@@ -13,7 +13,7 @@
 5. 按常用集合汇总为 `data/sets/<集合>.txt`（如 `europe`、`asia`、`north_america`、`south_america`、`oceania`、`africa`、`middle_east`、`hot`，以及小集合 `cn_common` 中国大陆常用）
 6. 去重合并为 `data/all.txt`（每行一个唯一 `ip:port#国家`）
 
-小集合 `cn_common` 每国最多取前 `--per-country-limit` 条（默认 20），如 `python scripts/download_proxies.py --per-country-limit 20`。
+每个集合另有限量版 `data/sets/<集合>_ltd.txt`，每国最多取前 `--per-country-limit` 条（默认 20）；全量汇总另有 `data/all_ltd.txt`（全部国家每国限量后的并集）。`--per-country-limit 0` 时不生成限量文件。例：`python scripts/download_proxies.py --per-country-limit 20`。
 
 ### 运行方式
 
@@ -52,5 +52,7 @@ data/raw/<port>/<country>.txt          按端口+国家的原始组织（ip:port
 data/countries/<country>.txt           按国家汇总（跨端口去重）
 data/ports/<port>.txt                  按端口汇总（跨国家去重）
 data/sets/<集合>.txt                   常用国家集合（europe、asia、hot、cn_common 等）
+data/sets/<集合>_ltd.txt               限量版（每国 --per-country-limit 条）
 data/all.txt                           全量去重 ip:port#国家
+data/all_ltd.txt                       全部国家每国限量后的并集
 ```

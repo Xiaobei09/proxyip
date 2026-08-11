@@ -155,25 +155,40 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     set_counts: dict[str, int] = {}
     all_sets = {**COUNTRY_SETS, **SMALL_SETS}
     for name, countries in all_sets.items():
-        limited = name in SMALL_SETS and per_country_limit > 0
-        entries: set[str] = set()
+        full_entries: set[str] = set()
+        ltd_entries: set[str] = set()
         for cc in countries:
             if cc not in by_country:
                 continue
             cc_entries = sorted(by_country[cc])
-            if limited:
-                cc_entries = cc_entries[:per_country_limit]
-            entries.update(cc_entries)
-        entries = sorted(entries)
-        (SETS_DIR / f"{name}.txt").write_text("\n".join(entries) + "\n")
-        set_counts[name] = len(entries)
-    expected_sets = {f"{n}.txt" for n in all_sets}
+            full_entries.update(cc_entries)
+            if per_country_limit > 0:
+                ltd_entries.update(cc_entries[:per_country_limit])
+        full_entries = sorted(full_entries)
+        (SETS_DIR / f"{name}.txt").write_text("\n".join(full_entries) + "\n")
+        set_counts[name] = len(full_entries)
+        if per_country_limit > 0:
+            ltd_entries = sorted(ltd_entries)
+            (SETS_DIR / f"{name}_ltd.txt").write_text("\n".join(ltd_entries) + "\n")
+            set_counts[f"{name}_ltd"] = len(ltd_entries)
+    expected_sets = {f"{n}.txt" for n in all_sets} | {f"{n}_ltd.txt" for n in all_sets}
     for stale in SETS_DIR.iterdir():
         if stale.name not in expected_sets:
             stale.unlink()
 
     all_entries = sorted({e for entries in by_country.values() for e in entries})
     (OUT_DIR / "all.txt").write_text("\n".join(all_entries) + "\n")
+    set_counts["all"] = len(all_entries)
+    if per_country_limit > 0:
+        all_ltd_entries = sorted(
+            {
+                e
+                for cc in by_country
+                for e in sorted(by_country[cc])[:per_country_limit]
+            }
+        )
+        (OUT_DIR / "all_ltd.txt").write_text("\n".join(all_ltd_entries) + "\n")
+        set_counts["all_ltd"] = len(all_ltd_entries)
     stats["__total__"] = total
     stats["__unique__"] = len(all_entries)
     stats["__countries__"] = len(by_country)
