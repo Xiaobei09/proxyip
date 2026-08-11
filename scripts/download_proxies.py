@@ -9,10 +9,12 @@ where each file holds one IP per line. Outputs are written in the
 import argparse
 import io
 import ipaddress
+import json
 import sys
 import urllib.request
 import zipfile
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 SOURCE_URL = "https://zip.cm.edu.kg"
@@ -53,6 +55,8 @@ SMALL_SETS: dict[str, list[str]] = {
 }
 
 PER_COUNTRY_LIMIT = 20
+HISTORY_FILE = ROOT / "data" / "history.jsonl"
+MAX_HISTORY_RECORDS = 1000
 
 
 def download(url: str, timeout: int = 60) -> bytes:
@@ -211,6 +215,41 @@ def print_stats(stats: dict) -> None:
         print(f"  {name}: {count}")
 
 
+def build_history_record(stats: dict) -> dict:
+    return {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "total": stats["__total__"],
+        "unique": stats["__unique__"],
+        "countries": stats["__countries__"],
+        "ports": stats["__ports__"],
+        "sets": stats["__sets__"],
+    }
+
+
+def append_history(record: dict) -> bool:
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    if HISTORY_FILE.exists():
+        lines = HISTORY_FILE.read_text(encoding="utf-8").splitlines()
+    if lines:
+        try:
+            last = json.loads(lines[-1])
+            last.pop("ts", None)
+            current = {k: v for k, v in record.items() if k != "ts"}
+            if last == current:
+                print("No data change; skipping history record")
+                return False
+        except (json.JSONDecodeError, KeyError):
+            pass
+    lines.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+    lines = lines[-MAX_HISTORY_RECORDS:]
+    tmp = HISTORY_FILE.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(HISTORY_FILE)
+    print(f"Appended history record ({len(lines)} total, capped at {MAX_HISTORY_RECORDS})")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -231,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         content = download(args.url, timeout=args.timeout)
         by_port = extract(content)
         stats = write_outputs(by_port, per_country_limit=args.per_country_limit)
+        append_history(build_history_record(stats))
         print_stats(stats)
         return 0
     except Exception as exc:  # noqa: BLE001

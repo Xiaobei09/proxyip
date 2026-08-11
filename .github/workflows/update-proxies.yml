@@ -42,6 +42,8 @@ jobs:
           find data/ports -name '*.txt' | wc -l
           echo "Unique IPs:"
           wc -l data/all.txt
+          echo "History records:"
+          wc -l data/history.jsonl
 
       - name: Commit changes
         run: |

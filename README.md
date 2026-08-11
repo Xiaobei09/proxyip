@@ -13,6 +13,8 @@
 5. 按常用集合汇总为 `data/sets/<集合>.txt`（如 `europe`、`asia`、`north_america`、`south_america`、`oceania`、`africa`、`middle_east`、`hot`，以及小集合 `cn_common` 中国大陆常用、`hk_us_jp_sg_tw_kr`）
 6. 去重合并为 `data/all.txt`（每行一个唯一 `ip:port#国家`）
 
+每次更新追加一条历史记录到 `data/history.jsonl`（JSON Lines，每行一条：时间戳、总条目、去重数、国家/端口数、各集合条数）；数据未变化时跳过，最多保留最近 1000 条。
+
 每个集合另有限量版 `data/sets/<集合>_ltd.txt`，每国最多取前 `--per-country-limit` 条（默认 20）；全量汇总另有 `data/all_ltd.txt`（全部国家每国限量后的并集）。`--per-country-limit 0` 时不生成限量文件。例：`python scripts/download_proxies.py --per-country-limit 20`。
 
 ### 运行方式
@@ -55,4 +57,5 @@ data/sets/<集合>.txt                   常用国家集合（europe、asia、ho
 data/sets/<集合>_ltd.txt               限量版（每国 --per-country-limit 条）
 data/all.txt                           全量去重 ip:port#国家
 data/all_ltd.txt                       全部国家每国限量后的并集
+data/history.jsonl                     更新历史记录（每行一条，最多 1000 条）
 ```
