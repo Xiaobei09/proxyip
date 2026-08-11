@@ -49,6 +49,7 @@ SMALL_SETS: dict[str, list[str]] = {
         "US", "DE", "GB", "FR", "NL",
         "RU", "CA", "AU",
     ],
+    "hk_us_jp_sg_tw_kr": ["HK", "US", "JP", "SG", "TW", "KR"],
 }
 
 PER_COUNTRY_LIMIT = 20
