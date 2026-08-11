@@ -85,6 +85,15 @@ def is_valid_ip(line: str) -> bool:
         return False
 
 
+def ip_sort_key(entry: str) -> tuple:
+    """Numeric IPv4 order key for an ``ip:port#country`` (or bare ``ip``) entry."""
+    ip = entry.split("#", 1)[0].rsplit(":", 1)[0]
+    parts = ip.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return (0, tuple(int(p) for p in parts))
+    return (1, ip)
+
+
 def extract(content: bytes) -> dict:
     print("[2/3] Extracting zip ...")
     by_port: dict[str, dict[str, list[str]]] = defaultdict(dict)
@@ -102,7 +111,7 @@ def extract(content: bytes) -> dict:
             text = zf.read(name).decode("utf-8", errors="replace")
             ips = [line.strip() for line in text.splitlines() if is_valid_ip(line)]
             if ips:
-                by_port[port][country] = sorted(set(ips))
+                by_port[port][country] = sorted(set(ips), key=ip_sort_key)
     return by_port
 
 
@@ -116,7 +125,9 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         port_dir.mkdir(parents=True, exist_ok=True)
         count = 0
         for country, ips in sorted(countries.items()):
-            entries = sorted(f"{ip}:{port}#{country}" for ip in ips)
+            entries = sorted(
+                (f"{ip}:{port}#{country}" for ip in ips), key=ip_sort_key
+            )
             (port_dir / f"{country}.txt").write_text("\n".join(entries) + "\n")
             count += len(ips)
         stats[port] = count
@@ -145,7 +156,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     COUNTRIES_DIR.mkdir(parents=True, exist_ok=True)
     for country in sorted(by_country):
         (COUNTRIES_DIR / f"{country}.txt").write_text(
-            "\n".join(sorted(by_country[country])) + "\n"
+            "\n".join(sorted(by_country[country], key=ip_sort_key)) + "\n"
         )
     expected_countries = {f"{c}.txt" for c in by_country}
     for stale in COUNTRIES_DIR.iterdir():
@@ -155,7 +166,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     PORTS_DIR.mkdir(parents=True, exist_ok=True)
     for port in sorted(by_port_all, key=int):
         (PORTS_DIR / f"{port}.txt").write_text(
-            "\n".join(sorted(by_port_all[port])) + "\n"
+            "\n".join(sorted(by_port_all[port], key=ip_sort_key)) + "\n"
         )
     expected_ports = {f"{p}.txt" for p in by_port_all}
     for stale in PORTS_DIR.iterdir():
@@ -171,15 +182,15 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         for cc in countries:
             if cc not in by_country:
                 continue
-            cc_entries = sorted(by_country[cc])
+            cc_entries = sorted(by_country[cc], key=ip_sort_key)
             full_entries.update(cc_entries)
             if per_country_limit > 0:
                 ltd_entries.update(cc_entries[:per_country_limit])
-        full_entries = sorted(full_entries)
+        full_entries = sorted(full_entries, key=ip_sort_key)
         (SETS_DIR / f"{name}.txt").write_text("\n".join(full_entries) + "\n")
         set_counts[name] = len(full_entries)
         if per_country_limit > 0:
-            ltd_entries = sorted(ltd_entries)
+            ltd_entries = sorted(ltd_entries, key=ip_sort_key)
             (SETS_DIR / f"{name}_ltd.txt").write_text("\n".join(ltd_entries) + "\n")
             set_counts[f"{name}_ltd"] = len(ltd_entries)
     expected_sets = {f"{n}.txt" for n in all_sets} | {f"{n}_ltd.txt" for n in all_sets}
@@ -187,7 +198,9 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         if stale.name not in expected_sets:
             stale.unlink()
 
-    all_entries = sorted({e for entries in by_country.values() for e in entries})
+    all_entries = sorted(
+        {e for entries in by_country.values() for e in entries}, key=ip_sort_key
+    )
     (OUT_DIR / "all.txt").write_text("\n".join(all_entries) + "\n")
     set_counts["all"] = len(all_entries)
     if per_country_limit > 0:
@@ -195,8 +208,9 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
             {
                 e
                 for cc in by_country
-                for e in sorted(by_country[cc])[:per_country_limit]
-            }
+                for e in sorted(by_country[cc], key=ip_sort_key)[:per_country_limit]
+            },
+            key=ip_sort_key,
         )
         (OUT_DIR / "all_ltd.txt").write_text("\n".join(all_ltd_entries) + "\n")
         set_counts["all_ltd"] = len(all_ltd_entries)
@@ -240,8 +254,8 @@ def write_diff(previous: list[str] | None, current: list[str]) -> tuple[int, int
     DIFF_DIR.mkdir(parents=True, exist_ok=True)
     prev_set = set(previous) if previous is not None else set()
     current_set = set(current)
-    added = sorted(current_set - prev_set)
-    removed = sorted(prev_set - current_set)
+    added = sorted(current_set - prev_set, key=ip_sort_key)
+    removed = sorted(prev_set - current_set, key=ip_sort_key)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     record = {
         "ts": ts,
