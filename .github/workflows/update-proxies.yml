@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "scripts/download_proxies.py"
+      - "scripts/*.py"
 
 permissions:
   contents: write
@@ -32,6 +32,12 @@ jobs:
       - name: Download and extract
         run: python scripts/download_proxies.py
 
+      - name: Validate proxies
+        run: python scripts/validate_proxies.py --time-budget 180
+
+      - name: Generate stats and chart
+        run: python scripts/generate_stats.py
+
       - name: Show stats
         run: |
           echo "Files extracted:"
@@ -42,8 +48,12 @@ jobs:
           find data/ports -name '*.txt' | wc -l
           echo "Unique IPs:"
           wc -l data/all.txt
+          echo "Alive proxies:"
+          wc -l data/valid/all.txt
           echo "History records:"
           wc -l data/history.jsonl
+          echo "Diff archives:"
+          ls data/diff/*.json 2>/dev/null | wc -l
 
       - name: Commit changes
         run: |

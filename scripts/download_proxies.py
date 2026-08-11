@@ -4,12 +4,16 @@
 The upstream archive is a zip of TXT files organised as ``<port>/<country>.txt``,
 where each file holds one IP per line. Outputs are written in the
 ``ip:port#country`` format, e.g. ``1.2.3.4:443#US``.
+
+Each run also archives the added/removed entries versus the previous committed
+list into ``data/diff/`` and records the change counts in ``data/history.jsonl``.
 """
 
 import argparse
 import io
 import ipaddress
 import json
+import subprocess
 import sys
 import urllib.request
 import zipfile
@@ -57,6 +61,8 @@ SMALL_SETS: dict[str, list[str]] = {
 PER_COUNTRY_LIMIT = 20
 HISTORY_FILE = ROOT / "data" / "history.jsonl"
 MAX_HISTORY_RECORDS = 1000
+DIFF_DIR = OUT_DIR / "diff"
+MAX_DIFF_FILES = 500
 
 
 def download(url: str, timeout: int = 60) -> bytes:
@@ -199,7 +205,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     stats["__countries__"] = len(by_country)
     stats["__ports__"] = len(by_port_all)
     stats["__sets__"] = set_counts
-    return stats
+    return stats, all_entries
 
 
 def print_stats(stats: dict) -> None:
@@ -215,7 +221,56 @@ def print_stats(stats: dict) -> None:
         print(f"  {name}: {count}")
 
 
-def build_history_record(stats: dict) -> dict:
+def load_previous_all() -> list[str] | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "show", "HEAD:data/all.txt"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def write_diff(previous: list[str] | None, current: list[str]) -> tuple[int, int]:
+    DIFF_DIR.mkdir(parents=True, exist_ok=True)
+    prev_set = set(previous) if previous is not None else set()
+    current_set = set(current)
+    added = sorted(current_set - prev_set)
+    removed = sorted(prev_set - current_set)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    record = {
+        "ts": ts,
+        "added_count": len(added),
+        "removed_count": len(removed),
+        "added": added,
+        "removed": removed,
+    }
+
+    def write(name: str, data: dict) -> None:
+        tmp = DIFF_DIR / f"{name}.json.tmp"
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(DIFF_DIR / f"{name}.json")
+
+    write("latest", record)
+    if added or removed:
+        write(ts.replace(":", "-"), record)
+        archives = sorted(
+            (DIFF_DIR / p).name
+            for p in DIFF_DIR.glob("*.json")
+            if p.name != "latest.json"
+        )
+        for stale in archives[:-MAX_DIFF_FILES] if len(archives) > MAX_DIFF_FILES else []:
+            (DIFF_DIR / stale).unlink()
+    print(f"Diff: +{len(added)} added, -{len(removed)} removed")
+    return len(added), len(removed)
+
+
+def build_history_record(stats: dict, added: int = 0, removed: int = 0) -> dict:
     return {
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total": stats["__total__"],
@@ -223,6 +278,8 @@ def build_history_record(stats: dict) -> dict:
         "countries": stats["__countries__"],
         "ports": stats["__ports__"],
         "sets": stats["__sets__"],
+        "added": added,
+        "removed": removed,
     }
 
 
@@ -269,8 +326,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         content = download(args.url, timeout=args.timeout)
         by_port = extract(content)
-        stats = write_outputs(by_port, per_country_limit=args.per_country_limit)
-        append_history(build_history_record(stats))
+        stats, all_entries = write_outputs(by_port, per_country_limit=args.per_country_limit)
+        previous = load_previous_all()
+        added, removed = write_diff(previous, all_entries)
+        append_history(build_history_record(stats, added, removed))
         print_stats(stats)
         return 0
     except Exception as exc:  # noqa: BLE001
