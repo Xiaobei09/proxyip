@@ -1,0 +1,47 @@
+# proxyip
+
+定期从 <https://zip.cm.edu.kg> 下载代理 IP 列表并通过 CI 自动解压、整理、提交回仓库；附带一个浏览器指纹生成工具。
+
+## 数据
+
+压缩包结构为 `<port>/<country>.txt`，每个文件内每行一个 IP。脚本会自动：
+
+1. 下载 zip 归档
+2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织
+3. 去重合并为 `data/all.txt`（每行一个唯一 IP）
+
+### 运行方式
+
+```bash
+python scripts/download_proxies.py
+python scripts/download_proxies.py --help
+```
+
+### CI 自动更新
+
+`.github/workflows/update-proxies.yml` 每 6 小时自动运行一次（也可手动触发 `workflow_dispatch`）。有变更时自动提交并推送回仓库。
+
+## 浏览器指纹生成
+
+生成内部自洽的浏览器指纹：UA、平台、分辨率、时区、语言、WebGL 渲染器、canvas 哈希等属性均来自同一操作系统/设备配置。
+
+```bash
+python scripts/generate_fingerprint.py
+python scripts/generate_fingerprint.py -n 5
+python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
+```
+
+示例输出：
+
+```json
+{"os": "macos", "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ...", "platform": "MacIntel", "language": "en-US", "languages": ["en-US", "en"], "timezone": "Europe/Paris", "screen": {"width": 2560, "height": 1440, "colorDepth": 24, "devicePixelRatio": 2.0}, "hardwareConcurrency": 10, "deviceMemory": 16, "webgl": {"renderer": "ANGLE (Apple, Apple M1, OpenGL 4.1)", "vendor": "Apple"}, "canvasHash": "9f3b2c1d4e5a6b7c"}
+```
+
+## 目录结构
+
+```
+.github/workflows/update-proxies.yml   CI 自动更新
+scripts/download_proxies.py            下载与解压
+scripts/generate_fingerprint.py        浏览器指纹生成
+data/                                  输出数据（gitignore，CI 提交时写入）
+```
