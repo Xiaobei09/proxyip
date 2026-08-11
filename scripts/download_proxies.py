@@ -79,8 +79,9 @@ def write_outputs(by_port: dict) -> dict:
     for port_dir in RAW_DIR.iterdir():
         if not port_dir.is_dir():
             continue
+        expected = {f"{c}.txt" for c in by_port.get(port_dir.name, {})}
         for stale in port_dir.iterdir():
-            if stale.name not in by_port.get(port_dir.name, {}):
+            if stale.name not in expected:
                 stale.unlink()
         if not any(port_dir.iterdir()):
             port_dir.rmdir()
