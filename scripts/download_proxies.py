@@ -20,7 +20,28 @@ ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
 COUNTRIES_DIR = ROOT / "data" / "countries"
 PORTS_DIR = ROOT / "data" / "ports"
+SETS_DIR = ROOT / "data" / "sets"
 OUT_DIR = ROOT / "data"
+
+COUNTRY_SETS: dict[str, list[str]] = {
+    "europe": [
+        "AL", "AT", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK",
+        "EE", "ES", "FI", "FR", "GB", "GR", "HR", "HU", "IE", "IS",
+        "IT", "LT", "LV", "MD", "MK", "NL", "NO", "PL", "PT", "RO",
+        "RS", "RU", "SE", "SI", "UA",
+    ],
+    "asia": [
+        "AE", "AM", "AZ", "CN", "GE", "HK", "ID", "IL", "IN", "JP",
+        "KH", "KR", "KZ", "MY", "PH", "SA", "SG", "TH", "TR", "TW",
+        "UZ", "VN",
+    ],
+    "north_america": ["CA", "MX", "US", "VG"],
+    "south_america": ["AR", "BR", "CL", "EC"],
+    "oceania": ["AU", "NZ"],
+    "africa": ["EG", "NG", "ZA"],
+    "middle_east": ["AE", "IL", "SA", "TR"],
+    "hot": ["AU", "CA", "DE", "FR", "GB", "HK", "JP", "KR", "NL", "SG", "TW", "US", "RU"],
+}
 
 
 def download(url: str, timeout: int = 60) -> bytes:
@@ -120,12 +141,31 @@ def write_outputs(by_port: dict) -> dict:
         if stale.name not in expected_ports:
             stale.unlink()
 
+    SETS_DIR.mkdir(parents=True, exist_ok=True)
+    set_counts: dict[str, int] = {}
+    for name, countries in COUNTRY_SETS.items():
+        entries = sorted(
+            {
+                e
+                for cc in countries
+                if cc in by_country
+                for e in by_country[cc]
+            }
+        )
+        (SETS_DIR / f"{name}.txt").write_text("\n".join(entries) + "\n")
+        set_counts[name] = len(entries)
+    expected_sets = {f"{n}.txt" for n in COUNTRY_SETS}
+    for stale in SETS_DIR.iterdir():
+        if stale.name not in expected_sets:
+            stale.unlink()
+
     all_entries = sorted({e for entries in by_country.values() for e in entries})
     (OUT_DIR / "all.txt").write_text("\n".join(all_entries) + "\n")
     stats["__total__"] = total
     stats["__unique__"] = len(all_entries)
     stats["__countries__"] = len(by_country)
     stats["__ports__"] = len(by_port_all)
+    stats["__sets__"] = set_counts
     return stats
 
 
@@ -134,8 +174,12 @@ def print_stats(stats: dict) -> None:
     print(f"Unique proxies: {stats.pop('__unique__')}")
     print(f"Countries:     {stats.pop('__countries__')}")
     print(f"Ports:         {stats.pop('__ports__')}")
+    set_counts = stats.pop("__sets__")
     for port, count in sorted(stats.items(), key=lambda kv: int(kv[0])):
         print(f"  port {port}: {count}")
+    print("Sets:")
+    for name, count in set_counts.items():
+        print(f"  {name}: {count}")
 
 
 def main(argv: list[str] | None = None) -> int:
