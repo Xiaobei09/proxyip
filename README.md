@@ -10,8 +10,10 @@
 2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`）
 3. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
 4. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重，不含 ALL 派生条目）
-5. 按常用集合汇总为 `data/sets/<集合>.txt`（如 `europe`、`asia`、`north_america`、`south_america`、`oceania`、`africa`、`middle_east`、`hot`）
+5. 按常用集合汇总为 `data/sets/<集合>.txt`（如 `europe`、`asia`、`north_america`、`south_america`、`oceania`、`africa`、`middle_east`、`hot`，以及小集合 `cn_common` 中国大陆常用）
 6. 去重合并为 `data/all.txt`（每行一个唯一 `ip:port#国家`）
+
+小集合 `cn_common` 每国最多取前 `--per-country-limit` 条（默认 20），如 `python scripts/download_proxies.py --per-country-limit 20`。
 
 ### 运行方式
 
@@ -49,6 +51,6 @@ scripts/generate_fingerprint.py        浏览器指纹生成
 data/raw/<port>/<country>.txt          按端口+国家的原始组织（ip:port#国家）
 data/countries/<country>.txt           按国家汇总（跨端口去重）
 data/ports/<port>.txt                  按端口汇总（跨国家去重）
-data/sets/<集合>.txt                   常用国家集合（如 europe、asia、hot）
+data/sets/<集合>.txt                   常用国家集合（europe、asia、hot、cn_common 等）
 data/all.txt                           全量去重 ip:port#国家
 ```

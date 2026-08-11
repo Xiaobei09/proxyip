@@ -43,6 +43,16 @@ COUNTRY_SETS: dict[str, list[str]] = {
     "hot": ["AU", "CA", "DE", "FR", "GB", "HK", "JP", "KR", "NL", "SG", "TW", "US", "RU"],
 }
 
+SMALL_SETS: dict[str, list[str]] = {
+    "cn_common": [
+        "HK", "TW", "SG", "JP", "KR",
+        "US", "DE", "GB", "FR", "NL",
+        "RU", "CA", "AU",
+    ],
+}
+
+PER_COUNTRY_LIMIT = 20
+
 
 def download(url: str, timeout: int = 60) -> bytes:
     print(f"[1/3] Downloading {url} ...")
@@ -85,7 +95,7 @@ def extract(content: bytes) -> dict:
     return by_port
 
 
-def write_outputs(by_port: dict) -> dict:
+def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> dict:
     print("[3/3] Writing output files ...")
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     stats: dict[str, int] = {}
@@ -143,18 +153,21 @@ def write_outputs(by_port: dict) -> dict:
 
     SETS_DIR.mkdir(parents=True, exist_ok=True)
     set_counts: dict[str, int] = {}
-    for name, countries in COUNTRY_SETS.items():
-        entries = sorted(
-            {
-                e
-                for cc in countries
-                if cc in by_country
-                for e in by_country[cc]
-            }
-        )
+    all_sets = {**COUNTRY_SETS, **SMALL_SETS}
+    for name, countries in all_sets.items():
+        limited = name in SMALL_SETS and per_country_limit > 0
+        entries: set[str] = set()
+        for cc in countries:
+            if cc not in by_country:
+                continue
+            cc_entries = sorted(by_country[cc])
+            if limited:
+                cc_entries = cc_entries[:per_country_limit]
+            entries.update(cc_entries)
+        entries = sorted(entries)
         (SETS_DIR / f"{name}.txt").write_text("\n".join(entries) + "\n")
         set_counts[name] = len(entries)
-    expected_sets = {f"{n}.txt" for n in COUNTRY_SETS}
+    expected_sets = {f"{n}.txt" for n in all_sets}
     for stale in SETS_DIR.iterdir():
         if stale.name not in expected_sets:
             stale.unlink()
@@ -190,12 +203,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-t", "--timeout", type=int, default=60, help="Download timeout (seconds)"
     )
+    parser.add_argument(
+        "--per-country-limit",
+        type=int,
+        default=PER_COUNTRY_LIMIT,
+        help="Max entries per country in small sets (0 = unlimited)",
+    )
     args = parser.parse_args(argv)
 
     try:
         content = download(args.url, timeout=args.timeout)
         by_port = extract(content)
-        stats = write_outputs(by_port)
+        stats = write_outputs(by_port, per_country_limit=args.per_country_limit)
         print_stats(stats)
         return 0
     except Exception as exc:  # noqa: BLE001
