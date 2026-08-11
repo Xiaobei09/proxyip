@@ -17,6 +17,8 @@ from pathlib import Path
 SOURCE_URL = "https://zip.cm.edu.kg"
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
+COUNTRIES_DIR = ROOT / "data" / "countries"
+PORTS_DIR = ROOT / "data" / "ports"
 OUT_DIR = ROOT / "data"
 
 
@@ -86,18 +88,47 @@ def write_outputs(by_port: dict) -> dict:
         if not any(port_dir.iterdir()):
             port_dir.rmdir()
 
+    by_country: dict[str, set[str]] = defaultdict(set)
+    for countries in by_port.values():
+        for country, ips in countries.items():
+            by_country[country].update(ips)
+    COUNTRIES_DIR.mkdir(parents=True, exist_ok=True)
+    for country in sorted(by_country):
+        (COUNTRIES_DIR / f"{country}.txt").write_text(
+            "\n".join(sorted(by_country[country])) + "\n"
+        )
+    expected_countries = {f"{c}.txt" for c in by_country}
+    for stale in COUNTRIES_DIR.iterdir():
+        if stale.name not in expected_countries:
+            stale.unlink()
+
+    by_port_all = {port: set().union(*countries.values()) for port, countries in by_port.items()}
+    PORTS_DIR.mkdir(parents=True, exist_ok=True)
+    for port in sorted(by_port_all, key=int):
+        (PORTS_DIR / f"{port}.txt").write_text(
+            "\n".join(sorted(by_port_all[port])) + "\n"
+        )
+    expected_ports = {f"{p}.txt" for p in by_port_all}
+    for stale in PORTS_DIR.iterdir():
+        if stale.name not in expected_ports:
+            stale.unlink()
+
     all_ips = sorted(
         {ip for ports in by_port.values() for ips in ports.values() for ip in ips}
     )
     (OUT_DIR / "all.txt").write_text("\n".join(all_ips) + "\n")
     stats["__total__"] = total
     stats["__unique__"] = len(all_ips)
+    stats["__countries__"] = len(by_country)
+    stats["__ports__"] = len(by_port_all)
     return stats
 
 
 def print_stats(stats: dict) -> None:
     print(f"\nTotal entries: {stats.pop('__total__')}")
     print(f"Unique IPs:    {stats.pop('__unique__')}")
+    print(f"Countries:     {stats.pop('__countries__')}")
+    print(f"Ports:         {stats.pop('__ports__')}")
     for port, count in sorted(stats.items(), key=lambda kv: int(kv[0])):
         print(f"  port {port}: {count}")
 

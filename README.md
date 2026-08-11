@@ -8,7 +8,9 @@
 
 1. 下载 zip 归档
 2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织
-3. 去重合并为 `data/all.txt`（每行一个唯一 IP）
+3. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重）
+4. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重）
+5. 去重合并为 `data/all.txt`（每行一个唯一 IP）
 
 ### 运行方式
 
@@ -19,7 +21,7 @@ python scripts/download_proxies.py --help
 
 ### CI 自动更新
 
-`.github/workflows/update-proxies.yml` 每 6 小时自动运行一次（也可手动触发 `workflow_dispatch`）。有变更时自动提交并推送回仓库。
+`.github/workflows/update-proxies.yml` 每 30 分钟自动运行一次（也可手动触发 `workflow_dispatch`）。有变更时自动提交并推送回仓库。
 
 ## 浏览器指纹生成
 
@@ -43,5 +45,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 .github/workflows/update-proxies.yml   CI 自动更新
 scripts/download_proxies.py            下载与解压
 scripts/generate_fingerprint.py        浏览器指纹生成
-data/                                  输出数据（gitignore，CI 提交时写入）
+data/raw/<port>/<country>.txt          按端口+国家的原始组织
+data/countries/<country>.txt           按国家汇总（跨端口去重）
+data/ports/<port>.txt                  按端口汇总（跨国家去重）
+data/all.txt                           全量去重 IP
 ```
