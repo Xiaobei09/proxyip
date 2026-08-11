@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Download, extract and organize the proxy IP list from zip.cm.edu.kg.
+"""Download, extract and organize the proxy list from zip.cm.edu.kg.
 
 The upstream archive is a zip of TXT files organised as ``<port>/<country>.txt``,
-where each file holds one IP per line.
+where each file holds one IP per line. Outputs are written in the
+``ip:port#country`` format, e.g. ``1.2.3.4:443#US``.
 """
 
 import argparse
@@ -73,7 +74,8 @@ def write_outputs(by_port: dict) -> dict:
         port_dir.mkdir(parents=True, exist_ok=True)
         count = 0
         for country, ips in sorted(countries.items()):
-            (port_dir / f"{country}.txt").write_text("\n".join(ips) + "\n")
+            entries = sorted(f"{ip}:{port}#{country}" for ip in ips)
+            (port_dir / f"{country}.txt").write_text("\n".join(entries) + "\n")
             count += len(ips)
         stats[port] = count
         total += count
@@ -89,9 +91,15 @@ def write_outputs(by_port: dict) -> dict:
             port_dir.rmdir()
 
     by_country: dict[str, set[str]] = defaultdict(set)
-    for countries in by_port.values():
+    by_port_all: dict[str, set[str]] = defaultdict(set)
+    for port, countries in by_port.items():
         for country, ips in countries.items():
-            by_country[country].update(ips)
+            if country == "ALL":
+                continue
+            for ip in ips:
+                by_country[country].add(f"{ip}:{port}#{country}")
+                by_port_all[port].add(f"{ip}:{port}#{country}")
+
     COUNTRIES_DIR.mkdir(parents=True, exist_ok=True)
     for country in sorted(by_country):
         (COUNTRIES_DIR / f"{country}.txt").write_text(
@@ -102,7 +110,6 @@ def write_outputs(by_port: dict) -> dict:
         if stale.name not in expected_countries:
             stale.unlink()
 
-    by_port_all = {port: set().union(*countries.values()) for port, countries in by_port.items()}
     PORTS_DIR.mkdir(parents=True, exist_ok=True)
     for port in sorted(by_port_all, key=int):
         (PORTS_DIR / f"{port}.txt").write_text(
@@ -113,12 +120,10 @@ def write_outputs(by_port: dict) -> dict:
         if stale.name not in expected_ports:
             stale.unlink()
 
-    all_ips = sorted(
-        {ip for ports in by_port.values() for ips in ports.values() for ip in ips}
-    )
-    (OUT_DIR / "all.txt").write_text("\n".join(all_ips) + "\n")
+    all_entries = sorted({e for entries in by_country.values() for e in entries})
+    (OUT_DIR / "all.txt").write_text("\n".join(all_entries) + "\n")
     stats["__total__"] = total
-    stats["__unique__"] = len(all_ips)
+    stats["__unique__"] = len(all_entries)
     stats["__countries__"] = len(by_country)
     stats["__ports__"] = len(by_port_all)
     return stats
@@ -126,7 +131,7 @@ def write_outputs(by_port: dict) -> dict:
 
 def print_stats(stats: dict) -> None:
     print(f"\nTotal entries: {stats.pop('__total__')}")
-    print(f"Unique IPs:    {stats.pop('__unique__')}")
+    print(f"Unique proxies: {stats.pop('__unique__')}")
     print(f"Countries:     {stats.pop('__countries__')}")
     print(f"Ports:         {stats.pop('__ports__')}")
     for port, count in sorted(stats.items(), key=lambda kv: int(kv[0])):

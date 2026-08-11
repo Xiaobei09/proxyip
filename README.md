@@ -4,13 +4,13 @@
 
 ## 数据
 
-压缩包结构为 `<port>/<country>.txt`，每个文件内每行一个 IP。脚本会自动：
+压缩包结构为 `<port>/<country>.txt`，每个文件内每行一个 IP。所有输出均采用 `ip:port#国家代号` 格式（如 `1.2.3.4:443#US`）。脚本会自动：
 
 1. 下载 zip 归档
-2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织
-3. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重）
-4. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重）
-5. 去重合并为 `data/all.txt`（每行一个唯一 IP）
+2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`）
+3. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
+4. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重，不含 ALL 派生条目）
+5. 去重合并为 `data/all.txt`（每行一个唯一 `ip:port#国家`）
 
 ### 运行方式
 
@@ -45,8 +45,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 .github/workflows/update-proxies.yml   CI 自动更新
 scripts/download_proxies.py            下载与解压
 scripts/generate_fingerprint.py        浏览器指纹生成
-data/raw/<port>/<country>.txt          按端口+国家的原始组织
+data/raw/<port>/<country>.txt          按端口+国家的原始组织（ip:port#国家）
 data/countries/<country>.txt           按国家汇总（跨端口去重）
 data/ports/<port>.txt                  按端口汇总（跨国家去重）
-data/all.txt                           全量去重 IP
+data/all.txt                           全量去重 ip:port#国家
 ```
