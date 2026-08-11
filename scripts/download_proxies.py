@@ -51,6 +51,9 @@ def extract(content: bytes) -> dict:
             if len(parts) != 2 or not parts[0].isdigit():
                 continue
             port, country = parts
+            if not country.endswith(".txt"):
+                continue
+            country = country[:-4]
             text = zf.read(name).decode("utf-8", errors="replace")
             ips = [line.strip() for line in text.splitlines() if is_valid_ip(line)]
             if ips:
@@ -72,6 +75,15 @@ def write_outputs(by_port: dict) -> dict:
             count += len(ips)
         stats[port] = count
         total += count
+
+    for port_dir in RAW_DIR.iterdir():
+        if not port_dir.is_dir():
+            continue
+        for stale in port_dir.iterdir():
+            if stale.name not in by_port.get(port_dir.name, {}):
+                stale.unlink()
+        if not any(port_dir.iterdir()):
+            port_dir.rmdir()
 
     all_ips = sorted(
         {ip for ports in by_port.values() for ips in ports.values() for ip in ips}
