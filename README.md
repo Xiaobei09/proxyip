@@ -24,7 +24,7 @@
 
 ### 可用性验证
 
-CI 每次更新后对 `data/all.txt` 做连通性检查（HTTP CONNECT 到 `www.gstatic.com:443`，默认 5s 超时、100 并发），输出镜像 `data/` 结构的存活列表到 `data/valid/`：
+CI 每次更新后对 `data/all.txt` 做连通性检查（HTTP CONNECT 到 `www.gstatic.com:443`，默认 5s 超时、asyncio 并发上限 500），输出镜像 `data/` 结构的存活列表到 `data/valid/`，全部**按延迟升序**（最快在前）；TCP 能连通但两项检测均超时的代理会**自动重试一次**：
 
 ```bash
 python scripts/validate_proxies.py                    # 验证全部
@@ -32,9 +32,9 @@ python scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
 python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ```
 
-- `data/valid/all.txt`、`all_ltd.txt` 存活代理（保持 `ip:port#国家` 格式）
+- `data/valid/all.txt`、`all_ltd.txt` 存活代理（保持 `ip:port#国家` 格式，按延迟排序）
 - `data/valid/countries/`、`ports/`、`sets/` 按国家/端口/集合分组的存活列表
-- `data/valid/meta.json` 汇总信息（checked/alive、平均/中位/P90 延迟、各国家/端口存活数）
+- `data/valid/meta.json` 汇总信息（checked/alive、耗时/吞吐、平均/中位/P90 延迟、各国家/端口存活数）
 - `data/valid/history.jsonl` 每次验证的历史记录（最多 1000 条，用于趋势图）
 
 ### 更新差异
