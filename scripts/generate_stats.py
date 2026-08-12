@@ -62,22 +62,57 @@ def fmt_ts(ts: object) -> str:
     return str(ts)[:16].replace("T", " ") if ts else ""
 
 
+def nice_step(span: float, count: int = 5) -> float:
+    """Round "nice" tick step (1/2/2.5/5 x 10^n) covering ``span``."""
+    if span <= 0:
+        return 1.0
+    raw = span / count
+    magnitude = 10 ** math.floor(math.log10(raw))
+    for s in (1, 2, 2.5, 5, 10):
+        nice = magnitude * s
+        if nice >= raw:
+            return nice
+    return magnitude * 10
+
+
 def nice_ticks(max_v: float, count: int = 5) -> list[float]:
-    """Round "nice" axis tick values (1/2/2.5/5 x 10^n) covering ``max_v``."""
+    """Round "nice" axis tick values covering ``max_v`` (from 0)."""
     if max_v <= 0:
         return [0]
-    raw = max_v / count
-    magnitude = 10 ** math.floor(math.log10(raw))
-    for step in (1, 2, 2.5, 5, 10):
-        nice = magnitude * step
-        if nice >= raw:
-            break
+    step = nice_step(max_v, count)
     ticks = []
     v = 0.0
     while v <= max_v + 1e-9:
         ticks.append(round(v, 10))
-        v += nice
+        v += step
     return ticks
+
+
+def nice_bounds(
+    lo: float, hi: float, count: int = 5
+) -> tuple[float, float, list[float]]:
+    """Zoomed axis range: round ``[lo, hi]`` out to nice ticks.
+
+    Returns ``(lo_tick, hi_tick, ticks)``. A minimum span is enforced so flat
+    series still render a sane axis.
+    """
+    if hi < lo:
+        lo, hi = hi, lo
+    if hi - lo <= 0:
+        pad = max(1.0, abs(hi) * 0.01)
+        lo, hi = hi - pad, hi + pad
+    step = nice_step(hi - lo, count)
+    lo_tick = math.floor(lo / step) * step
+    ticks = []
+    v = lo_tick
+    while v <= hi + 1e-9:
+        ticks.append(round(v, 10))
+        v += step
+    if ticks[-1] < hi:
+        ticks.append(round(ticks[-1] + step, 10))
+    if len(ticks) < 2:
+        ticks.append(round(ticks[-1] + step, 10))
+    return ticks[0], ticks[-1], ticks
 
 
 def fmt_tick(v: float) -> str:
@@ -151,8 +186,9 @@ def legend_svg(series: list[tuple]) -> str:
 def plot_lines(
     series: list[tuple],
     *,
-    y_max: int | None = None,
-    right_ticks: list[tuple[int, str]] | None = None,
+    y_min: float | None = None,
+    y_max: float | None = None,
+    right_ticks: list[tuple[float, str]] | None = None,
     x_labels: tuple[str, str] = ("", ""),
     height: int = HEIGHT,
     title: str | None = None,
@@ -161,17 +197,21 @@ def plot_lines(
 
     ``series`` is a list of ``(name, color, values, dash)`` tuples. Each
     series is normalized to its own width (points are index positions, not a
-    shared timeline). ``right_ticks`` draws extra labels on the right axis for
-    dual-axis charts (values are expressed in the same units as ``y_max``).
+    shared timeline). Unless ``y_min``/``y_max`` are given the y-axis is
+    zoomed to the data range (rounded to nice ticks) so small variations stay
+    visible. ``right_ticks`` draws extra labels on the right axis for dual-axis
+    charts (values are expressed in the same units as the y-axis).
     """
     active = [s for s in series if s[2]]
     if not active:
         return empty_svg(height=height)
     plot_w = WIDTH - MARGIN_L - MARGIN_R
     plot_h = height - MARGIN_T - MARGIN_B
-    if y_max is None:
-        y_max = max(max(vals) for _, _, vals, _ in active)
-    y_max = y_max or 1
+    data = [v for _, _, vals, _ in active for v in vals]
+    lo, hi, ticks = nice_bounds(
+        min(data) if y_min is None else y_min,
+        max(data) if y_max is None else y_max,
+    )
 
     def xs(n: int) -> list[float]:
         if n <= 1:
@@ -179,7 +219,7 @@ def plot_lines(
         return [MARGIN_L + i / (n - 1) * plot_w for i in range(n)]
 
     def y(v: float) -> float:
-        return MARGIN_T + plot_h - v / y_max * plot_h
+        return MARGIN_T + plot_h * (1 - (v - lo) / (hi - lo))
 
     parts = [svg_head(WIDTH, height)]
     if title:
@@ -199,7 +239,7 @@ def plot_lines(
                 f'font-size="9" fill="{TEXT}">{esc(label)}</text>'
             )
     else:
-        for v in nice_ticks(y_max):
+        for v in ticks:
             yy = y(v)
             parts.append(
                 f'<line x1="{MARGIN_L}" y1="{yy:.1f}" x2="{WIDTH - MARGIN_R}" '
@@ -435,7 +475,6 @@ def build_alive_rate(valid_history: list[dict]) -> str:
     )
     return plot_lines(
         [("alive rate", COLOR_RATE, values, "")],
-        y_max=100,
         x_labels=labels,
         title="Alive rate (%) over time",
     )
@@ -457,21 +496,32 @@ def build_combo(history: list[dict], valid_history: list[dict]) -> str:
     for r in valid_history:
         checked = r.get("checked", 0)
         pct.append(round(r.get("alive", 0) / checked * 100, 1) if checked else 0)
-    counts = max(max(unique) if unique else 0, max(alive) if alive else 0) or 1
+    counts = max(
+        max(unique) if unique else 0,
+        max(alive) if alive else 0,
+        max(pct) if pct else 0,
+    ) or 1
     scale = counts / 100
     series = [
         ("unique", COLOR_UNIQUE, unique, ""),
         ("alive", COLOR_ALIVE, alive, ""),
         ("alive rate", COLOR_RATE, [v * scale for v in pct], "dash"),
     ]
-    right_ticks = [(int(p * scale), f"{int(p)}%") for p in (0, 25, 50, 75, 100)]
+    data = [v for _, _, vals, _ in series for v in vals]
+    if not data:
+        return empty_svg()
+    lo, hi, ticks = nice_bounds(min(data), max(data))
+    right_ticks = [
+        (t, f"{min(100.0, max(0.0, t / counts * 100)):.1f}%") for t in ticks
+    ]
     labels = (
         fmt_ts(history[0].get("ts")) if history else "",
         fmt_ts(history[-1].get("ts")) if history else "",
     )
     return plot_lines(
         series,
-        y_max=counts,
+        y_min=lo,
+        y_max=hi,
         right_ticks=right_ticks,
         x_labels=labels,
         title="Unique / Alive / Alive rate",
