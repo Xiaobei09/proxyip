@@ -4,24 +4,28 @@
 Reads ``data/history.jsonl`` and ``data/valid/history.jsonl`` plus
 ``data/valid/meta.json`` and writes ``data/stats.json`` together with:
 
-- ``chart.svg``           unique / alive trend (line)
+- ``chart.svg``           unique / alive trend (time-aligned lines)
 - ``chart_country.svg``   alive proxies per country (horizontal bars, top 15)
 - ``chart_port.svg``      alive proxies per port (vertical bars)
-- ``chart_alive_rate.svg`` alive rate (%) over time (line)
+- ``chart_alive_rate.svg`` alive rate + dead (dual-axis lines)
 - ``chart_churn.svg``     added / removed per update (grouped bars)
 - ``chart_combo.svg``     dual-axis composite trend (unique/alive + rate)
+- ``chart_latency.svg``   latency distribution (vertical bars)
+
+Line charts share a real-time x axis (series lacking usable timestamps fall
+back to index spacing), zoom each y-axis to its data range so small variations
+stay visible, and attach hover tooltips via inline ``<title>`` elements.
 """
 
 import argparse
 import json
 import math
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from download_proxies import HISTORY_FILE, OUT_DIR
-
-VALID_DIR = OUT_DIR / "valid"
+from download_proxies import OUT_DIR
 
 WIDTH = 800
 HEIGHT = 300
@@ -38,10 +42,29 @@ TITLE = "#444"
 COLOR_UNIQUE = "#4c78a8"
 COLOR_ALIVE = "#e45756"
 COLOR_RATE = "#f58518"
+COLOR_DEAD = "#8c564b"
 COLOR_ADDED = "#72b7b2"
 COLOR_REMOVED = "#e45756"
 COLOR_BAR = "#4c78a8"
 COLOR_PORT = "#58508d"
+COLOR_LATENCY = "#bcbd22"
+
+MAX_HOVER_POINTS = 600
+
+
+@dataclass
+class Series:
+    """One line series: timestamps aligned 1:1 with values.
+
+    ``axis`` is ``"l"`` (left) or ``"r"`` (right, dual-axis chart).
+    """
+
+    name: str
+    color: str
+    ts: list[str]
+    values: list[float]
+    dash: str = ""
+    axis: str = "l"
 
 
 def now_ts() -> str:
@@ -60,6 +83,18 @@ def esc(text: object) -> str:
 
 def fmt_ts(ts: object) -> str:
     return str(ts)[:16].replace("T", " ") if ts else ""
+
+
+def to_epoch(ts: object) -> float | None:
+    if not ts:
+        return None
+    s = str(ts).strip()
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
 
 
 def nice_step(span: float, count: int = 5) -> float:
@@ -166,117 +201,220 @@ def empty_svg(height: int = HEIGHT, text: str = "No data yet") -> str:
     )
 
 
-def legend_svg(series: list[tuple]) -> str:
+def render_title(title: str, height: int = HEIGHT) -> str:
+    return (
+        f'<text x="{WIDTH / 2}" y="{MARGIN_T}" font-size="10" '
+        f'text-anchor="middle" fill="{TITLE}">{esc(title)}</text>'
+    )
+
+
+def legend_svg(series: list[Series]) -> str:
     x = 14
     parts = []
-    for name, color, values, dash in series:
-        if not values:
+    for s in series:
+        if not s.values:
             continue
         sw = 18
-        dash_attr = ' stroke-dasharray="4,3"' if dash else ""
+        dash_attr = ' stroke-dasharray="4,3"' if s.dash else ""
         parts.append(
             f'<line x1="{x}" y1="10" x2="{x + sw}" y2="10" '
-            f'stroke="{color}" stroke-width="2"{dash_attr}/>'
-            f'<text x="{x + sw + 4}" y="13" font-size="10" fill="#333">{esc(name)}</text>'
+            f'stroke="{s.color}" stroke-width="2"{dash_attr}/>'
+            f'<text x="{x + sw + 4}" y="13" font-size="10" fill="#333">{esc(s.name)}</text>'
         )
-        x += sw + 4 + len(name) * 6.4 + 16
+        x += sw + 4 + len(s.name) * 6.4 + 16
     return "".join(parts)
 
 
+def time_labels(
+    series: list[Series], use_time: bool
+) -> list[tuple[float, str, str]]:
+    """Return ``(x, anchor, text)`` x-axis labels.
+
+    Shows the first and last data point timestamps plus up to three evenly
+    spaced intermediate ones, each snapped to the nearest real data point.
+    """
+    texts: list[str] = []
+    seen: set[str] = set()
+    for s in series:
+        for t in s.ts:
+            if t and t not in seen:
+                seen.add(t)
+                texts.append(t)
+    if not texts:
+        return []
+    plot_w = WIDTH - MARGIN_L - MARGIN_R
+
+    if not use_time:
+        return [
+            (MARGIN_L, "start", fmt_ts(texts[0])),
+            (WIDTH - MARGIN_R, "end", fmt_ts(texts[-1])),
+        ]
+
+    epochs = [to_epoch(t) for t in texts]
+    t0, t1 = min(epochs), max(epochs)
+    span = t1 - t0
+
+    def x_of(e: float) -> float:
+        return MARGIN_L + (e - t0) / span * plot_w
+
+    if span <= 0:
+        return [(MARGIN_L + plot_w / 2, "middle", fmt_ts(texts[0]))]
+
+    picked = {texts[0], texts[-1]}
+    items = [
+        (x_of(epochs[0]), "start", fmt_ts(texts[0])),
+        (x_of(epochs[-1]), "end", fmt_ts(texts[-1])),
+    ]
+    for frac in (0.25, 0.5, 0.75):
+        target = t0 + span * frac
+        nearest = min(range(len(epochs)), key=lambda i: abs(epochs[i] - target))
+        t = texts[nearest]
+        if t in picked:
+            continue
+        picked.add(t)
+        x = x_of(epochs[nearest])
+        if all(abs(x - ex) >= 66 for ex, _, _ in items):
+            items.append((x, "middle", fmt_ts(t)))
+    return sorted(items, key=lambda it: it[0])
+
+
 def plot_lines(
-    series: list[tuple],
+    series: list[Series],
     *,
     y_min: float | None = None,
     y_max: float | None = None,
-    right_ticks: list[tuple[float, str]] | None = None,
-    x_labels: tuple[str, str] = ("", ""),
+    left_unit: str = "",
+    right_unit: str = "",
     height: int = HEIGHT,
     title: str | None = None,
 ) -> str:
-    """Multi-series line chart.
+    """Multi-series line chart with per-axis zoom and a shared time x axis.
 
-    ``series`` is a list of ``(name, color, values, dash)`` tuples. Each
-    series is normalized to its own width (points are index positions, not a
-    shared timeline). Unless ``y_min``/``y_max`` are given the y-axis is
-    zoomed to the data range (rounded to nice ticks) so small variations stay
-    visible. ``right_ticks`` draws extra labels on the right axis for dual-axis
-    charts (values are expressed in the same units as the y-axis).
+    All series are positioned on one time axis spanning the earliest to the
+    latest timestamp across every series; series lacking usable timestamps fall
+    back to index spacing. ``axis="r"`` series are scaled against their own
+    zoomed range and labeled on the right margin (dual-axis). Data points get a
+    hover tooltip via inline ``<title>`` when the total point count is modest.
     """
-    active = [s for s in series if s[2]]
+    active = [s for s in series if s.values]
     if not active:
         return empty_svg(height=height)
     plot_w = WIDTH - MARGIN_L - MARGIN_R
     plot_h = height - MARGIN_T - MARGIN_B
-    data = [v for _, _, vals, _ in active for v in vals]
-    lo, hi, ticks = nice_bounds(
-        min(data) if y_min is None else y_min,
-        max(data) if y_max is None else y_max,
-    )
 
-    def xs(n: int) -> list[float]:
+    left = [s for s in active if s.axis == "l"]
+    right = [s for s in active if s.axis == "r"]
+    if not left:
+        left, right = active, []
+
+    l_lo, l_hi, l_ticks = nice_bounds(
+        min(v for s in left for v in s.values) if y_min is None else y_min,
+        max(v for s in left for v in s.values) if y_max is None else y_max,
+    )
+    if right:
+        r_lo, r_hi, r_ticks = nice_bounds(
+            min(v for s in right for v in s.values),
+            max(v for s in right for v in s.values),
+        )
+    else:
+        r_lo, r_hi, r_ticks = 0.0, 1.0, []
+
+    def y_of(axis: str, v: float) -> float:
+        lo, hi = (l_lo, l_hi) if axis == "l" else (r_lo, r_hi)
+        return MARGIN_T + plot_h * (1 - (v - lo) / (hi - lo))
+
+    use_time = True
+    epochs_all: list[float] = []
+    for s in active:
+        for t in s.ts:
+            e = to_epoch(t)
+            if e is None:
+                use_time = False
+                break
+            epochs_all.append(e)
+        if not use_time:
+            break
+    if use_time and len(set(epochs_all)) < 2:
+        use_time = False
+    t0 = min(epochs_all) if use_time else 0.0
+    t1 = max(epochs_all) if use_time else 0.0
+    span = t1 - t0 if use_time else 0.0
+
+    def x_for(ts_list: list[str], n: int) -> list[float]:
         if n <= 1:
             return [MARGIN_L + plot_w / 2]
-        return [MARGIN_L + i / (n - 1) * plot_w for i in range(n)]
-
-    def y(v: float) -> float:
-        return MARGIN_T + plot_h * (1 - (v - lo) / (hi - lo))
+        if not use_time:
+            return [MARGIN_L + i / (n - 1) * plot_w for i in range(n)]
+        out = []
+        for t in ts_list:
+            e = to_epoch(t)
+            frac = (e - t0) / span
+            out.append(MARGIN_L + max(0.0, min(1.0, frac)) * plot_w)
+        return out
 
     parts = [svg_head(WIDTH, height)]
     if title:
+        parts.append(render_title(title, height))
+
+    for v in l_ticks:
+        yy = y_of("l", v)
         parts.append(
-            f'<text x="{WIDTH / 2}" y="{MARGIN_T}" font-size="10" '
-            f'text-anchor="middle" fill="{TITLE}">{esc(title)}</text>'
+            f'<line x1="{MARGIN_L}" y1="{yy:.1f}" x2="{WIDTH - MARGIN_R}" '
+            f'y2="{yy:.1f}" stroke="{GRID}"/>'
+            f'<text x="{MARGIN_L - 6}" y="{yy + 3:.1f}" font-size="9" '
+            f'text-anchor="end" fill="{TEXT}">{fmt_tick(v)}{left_unit}</text>'
         )
-    if right_ticks:
-        for v, label in right_ticks:
-            yy = y(v)
+    if right:
+        for v in r_ticks:
+            yy = y_of("r", v)
             parts.append(
-                f'<line x1="{MARGIN_L}" y1="{yy:.1f}" x2="{WIDTH - MARGIN_R}" '
-                f'y2="{yy:.1f}" stroke="{GRID}"/>'
-                f'<text x="{MARGIN_L - 6}" y="{yy + 3:.1f}" font-size="9" '
-                f'text-anchor="end" fill="{TEXT}">{fmt_tick(v)}</text>'
-                f'<text x="{WIDTH - MARGIN_R + 6}" y="{yy + 3:.1f}" '
-                f'font-size="9" fill="{TEXT}">{esc(label)}</text>'
+                f'<text x="{WIDTH - 8}" y="{yy + 3:.1f}" font-size="9" '
+                f'text-anchor="end" fill="{TEXT}">{fmt_tick(v)}{right_unit}</text>'
             )
-    else:
-        for v in ticks:
-            yy = y(v)
-            parts.append(
-                f'<line x1="{MARGIN_L}" y1="{yy:.1f}" x2="{WIDTH - MARGIN_R}" '
-                f'y2="{yy:.1f}" stroke="{GRID}"/>'
-                f'<text x="{MARGIN_L - 6}" y="{yy + 3:.1f}" font-size="9" '
-                f'text-anchor="end" fill="{TEXT}">{fmt_tick(v)}</text>'
-            )
+        parts.append(
+            f'<line x1="{WIDTH - MARGIN_R}" y1="{MARGIN_T}" '
+            f'y2="{WIDTH - MARGIN_R}" y2="{MARGIN_T + plot_h}" stroke="{AXIS}"/>'
+        )
     parts.append(
         f'<line x1="{MARGIN_L}" y1="{MARGIN_T}" x2="{MARGIN_L}" '
         f'y2="{MARGIN_T + plot_h}" stroke="{AXIS}"/>'
         f'<line x1="{MARGIN_L}" y1="{MARGIN_T + plot_h}" x2="{WIDTH - MARGIN_R}" '
         f'y2="{MARGIN_T + plot_h}" stroke="{AXIS}"/>'
     )
-    for name, color, values, dash in series:
-        if not values:
-            continue
-        xpts = xs(len(values))
-        pts = " ".join(
-            f"{xpts[i]:.1f},{y(values[i]):.1f}" for i in range(len(values))
-        )
-        if len(values) == 1:
-            px, py = xpts[0], y(values[0])
-            parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="3" fill="{color}"/>')
-        else:
-            dash_attr = ' stroke-dasharray="4,3"' if dash else ""
+
+    total_pts = sum(len(s.values) for s in active)
+    hover = total_pts <= MAX_HOVER_POINTS
+    for s in active:
+        xpts = x_for(s.ts, len(s.values))
+        ypts = [y_of(s.axis, v) for v in s.values]
+        pts = " ".join(f"{xpts[i]:.1f},{ypts[i]:.1f}" for i in range(len(s.values)))
+        if len(s.values) == 1:
             parts.append(
-                f'<polyline fill="none" stroke="{color}" stroke-width="2"'
+                f'<circle cx="{xpts[0]:.1f}" cy="{ypts[0]:.1f}" r="3" fill="{s.color}"/>'
+            )
+        else:
+            dash_attr = ' stroke-dasharray="4,3"' if s.dash else ""
+            parts.append(
+                f'<polyline fill="none" stroke="{s.color}" stroke-width="2"'
                 f'{dash_attr} stroke-linejoin="round" points="{pts}"/>'
             )
-    if x_labels[0] or x_labels[1]:
+        if hover:
+            for i in range(len(s.values)):
+                tip = f"{s.name}: {s.values[i]:g}"
+                ts_txt = fmt_ts(s.ts[i]) if i < len(s.ts) else ""
+                if ts_txt:
+                    tip = f"{ts_txt} · {tip}"
+                parts.append(
+                    f'<circle cx="{xpts[i]:.1f}" cy="{ypts[i]:.1f}" r="4" '
+                    f'fill="transparent"><title>{esc(tip)}</title></circle>'
+                )
+
+    for x, anchor, text in time_labels(active, use_time):
         parts.append(
-            f'<text x="{MARGIN_L}" y="{height - 12}" font-size="9" fill="{TEXT}">'
-            f"{esc(x_labels[0])}</text>"
-            f'<text x="{WIDTH - MARGIN_R}" y="{height - 12}" font-size="9" '
-            f'text-anchor="end" fill="{TEXT}">{esc(x_labels[1])}</text>'
+            f'<text x="{x:.1f}" y="{height - 12}" font-size="9" '
+            f'text-anchor="{anchor}" fill="{TEXT}">{esc(text)}</text>'
         )
-    parts.append(legend_svg(series))
+    parts.append(legend_svg(active))
     parts.append("</svg>")
     return "\n".join(parts)
 
@@ -301,10 +439,7 @@ def plot_hbars(
 
     parts = [svg_head(WIDTH, height)]
     if title:
-        parts.append(
-            f'<text x="{WIDTH / 2}" y="{MARGIN_T}" font-size="10" '
-            f'text-anchor="middle" fill="{TITLE}">{esc(title)}</text>'
-        )
+        parts.append(render_title(title, height))
     for v in nice_ticks(max_v):
         gx = left + v / max_v * plot_w
         parts.append(
@@ -345,10 +480,7 @@ def plot_vbars(
 
     parts = [svg_head(WIDTH, HEIGHT)]
     if title:
-        parts.append(
-            f'<text x="{WIDTH / 2}" y="{MARGIN_T}" font-size="10" '
-            f'text-anchor="middle" fill="{TITLE}">{esc(title)}</text>'
-        )
+        parts.append(render_title(title, HEIGHT))
     for v in nice_ticks(max_v):
         yy = MARGIN_T + plot_h - v / max_v * plot_h
         parts.append(
@@ -381,28 +513,24 @@ def plot_vbars(
 
 def plot_grouped_vbars(
     groups: list[str],
-    series: list[tuple],
+    series: list[Series],
     *,
     title: str | None = None,
 ) -> str:
-    """Grouped vertical bars; ``groups`` are x labels, ``series`` mirrors the
-    ``(name, color, values, dash)`` layout of :func:`plot_lines`."""
+    """Grouped vertical bars; ``groups`` are x labels, one bar per series."""
     n = len(groups)
-    if n == 0 or not any(vals for _, _, vals, _ in series):
+    if n == 0 or not any(s.values for s in series):
         return empty_svg()
     plot_w = WIDTH - MARGIN_L - MARGIN_R
     plot_h = HEIGHT - MARGIN_T - MARGIN_B
-    max_v = max((v for _, _, vals, _ in series for v in vals), default=0) or 1
+    max_v = max((v for s in series for v in s.values), default=0) or 1
     slot = plot_w / n
     k = len(series)
     bar_w = min(50, slot / (k + 0.5))
 
     parts = [svg_head(WIDTH, HEIGHT)]
     if title:
-        parts.append(
-            f'<text x="{WIDTH / 2}" y="{MARGIN_T}" font-size="10" '
-            f'text-anchor="middle" fill="{TITLE}">{esc(title)}</text>'
-        )
+        parts.append(render_title(title, HEIGHT))
     for v in nice_ticks(max_v):
         yy = MARGIN_T + plot_h - v / max_v * plot_h
         parts.append(
@@ -419,16 +547,16 @@ def plot_grouped_vbars(
     )
     for i in range(n):
         center = MARGIN_L + (i + 0.5) * slot
-        for j, (name, color, vals, _) in enumerate(series):
-            if i >= len(vals):
+        for j, s in enumerate(series):
+            if i >= len(s.values):
                 continue
-            value = vals[i]
+            value = s.values[i]
             x0 = center + (j - (k - 1) / 2) * bar_w - bar_w / 2
             bh = value / max_v * plot_h
             y0 = MARGIN_T + plot_h - bh
             parts.append(
                 f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{bar_w:.1f}" '
-                f'height="{bh:.1f}" fill="{color}" rx="1"/>'
+                f'height="{bh:.1f}" fill="{s.color}" rx="1"/>'
             )
     first_x = MARGIN_L
     last_x = MARGIN_L + (n - 1) * slot
@@ -445,11 +573,18 @@ def plot_grouped_vbars(
 
 def build_trend(history: list[dict], valid_history: list[dict]) -> str:
     series = [
-        ("unique", COLOR_UNIQUE, [r.get("unique", 0) for r in history], ""),
-        ("alive", COLOR_ALIVE, [r.get("alive", 0) for r in valid_history], ""),
+        Series(
+            "unique", COLOR_UNIQUE,
+            [r.get("ts", "") for r in history],
+            [r.get("unique", 0) for r in history],
+        ),
+        Series(
+            "alive", COLOR_ALIVE,
+            [r.get("ts", "") for r in valid_history],
+            [r.get("alive", 0) for r in valid_history],
+        ),
     ]
-    labels = (fmt_ts(history[0].get("ts")) if history else "", fmt_ts(history[-1].get("ts")) if history else "")
-    return plot_lines(series, x_labels=labels, title="Unique & Alive trend")
+    return plot_lines(series, title="Unique & Alive trend")
 
 
 def build_country(meta: dict) -> str:
@@ -465,77 +600,70 @@ def build_port(meta: dict) -> str:
 
 
 def build_alive_rate(valid_history: list[dict]) -> str:
-    values = []
+    ts = [r.get("ts", "") for r in valid_history]
+    rate = []
+    dead = []
     for r in valid_history:
         checked = r.get("checked", 0)
-        values.append(round(r.get("alive", 0) / checked * 100, 1) if checked else 0)
-    labels = (
-        fmt_ts(valid_history[0].get("ts")) if valid_history else "",
-        fmt_ts(valid_history[-1].get("ts")) if valid_history else "",
-    )
-    return plot_lines(
-        [("alive rate", COLOR_RATE, values, "")],
-        x_labels=labels,
-        title="Alive rate (%) over time",
-    )
+        rate.append(round(r.get("alive", 0) / checked * 100, 1) if checked else 0)
+        dead.append(r.get("dead", 0))
+    series = [
+        Series("alive rate", COLOR_RATE, ts, rate, axis="l"),
+        Series("dead", COLOR_DEAD, ts, dead, axis="r"),
+    ]
+    return plot_lines(series, left_unit="%", title="Alive rate (%) & dead")
 
 
 def build_churn(history: list[dict]) -> str:
     groups = [r.get("ts", "") for r in history]
     series = [
-        ("added", COLOR_ADDED, [r.get("added", 0) for r in history], ""),
-        ("removed", COLOR_REMOVED, [r.get("removed", 0) for r in history], ""),
+        Series("added", COLOR_ADDED, groups, [r.get("added", 0) for r in history]),
+        Series("removed", COLOR_REMOVED, groups, [r.get("removed", 0) for r in history]),
     ]
     return plot_grouped_vbars(groups, series, title="Added / removed per update")
 
 
 def build_combo(history: list[dict], valid_history: list[dict]) -> str:
-    unique = [r.get("unique", 0) for r in history]
-    alive = [r.get("alive", 0) for r in valid_history]
+    u_ts = [r.get("ts", "") for r in history]
+    v_ts = [r.get("ts", "") for r in valid_history]
     pct = []
     for r in valid_history:
         checked = r.get("checked", 0)
         pct.append(round(r.get("alive", 0) / checked * 100, 1) if checked else 0)
-    counts = max(
-        max(unique) if unique else 0,
-        max(alive) if alive else 0,
-        max(pct) if pct else 0,
-    ) or 1
-    scale = counts / 100
     series = [
-        ("unique", COLOR_UNIQUE, unique, ""),
-        ("alive", COLOR_ALIVE, alive, ""),
-        ("alive rate", COLOR_RATE, [v * scale for v in pct], "dash"),
+        Series("unique", COLOR_UNIQUE, u_ts, [r.get("unique", 0) for r in history]),
+        Series("alive", COLOR_ALIVE, v_ts, [r.get("alive", 0) for r in valid_history]),
+        Series("alive rate", COLOR_RATE, v_ts, pct, dash="dash", axis="r"),
     ]
-    data = [v for _, _, vals, _ in series for v in vals]
-    if not data:
-        return empty_svg()
-    lo, hi, ticks = nice_bounds(min(data), max(data))
-    right_ticks = [
-        (t, f"{min(100.0, max(0.0, t / counts * 100)):.1f}%") for t in ticks
-    ]
-    labels = (
-        fmt_ts(history[0].get("ts")) if history else "",
-        fmt_ts(history[-1].get("ts")) if history else "",
-    )
     return plot_lines(
-        series,
-        y_min=lo,
-        y_max=hi,
-        right_ticks=right_ticks,
-        x_labels=labels,
-        title="Unique / Alive / Alive rate",
+        series, right_unit="%", title="Unique / Alive / Alive rate"
+    )
+
+
+def build_latency(meta: dict) -> str:
+    dist = meta.get("latency_dist", {})
+    if not dist:
+        return empty_svg(text="No latency data yet")
+    return plot_vbars(
+        list(dist.items()), color=COLOR_LATENCY, title="Alive proxies by latency (ms)"
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=OUT_DIR, help="Output directory")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=OUT_DIR,
+        help="Directory with inputs (history.jsonl, valid/); default: data/",
+    )
     args = parser.parse_args(argv)
 
-    history = load_history(HISTORY_FILE)
-    valid_history = load_history(VALID_DIR / "history.jsonl")
-    meta = read_json(VALID_DIR / "meta.json")
+    data_dir = args.data_dir
+    history = load_history(data_dir / "history.jsonl")
+    valid_history = load_history(data_dir / "valid" / "history.jsonl")
+    meta = read_json(data_dir / "valid" / "meta.json")
 
     latest = history[-1] if history else {}
     sets = latest.get("sets", {})
@@ -557,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         "alive_countries": len(meta.get("per_country", {})),
         "alive_sets": alive_sets,
         "latency": meta.get("latency", {}),
+        "latency_dist": meta.get("latency_dist", {}),
         "history_records": len(history),
         "alive_history_records": len(valid_history),
     }
@@ -572,15 +701,17 @@ def main(argv: list[str] | None = None) -> int:
         "chart_alive_rate.svg": build_alive_rate(valid_history),
         "chart_churn.svg": build_churn(history),
         "chart_combo.svg": build_combo(history, valid_history),
+        "chart_latency.svg": build_latency(meta),
     }
     for name, content in charts.items():
         path = args.out / name
         write_atomic(path, content)
         print(f"Wrote {path}")
 
+    p90 = stats["latency"].get("p90_ms")
     print(
         f"unique={stats['unique']} alive={alive}/{checked} "
-        f"latency_p90={stats['latency'].get('p90_ms')}ms"
+        f"latency_p90={'-' if p90 is None else p90}ms"
     )
     return 0
 

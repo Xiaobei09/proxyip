@@ -19,7 +19,7 @@
 - **自动抓取整理**：下载上游 zip → 按端口/国家/常用集合/全量多维度汇总，去重合并
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活与测速，输出**按延迟升序**
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
-- **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、更新增量与双轴复合图
+- **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟分布、更新增量与双轴复合图
 - **CI 自动化**：每 30 分钟全自动执行下载→验证→统计→提交，无需人工干预
 - **浏览器指纹生成**：生成内部自洽、同一设备配置的 UA/分辨率/时区/WebGL 等指纹
 
@@ -151,6 +151,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `alive` / `alive_checked` / `alive_rate` | 存活数 / 检测数 / 存活率 |
 | `alive_countries` / `alive_sets` | 存活国家数 / 存活集合条数 |
 | `latency` | 延迟统计（avg/median/p90/max，毫秒） |
+| `latency_dist` | 延迟分桶直方图（如 `0-100`、`1000+`，毫秒） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
 
 ### `data/valid/meta.json`
@@ -161,6 +162,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `elapsed_s` / `checked_per_s` | 耗时（秒）/ 吞吐（条/秒） |
 | `by_method` | 各判定方法（connect/tls）的存活数 |
 | `latency` | 延迟统计（avg/median/p90/max） |
+| `latency_dist` | 延迟分桶直方图（毫秒） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
 | `sets` | 各集合存活条数 |
 
@@ -201,7 +203,12 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `scripts/generate_stats.py`
 
-读取历史与验证汇总，生成统计与一组零依赖 SVG 图表。参数：`--out`（输出目录，默认 `data/`）。
+读取历史与验证汇总，生成统计与一组零依赖 SVG 图表。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--out` | 输出目录 | `data/` |
+| `--data-dir` | 输入数据目录（含 `history.jsonl` 与 `valid/`） | `data/` |
 
 | 输出文件 | 内容 |
 |---|---|
@@ -211,6 +218,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `chart_port.svg` | 存活代理按端口纵向条形图 |
 | `chart_churn.svg` | 每次更新 added / removed 分组条形图 |
 | `chart_combo.svg` | 双轴复合趋势（unique/alive 左轴 + 存活率右轴） |
+| `chart_latency.svg` | 存活代理延迟分桶条形图（毫秒） |
 
 ### `scripts/generate_fingerprint.py`
 

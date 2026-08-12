@@ -45,6 +45,15 @@ READ_CAP = 3
 WORKERS = 500
 RETRY_DELAY = 0.2
 
+LATENCY_BUCKETS = [
+    (0, 100),
+    (100, 200),
+    (200, 300),
+    (300, 500),
+    (500, 1000),
+    (1000, None),
+]
+
 _TLS_CTX = ssl.create_default_context()
 _TLS_CTX.check_hostname = False
 _TLS_CTX.verify_mode = ssl.CERT_NONE
@@ -52,6 +61,18 @@ _TLS_CTX.verify_mode = ssl.CERT_NONE
 
 def now_ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bucket_latency(latencies: list[float]) -> dict[str, int]:
+    """Histogram of latencies (ms) into ``LATENCY_BUCKETS``, in bucket order."""
+    counts = {}
+    for lo, hi in LATENCY_BUCKETS:
+        label = f"{lo}-{hi}" if hi is not None else f"{lo}+"
+        if hi is None:
+            counts[label] = sum(1 for lat in latencies if lat >= lo)
+        else:
+            counts[label] = sum(1 for lat in latencies if lo <= lat < hi)
+    return counts
 
 
 def parse_entries(lines: list[str]) -> list[tuple[str, str, str]]:
@@ -343,6 +364,7 @@ async def run(args: argparse.Namespace) -> int:
         "checked_per_s": round(checked / elapsed, 1) if elapsed else 0,
         "by_method": dict(sorted(by_method.items())),
         "latency": lat_stats,
+        "latency_dist": bucket_latency(latencies),
         "per_country": dict(sorted(per_country.items())),
         "per_port": {p: per_port[p] for p in sorted(per_port, key=int)},
         "sets": stats["__sets__"],
