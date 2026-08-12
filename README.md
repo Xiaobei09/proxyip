@@ -8,13 +8,18 @@
 [![Updated](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json&query=updated_at&label=Updated&color=informational)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json)
 
 ![Trend](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart.svg)
+![Alive rate](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_alive_rate.svg)
+![Country distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_country.svg)
+![Port distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_port.svg)
+![Churn](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_churn.svg)
+![Composite trend](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_combo.svg)
 
 ## 功能特性
 
 - **自动抓取整理**：下载上游 zip → 按端口/国家/常用集合/全量多维度汇总，去重合并
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活与测速，输出**按延迟升序**
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
-- **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 趋势图
+- **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、更新增量与双轴复合图
 - **CI 自动化**：每 30 分钟全自动执行下载→验证→统计→提交，无需人工干预
 - **浏览器指纹生成**：生成内部自洽、同一设备配置的 UA/分辨率/时区/WebGL 等指纹
 
@@ -196,7 +201,16 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `scripts/generate_stats.py`
 
-读取历史生成统计与趋势图。参数：`--out`（输出目录，默认 `data/`）。
+读取历史与验证汇总，生成统计与一组零依赖 SVG 图表。参数：`--out`（输出目录，默认 `data/`）。
+
+| 输出文件 | 内容 |
+|---|---|
+| `chart.svg` | unique / alive 趋势折线图 |
+| `chart_alive_rate.svg` | 存活率（%）随时间变化 |
+| `chart_country.svg` | 存活代理按国家 top-15 横向条形图 |
+| `chart_port.svg` | 存活代理按端口纵向条形图 |
+| `chart_churn.svg` | 每次更新 added / removed 分组条形图 |
+| `chart_combo.svg` | 双轴复合趋势（unique/alive 左轴 + 存活率右轴） |
 
 ### `scripts/generate_fingerprint.py`
 
@@ -251,6 +265,11 @@ data/diff/latest.json                  最近一次更新差异（added/removed�
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
 data/chart.svg                         趋势折线图（unique 与 alive 随时间变化）
+data/chart_alive_rate.svg              存活率（%）随时间变化折线图
+data/chart_country.svg                 存活代理按国家 top-15 条形图
+data/chart_port.svg                    存活代理按端口条形图
+data/chart_churn.svg                   每次更新 added/removed 条形图
+data/chart_combo.svg                   双轴复合趋势（计数 + 存活率）
 data/history.jsonl                     更新历史记录（每行一条，最多 1000 条）
 ```
 
