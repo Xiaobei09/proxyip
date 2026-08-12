@@ -35,6 +35,7 @@ from download_proxies import (
 
 VALID_DIR = OUT_DIR / "valid"
 VALID_HISTORY_FILE = VALID_DIR / "history.jsonl"
+INDEX_FILE = VALID_DIR / "index.json"
 MAX_HISTORY_RECORDS = 1000
 
 TARGET_HOST = "www.gstatic.com"
@@ -165,6 +166,23 @@ async def check_proxy(
     return "ok", "tls", elapsed(tls_started)
 
 
+def write_index(ordered: list[str], alive: dict) -> None:
+    """Write ``index.json``: each alive proxy -> ``[latency_ms, method]``.
+
+    Skipped when byte-identical so stable data produces no extra commits.
+    """
+    proxies = {entry: [alive[entry][4], alive[entry][3]] for entry in ordered}
+    content = (
+        json.dumps({"proxies": proxies}, ensure_ascii=False, separators=(",", ":"))
+        + "\n"
+    )
+    if INDEX_FILE.exists() and INDEX_FILE.read_text(encoding="utf-8") == content:
+        return
+    tmp = INDEX_FILE.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(INDEX_FILE)
+
+
 def write_valid_outputs(
     alive: dict[str, tuple[str, str, str, str, float]],
     per_country_limit: int,
@@ -238,6 +256,7 @@ def write_valid_outputs(
                 counts[cc] += 1
         (VALID_DIR / "all_ltd.txt").write_text("\n".join(ltd_all) + "\n")
         set_counts["all_ltd"] = len(ltd_all)
+    write_index(ordered, alive)
     return {
         "__countries__": len(by_country),
         "__ports__": len(by_port),

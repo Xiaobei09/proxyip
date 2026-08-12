@@ -5,7 +5,8 @@
 [![Unique Proxies](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json&query=unique&label=Unique%20Proxies&color=blue)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/all.txt)
 [![Alive](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json&query=alive&label=Alive&color=green)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all.txt)
 [![Alive Rate](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json&query=alive_rate&label=Alive%20Rate&color=orange)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/meta.json)
-[![Updated](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json&query=updated_at&label=Updated&color=informational)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json)
+[![Updated](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json&query=updated_ago&label=Updated&color=informational)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json)
+[![Status](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/badge.json)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/stats.json)
 
 ![Trend](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart.svg)
 ![Alive rate](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_alive_rate.svg)
@@ -13,6 +14,7 @@
 ![Port distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_port.svg)
 ![Churn](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_churn.svg)
 ![Composite trend](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_combo.svg)
+![Latency distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_latency.svg)
 
 ## 功能特性
 
@@ -20,7 +22,8 @@
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活与测速，输出**按延迟升序**
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟分布、更新增量与双轴复合图
-- **CI 自动化**：每 30 分钟全自动执行下载→验证→统计→提交，无需人工干预
+- **结构化索引**：`valid/index.json` 提供每存活代理的延迟与检测方法索引，便于程序直接消费
+- **CI 自动化**：每 30 分钟全自动执行下载→验证→统计→提交，无需人工干预；提交前自动跑测试套件（stdlib `unittest`）
 - **浏览器指纹生成**：生成内部自洽、同一设备配置的 UA/分辨率/时区/WebGL 等指纹
 
 ## 快速开始
@@ -36,6 +39,7 @@
 git clone https://github.com/Xiaobei09/proxyip.git
 cd proxyip
 
+python -m unittest discover -s tests -v     # 0. 运行测试套件（可选）
 python scripts/download_proxies.py          # 1. 下载解压整理
 python scripts/validate_proxies.py --time-budget 180   # 2. 连通性验证（限时 180s）
 python scripts/generate_stats.py            # 3. 统计与趋势图
@@ -117,6 +121,7 @@ CI 每次更新后对 `data/all.txt` 做连通性检查，输出镜像 `data/` �
 - `data/valid/all.txt`、`all_ltd.txt`：存活代理（保持 `ip:port#国家` 格式，按延迟排序）
 - `data/valid/countries/`、`ports/`、`sets/`：按国家/端口/集合分组的存活列表
 - `data/valid/meta.json`：本次验证汇总（字段见下）
+- `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）
 - `data/valid/history.jsonl`：每次验证的历史记录（最多 1000 条，供趋势图）
 
 ### 常用命令
@@ -152,6 +157,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `alive_countries` / `alive_sets` | 存活国家数 / 存活集合条数 |
 | `latency` | 延迟统计（avg/median/p90/max，毫秒） |
 | `latency_dist` | 延迟分桶直方图（如 `0-100`、`1000+`，毫秒） |
+| `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
 
 ### `data/valid/meta.json`
@@ -165,6 +171,16 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `latency_dist` | 延迟分桶直方图（毫秒） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
 | `sets` | 各集合存活条数 |
+
+### `data/valid/index.json`
+
+单行 JSON 结构化索引，键为 `ip:port#国家`，值为 `[延迟ms, 检测方法]`，按延迟升序：
+
+```json
+{"proxies": {"1.2.3.4:443#US": [640.1, "tls"], "5.6.7.8:8443#JP": [80.1, "connect"]}}
+```
+
+数据未变化时文件不变（避免无意义提交）。运行时间见 `meta.json` 的 `ts`。
 
 ### `data/history.jsonl`（每行一条）
 
@@ -249,9 +265,9 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 `.github/workflows/update-proxies.yml`：
 
 - **触发**：每 30 分钟定时（`cron: */30 * * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
-- **流程**：下载整理 → 验证（`--time-budget 180`）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
+- **流程**：跑测试（`unittest`）→ 下载整理 → 验证（`--time-budget 180`）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
 - **细节**：作业超时 20 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
-- **徽章**：四个徽章分别取 `stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_at`
+- **徽章**：四个徽章分别取 `stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
 ## 目录结构
 
@@ -268,7 +284,7 @@ data/sets/<集合>.txt                   常用国家集合（europe、asia、ho
 data/sets/<集合>_ltd.txt               限量版（每国 --per-country-limit 条）
 data/all.txt                           全量去重 ip:port#国家（IP 数字序）
 data/all_ltd.txt                       全部国家每国限量后的并集
-data/valid/                            存活代理（结构同 data/，按延迟排序，含 meta.json、history.jsonl）
+data/valid/                            存活代理（结构同 data/，按延迟排序，含 meta.json、index.json、history.jsonl）
 data/diff/latest.json                  最近一次更新差异（added/removed）
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
@@ -278,7 +294,9 @@ data/chart_country.svg                 存活代理按国家 top-15 条形图
 data/chart_port.svg                    存活代理按端口条形图
 data/chart_churn.svg                   每次更新 added/removed 条形图
 data/chart_combo.svg                   双轴复合趋势（计数 + 存活率）
+data/chart_latency.svg                 存活代理延迟分桶条形图
 data/history.jsonl                     更新历史记录（每行一条，最多 1000 条）
+tests/                                 标准库 unittest 测试套件
 ```
 
 ## 免责声明

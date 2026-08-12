@@ -50,6 +50,7 @@ COLOR_PORT = "#58508d"
 COLOR_LATENCY = "#bcbd22"
 
 MAX_HOVER_POINTS = 600
+STALE_AFTER_S = 3 * 3600
 
 
 @dataclass
@@ -95,6 +96,21 @@ def to_epoch(ts: object) -> float | None:
         return datetime.fromisoformat(s).timestamp()
     except ValueError:
         return None
+
+
+def fmt_ago(seconds: float) -> str:
+    """Human-readable age, e.g. ``"35m ago"`` / ``"2h 15m ago"``."""
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        mins = minutes % 60
+        return f"{hours}h {mins}m ago" if mins else f"{hours}h ago"
+    return f"{hours // 24}d ago"
 
 
 def nice_step(span: float, count: int = 5) -> float:
@@ -660,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    now = datetime.now(timezone.utc).timestamp()
     data_dir = args.data_dir
     history = load_history(data_dir / "history.jsonl")
     valid_history = load_history(data_dir / "valid" / "history.jsonl")
@@ -671,9 +688,16 @@ def main(argv: list[str] | None = None) -> int:
     alive = meta.get("alive", 0)
     checked = meta.get("checked", 0)
 
+    updated_epoch = to_epoch(latest.get("ts"))
+    age_s = (now - updated_epoch) if updated_epoch is not None else None
+    stale = age_s is not None and age_s > STALE_AFTER_S
+
     stats = {
         "ts": now_ts(),
         "updated_at": latest.get("ts"),
+        "age_s": age_s,
+        "updated_ago": fmt_ago(age_s) if age_s is not None else "-",
+        "stale": bool(stale),
         "unique": latest.get("unique", 0),
         "total": latest.get("total", 0),
         "countries": latest.get("countries", 0),
@@ -693,6 +717,16 @@ def main(argv: list[str] | None = None) -> int:
     stats_file = args.out / "stats.json"
     write_atomic(stats_file, json.dumps(stats, ensure_ascii=False, indent=2) + "\n")
     print(f"Wrote {stats_file}")
+
+    badge = {
+        "schemaVersion": 1,
+        "label": "status",
+        "message": "stale" if stale else "fresh",
+        "color": "red" if stale else "brightgreen",
+    }
+    badge_file = args.out / "badge.json"
+    write_atomic(badge_file, json.dumps(badge) + "\n")
+    print(f"Wrote {badge_file}")
 
     charts = {
         "chart.svg": build_trend(history, valid_history),

@@ -29,6 +29,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
       - name: Download and extract
         run: python scripts/download_proxies.py
 
