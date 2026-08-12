@@ -373,7 +373,7 @@ def plot_lines(
             )
         parts.append(
             f'<line x1="{WIDTH - MARGIN_R}" y1="{MARGIN_T}" '
-            f'y2="{WIDTH - MARGIN_R}" y2="{MARGIN_T + plot_h}" stroke="{AXIS}"/>'
+            f'x2="{WIDTH - MARGIN_R}" y2="{MARGIN_T + plot_h}" stroke="{AXIS}"/>'
         )
     parts.append(
         f'<line x1="{MARGIN_L}" y1="{MARGIN_T}" x2="{MARGIN_L}" '
