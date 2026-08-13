@@ -19,7 +19,7 @@ jobs:
   update:
     name: Download and extract proxies
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
         run: python scripts/download_proxies.py
 
       - name: Validate proxies
-        run: python scripts/validate_proxies.py --time-budget 600
+        run: python scripts/validate_proxies.py
 
       - name: Generate stats and chart
         run: python scripts/generate_stats.py

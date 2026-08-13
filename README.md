@@ -42,7 +42,7 @@ cd proxyip
 
 python -m unittest discover -s tests -v     # 0. 运行测试套件（可选）
 python scripts/download_proxies.py          # 1. 下载解压整理
-python scripts/validate_proxies.py --time-budget 600   # 2. 连通性验证与测速（限时 600s）
+python scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止）
 python scripts/generate_stats.py            # 3. 统计与趋势图
 ```
 
@@ -120,12 +120,16 @@ CI 每次更新后对 `data/all.txt` 做连通性检查，输出镜像 `data/` �
 CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅使速度置空，不影响存活判定。速度仅供排序与统计，
 不做二次筛选。
 
+下载测速受独立并发上限 `--speed-workers`（默认 10）约束——判活（TCP/TLS/CONNECT）仍以 `--workers`（默认 500）
+高并发进行，但同一时刻最多 10 个测速下载在飞，避免 CI 出口带宽被打满导致测速值拉平、区分度下降。并发越低
+测速越准确，但全量测速耗时越长（并发 10 时约 30-40 分钟）。
+
 ### 并发与容错
 
 - **asyncio 并发**：默认 500 个在飞任务（`-w` 可调），有界任务池实现严格限时
 - **超时**：单代理 5s（`-t`）；CONNECT 响应读取独立 3s 上限
 - **自动重试**：TCP 能连通但两项检测均超时的代理，短暂间隔后重试一次，降低单次丢包误杀
-- **时间预算**：`--time-budget N` 到时立即停止（CI 用 600s），到期只取消少量在飞任务
+- **时间预算**：`--time-budget N` 到时立即停止，到期只取消少量在飞任务；CI 默认不设置（`0` = 跑完全部存活代理）
 
 ### 输出
 
@@ -141,7 +145,9 @@ CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅�
 ```bash
 python scripts/validate_proxies.py                    # 验证全部
 python scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
-python scripts/validate_proxies.py --time-budget 600  # 最多跑 600 秒
+python scripts/validate_proxies.py                    # 验证全部（默认不设限）
+python scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
+python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ```
 
 ## 更新差异
@@ -238,6 +244,7 @@ python scripts/validate_proxies.py --time-budget 600  # 最多跑 600 秒
 | `--speed-host` / `--speed-path` | 测速下载主机 / 路径 | `cdnjs.cloudflare.com` / `/ajax/libs/three.js/r128/three.min.js` |
 | `--speed-bytes` | 测速单次读取字节上限 | 262144 |
 | `--speed-timeout` | 测速单次时长上限（秒） | 5 |
+| `--speed-workers` | 同时进行的下载测速并发上限 | 10 |
 | `--no-speed` | 跳过速度测试（`_ltd` 回退按延迟） | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 5 |
 | `-w, --workers` | asyncio 并发上限 | 500 |
@@ -294,8 +301,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 `.github/workflows/update-proxies.yml`：
 
 - **触发**：每 30 分钟定时（`cron: */30 * * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
-- **流程**：跑测试（`unittest`）→ 下载整理 → 验证与测速（`--time-budget 600`）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
-- **细节**：作业超时 20 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
+- **流程**：跑测试（`unittest`）→ 下载整理 → 验证与测速（默认不设时间限制，跑完为止）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
+- **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：四个徽章分别取 `stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
 ## 目录结构

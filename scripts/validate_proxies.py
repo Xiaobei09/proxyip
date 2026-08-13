@@ -50,6 +50,7 @@ SPEED_PATH = "/ajax/libs/three.js/r128/three.min.js"
 SPEED_READ_BYTES = 262144
 SPEED_TIMEOUT = 5
 SPEED_MIN_BYTES = 16384
+SPEED_WORKERS = 10
 TIMEOUT = 5
 READ_CAP = 3
 WORKERS = 500
@@ -183,17 +184,32 @@ async def try_connect(
     return b" 200 " in buf.split(b"\r\n", 1)[0]
 
 
-async def check_proxy(ip: str, port: str, args: argparse.Namespace) -> tuple[str, str | None, float | None, float | None]:
+async def check_proxy(
+    ip: str,
+    port: str,
+    args: argparse.Namespace,
+    speed_sem: asyncio.Semaphore | None,
+) -> tuple[str, str | None, float | None, float | None]:
     """Return ``(status, method, latency_ms, speed_mbps)``.
 
     Alive proxies additionally download ``speed_path`` from ``speed_host`` on
-    the already-established connection to measure throughput. Speed is
-    ``None`` when the measurement failed (the proxy stays alive).
+    the already-established connection to measure throughput. Downloads are
+    gated by ``speed_sem`` so bandwidth stays low-contention. Speed is ``None``
+    when the measurement failed (the proxy stays alive).
     """
     started = time.monotonic()
 
     def elapsed(since: float) -> float:
         return round((time.monotonic() - since) * 1000, 1)
+
+    async def measure_speed(reader, writer) -> float | None:
+        if args.no_speed or speed_sem is None:
+            return None
+        async with speed_sem:
+            return await speed_download(
+                reader, writer, args.speed_host, args.speed_path,
+                args.speed_bytes, args.speed_timeout,
+            )
 
     try:
         reader, writer = await open_conn(ip, port, args.timeout)
@@ -202,15 +218,7 @@ async def check_proxy(ip: str, port: str, args: argparse.Namespace) -> tuple[str
     try:
         try:
             if await try_connect(reader, writer, args.host, args.target_port):
-                speed = (
-                    await speed_download(
-                        reader, writer, args.speed_host, args.speed_path,
-                        args.speed_bytes, args.speed_timeout,
-                    )
-                    if not args.no_speed
-                    else None
-                )
-                return "ok", "connect", elapsed(started), speed
+                return "ok", "connect", elapsed(started), await measure_speed(reader, writer)
         except (ConnectionError, OSError):
             pass
     finally:
@@ -225,14 +233,7 @@ async def check_proxy(ip: str, port: str, args: argparse.Namespace) -> tuple[str
     except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError):
         return "retry", None, None, None
     try:
-        speed = (
-            await speed_download(
-                reader, writer, args.speed_host, args.speed_path,
-                args.speed_bytes, args.speed_timeout,
-            )
-            if not args.no_speed
-            else None
-        )
+        speed = await measure_speed(reader, writer)
     finally:
         try:
             writer.close()
@@ -419,13 +420,14 @@ async def check_entries(
     by_method: dict[str, int] = {}
     retry_pool: list[tuple[str, str, str]] = []
     lock = asyncio.Lock()
+    speed_sem = asyncio.Semaphore(args.speed_workers)
     checked = 0
     started = time.monotonic()
     deadline = started + args.time_budget if args.time_budget else float("inf")
 
     async def worker(ip: str, port: str, cc: str, is_retry: bool) -> None:
         nonlocal checked
-        status, method, latency, speed = await check_proxy(ip, port, args)
+        status, method, latency, speed = await check_proxy(ip, port, args, speed_sem)
         async with lock:
             checked += 1
             if status == "ok":
@@ -567,6 +569,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--speed-path", default=SPEED_PATH, help="Path to download for the speed test")
     parser.add_argument("--speed-bytes", type=int, default=SPEED_READ_BYTES, help="Max bytes to read during a speed test")
     parser.add_argument("--speed-timeout", type=int, default=SPEED_TIMEOUT, help="Max seconds per speed test")
+    parser.add_argument("--speed-workers", type=int, default=SPEED_WORKERS, help="Max concurrent speed downloads")
     parser.add_argument("--no-speed", action="store_true", help="Skip speed measurement")
     parser.add_argument("-t", "--timeout", type=int, default=TIMEOUT, help="Per-proxy timeout (seconds)")
     parser.add_argument("-w", "--workers", type=int, default=WORKERS, help="Max concurrent checks")
