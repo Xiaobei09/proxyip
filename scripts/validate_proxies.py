@@ -218,7 +218,9 @@ async def check_proxy(
     try:
         try:
             if await try_connect(reader, writer, args.host, args.target_port):
-                return "ok", "connect", elapsed(started), await measure_speed(reader, writer)
+                connect_latency = elapsed(started)
+                speed = await measure_speed(reader, writer)
+                return "ok", "connect", connect_latency, speed
         except (ConnectionError, OSError):
             pass
     finally:
@@ -232,6 +234,7 @@ async def check_proxy(
         reader, writer = await open_conn(ip, port, args.timeout, ctx=_TLS_CTX, sni=args.sni)
     except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError):
         return "retry", None, None, None
+    tls_latency = elapsed(tls_started)
     try:
         speed = await measure_speed(reader, writer)
     finally:
@@ -239,7 +242,7 @@ async def check_proxy(
             writer.close()
         except OSError:
             pass
-    return "ok", "tls", elapsed(tls_started), speed
+    return "ok", "tls", tls_latency, speed
 
 
 async def speed_download(
