@@ -10,10 +10,11 @@ Two checks are performed, in order:
 
 Checks run concurrently with asyncio (default 500 in-flight, kept bounded by
 an in-flight task pool). Each alive proxy also gets a download speed test on
-the same connection (CONNECT tunnel or TLS). Outputs are written under
-``data/valid/`` mirroring the structure of ``data/``. Non-limited outputs are
-ordered by latency (fastest first); ``*_ltd`` outputs pick the fastest per
-country by measured speed. Lines use the ``ip:port#<flag><cc>-<latency>ms-<speed>MB/s``
+a freshly-opened connection (CONNECT tunnel or TLS), gated by a semaphore so
+bandwidth stays low-contention. Outputs are written under ``data/valid/``
+mirroring the structure of ``data/``. Non-limited outputs are ordered by
+latency (fastest first); ``*_ltd`` outputs pick the fastest per country by
+measured speed. Lines use the ``ip:port#<flag><cc>-<latency>ms-<speed>MB/s``
 format (speed omitted when the test failed). Proxies that connect at the TCP
 level but fail both checks are retried once.
 """
@@ -46,8 +47,8 @@ SPEED_HOST = "cdnjs.cloudflare.com"
 TARGET_HOST = SPEED_HOST
 TARGET_PORT = 443
 TARGET_SNI = SPEED_HOST
-SPEED_PATH = "/ajax/libs/three.js/r128/three.min.js"
-SPEED_READ_BYTES = 262144
+SPEED_PATH = "/ajax/libs/three.js/r128/three.js"
+SPEED_READ_BYTES = 1048576
 SPEED_TIMEOUT = 5
 SPEED_MIN_BYTES = 16384
 SPEED_WORKERS = 10
@@ -192,24 +193,21 @@ async def check_proxy(
 ) -> tuple[str, str | None, float | None, float | None]:
     """Return ``(status, method, latency_ms, speed_mbps)``.
 
-    Alive proxies additionally download ``speed_path`` from ``speed_host`` on
-    the already-established connection to measure throughput. Downloads are
-    gated by ``speed_sem`` so bandwidth stays low-contention. Speed is ``None``
-    when the measurement failed (the proxy stays alive).
+    Alive proxies additionally get a download speed test on a freshly-opened
+    connection (gated by ``speed_sem``, so the semaphore-queued probes hold no
+    connection while waiting). Speed is ``None`` when the measurement failed
+    (the proxy stays alive).
     """
     started = time.monotonic()
 
     def elapsed(since: float) -> float:
         return round((time.monotonic() - since) * 1000, 1)
 
-    async def measure_speed(reader, writer) -> float | None:
+    async def measure_speed(method: str) -> float | None:
         if args.no_speed or speed_sem is None:
             return None
         async with speed_sem:
-            return await speed_download(
-                reader, writer, args.speed_host, args.speed_path,
-                args.speed_bytes, args.speed_timeout,
-            )
+            return await speed_probe(ip, port, args, method)
 
     try:
         reader, writer = await open_conn(ip, port, args.timeout)
@@ -219,7 +217,7 @@ async def check_proxy(
         try:
             if await try_connect(reader, writer, args.host, args.target_port):
                 connect_latency = elapsed(started)
-                speed = await measure_speed(reader, writer)
+                speed = await measure_speed("connect")
                 return "ok", "connect", connect_latency, speed
         except (ConnectionError, OSError):
             pass
@@ -236,13 +234,62 @@ async def check_proxy(
         return "retry", None, None, None
     tls_latency = elapsed(tls_started)
     try:
-        speed = await measure_speed(reader, writer)
+        speed = await measure_speed("tls")
     finally:
         try:
             writer.close()
         except OSError:
             pass
     return "ok", "tls", tls_latency, speed
+
+
+async def speed_probe(
+    ip: str,
+    port: str,
+    args: argparse.Namespace,
+    method: str,
+) -> float | None:
+    """Open a fresh connection through the proxy and measure download speed.
+
+    ``method`` mirrors the alive-check method ("connect" or "tls"). Any failure
+    returns ``None``; the proxy stays alive, it just gets no speed entry.
+    """
+    if method == "connect":
+        try:
+            reader, writer = await open_conn(ip, port, args.timeout)
+        except (OSError, asyncio.TimeoutError, ValueError):
+            return None
+        try:
+            if not await try_connect(reader, writer, args.host, args.target_port):
+                return None
+            return await speed_download(
+                reader, writer, args.speed_host, args.speed_path,
+                args.speed_bytes, args.speed_timeout,
+            )
+        except (ConnectionError, OSError):
+            return None
+        finally:
+            try:
+                writer.close()
+            except OSError:
+                pass
+
+    try:
+        reader, writer = await open_conn(ip, port, args.timeout, ctx=_TLS_CTX, sni=args.sni)
+    except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError):
+        return None
+    try:
+        return await speed_download(
+            reader, writer, args.speed_host, args.speed_path,
+            args.speed_bytes, args.speed_timeout,
+        )
+    except (ConnectionError, OSError):
+        return None
+    finally:
+        try:
+            writer.close()
+        except OSError:
+            pass
 
 
 async def speed_download(
