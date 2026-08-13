@@ -261,8 +261,11 @@ async def speed_download(
         "Accept-Encoding: identity\r\n"
         "Connection: close\r\n\r\n"
     )
-    writer.write(req.encode("ascii"))
-    await writer.drain()
+    try:
+        writer.write(req.encode("ascii"))
+        await writer.drain()
+    except (ConnectionError, OSError):
+        return None
     start = time.monotonic()
     buf = b""
     while len(buf) < cap_bytes:
@@ -430,7 +433,10 @@ async def check_entries(
 
     async def worker(ip: str, port: str, cc: str, is_retry: bool) -> None:
         nonlocal checked
-        status, method, latency, speed = await check_proxy(ip, port, args, speed_sem)
+        try:
+            status, method, latency, speed = await check_proxy(ip, port, args, speed_sem)
+        except Exception:
+            status, method, latency, speed = "dead", None, None, None
         async with lock:
             checked += 1
             if status == "ok":
