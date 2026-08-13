@@ -16,11 +16,13 @@
 ![Composite trend](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_combo.svg)
 ![Latency distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_latency.svg)
 ![Speed distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_speed.svg)
+![Streaming unlock](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_streaming.svg)
 
 ## 功能特性
 
 - **自动抓取整理**：下载上游 zip → 按端口/国家/常用集合/全量多维度汇总，去重合并
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活，并在判活连接内**真实下载测速**（MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
+- **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对每国最快的限量存活集做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量与双轴复合图
 - **结构化索引**：`valid/index.json` 提供每存活代理的延迟与检测方法索引，`valid/speed.json` 提供实测速度索引，便于程序直接消费
@@ -44,6 +46,7 @@ python -m unittest discover -s tests -v     # 0. 运行测试套件（可选）
 python scripts/download_proxies.py          # 1. 下载解压整理
 python scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止）
 python scripts/generate_stats.py            # 3. 统计与趋势图
+python scripts/quality_check.py             # 4. 流媒体解锁 + 出口 IP 质量检测（可选）
 ```
 
 ### 消费数据
@@ -67,6 +70,7 @@ data/all.txt                                # 全量去重清单（未验证）
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`。示例：`1.2.3.4:443#🇺🇸US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC`、`9.9.9.9:443#🇺🇸US-8ms-5.86MB/s-GPT-CF`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt` 按速度降序
 
@@ -177,6 +181,8 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `latency_dist` | 延迟分桶直方图（如 `0-100`、`1000+`，毫秒） |
 | `speed` | 测速统计（avg/median/p90/max，MB/s） |
 | `speed_dist` | 速度分桶直方图（如 `0-0.5`、`5+`，MB/s） |
+| `streaming` / `streaming_ok` | 各服务解锁计数（来自 `quality_meta.json`）/ 任一解锁条目数 |
+| `ip_type` / `family` / `dual_stack` / `country_mismatch` | 出口 IP 类型分布 / 地址族分布 / 双栈数 / 错区数 |
 | `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
 
@@ -211,6 +217,22 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ```
 
 数据未变化时文件不变（避免无意义提交）。运行时间见 `meta.json` 的 `ts`。
+
+### `data/valid/ipinfo.json`（质量 CI 输出）
+
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`family`（ipv4/ipv6/dual）、`dual_stack`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`risk`（keyless 推导或滥用分）。
+
+### `data/valid/streaming.json`
+
+单行 JSON，键为 `ip:port#国家`，值为各服务检测结果：`{netflix: {status, region, native}, disney: {...}, youtube: {...}, max: {...}, prime: {...}, openai: {...}}`。`status` ∈ `ok`/`blocked`/`error`；Netflix 的 `native` 表示解锁区域与出口地理一致（原生 IP）。
+
+### `data/valid/quality_meta.json`
+
+质量检测汇总（供 stats 消费）：`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`family`/`dual_stack`（地址族分布）、`country_mismatch`（错区数）、`risk`、`abuse_checked`。
+
+### `data/valid/abuse.json`
+
+提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。
 
 ### `data/history.jsonl`（每行一条）
 
@@ -271,6 +293,28 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `chart_combo.svg` | 双轴复合趋势（unique/alive 左轴 + 存活率右轴） |
 | `chart_latency.svg` | 存活代理延迟分桶条形图（毫秒） |
 | `chart_speed.svg` | 存活代理速度分桶条形图（MB/s） |
+| `chart_streaming.svg` | 流媒体各服务解锁数条形图（质量 CI） |
+| `chart_streaming.svg` | 流媒体各服务解锁数条形图（质量 CI 生成） |
+
+### `scripts/quality_check.py`
+
+流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all_ltd.txt`（每国最快存活集）检测，按 `index.json` 记录的方法分流：
+
+- **connect 方法**（标准 HTTP CONNECT 代理）：出口 IP 回显（`api.ipify.org`/`api6.ipify.org` 双栈）→ 本地 `ip-api.com/batch` 批量查地理/ASN/IP 类型 → 各流媒体服务经 CONNECT + TLS 隧道逐项检测
+- **tls 方法**（Cloudflare 边缘）：仅能按 SNI 路由到 CF 托管域名，只做 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--source` | 输入代理列表 | `data/valid/all_ltd.txt` |
+| `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
+| `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
+| `-t, --timeout` | 单代理超时（秒） | 6 |
+| `--read-cap` | 单次响应读取上限（字节） | 524288 |
+| `-w, --workers` | asyncio 并发上限 | 40 |
+| `--limit` | 只检测前 N 条（0 = 全部） | 0 |
+| `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
+
+滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过并回退到 ip-api 标志推导 `risk`（高/中/低，仅入 JSON 不入备注）。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/generate_fingerprint.py`
 
@@ -305,13 +349,22 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：四个徽章分别取 `stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
+`.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
+
+- **触发**：主更新工作流完成后自动执行（`workflow_run`）；支持 `workflow_dispatch`；每 3 小时 cron 兜底（主更新失败/未触发时仍出质量数据）
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（默认 `--time-budget 1800` 兜底）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
+- **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
+- **说明**：主更新每 30 分钟重写 `data/valid/*.txt` 为无备注行，质量 CI 紧随其后重新加备注——两状态间存在短暂窗口，属独立 CI 固有节奏
+
 ## 目录结构
 
 ```
 .github/workflows/update-proxies.yml   CI 自动更新（下载、验证、统计）
+.github/workflows/quality-check.yml    独立 CI：流媒体解锁 + 出口 IP 质量检测
 scripts/download_proxies.py            下载与解压整理
 scripts/validate_proxies.py            可用性验证与测速
 scripts/generate_stats.py              统计与趋势图
+scripts/quality_check.py               流媒体解锁与出口 IP 质量检测
 scripts/generate_fingerprint.py        浏览器指纹生成
 data/raw/<port>/<country>.txt          按端口+国家的原始组织（含 #ALL，ip:port#国家）
 data/countries/<country>.txt           按国家汇总（跨端口去重）
@@ -321,6 +374,10 @@ data/sets/<集合>_ltd.txt               限量版（每国 --per-country-limit 
 data/all.txt                           全量去重 ip:port#国家（IP 数字序）
 data/all_ltd.txt                       全部国家每国限量后的并集
 data/valid/                            存活代理（结构同 data/，按延迟排序，_ltd 按速度排序，含 meta.json、index.json、speed.json、history.jsonl）
+data/valid/ipinfo.json                 出口 IP 地理 / 类型 / 双栈（质量 CI）
+data/valid/streaming.json              各服务流媒体解锁结果（质量 CI）
+data/valid/quality_meta.json           质量检测汇总（质量 CI）
+data/valid/abuse.json                  滥用分结果（配置 key 时生成，质量 CI）
 data/diff/latest.json                  最近一次更新差异（added/removed）
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
