@@ -59,6 +59,8 @@ class TestBuilders(unittest.TestCase):
         "per_port": {"443": 120, "8443": 85},
         "latency": {"avg_ms": 300.0, "median_ms": 280.0, "p90_ms": 500.0, "max_ms": 1000.0},
         "latency_dist": {"0-100": 20, "100-200": 50, "500-1000": 30},
+        "speed": {"avg_mbps": 0.8, "median_mbps": 0.7, "p90_mbps": 1.5, "max_mbps": 5.0},
+        "speed_dist": {"0-0.5": 30, "0.5-1": 100, "1-2": 60, "2-5": 15},
     }
 
     def test_all_charts_valid_svg(self):
@@ -70,6 +72,7 @@ class TestBuilders(unittest.TestCase):
             "chart_churn.svg": gs.build_churn(self.HISTORY),
             "chart_combo.svg": gs.build_combo(self.HISTORY, self.VALID_HISTORY),
             "chart_latency.svg": gs.build_latency(self.META),
+            "chart_speed.svg": gs.build_speed(self.META),
         }
         for name, svg in builders.items():
             with self.subTest(name=name):
@@ -78,6 +81,7 @@ class TestBuilders(unittest.TestCase):
     def test_empty_inputs_placeholders(self):
         self.assertIn("No data", gs.build_trend([], []))
         self.assertIn("No latency", gs.build_latency({}))
+        self.assertIn("No speed", gs.build_speed({}))
         self.assertIn("No data", gs.build_country({}))
         svg_ok(gs.build_alive_rate([]))
 
@@ -86,6 +90,13 @@ class TestBuilders(unittest.TestCase):
         svg_ok(svg)
         self.assertIn("0-100", svg)
         self.assertIn("500-1000", svg)
+        self.assertGreaterEqual(svg.count("<rect"), 3)
+
+    def test_chart_speed_has_bars_and_labels(self):
+        svg = gs.build_speed(self.META)
+        svg_ok(svg)
+        self.assertIn("0-0.5", svg)
+        self.assertIn("2-5", svg)
         self.assertGreaterEqual(svg.count("<rect"), 3)
 
     def test_escapes_labels(self):
@@ -124,7 +135,7 @@ class TestMain(unittest.TestCase):
             for f in (
                 "chart.svg", "chart_country.svg", "chart_port.svg",
                 "chart_alive_rate.svg", "chart_churn.svg", "chart_combo.svg",
-                "chart_latency.svg",
+                "chart_latency.svg", "chart_speed.svg",
             ):
                 self.assertTrue((out / f).exists(), f)
                 svg_ok((out / f).read_text())

@@ -36,7 +36,7 @@ jobs:
         run: python scripts/download_proxies.py
 
       - name: Validate proxies
-        run: python scripts/validate_proxies.py --time-budget 180
+        run: python scripts/validate_proxies.py --time-budget 600
 
       - name: Generate stats and chart
         run: python scripts/generate_stats.py

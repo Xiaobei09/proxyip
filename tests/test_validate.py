@@ -47,6 +47,44 @@ class TestBucketLatency(unittest.TestCase):
         )
 
 
+class TestSpeedHelpers(unittest.TestCase):
+    def test_flag_of(self):
+        self.assertEqual(vp.flag_of("US"), "\U0001F1FA\U0001F1F8")
+        self.assertEqual(vp.flag_of("jp"), "\U0001F1EF\U0001F1F5")
+        self.assertEqual(vp.flag_of("USA"), "")
+        self.assertEqual(vp.flag_of(""), "")
+
+    def test_compute_speed(self):
+        self.assertEqual(vp.compute_speed(500 * 1024 * 1024, 1.0), 500.0)
+        self.assertEqual(vp.compute_speed(1024 * 1024, 2.0), 0.5)
+        self.assertIsNone(vp.compute_speed(1000, 1.0))
+        self.assertIsNone(vp.compute_speed(1024 * 1024, 0))
+
+    def test_bucket_speed(self):
+        dist = vp.bucket_speed([0.2, 0.49, 0.5, 0.9, 1, 1.9, 2, 4.9, 5, 10])
+        self.assertEqual(
+            dist,
+            {
+                "0-0.5": 2,
+                "0.5-1": 2,
+                "1-2": 2,
+                "2-5": 2,
+                "5+": 2,
+            },
+        )
+        self.assertEqual(vp.bucket_speed([]), {"0-0.5": 0, "0.5-1": 0, "1-2": 0, "2-5": 0, "5+": 0})
+
+    def test_fmt_entry(self):
+        self.assertEqual(
+            vp.fmt_entry("1.2.3.4", "443", "US", 120.5, 0.44),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s",
+        )
+        self.assertEqual(
+            vp.fmt_entry("1.2.3.4", "443", "JP", 80.2, None),
+            "1.2.3.4:443#\U0001F1EF\U0001F1F5JP-80ms",
+        )
+
+
 class TestWriteIndex(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="vp_"))
@@ -59,8 +97,8 @@ class TestWriteIndex(unittest.TestCase):
 
     def test_writes_ordered_compact(self):
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5),
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "connect", 80.1),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "connect", 80.1, 1.2),
         }
         vp.write_index(["2.0.0.1:8443#JP", "1.0.0.1:443#US"], alive)
         data = json.loads(vp.INDEX_FILE.read_text())
@@ -70,7 +108,7 @@ class TestWriteIndex(unittest.TestCase):
         )
 
     def test_skips_rewrite_when_unchanged(self):
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44)}
         vp.write_index(["1.0.0.1:443#US"], alive)
         m1 = vp.INDEX_FILE.stat().st_mtime_ns
         vp.write_index(["1.0.0.1:443#US"], alive)
@@ -81,27 +119,30 @@ class TestWriteIndex(unittest.TestCase):
 class TestWriteValidOutputs(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="vp_"))
-        self.orig = (vp.VALID_DIR, vp.INDEX_FILE)
+        self.orig = (vp.VALID_DIR, vp.INDEX_FILE, vp.SPEED_FILE)
         vp.VALID_DIR = self.tmp
         vp.INDEX_FILE = self.tmp / "index.json"
+        vp.SPEED_FILE = self.tmp / "speed.json"
 
     def tearDown(self):
-        vp.VALID_DIR, vp.INDEX_FILE = self.orig
+        vp.VALID_DIR, vp.INDEX_FILE, vp.SPEED_FILE = self.orig
 
     def test_outputs_ordered_by_latency(self):
         alive = {
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "connect", 300.0),
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0),
-            "3.0.0.1:80#US": ("3.0.0.1", "80", "US", "tls", 50.0),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "connect", 300.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.0),
+            "3.0.0.1:80#US": ("3.0.0.1", "80", "US", "tls", 50.0, 0.3),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
+        lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
         self.assertEqual(
-            (vp.VALID_DIR / "all.txt").read_text().splitlines(),
-            ["3.0.0.1:80#US", "1.0.0.1:443#US", "2.0.0.1:8443#JP"],
+            [line.split("#", 1)[0] for line in lines],
+            ["3.0.0.1:80", "1.0.0.1:443", "2.0.0.1:8443"],
         )
+        self.assertIn("\U0001F1FA\U0001F1F8US-50ms-0.30MB/s", lines[0])
         self.assertEqual(
-            (vp.VALID_DIR / "countries" / "US.txt").read_text().splitlines(),
-            ["3.0.0.1:80#US", "1.0.0.1:443#US"],
+            [line.split("#", 1)[0] for line in (vp.VALID_DIR / "countries" / "US.txt").read_text().splitlines()],
+            ["3.0.0.1:80", "1.0.0.1:443"],
         )
         # index matches all.txt order
         self.assertEqual(
@@ -111,15 +152,52 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_all_ltd_per_country_cap(self):
         alive = {
-            f"{i}.0.0.1:443#US": (f"{i}.0.0.1", "443", "US", "tls", float(i))
+            f"{i}.0.0.1:443#US": (f"{i}.0.0.1", "443", "US", "tls", float(i), None)
             for i in range(1, 6)
         }
-        alive["9.0.0.1:443#JP"] = ("9.0.0.1", "443", "JP", "tls", 1.0)
+        alive["9.0.0.1:443#JP"] = ("9.0.0.1", "443", "JP", "tls", 1.0, None)
         vp.write_valid_outputs(alive, per_country_limit=2)
         ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
         self.assertEqual(len(ltd), 3)
-        us = [e for e in ltd if e.endswith("#US")]
+        us = [e for e in ltd if e.split("#", 1)[1].startswith("\U0001F1FA\U0001F1F8US")]
         self.assertEqual(len(us), 2)
+
+    def test_ltd_ordered_by_speed(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 10.0, 0.2),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 5.0),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=2)
+        ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
+        self.assertEqual(len(ltd), 2)
+        self.assertTrue(ltd[0].startswith("2.0.0.1:443#"), ltd)
+        self.assertIn("5.00MB/s", ltd[0])
+
+    def test_ltd_omits_speed_when_none(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 90.0, 1.0),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=2)
+        ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
+        self.assertEqual(len(ltd), 2)
+        no_speed = [e for e in ltd if "MB/s" not in e]
+        self.assertEqual(len(no_speed), 1)
+        self.assertTrue(no_speed[0].endswith("ms"), no_speed[0])
+
+    def test_speed_json(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, 0.2),
+            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 90.0, 5.0),
+            "3.0.0.1:443#DE": ("3.0.0.1", "443", "DE", "tls", 70.0, None),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=0)
+        data = json.loads(vp.SPEED_FILE.read_text())
+        self.assertEqual(
+            list(data["proxies"]),
+            ["2.0.0.1:443#JP", "1.0.0.1:443#US"],
+        )
+        self.assertEqual(data["proxies"]["2.0.0.1:443#JP"], 5.0)
 
 
 if __name__ == "__main__":

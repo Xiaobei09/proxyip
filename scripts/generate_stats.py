@@ -11,6 +11,7 @@ Reads ``data/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_churn.svg``     added / removed per update (grouped bars)
 - ``chart_combo.svg``     dual-axis composite trend (unique/alive + rate)
 - ``chart_latency.svg``   latency distribution (vertical bars)
+- ``chart_speed.svg``     download speed distribution (vertical bars, MB/s)
 
 Line charts share a real-time x axis (series lacking usable timestamps fall
 back to index spacing), zoom each y-axis to its data range so small variations
@@ -48,6 +49,7 @@ COLOR_REMOVED = "#e45756"
 COLOR_BAR = "#4c78a8"
 COLOR_PORT = "#58508d"
 COLOR_LATENCY = "#bcbd22"
+COLOR_SPEED = "#17becf"
 
 MAX_HOVER_POINTS = 600
 STALE_AFTER_S = 3 * 3600
@@ -665,6 +667,15 @@ def build_latency(meta: dict) -> str:
     )
 
 
+def build_speed(meta: dict) -> str:
+    dist = meta.get("speed_dist", {})
+    if not dist:
+        return empty_svg(text="No speed data yet")
+    return plot_vbars(
+        list(dist.items()), color=COLOR_SPEED, title="Alive proxies by speed (MB/s)"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=OUT_DIR, help="Output directory")
@@ -710,6 +721,8 @@ def main(argv: list[str] | None = None) -> int:
         "alive_sets": alive_sets,
         "latency": meta.get("latency", {}),
         "latency_dist": meta.get("latency_dist", {}),
+        "speed": meta.get("speed", {}),
+        "speed_dist": meta.get("speed_dist", {}),
         "history_records": len(history),
         "alive_history_records": len(valid_history),
     }
@@ -736,6 +749,7 @@ def main(argv: list[str] | None = None) -> int:
         "chart_churn.svg": build_churn(history),
         "chart_combo.svg": build_combo(history, valid_history),
         "chart_latency.svg": build_latency(meta),
+        "chart_speed.svg": build_speed(meta),
     }
     for name, content in charts.items():
         path = args.out / name
