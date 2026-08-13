@@ -1,25 +1,29 @@
-name: Update proxy list
+name: Quality check
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
+  workflow_run:
+    workflows: ["Update proxy list"]
+    types: [completed]
   workflow_dispatch:
-  push:
-    paths:
-      - "scripts/*.py"
+  schedule:
+    - cron: "23 */3 * * *"
 
 permissions:
   contents: write
 
 concurrency:
-  group: update-proxies
-  cancel-in-progress: false
+  group: quality-check
+  cancel-in-progress: true
 
 jobs:
-  update:
-    name: Download and extract proxies
+  check:
+    name: Streaming and exit IP quality
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
+    env:
+      ABUSEIPDB_KEY: ${{ secrets.ABUSEIPDB_KEY }}
+      IPQS_KEY: ${{ secrets.IPQS_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,31 +36,20 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Download and extract
-        run: python scripts/download_proxies.py
-
-      - name: Validate proxies
-        run: python scripts/validate_proxies.py
+      - name: Deep quality check
+        run: python scripts/quality_check.py --time-budget 1800
 
       - name: Generate stats and chart
         run: python scripts/generate_stats.py
 
-      - name: Show stats
+      - name: Show summary
         run: |
-          echo "Files extracted:"
-          find data/raw -name '*.txt' | wc -l
-          echo "Country files:"
-          find data/countries -name '*.txt' | wc -l
-          echo "Port files:"
-          find data/ports -name '*.txt' | wc -l
-          echo "Unique IPs:"
-          wc -l data/all.txt
-          echo "Alive proxies:"
-          wc -l data/valid/all.txt
-          echo "History records:"
-          wc -l data/history.jsonl
-          echo "Diff archives:"
-          ls data/diff/*.json 2>/dev/null | wc -l
+          echo "Checked proxies:"
+          wc -l data/valid/all_ltd.txt
+          echo "Streaming unlock:"
+          jq -r '.streaming // empty' data/valid/quality_meta.json 2>/dev/null || true
+          echo "IP type distribution:"
+          jq -r '.by_type // empty' data/valid/quality_meta.json 2>/dev/null || true
 
       - name: Commit changes
         run: |
@@ -67,7 +60,7 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git commit -m "chore(data): streaming & exit IP quality check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           for i in 1 2 3; do
             if git push; then
               echo "Pushed successfully"

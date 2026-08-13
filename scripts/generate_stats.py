@@ -12,6 +12,7 @@ Reads ``data/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_combo.svg``     dual-axis composite trend (unique/alive + rate)
 - ``chart_latency.svg``   latency distribution (vertical bars)
 - ``chart_speed.svg``     download speed distribution (vertical bars, MB/s)
+- ``chart_streaming.svg`` streaming unlock count per service (vertical bars)
 
 Line charts share a real-time x axis (series lacking usable timestamps fall
 back to index spacing), zoom each y-axis to its data range so small variations
@@ -50,6 +51,7 @@ COLOR_BAR = "#4c78a8"
 COLOR_PORT = "#58508d"
 COLOR_LATENCY = "#bcbd22"
 COLOR_SPEED = "#17becf"
+COLOR_STREAMING = "#9b59b6"
 
 MAX_HOVER_POINTS = 600
 STALE_AFTER_S = 3 * 3600
@@ -676,6 +678,17 @@ def build_speed(meta: dict) -> str:
     )
 
 
+def build_streaming(quality_meta: dict) -> str:
+    streaming = quality_meta.get("streaming", {})
+    items = [
+        (name, streaming.get(name, {}).get("ok", 0))
+        for name in ("netflix", "disney", "youtube", "max", "prime", "openai")
+    ]
+    if not any(v for _, v in items):
+        return empty_svg(text="No streaming data yet")
+    return plot_vbars(items, color=COLOR_STREAMING, title="Streaming unlock count")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=OUT_DIR, help="Output directory")
@@ -692,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
     history = load_history(data_dir / "history.jsonl")
     valid_history = load_history(data_dir / "valid" / "history.jsonl")
     meta = read_json(data_dir / "valid" / "meta.json")
+    quality_meta = read_json(data_dir / "valid" / "quality_meta.json")
 
     latest = history[-1] if history else {}
     sets = latest.get("sets", {})
@@ -723,6 +737,12 @@ def main(argv: list[str] | None = None) -> int:
         "latency_dist": meta.get("latency_dist", {}),
         "speed": meta.get("speed", {}),
         "speed_dist": meta.get("speed_dist", {}),
+        "streaming": quality_meta.get("streaming", {}),
+        "streaming_ok": quality_meta.get("streaming_ok", 0),
+        "ip_type": quality_meta.get("by_type", {}),
+        "family": quality_meta.get("family", {}),
+        "dual_stack": quality_meta.get("dual_stack", 0),
+        "country_mismatch": quality_meta.get("country_mismatch", 0),
         "history_records": len(history),
         "alive_history_records": len(valid_history),
     }
@@ -750,6 +770,7 @@ def main(argv: list[str] | None = None) -> int:
         "chart_combo.svg": build_combo(history, valid_history),
         "chart_latency.svg": build_latency(meta),
         "chart_speed.svg": build_speed(meta),
+        "chart_streaming.svg": build_streaming(quality_meta),
     }
     for name, content in charts.items():
         path = args.out / name
