@@ -1,0 +1,72 @@
+name: China check
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Mainland-China reachability
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CHINA_CHECK_API_KEY: ${{ secrets.CHINA_CHECK_API_KEY }}
+      TCPPING_CN_TOKEN: ${{ secrets.TCPPING_CN_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: China reachability check
+        run: python scripts/china_check.py --limit 250
+
+      - name: Show summary
+        run: |
+          echo "China-reachable proxies:"
+          wc -l data/valid/all_cn.txt 2>/dev/null || true
+          echo "Verdict distribution:"
+          jq -r '[.proxies[].verdict] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/valid/china.json 2>/dev/null || true
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(data): mainland-china reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Pushed successfully"
+              exit 0
+            fi
+            echo "Push attempt $i failed, rebasing on origin/main and retrying..."
+            git fetch origin main || break
+            # -X theirs: on conflict with concurrent data commits, prefer the
+            # freshly generated data from this run (last-writer-wins is safe
+            # because data/ is fully regenerated on every run).
+            git rebase --autostash -X theirs origin/main || {
+              echo "Rebase failed, aborting and retrying"
+              git rebase --abort
+            }
+          done
+          echo "Push failed after 5 attempts"
+          exit 1
