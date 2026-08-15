@@ -26,10 +26,10 @@ jobs:
       IPQS_KEY: ${{ secrets.IPQS_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -61,13 +61,20 @@ jobs:
             exit 0
           fi
           git commit -m "chore(data): streaming & exit IP quality check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          for i in 1 2 3; do
+          for i in 1 2 3 4 5; do
             if git push; then
               echo "Pushed successfully"
               exit 0
             fi
             echo "Push attempt $i failed, rebasing on origin/main and retrying..."
-            git pull --rebase --autostash origin main
+            git fetch origin main || break
+            # -X theirs: on conflict with concurrent data commits, prefer the
+            # freshly generated data from this run (last-writer-wins is safe
+            # because data/ is fully regenerated on every run).
+            git rebase --autostash -X theirs origin/main || {
+              echo "Rebase failed, aborting and retrying"
+              git rebase --abort
+            }
           done
-          echo "Push failed after 3 attempts"
+          echo "Push failed after 5 attempts"
           exit 1
