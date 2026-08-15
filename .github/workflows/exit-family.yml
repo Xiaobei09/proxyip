@@ -1,0 +1,71 @@
+name: Exit family check
+
+on:
+  schedule:
+    - cron: "31 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: exit-family
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Actual exit IPv4/IPv6 family
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Exit family check
+        run: python scripts/exit_family.py
+
+      - name: Show summary
+        run: |
+          echo "IPv4 exit:"
+          wc -l data/valid/all_ipv4.txt 2>/dev/null || true
+          echo "IPv6 exit:"
+          wc -l data/valid/all_ipv6.txt 2>/dev/null || true
+          echo "Family distribution:"
+          jq -r '[.proxies[].family] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/valid/exit_family.json 2>/dev/null || true
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(data): actual exit ipv4/ipv6 split ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Pushed successfully"
+              exit 0
+            fi
+            echo "Push attempt $i failed, rebasing on origin/main and retrying..."
+            git fetch origin main || break
+            # -X theirs: on conflict with concurrent data commits, prefer the
+            # freshly generated data from this run (last-writer-wins is safe
+            # because data/ is fully regenerated on every run).
+            git rebase --autostash -X theirs origin/main || {
+              echo "Rebase failed, aborting and retrying"
+              git rebase --abort
+            }
+          done
+          echo "Push failed after 5 attempts"
+          exit 1

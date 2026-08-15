@@ -67,7 +67,7 @@ python3 --version        # 需 3.11+
 ## 4. 测试与检查
 
 ```bash
-python3 -m unittest discover -s tests          # 全部测试（当前 135 个，须全绿）
+python3 -m unittest discover -s tests          # 全部测试（当前 156 个，须全绿）
 python3 -m unittest tests/test_quality.py      # 单文件
 python3 -m py_compile scripts/*.py             # 语法检查
 ```
@@ -82,9 +82,21 @@ python3 scripts/download_proxies.py            # 阶段 1（默认下载 zip.cm.
 python3 scripts/validate_proxies.py            # 阶段 2（跑完为止，可加 --time-budget）
 python3 scripts/quality_check.py --help        # 阶段 3（勿直接全量跑，会改 data/valid）
 python3 scripts/china_check.py --dry-run       # 大陆连通性（先用 --dry-run 看计划）
+python3 scripts/exit_family.py --dry-run       # 实际出口家族检测（先用 --dry-run 看计划）
 python3 scripts/generate_stats.py              # 阶段 4
 python3 scripts/generate_fingerprint.py -n 5   # 指纹工具
 ```
+
+### exit_family.py 关键参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--source` | `data/valid/all.txt` | 输入清单（全量存活池） |
+| `--limit` | 0 | 只检测前 N 条（0=全部） |
+| `--workers` | 16 | 并发上限 |
+| `--dry-run` | 关 | 只输出计划，不发请求不写盘 |
+
+tls 方法走 CF trace（`cloudflare.com/cdn-cgi/trace` 回显 `ip=`），connect 方法走 `api.ipify.org`/`api6.ipify.org` 双回显。产出 `all_ipv4.txt`/`all_ipv6.txt`（双栈双入）、`exit_family.json`，并向 `all.txt`/`all_ltd.txt` 追加 `-V4`/`-V6`/`-DS`。详见 README「实际出口家族检测」章节。
 
 ### china_check.py 关键参数
 
