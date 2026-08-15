@@ -23,6 +23,7 @@
 - **自动抓取整理**：下载上游 zip → 按端口/国家/常用集合/全量多维度汇总，去重合并
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活，并在判活连接内**真实下载测速**（MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
 - **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对每国最快的限量存活集做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
+- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），启发式 CF 边缘判定 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `china.json` 明细与 `all_cn.txt` 大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量与双轴复合图
 - **结构化索引**：`valid/index.json` 提供每存活代理的延迟与检测方法索引，`valid/speed.json` 提供实测速度索引，便于程序直接消费
@@ -337,6 +338,28 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）；`ipapi_is`（5 权重，`ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20）。单源响应时直接取该源分数；无任何信号则该项无分（不误判满分）。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
+### `scripts/china_check.py`
+
+大陆连通性检测（独立 CI 运行）。默认对 `data/valid/all_rep.txt` 按信誉降序采样前 250 条（缺失时回退 `all_ltd.txt`），从大陆视角实测 TCP 可达性，分三层判定：
+
+- **L1 启发式（零网络）**：行备注已带 `-CF`（Cloudflare 边缘 tls 代理）即判大陆可达——这类代理走 CF 边缘节点，不依赖源站回程
+- **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 6/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**任一成功 → reachable；二者均失败 → unreachable；单方失败 → uncertain（不误判）**
+- **L3 多节点复核（串行小样本）**：`ping.pe`（约 13 个大陆节点，多数可达即判可达，报告不足则 inconclusive）；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--source` | 输入代理列表 | `data/valid/all_rep.txt` |
+| `--limit` | 按信誉降序采样条数（0=全部） | 250 |
+| `--pingpe-limit` | ping.pe 多节点复核条数（串行） | 40 |
+| `--workers` | L2 并发上限 | 8 |
+| `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
+| `--api-key` | check-host.cc key（读 `CHINA_CHECK_API_KEY`） | 空 |
+| `--tcpping-token` | tcpping.cn token（读 `TCPPING_CN_TOKEN`） | 空 |
+| `--skip-pingpe` | 跳过 ping.pe 复核（本地快速冒烟） | 关 |
+| `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
+
+结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict）与 `all_cn.txt`（大陆可达清单，含历史已判可达者）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等）。
+
 ### `scripts/generate_fingerprint.py`
 
 生成内部自洽的浏览器指纹（浏览器指纹生成工具）。
@@ -377,15 +400,24 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt` 为无备注行，质量 CI 紧随其后重新加备注——两状态间存在短暂窗口，属独立 CI 固有节奏
 
+`.github/workflows/china-check.yml`（大陆连通性独立 CI）：
+
+- **触发**：每 6 小时定时（`cron: 17 */6 * * *`）；支持 `workflow_dispatch` 手动触发
+- **流程**：跑测试（`unittest`）→ `china_check.py`（`--limit 250`，启发式 CF + check-host.cc + xxapi.cn + ping.pe 分层判定）→ 有变更则自动提交并推送
+- **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
+- **说明**：复用质量 CI 的冲突容错提交（rebase `-X theirs`），与主更新/质量 CI 的并发 `data/` 提交安全共存
+
 ## 目录结构
 
 ```
 .github/workflows/update-proxies.yml   CI 自动更新（下载、验证、统计）
 .github/workflows/quality-check.yml    独立 CI：流媒体解锁 + 出口 IP 质量检测
+.github/workflows/china-check.yml       独立 CI：大陆连通性检测
 scripts/download_proxies.py            下载与解压整理
 scripts/validate_proxies.py            可用性验证与测速
 scripts/generate_stats.py              统计与趋势图
 scripts/quality_check.py               流媒体解锁与出口 IP 质量检测
+scripts/china_check.py                 大陆连通性检测（CF 启发式 + check-host + xxapi + ping.pe）
 scripts/generate_fingerprint.py        浏览器指纹生成
 data/raw/<port>/<country>.txt          按端口+国家的原始组织（含 #ALL，ip:port#国家）
 data/countries/<country>.txt           按国家汇总（跨端口去重）
@@ -401,6 +433,8 @@ data/valid/quality_meta.json           质量检测汇总（质量 CI）
 data/valid/abuse.json                  滥用分结果（配置 key 时生成，质量 CI）
 data/valid/reputation.json             信誉分索引（0-100，质量 CI）
 data/valid/all_rep.txt                 信誉排行（按分数降序，质量 CI）
+data/valid/china.json                  大陆连通性检测明细（keyed，china-check CI）
+data/valid/all_cn.txt                  大陆可达清单（china-check CI）
 data/diff/latest.json                  最近一次更新差异（added/removed）
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）

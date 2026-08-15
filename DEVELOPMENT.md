@@ -67,7 +67,7 @@ python3 --version        # 需 3.11+
 ## 4. 测试与检查
 
 ```bash
-python3 -m unittest discover -s tests          # 全部测试（当前 97 个，须全绿）
+python3 -m unittest discover -s tests          # 全部测试（当前 135 个，须全绿）
 python3 -m unittest tests/test_quality.py      # 单文件
 python3 -m py_compile scripts/*.py             # 语法检查
 ```
@@ -81,9 +81,22 @@ python3 -m py_compile scripts/*.py             # 语法检查
 python3 scripts/download_proxies.py            # 阶段 1（默认下载 zip.cm.edu.kg）
 python3 scripts/validate_proxies.py            # 阶段 2（跑完为止，可加 --time-budget）
 python3 scripts/quality_check.py --help        # 阶段 3（勿直接全量跑，会改 data/valid）
+python3 scripts/china_check.py --dry-run       # 大陆连通性（先用 --dry-run 看计划）
 python3 scripts/generate_stats.py              # 阶段 4
 python3 scripts/generate_fingerprint.py -n 5   # 指纹工具
 ```
+
+### china_check.py 关键参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--source` | `data/valid/all_rep.txt` | 输入清单（缺失回退 `all_ltd.txt`） |
+| `--limit` | 250 | 按信誉降序采样条数 |
+| `--pingpe-limit` | 40 | ping.pe 多节点复核条数（串行） |
+| `--skip-pingpe` | 关 | 跳过 ping.pe（本地快速冒烟） |
+| `--dry-run` | 关 | 只输出计划，不发请求不写盘 |
+
+分层判定：L1 启发式 CF（零网络）→ L2 check-host.cc + xxapi.cn（并发实测）→ L3 ping.pe/tcpping.cn（多节点复核）。任一实测源成功即判可达；check-host 与 xxapi 均失败才判不可达；单源失败归 uncertain。key 走环境变量 `CHINA_CHECK_API_KEY`、`TCPPING_CN_TOKEN`。产出 `china.json`、`all_cn.txt` 并向 `all.txt`/`all_ltd.txt` 追加 `-CN`。详见 README「大陆连通性检测」章节。
 
 ### quality_check.py 关键参数
 
