@@ -174,6 +174,7 @@ git pull --rebase origin main && git push    # 最多重试 3 次
 ## 9. 常见问题排查
 
 - **push 被拒**：远程有新 `chore(data)` 提交 → `git pull --rebase` 后重推。
+- **CI「Commit changes」失败、日志满屏 `CONFLICT (content): Merge conflict in data/...`**：两个工作流并发提交 `data/`，`git pull --rebase` 撞冲突。两个 workflow 的提交步骤已内置容错：`git fetch origin main` + `git rebase --autostash -X theirs origin/main`（冲突时保留本 run 新生成的数据，data/ 每次全量重生成，后写者胜），失败则 `git rebase --abort` 后重试，最多 5 次。若仍失败，多为网络/上游问题，下个调度周期会自动重试。
 - **误提交 `data/`**：`git rm --cached -r data/` 移出暂存（`data/` 已被 gitignore），仅提交代码文件。
 - **测试不过**：确认没改 `data/` 输入；`quality_check.py` 的单元测试全部用 fake `urlopen`，不依赖网络。
 - **本地冒烟把 data 弄脏**：`git checkout -- data/`。
@@ -183,5 +184,6 @@ git pull --rebase origin main && git push    # 最多重试 3 次
 
 | 日期 | 提交 | 说明 |
 |---|---|---|
+| 2026-08-15 | `ci: conflict-tolerant data commit in workflows` | 修复两个工作流并发提交 `data/` 导致的 rebase 冲突失败；升级 checkout/setup-python 消除 Node 20 告警 |
 | 2026-08-15 | `feat(quality): multi-source weighted IP reputation` | 多源加权信誉（netcoffee/ncgy/ip-api/ipdata/torlist + opt-in getipintel/ipapi_is） |
 | 2026-08-13 | `feat(quality): streaming & exit IP quality check with dedicated CI` | 质量检测独立 CI 与数据产物 |
