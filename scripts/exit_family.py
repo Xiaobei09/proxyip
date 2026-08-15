@@ -20,9 +20,15 @@
 
 家族判定：仅 v4 → ``ipv4``；仅 v6 → ``ipv6``；双通 → ``dual``；探测全失败 →
 ``unknown``（不入任何分离清单）。纯标准库，ThreadPoolExecutor 并发。
+
+交叉验证：若 ``data/upstream_meta.json`` 存在（由 ``download_proxies.py`` 从上游
+``all.json`` 生成），逐条对照上游记录的真实出口 ``clientIp``，在
+``exit_family.json`` 中写入 ``upstream_client_ip`` / ``upstream_family`` /
+``upstream_match`` 字段并输出命中统计；文件缺失时静默跳过，不降级实时探测。
 """
 
 import argparse
+import json
 import re
 import socket
 import ssl
@@ -49,6 +55,7 @@ DEFAULT_SOURCE = VALID_DIR / "all.txt"
 ALL_V4_FILE = VALID_DIR / "all_ipv4.txt"
 ALL_V6_FILE = VALID_DIR / "all_ipv6.txt"
 EXIT_FAMILY_FILE = VALID_DIR / "exit_family.json"
+UPSTREAM_META_FILE = OUT_DIR / "upstream_meta.json"
 
 WORKERS_DEFAULT = 16
 TIMEOUT_DEFAULT = 10
@@ -325,6 +332,41 @@ def load_sample(source: Path, limit: int) -> list:
     return out
 
 
+def load_upstream_meta(path: Path | None = None) -> dict:
+    """读入上游 ``all.json`` 生成的元数据表（keyed by ip）。缺失/损坏 → ``{}``。"""
+    path = path or UPSTREAM_META_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def cross_check(results: dict, upstream: dict) -> None:
+    """把上游真实出口 ``clientIp`` 并入每条结果（原地修改）作交叉验证。
+
+    命中上游的条目写入 ``upstream_client_ip`` / ``upstream_family`` /
+    ``upstream_match``（探测与上游家族均为已知值时才比较，否则置 ``None``）；
+    未命中写入 ``upstream_absent: true``。
+    """
+    for res in results.values():
+        meta = upstream.get(res["ip"])
+        if not isinstance(meta, dict):
+            res["upstream_absent"] = True
+            continue
+        client_ip = meta.get("clientIp")
+        up_family = meta.get("family")
+        res["upstream_client_ip"] = client_ip
+        res["upstream_family"] = up_family
+        res["upstream_absent"] = False
+        if res["family"] != "unknown" and up_family in ("ipv4", "ipv6"):
+            res["upstream_match"] = res["family"] == up_family
+        else:
+            res["upstream_match"] = None
+
+
 def write_lines(path: Path, lines: list) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -403,6 +445,8 @@ def main(argv=None) -> int:
 
     families = {key: res["family"] for key, res in results.items()}
     v4_lines, v6_lines = split_by_family(results)
+    upstream = load_upstream_meta()
+    cross_check(results, upstream)
     entries = {
         key: {k: v for k, v in res.items() if k != "line"}
         for key, res in results.items()
@@ -418,6 +462,13 @@ def main(argv=None) -> int:
     print(f"family: {dict(fam_counts)}", file=sys.stderr)
     print(f"all_ipv4.txt: {len(v4_lines)} lines; all_ipv6.txt: {len(v6_lines)} lines",
           file=sys.stderr)
+    if upstream:
+        compared = sum(1 for r in results.values() if not r.get("upstream_absent"))
+        matched = sum(1 for r in results.values() if r.get("upstream_match") is True)
+        mismatched = sum(1 for r in results.values() if r.get("upstream_match") is False)
+        absent = sum(1 for r in results.values() if r.get("upstream_absent"))
+        print(f"upstream cross-check: {compared} compared, {matched} match / "
+              f"{mismatched} mismatch, {absent} absent", file=sys.stderr)
     return 0
 
 

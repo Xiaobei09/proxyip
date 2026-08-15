@@ -20,11 +20,11 @@
 
 ## 功能特性
 
-- **自动抓取整理**：下载上游 zip → 按端口/国家/常用集合/全量多维度汇总，去重合并
+- **自动抓取整理**：下载上游 `all.json`（失败自动回退 zip）→ 按端口/国家/常用集合/全量多维度汇总，去重合并；并把上游真实出口 IP、ASN、地理等元数据落盘为 `upstream_meta.json` 供下游消费
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活，并在判活连接内**真实下载测速**（MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
 - **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对每国最快的限量存活集做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
 - **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），启发式 CF 边缘判定 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `china.json` 明细与 `all_cn.txt` 大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
-- **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注
+- **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量与双轴复合图
 - **结构化索引**：`valid/index.json` 提供每存活代理的延迟与检测方法索引，`valid/speed.json` 提供实测速度索引，便于程序直接消费
@@ -252,15 +252,19 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 `ts`、`total`、`checked`、`alive`、`dead`。与上一条完全相同则跳过，最多 1000 条。
 
+### `data/upstream_meta.json`
+
+上游 `all.json` 导出的逐 IP 元数据（keyed by 代理 IP），由 `download_proxies.py` 生成，供下游（如 exit-family 交叉验证）消费。每个值含 `clientIp`（该代理的真实出口 IP，Cloudflare 视角）、`family`（由 `clientIp` 派生，ipv4/ipv6）、`asn`、`asOrganization`、`country`、`city`、`region`、`continent`、`colo_iata`。使用旧版 zip 回退源时本文件不更新。
+
 ## 脚本与 CLI
 
 ### `scripts/download_proxies.py`
 
-下载、解压并整理代理列表。
+下载、解压并整理代理列表。主源为上游 `all.json`（含每条代理的真实出口 `clientIp`、ASN、地理、colo 元数据）；`all.json` 不可达时自动回退旧版 zip 归档，保证定时 CI 不中断。解析后除输出多维清单外，还将按 IP 汇总的元数据写为 `data/upstream_meta.json`。
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `-u, --url` | 源压缩包地址 | `zip.cm.edu.kg` |
+| `-u, --url` | 源地址（默认上游 `all.json`，失败回退 zip） | `zip.cm.edu.kg` |
 | `-t, --timeout` | 下载超时（秒） | 60 |
 | `--per-country-limit` | 限量版每国条数（0 = 不生成） | 20 |
 
@@ -374,6 +378,8 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 - `exit_family.json` — 逐条明细（keyed，含 `family`、`exit_v4`/`exit_v6`、`method`）
 - 并在 `all.txt`/`all_ltd.txt` 对应行追加 `-V4`/`-V6`/`-DS` 备注（幂等，`DS` 与质量检测已有的双栈 token 一致）
 
+交叉验证：若 `data/upstream_meta.json` 存在（由 `download_proxies.py` 生成），逐条对照上游记录的真实出口 `clientIp`，在 `exit_family.json` 中补充 `upstream_client_ip` / `upstream_family` / `upstream_match` 字段，并在结束时输出对照统计（命中数、一致/不一致数、未命中数）；文件缺失时静默跳过，不影响实时探测结果。
+
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
@@ -411,7 +417,7 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 `.github/workflows/update-proxies.yml`：
 
 - **触发**：每 30 分钟定时（`cron: */30 * * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
-- **流程**：跑测试（`unittest`）→ 下载整理 → 验证与测速（默认不设时间限制，跑完为止）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
+- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip，产出 `upstream_meta.json`）→ 验证与测速（默认不设时间限制，跑完为止）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：四个徽章分别取 `stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
@@ -432,9 +438,9 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 `.github/workflows/exit-family.yml`（实际出口家族独立 CI）：
 
 - **触发**：每 6 小时定时（`cron: 31 */6 * * *`，与 china-check 错开）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `exit_family.py`（全量存活池按家族分离）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `exit_family.py`（全量存活池按家族分离，并对照 `upstream_meta.json` 交叉验证）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
-- **说明**：CF 边缘代理真实出口常为 IPv6（尽管呈现为 v4 地址），分离清单供按家族选路使用
+- **说明**：CF 边缘代理真实出口常为 IPv6（尽管呈现为 v4 地址），分离清单供按家族选路使用；上游交叉验证仅作参照，实时探测仍是判定依据
 
 ## 目录结构
 
@@ -468,7 +474,8 @@ data/valid/china.json                  大陆连通性检测明细（keyed，chi
 data/valid/all_cn.txt                  大陆可达清单（china-check CI）
 data/valid/all_ipv4.txt                出口为 IPv4 的代理清单（exit-family CI，双栈双入）
 data/valid/all_ipv6.txt                出口为 IPv6 的代理清单（exit-family CI，双栈双入）
-data/valid/exit_family.json            实际出口家族明细（keyed，exit-family CI）
+data/valid/exit_family.json            实际出口家族明细（keyed，含上游交叉验证，exit-family CI）
+data/upstream_meta.json               上游 all.json 逐 IP 元数据（真实出口 clientIp / ASN / 地理 / colo）
 data/diff/latest.json                  最近一次更新差异（added/removed）
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
