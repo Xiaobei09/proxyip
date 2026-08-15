@@ -4,9 +4,14 @@
 Runs on a bounded population (default ``data/valid/all_ltd.txt``, the
 per-country fastest survivors) and writes under ``data/valid/``:
 
-- ``ipinfo.json``      exit IP / address family / dual-stack / geo / IP type
+- ``ipinfo.json``      exit IP / address family / dual-stack / geo / IP type /
+                      reputation score + source (per checked proxy)
 - ``streaming.json``   per-service unlock results (incl. native Netflix)
 - ``abuse.json``       optional abuse-score results (key-gated)
+- ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
+                      net.coffee / ip.nc.gy / ip-api / ipdata / Tor exit lists,
+                      optionally GetIPIntel + ipapi.is), keyed by ``ip:port#CC``
+- ``all_rep.txt``      ``all_ltd.txt`` lines re-sorted by reputation desc
 - ``quality_meta.json`` aggregated summary for stats and charts
 - annotated ``*.txt``  all/countries/ports/sets lines get ``#``-suffix segments
 
@@ -22,10 +27,10 @@ Two proxy flavors are handled, selected by the method recorded in
    and is tagged ``CF``.
 
 Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
-lines as ``-<streaming>-<type>``, e.g.
-``1.2.3.4:443#US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC`` (streaming tokens
-space-separated, IP-type tokens after a second dash). Lines without results
-stay untouched.
+lines as ``-<streaming>-<type>-<rep>``, e.g.
+``1.2.3.4:443#US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`` (streaming tokens
+space-separated, IP-type tokens after a second dash, then the 0-100 reputation
+score). Lines without results stay untouched.
 """
 
 import argparse
@@ -35,6 +40,7 @@ import re
 import ssl
 import sys
 import time
+import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -49,7 +55,85 @@ IPINFO_FILE = VALID_DIR / "ipinfo.json"
 STREAMING_FILE = VALID_DIR / "streaming.json"
 ABUSE_FILE = VALID_DIR / "abuse.json"
 QUALITY_META_FILE = VALID_DIR / "quality_meta.json"
+REPUTATION_FILE = VALID_DIR / "reputation.json"
+REP_RANK_FILE = VALID_DIR / "all_rep.txt"
 DEFAULT_SOURCE = VALID_DIR / "all_ltd.txt"
+
+REP_RISK_HIGH = 30
+REP_RISK_MEDIUM = 75
+
+REP_WORKERS = 10
+REP_DELAY = 0.15
+
+NETCOFFEE_URL = "https://ip.net.coffee/api/iprisk/{ip}"
+NETCOFFEE_TIMEOUT = 8
+
+NCGY_URL = "https://ip.nc.gy/json?ip={ip}"
+NCGY_TIMEOUT = 8
+
+IPDATA_URL = "https://ipdata.info/json/{ip}"
+IPDATA_TIMEOUT = 8
+IPDATA_CAP = 50
+
+GETIPINTEL_URL = (
+    "https://check.getipintel.net/check.php?ip={ip}"
+    "&contact={email}&flags=m"
+)
+GETIPINTEL_TIMEOUT = 8
+GETIPINTEL_CAP = 300
+
+IPAPI_IS_URL = "https://api.ipapi.is/?q={ip}"
+IPAPI_IS_TIMEOUT = 8
+
+TORLIST_URLS = (
+    "https://check.torproject.org/exit-addresses",
+    "https://www.dan.me.uk/torlist/",
+)
+
+IPAPI_PROXY_PENALTY = 25
+IPAPI_HOSTING_PENALTY = 10
+
+NETCOFFEE_FLAG_PENALTIES = {
+    "is_abuser": 40,
+    "is_tor": 35,
+    "is_proxy": 30,
+    "is_vpn": 25,
+    "is_datacenter": 15,
+}
+
+NCGY_FLAG_PENALTIES = {
+    "is_tor": 45,
+    "is_proxy": 30,
+    "is_vpn": 25,
+    "is_anonymous": 10,
+}
+
+IPDATA_FLAG_PENALTIES = {
+    "tor": 45,
+    "proxy": 30,
+    "vpn": 25,
+    "anonymous": 10,
+}
+
+IPAPI_IS_FLAG_PENALTIES = {
+    "is_tor": 45,
+    "is_vpn": 30,
+    "is_proxy": 25,
+    "is_datacenter": 15,
+    "is_abuser": 20,
+}
+
+REPUTATION_WEIGHTS = {
+    "netcoffee": 35,
+    "ncgy": 25,
+    "ip-api": 15,
+    "ipdata": 10,
+    "torlist": 5,
+    "getipintel": 5,
+    "ipapi_is": 5,
+}
+
+DEFAULT_REP_SOURCES = ("netcoffee", "ncgy", "ip-api", "ipdata", "torlist")
 
 ECHO_V4_HOST = "api.ipify.org"
 ECHO_V6_HOST = "api6.ipify.org"
@@ -497,6 +581,275 @@ async def batch_ipapi(ips: list) -> dict:
     return out
 
 
+def netcoffee_lookup_sync(ip: str) -> dict | None:
+    """``GET /api/iprisk/{ip}`` (free, keyless); returns reputation flags."""
+    url = NETCOFFEE_URL.format(ip=ip)
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": UA,
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=NETCOFFEE_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    out = {
+        "trust_score": data.get("trust_score"),
+        "is_datacenter": bool(data.get("is_datacenter")),
+        "is_vpn": bool(data.get("is_vpn")),
+        "is_proxy": bool(data.get("is_proxy")),
+        "is_tor": bool(data.get("is_tor")),
+        "is_abuser": bool(data.get("is_abuser")),
+        "is_mobile": bool(data.get("is_mobile")),
+        "is_crawler": bool(data.get("is_crawler")),
+        "isResidential": bool(data.get("isResidential")),
+    }
+    if out["trust_score"] is None and not any(
+        v for k, v in out.items() if k != "trust_score"
+    ):
+        return None
+    return out
+
+
+async def batch_netcoffee(ips: list) -> dict:
+    """Concurrent net.coffee lookups; ``{ip: flags}`` (fails become ``None``)."""
+    return await batch_sync(ips, netcoffee_lookup_sync)
+
+
+def ncgy_lookup_sync(ip: str) -> dict | None:
+    """MaxMind GeoIP2 Anonymous IP flags via ``ip.nc.gy/json``."""
+    req = urllib.request.Request(
+        NCGY_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=NCGY_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    proxy = data.get("proxy") if isinstance(data, dict) else None
+    if not isinstance(proxy, dict):
+        return None
+    out = {
+        "is_proxy": bool(proxy.get("is_proxy")),
+        "is_vpn": bool(proxy.get("is_vpn")),
+        "is_tor": bool(proxy.get("is_tor")),
+        "is_hosting": bool(proxy.get("is_hosting")),
+        "is_cdn": bool(proxy.get("is_cdn")),
+        "is_school": bool(proxy.get("is_school")),
+        "is_anonymous": bool(proxy.get("is_anonymous")),
+    }
+    if not any(out.values()):
+        return None
+    return out
+
+
+def ipdata_lookup_sync(ip: str) -> dict | None:
+    """Security block (proxy/vpn/tor/anonymous/hosting + threat score)."""
+    req = urllib.request.Request(
+        IPDATA_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=IPDATA_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict) or not data.get("success", True):
+        return None
+    security = data.get("security") or {}
+    threat = security.get("threat") or {}
+    return {
+        "is_proxy": bool(data.get("is_proxy")),
+        "is_hosting": bool(data.get("is_hosting")),
+        "security": {
+            key: bool(security.get(key))
+            for key in ("anonymous", "proxy", "vpn", "tor", "hosting")
+        },
+        "threat_score": int(threat.get("score") or 0),
+    }
+
+
+def getipintel_lookup_sync(ip: str, email: str) -> dict | None:
+    """Proxy/VPN probability (0-1) via GetIPIntel; negative values are errors."""
+    req = urllib.request.Request(
+        GETIPINTEL_URL.format(ip=ip, email=urllib.parse.quote(email)),
+        headers={"User-Agent": UA},
+    )
+    with urllib.request.urlopen(req, timeout=GETIPINTEL_TIMEOUT) as resp:
+        text = resp.read().decode("utf-8").strip()
+    try:
+        prob = float(text)
+    except ValueError:
+        return None
+    if prob < 0:
+        return None
+    return {"probability": prob}
+
+
+def ipapi_is_lookup_sync(ip: str) -> dict | None:
+    """Free keyless ``api.ipapi.is`` security flags."""
+    req = urllib.request.Request(
+        IPAPI_IS_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=IPAPI_IS_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    return {
+        "is_bogon": bool(data.get("is_bogon")),
+        "is_mobile": bool(data.get("is_mobile")),
+        "is_crawler": bool(data.get("is_crawler")),
+        "is_datacenter": bool(data.get("is_datacenter")),
+        "is_tor": bool(data.get("is_tor")),
+        "is_proxy": bool(data.get("is_proxy")),
+        "is_vpn": bool(data.get("is_vpn")),
+        "is_abuser": bool(data.get("is_abuser")),
+    }
+
+
+async def fetch_torlist() -> set[str]:
+    """Union of Tor exit IPs from the static free lists."""
+    exits: set[str] = set()
+
+    async def fetch_one(url: str) -> None:
+        try:
+            text = await asyncio.to_thread(
+                lambda: urllib.request.urlopen(
+                    urllib.request.Request(url, headers={"User-Agent": UA}),
+                    timeout=NETCOFFEE_TIMEOUT,
+                ).read().decode("utf-8", errors="replace")
+            )
+        except Exception:
+            return
+        for line in text.splitlines():
+            if "ExitAddress" in line:
+                parts = line.split()
+                if len(parts) >= 2 and ":" not in parts[1]:
+                    exits.add(parts[1])
+            elif line.count(".") == 3 and not line.startswith(("#", "Exit")):
+                if len(line) <= 15 and all(c.isdigit() or c == "." for c in line):
+                    exits.add(line.strip())
+
+    await asyncio.gather(*(fetch_one(u) for u in TORLIST_URLS))
+    return exits
+
+
+async def batch_sync(
+    ips: list,
+    fn,
+    cap: int = 0,
+    workers: int = REP_WORKERS,
+    delay: float = REP_DELAY,
+) -> dict:
+    """Run ``fn(ip)`` over unique IPs with a concurrency semaphore + pacing."""
+    items = list(dict.fromkeys(ips))
+    if cap > 0:
+        items = items[:cap]
+    sem = asyncio.Semaphore(workers)
+    out: dict = {}
+
+    async def work(ip: str) -> None:
+        async with sem:
+            try:
+                res = await asyncio.to_thread(fn, ip)
+            except Exception:
+                res = None
+        if res:
+            out[ip] = res
+            await asyncio.sleep(delay)
+
+    await asyncio.gather(*(work(ip) for ip in items))
+    return out
+
+
+def source_score(name: str, signal) -> int | None:
+    """0-100 cleanliness from a single source's signal; ``None`` = no signal."""
+    if signal is None:
+        return None
+    if name == "netcoffee":
+        score = signal.get("trust_score")
+        if isinstance(score, (int, float)):
+            return max(0, min(100, round(score)))
+        penalty = sum(
+            amt for flag, amt in NETCOFFEE_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        return max(0, min(100, 100 - penalty))
+    if name == "ncgy":
+        penalty = sum(
+            amt for flag, amt in NCGY_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        return max(0, min(100, 100 - penalty))
+    if name == "ip-api":
+        penalty = 0
+        if signal.get("proxy"):
+            penalty += IPAPI_PROXY_PENALTY
+        if signal.get("hosting"):
+            penalty += IPAPI_HOSTING_PENALTY
+        return 100 - penalty
+    if name == "ipdata":
+        security = signal.get("security") or {}
+        penalty = sum(
+            amt for flag, amt in IPDATA_FLAG_PENALTIES.items()
+            if security.get(flag)
+        )
+        penalty += int(signal.get("threat_score") or 0)
+        return max(0, min(100, 100 - penalty))
+    if name == "torlist":
+        return 25 if signal.get("is_tor") else None
+    if name == "getipintel":
+        prob = signal.get("probability")
+        if not isinstance(prob, (int, float)) or prob < 0:
+            return None
+        return max(0, min(100, 100 - round(prob * 100)))
+    if name == "ipapi_is":
+        penalty = sum(
+            amt for flag, amt in IPAPI_IS_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        return max(0, min(100, 100 - penalty))
+    return None
+
+
+def weighted_reputation(
+    signals: dict, weights: dict
+) -> tuple[int | None, list[str]]:
+    """Weighted merge of per-source cleanliness scores over responding sources."""
+    parts = []
+    for name, signal in signals.items():
+        score = source_score(name, signal)
+        if score is None:
+            continue
+        weight = weights.get(name, 0)
+        if weight <= 0:
+            continue
+        parts.append((weight, score, name))
+    if not parts:
+        return None, []
+    total = sum(w for w, _s, _n in parts)
+    merged = round(sum(w * s for w, s, _n in parts) / total)
+    return merged, [name for _w, _s, name in parts]
+
+
+def compute_reputation(
+    signals: dict, abuse: dict | None, weights: dict
+) -> int | None:
+    """0-100 multi-source reputation; abuse score (100-score) takes precedence."""
+    if abuse and isinstance(abuse.get("score"), (int, float)):
+        return max(0, min(100, 100 - round(abuse["score"])))
+    score, _sources = weighted_reputation(signals, weights)
+    return score
+
+
+def reputation_risk(score: int | None) -> str | None:
+    if score is None:
+        return None
+    if score < REP_RISK_HIGH:
+        return "high"
+    if score < REP_RISK_MEDIUM:
+        return "medium"
+    return "low"
+
+
 def classify_ip(geo: dict) -> str:
     if geo.get("hosting"):
         return "DC"
@@ -507,20 +860,41 @@ def classify_ip(geo: dict) -> str:
     return "RES"
 
 
-def derive_risk(ipinfo: dict, abuse: dict | None) -> str:
-    if abuse and isinstance(abuse.get("score"), (int, float)):
-        score = abuse["score"]
-        return "high" if score >= 75 else ("medium" if score >= 30 else "low")
-    if ipinfo.get("proxy") and ipinfo.get("hosting"):
-        return "high"
-    if ipinfo.get("proxy") or ipinfo.get("hosting"):
-        return "medium"
-    return "low"
+def collect_signals(
+    ip: str,
+    geo_item: dict,
+    risk_data: dict,
+    weights: dict,
+    include_ipapi: bool = True,
+) -> dict:
+    """Assemble ``{source: signal}`` for one IP from ``risk_data``."""
+    signals: dict = {}
+    for source in weights:
+        if source == "ip-api":
+            continue
+        signal = risk_data.get(ip, {}).get(source)
+        if signal is not None:
+            signals[source] = signal
+    if include_ipapi and (geo_item.get("proxy") or geo_item.get("hosting")):
+        signals["ip-api"] = geo_item
+    return signals
+
+
+def derive_risk(
+    signals: dict, abuse: dict | None, weights: dict
+) -> str:
+    return reputation_risk(compute_reputation(signals, abuse, weights)) or "low"
 
 
 def build_ipinfo_map(
-    results: dict, geo: dict, abuse_map: dict
+    results: dict,
+    geo: dict,
+    abuse_map: dict,
+    risk_data: dict | None = None,
+    weights: dict | None = None,
 ) -> dict[str, dict]:
+    risk_data = risk_data or {}
+    weights = weights or REPUTATION_WEIGHTS
     info_map: dict[str, dict] = {}
     for res in results.values():
         if res.get("tls"):
@@ -533,8 +907,10 @@ def build_ipinfo_map(
         elif not ip4 and ip6:
             family = "ipv6"
         cc = geo_item.get("countryCode")
+        exit_ip = ip4 or ip6
+        abuse_item = abuse_map.get(res["key"])
         info = {
-            "exit_ip": ip4 or ip6,
+            "exit_ip": exit_ip,
             "family": family,
             "dual_stack": dual,
             "country": geo_item.get("country"),
@@ -550,8 +926,27 @@ def build_ipinfo_map(
             "listed_country": res["cc"],
             "country_match": (cc == res["cc"]) if cc else None,
             "ip_type": classify_ip(geo_item),
+            "geo_checked": bool(cc),
         }
-        info["risk"] = derive_risk(info, abuse_map.get(res["key"]))
+        risk_flags = {
+            source: signal
+            for source, signal in risk_data.get(exit_ip, {}).items()
+        }
+        if risk_flags:
+            info["risk_flags"] = risk_flags
+        signals = collect_signals(exit_ip, geo_item, risk_data, weights)
+        score = compute_reputation(signals, abuse_item, weights)
+        if score is not None:
+            info["reputation"] = score
+            if abuse_item:
+                info["reputation_source"] = abuse_item.get("service")
+            else:
+                _score, sources = weighted_reputation(signals, weights)
+                info["reputation_source"] = (
+                    sources[0] if len(sources) == 1 else "multi"
+                )
+                info["risk_sources"] = sources
+        info["risk"] = derive_risk(signals, abuse_item, weights)
         info_map[res["key"]] = info
     return info_map
 
@@ -606,16 +1001,96 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
-def build_annotations(results: dict, ipinfo: dict) -> dict[str, str]:
+def build_reputation_map(
+    results: dict,
+    ipinfo: dict,
+    risk_data: dict,
+    weights: dict,
+) -> dict[str, dict]:
+    rep_map: dict[str, dict] = {}
+    for res in results.values():
+        if res.get("tls"):
+            signals = collect_signals(
+                res["ip"], {}, risk_data, weights, include_ipapi=False
+            )
+            score = compute_reputation(signals, None, weights)
+            _score, sources = weighted_reputation(signals, weights)
+            source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
+        else:
+            info = ipinfo.get(res["key"]) or {}
+            score = info.get("reputation")
+            sources = info.get("risk_sources") or []
+            source = info.get("reputation_source")
+        if score is None:
+            continue
+        rep_map[res["key"]] = {
+            "score": score,
+            "risk": reputation_risk(score),
+            "source": source,
+            "sources": sources,
+        }
+    return rep_map
+
+
+LATENCY_RE = re.compile(r"-(\d+)ms")
+
+
+def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
+    lines = source_text.splitlines()
+    scored: list[tuple[dict | None, str, str]] = []
+    unscored: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        key = line_to_key(line)
+        ann = annotations.get(key) if key else None
+        out = line + ("-" + ann if ann else "")
+        rep = rep_map.get(key)
+        if rep:
+            scored.append((rep, key, out))
+        else:
+            unscored.append(out)
+
+    def sort_key(item: tuple[dict | None, str, str]) -> tuple:
+        rep, key, line = item
+        lat_match = LATENCY_RE.search(line)
+        lat = int(lat_match.group(1)) if lat_match else float("inf")
+        return (-rep["score"], lat, key)
+
+    scored.sort(key=sort_key)
+    ranked = [line for _rep, _key, line in scored] + unscored
+    REP_RANK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = REP_RANK_FILE.with_suffix(".tmp")
+    tmp.write_text("\n".join(ranked) + "\n", encoding="utf-8")
+    tmp.replace(REP_RANK_FILE)
+    entries = {
+        key: {
+            "score": rep["score"],
+            "risk": rep["risk"],
+            "source": rep["source"],
+            "sources": rep.get("sources") or [],
+        }
+        for key, rep in rep_map.items()
+    }
+    entries = dict(
+        sorted(entries.items(), key=lambda kv: (-kv[1]["score"], kv[0]))
+    )
+    write_json(REPUTATION_FILE, keyed_json(entries))
+
+
+def build_annotations(results: dict, ipinfo: dict, rep_map: dict) -> dict[str, str]:
     annotations: dict[str, str] = {}
     for res in results.values():
         stream_toks = streaming_tokens(res["streaming"])
         if res.get("tls"):
-            annotations[res["key"]] = build_annotation(stream_toks, "CF")
+            type_toks = "CF"
         else:
-            annotations[res["key"]] = build_annotation(
-                stream_toks, type_tokens(ipinfo.get(res["key"]) or {})
-            )
+            type_toks = type_tokens(ipinfo.get(res["key"]) or {})
+        ann = build_annotation(stream_toks, type_toks)
+        rep = rep_map.get(res["key"])
+        if rep:
+            ann = build_annotation(ann, str(rep["score"]))
+        annotations[res["key"]] = ann
     return annotations
 
 
@@ -671,6 +1146,16 @@ def build_meta(
     risk = Counter(
         info["risk"] for info in ipinfo.values() if info.get("risk")
     )
+    reps = [
+        info["reputation"] for info in ipinfo.values()
+        if info.get("reputation") is not None
+    ]
+    rep_dist = {
+        "0-25": sum(1 for r in reps if r < 25),
+        "25-50": sum(1 for r in reps if 25 <= r < 50),
+        "50-75": sum(1 for r in reps if 50 <= r < 75),
+        "75-100": sum(1 for r in reps if r >= 75),
+    }
     return {
         "ts": now_ts(),
         "total": len(results),
@@ -685,6 +1170,12 @@ def build_meta(
         "country_mismatch": mismatch,
         "risk": dict(sorted(risk.items())),
         "abuse_checked": len(abuse_map),
+        "reputation_checked": len(reps),
+        "rep_dist": rep_dist,
+        "rep_avg": (round(sum(reps) / len(reps), 1) if reps else None),
+        "rep_median": (
+            round(sorted(reps)[len(reps) // 2], 1) if reps else None
+        ),
     }
 
 
@@ -766,9 +1257,58 @@ async def run_abuse(
         item = by_ip.get(info.get("exit_ip"))
         if item:
             entry = dict(item)
-            entry["risk"] = derive_risk(info, item)
+            entry["risk"] = derive_risk({}, item, args.reputation_weights)
             abuse_map[key] = entry
     return abuse_map
+
+
+async def lookup_all_risk(ips: list, args: argparse.Namespace) -> dict:
+    """Query all enabled reputation sources; ``{ip: {source: signal}}``."""
+    sources = args.reputation_sources
+    if not sources:
+        return {}
+    risk_data: dict[str, dict] = {}
+
+    def put(name: str, ip: str, signal) -> None:
+        risk_data.setdefault(ip, {})[name] = signal
+
+    if "netcoffee" in sources:
+        for ip, sig in (await batch_netcoffee(ips)).items():
+            put("netcoffee", ip, sig)
+    if "ncgy" in sources:
+        for ip, sig in (await batch_sync(ips, ncgy_lookup_sync)).items():
+            put("ncgy", ip, sig)
+    if "ipdata" in sources:
+        for ip, sig in (
+            await batch_sync(
+                ips, ipdata_lookup_sync,
+                cap=IPDATA_CAP, workers=2, delay=0.8,
+            )
+        ).items():
+            put("ipdata", ip, sig)
+    if "getipintel" in sources:
+        if args.getipintel_email:
+            fn = lambda ip: getipintel_lookup_sync(ip, args.getipintel_email)
+            for ip, sig in (
+                await batch_sync(
+                    ips, fn, cap=GETIPINTEL_CAP, workers=1, delay=4
+                )
+            ).items():
+                put("getipintel", ip, sig)
+        else:
+            print(
+                "Warning: GETIPINTEL_EMAIL not set; skipping getipintel source",
+                file=sys.stderr,
+            )
+    if "ipapi_is" in sources:
+        for ip, sig in (await batch_sync(ips, ipapi_is_lookup_sync)).items():
+            put("ipapi_is", ip, sig)
+    if "torlist" in sources:
+        tor = await fetch_torlist()
+        for ip in dict.fromkeys(ips):
+            if ip in tor:
+                put("torlist", ip, {"is_tor": True})
+    return risk_data
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -799,10 +1339,33 @@ async def run(args: argparse.Namespace) -> int:
     )
     ipinfo = build_ipinfo_map(results, geo, {})
     abuse_map = await run_abuse(results, ipinfo, args)
-    if abuse_map:
-        ipinfo = build_ipinfo_map(results, geo, abuse_map)
+
+    rep_ips = []
+    for res in results.values():
+        if res.get("tls"):
+            rep_ips.append(res["ip"])
+        else:
+            info = ipinfo.get(res["key"]) or {}
+            if info.get("exit_ip"):
+                rep_ips.append(info["exit_ip"])
+    risk_data = await lookup_all_risk(rep_ips, args)
+    if risk_data:
+        print(
+            f"Reputation: {len(risk_data)}/{len(set(rep_ips))} IPs from "
+            f"{', '.join(args.reputation_sources)}"
+        )
+    ipinfo = build_ipinfo_map(
+        results, geo, abuse_map, risk_data, args.reputation_weights
+    )
+    rep_map = build_reputation_map(
+        results, ipinfo, risk_data, args.reputation_weights
+    )
+
     streaming = finalize_streaming(results, ipinfo)
-    annotations = build_annotations(results, ipinfo)
+    annotations = build_annotations(results, ipinfo, rep_map)
+    source_text = args.source.read_text(encoding="utf-8")
+    if rep_map:
+        write_reputation_files(source_text, annotations, rep_map)
 
     write_json(IPINFO_FILE, keyed_json(ipinfo))
     write_json(STREAMING_FILE, keyed_json(streaming))
@@ -815,7 +1378,8 @@ async def run(args: argparse.Namespace) -> int:
     print(
         f"streaming_ok={meta['streaming_ok']} "
         f"by_type={meta['by_type']} family={meta['family']} "
-        f"mismatch={meta['country_mismatch']}"
+        f"mismatch={meta['country_mismatch']} "
+        f"rep_avg={meta['rep_avg']} rep_dist={meta['rep_dist']}"
     )
     return 0
 
@@ -833,6 +1397,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--abuse-service", choices=("none", "abuseipdb", "ipqs"), default="none",
         help="Abuse-score provider (key from ABUSEIPDB_KEY / IPQS_KEY env)",
+    )
+    parser.add_argument(
+        "--reputation-provider",
+        choices=("multi", "netcoffee", "ip-api", "none"),
+        default="multi",
+        help="Reputation strategy: multi (weighted merge of --reputation-sources), "
+        "netcoffee (legacy net.coffee + ip-api), ip-api (flags only), or none",
+    )
+    parser.add_argument(
+        "--reputation-sources",
+        default=None,
+        help="Comma list of sources for --reputation-provider multi "
+        "(default: netcoffee,ncgy,ip-api,ipdata,torlist)",
+    )
+    parser.add_argument(
+        "--reputation-weights",
+        dest="reputation_weights_override",
+        default=None,
+        help="Comma list of name:weight overrides, e.g. netcoffee:40,ncgy:20",
     )
     parser.add_argument(
         "-t", "--timeout", type=int, default=TIMEOUT,
@@ -853,10 +1436,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.services:
         args.services = list(SERVICES)
+    import os
+
     args.abuse_key = ""
     if args.abuse_service != "none":
-        import os
-
         env_name = {
             "abuseipdb": "ABUSEIPDB_KEY",
             "ipqs": "IPQS_KEY",
@@ -868,6 +1451,32 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             args.abuse_service = "none"
+    args.getipintel_email = os.environ.get("GETIPINTEL_EMAIL", "")
+    args.reputation_weights = dict(REPUTATION_WEIGHTS)
+    override = args.reputation_weights_override or ""
+    for tok in override.split(","):
+        if ":" in tok:
+            name, weight = tok.split(":", 1)
+            try:
+                args.reputation_weights[name.strip()] = int(weight)
+            except ValueError:
+                pass
+    args.reputation_sources = args.reputation_sources or ""
+    if args.reputation_provider == "none":
+        args.reputation_sources = []
+    elif args.reputation_provider == "netcoffee":
+        args.reputation_sources = ["netcoffee", "ip-api"]
+    elif args.reputation_provider == "ip-api":
+        args.reputation_sources = ["ip-api"]
+    else:
+        args.reputation_sources = [
+            s.strip() for s in args.reputation_sources.split(",") if s.strip()
+        ]
+        args.reputation_sources = [
+            s for s in args.reputation_sources if s in REPUTATION_WEIGHTS
+        ]
+        if not args.reputation_sources:
+            args.reputation_sources = list(DEFAULT_REP_SOURCES)
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:

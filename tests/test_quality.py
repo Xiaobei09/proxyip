@@ -1,5 +1,6 @@
 """Tests for quality_check.py pure functions."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -134,26 +135,35 @@ class TestIpTypeAndRisk(unittest.TestCase):
         self.assertEqual(qc.classify_ip({}), "RES")
 
     def test_derive_risk_keyless(self):
+        w = qc.REPUTATION_WEIGHTS
         self.assertEqual(
-            qc.derive_risk({"proxy": True, "hosting": True}, None), "high"
+            qc.derive_risk({"ip-api": {"proxy": True, "hosting": True}},
+                           None, w), "medium"
         )
         self.assertEqual(
-            qc.derive_risk({"proxy": True, "hosting": False}, None), "medium"
+            qc.derive_risk({"ip-api": {"proxy": True, "hosting": False}},
+                           None, w), "low"
         )
         self.assertEqual(
-            qc.derive_risk({"proxy": False, "hosting": False}, None), "low"
+            qc.derive_risk({"ip-api": {"proxy": False, "hosting": False}},
+                           None, w), "low"
+        )
+        self.assertEqual(
+            qc.derive_risk({"netcoffee": {"trust_score": 20}}, None, w), "high"
+        )
+        self.assertEqual(
+            qc.derive_risk({"netcoffee": {"trust_score": 50}}, None, w),
+            "medium"
+        )
+        self.assertEqual(
+            qc.derive_risk({"netcoffee": {"trust_score": 90}}, None, w), "low"
         )
 
     def test_derive_risk_from_score(self):
-        self.assertEqual(
-            qc.derive_risk({}, {"score": 90}), "high"
-        )
-        self.assertEqual(
-            qc.derive_risk({}, {"score": 50}), "medium"
-        )
-        self.assertEqual(
-            qc.derive_risk({}, {"score": 10}), "low"
-        )
+        w = qc.REPUTATION_WEIGHTS
+        self.assertEqual(qc.derive_risk({}, {"score": 90}, w), "high")
+        self.assertEqual(qc.derive_risk({}, {"score": 50}, w), "medium")
+        self.assertEqual(qc.derive_risk({}, {"score": 10}, w), "low")
 
 
 class TestBuildIpinfo(unittest.TestCase):
@@ -179,7 +189,38 @@ class TestBuildIpinfo(unittest.TestCase):
         self.assertTrue(info["dual_stack"])
         self.assertTrue(info["country_match"])
         self.assertEqual(info["ip_type"], "DC")
+        self.assertEqual(info["risk"], "low")
+        self.assertEqual(info["reputation"], 90)
+        self.assertEqual(info["reputation_source"], "ip-api")
+        self.assertTrue(info["geo_checked"])
+
+    def test_reputation_netcoffee_wins(self):
+        results = {
+            "1.2.3.4:443#US": {
+                "key": "1.2.3.4:443#US", "cc": "US",
+                "v4": "9.9.9.9", "v6": None,
+            }
+        }
+        geo = {"9.9.9.9": {"status": "success", "countryCode": "US"}}
+        nc = {"9.9.9.9": {"netcoffee": {"trust_score": 42,
+                                         "is_datacenter": True}}}
+        info = qc.build_ipinfo_map(results, geo, {}, nc)["1.2.3.4:443#US"]
+        self.assertEqual(info["reputation"], 42)
+        self.assertEqual(info["reputation_source"], "netcoffee")
         self.assertEqual(info["risk"], "medium")
+        self.assertEqual(info["risk_flags"]["netcoffee"]["trust_score"], 42)
+
+    def test_no_geo_no_reputation(self):
+        results = {
+            "1.2.3.4:443#US": {
+                "key": "1.2.3.4:443#US", "cc": "US",
+                "v4": "9.9.9.9", "v6": None,
+            }
+        }
+        info = qc.build_ipinfo_map(results, {}, {})["1.2.3.4:443#US"]
+        self.assertNotIn("reputation", info)
+        self.assertFalse(info["geo_checked"])
+        self.assertEqual(info["risk"], "low")
 
     def test_mismatch_country(self):
         results = {
@@ -244,6 +285,333 @@ class TestAnnotation(unittest.TestCase):
         self.assertTrue(lines[0].endswith("-NF(US)-DC"))
         self.assertTrue(lines[1].endswith("-GPT-CF"))
         self.assertFalse(lines[2].endswith("-"))
+
+
+class TestReputation(unittest.TestCase):
+    W = qc.REPUTATION_WEIGHTS
+
+    def test_abuse_takes_precedence(self):
+        signals = {
+            "netcoffee": {"trust_score": 5, "is_abuser": True},
+            "ip-api": {"proxy": True, "hosting": True},
+        }
+        self.assertEqual(qc.compute_reputation(signals, {"score": 90}, self.W), 10)
+
+    def test_trust_score_direct(self):
+        self.assertEqual(
+            qc.compute_reputation({"netcoffee": {"trust_score": 63}},
+                                  None, self.W), 63
+        )
+
+    def test_trust_score_clamped(self):
+        self.assertEqual(
+            qc.compute_reputation({"netcoffee": {"trust_score": 150}},
+                                  None, self.W), 100
+        )
+        self.assertEqual(
+            qc.compute_reputation({"netcoffee": {"trust_score": -5}},
+                                  None, self.W), 0
+        )
+
+    def test_netcoffee_flag_penalty(self):
+        nc = {"netcoffee": {"is_abuser": True, "is_tor": True, "is_vpn": True}}
+        self.assertEqual(qc.compute_reputation(nc, None, self.W), 0)
+        nc = {"netcoffee": {"is_datacenter": True}}
+        self.assertEqual(qc.compute_reputation(nc, None, self.W), 85)
+
+    def test_source_score_per_source(self):
+        self.assertEqual(
+            qc.source_score("netcoffee", {"trust_score": 63}), 63)
+        self.assertEqual(
+            qc.source_score("netcoffee", {"is_datacenter": True}), 85)
+        self.assertEqual(
+            qc.source_score("ncgy", {"is_tor": True, "is_anonymous": True}), 45)
+        self.assertEqual(qc.source_score("ncgy", {"is_vpn": True}), 75)
+        self.assertEqual(
+            qc.source_score("ip-api", {"proxy": True, "hosting": True}), 65)
+        self.assertEqual(
+            qc.source_score("ip-api", {"proxy": False, "hosting": False}), 100)
+        self.assertEqual(
+            qc.source_score(
+                "ipdata", {"security": {"tor": True}, "threat_score": 30}), 25)
+        self.assertEqual(qc.source_score("torlist", {"is_tor": True}), 25)
+        self.assertIsNone(qc.source_score("torlist", {"is_tor": False}))
+        self.assertEqual(
+            qc.source_score("getipintel", {"probability": 0.3}), 70)
+        self.assertIsNone(qc.source_score("getipintel", {"probability": -3}))
+        self.assertEqual(
+            qc.source_score("ipapi_is", {"is_tor": True, "is_vpn": True}), 25)
+        self.assertIsNone(qc.source_score("bogus", {}))
+
+    def test_weighted_merge(self):
+        signals = {"netcoffee": {"trust_score": 80},
+                   "ncgy": {"is_vpn": True}}
+        score, sources = qc.weighted_reputation(signals, self.W)
+        self.assertEqual(score, 78)
+        self.assertEqual(set(sources), {"netcoffee", "ncgy"})
+
+    def test_weighted_merge_renormalizes(self):
+        signals = {"netcoffee": {"trust_score": 50}}
+        score, sources = qc.weighted_reputation(signals, self.W)
+        self.assertEqual(score, 50)
+        self.assertEqual(sources, ["netcoffee"])
+
+    def test_no_signals(self):
+        self.assertIsNone(qc.compute_reputation({}, None, self.W))
+        self.assertEqual(qc.weighted_reputation({}, self.W), (None, []))
+
+    def test_ipapi_only(self):
+        self.assertEqual(
+            qc.compute_reputation(
+                {"ip-api": {"proxy": True, "hosting": True}}, None, self.W), 65
+        )
+        self.assertIsNone(qc.compute_reputation({}, None, self.W))
+
+    def test_reputation_risk_boundaries(self):
+        self.assertEqual(qc.reputation_risk(0), "high")
+        self.assertEqual(qc.reputation_risk(29), "high")
+        self.assertEqual(qc.reputation_risk(30), "medium")
+        self.assertEqual(qc.reputation_risk(74), "medium")
+        self.assertEqual(qc.reputation_risk(75), "low")
+        self.assertEqual(qc.reputation_risk(100), "low")
+        self.assertIsNone(qc.reputation_risk(None))
+
+    def test_build_reputation_map(self):
+        results = {
+            "1.2.3.4:443#US": {
+                "key": "1.2.3.4:443#US", "ip": "1.2.3.4",
+                "method": "connect", "streaming": {},
+            },
+            "5.6.7.8:8443#JP": {
+                "key": "5.6.7.8:8443#JP", "ip": "5.6.7.8",
+                "method": "tls", "tls": True, "streaming": {},
+            },
+        }
+        ipinfo = {
+            "1.2.3.4:443#US": {
+                "reputation": 40, "reputation_source": "multi",
+                "risk_sources": ["netcoffee", "ncgy"],
+            },
+        }
+        risk_data = {"5.6.7.8": {"netcoffee": {"trust_score": 70}}}
+        rep = qc.build_reputation_map(results, ipinfo, risk_data, self.W)
+        self.assertEqual(rep["1.2.3.4:443#US"]["score"], 40)
+        self.assertEqual(rep["1.2.3.4:443#US"]["source"], "multi")
+        self.assertEqual(
+            rep["1.2.3.4:443#US"]["sources"], ["netcoffee", "ncgy"])
+        self.assertEqual(rep["1.2.3.4:443#US"]["risk"], "medium")
+        self.assertEqual(rep["5.6.7.8:8443#JP"]["score"], 70)
+        self.assertEqual(rep["5.6.7.8:8443#JP"]["source"], "netcoffee")
+        self.assertEqual(rep["5.6.7.8:8443#JP"]["sources"], ["netcoffee"])
+
+    def test_netcoffee_lookup_parsing(self):
+        payload = (
+            b'{"trust_score":61,"is_datacenter":true,"is_vpn":false,'
+            b'"is_proxy":false,"is_tor":false,"is_abuser":false,'
+            b'"is_mobile":false,"is_crawler":false,"isResidential":false}'
+        )
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return payload
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("iprisk/1.2.3.4", req.full_url)
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.netcoffee_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out["trust_score"], 61)
+        self.assertTrue(out["is_datacenter"])
+        self.assertFalse(out["is_vpn"])
+
+    def test_netcoffee_lookup_empty(self):
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return b"{}"
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            self.assertIsNone(qc.netcoffee_lookup_sync("1.2.3.4"))
+        finally:
+            qc.urllib.request.urlopen = orig
+
+    def test_ncgy_lookup_parsing(self):
+        payload = (
+            b'{"ip":"1.2.3.4","proxy":{"is_proxy":true,"is_vpn":false,'
+            b'"is_tor":false,"is_hosting":true,"is_cdn":false,'
+            b'"is_school":false,"is_anonymous":true}}'
+        )
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return payload
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("nc.gy", req.full_url)
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.ncgy_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertTrue(out["is_proxy"])
+        self.assertTrue(out["is_hosting"])
+        self.assertTrue(out["is_anonymous"])
+        self.assertFalse(out["is_vpn"])
+
+    def test_ncgy_lookup_clean_none(self):
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return (
+                        b'{"ip":"1.2.3.4","proxy":{"is_proxy":false,'
+                        b'"is_vpn":false,"is_tor":false,"is_hosting":false,'
+                        b'"is_cdn":false,"is_school":false,'
+                        b'"is_anonymous":false}}'
+                    )
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            self.assertIsNone(qc.ncgy_lookup_sync("1.2.3.4"))
+        finally:
+            qc.urllib.request.urlopen = orig
+
+    def test_getipintel_lookup(self):
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return b"0.25"
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.getipintel_lookup_sync("1.2.3.4", "a@b.com")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out, {"probability": 0.25})
+
+    def test_getipintel_error_none(self):
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return b"-5"
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            self.assertIsNone(qc.getipintel_lookup_sync("1.2.3.4", "a@b.com"))
+        finally:
+            qc.urllib.request.urlopen = orig
+
+
+class TestReputationFiles(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self._rep_file, self._rank_file = (
+            qc.REPUTATION_FILE,
+            qc.REP_RANK_FILE,
+        )
+        qc.REPUTATION_FILE = self.tmp / "reputation.json"
+        qc.REP_RANK_FILE = self.tmp / "all_rep.txt"
+
+    def tearDown(self):
+        qc.REPUTATION_FILE = self._rep_file
+        qc.REP_RANK_FILE = self._rank_file
+
+    def test_write_reputation_files_sorted(self):
+        text = (
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms-1.00MB/s\n"
+            "5.6.7.8:8443#\U0001F1EF\U0001F1F5JP-50ms-2.00MB/s\n"
+            "9.9.9.9:443#\U0001F1FA\U0001F1F8US-30ms-3.00MB/s\n"
+        )
+        annotations = {"1.2.3.4:443#US": "DC-90", "5.6.7.8:8443#JP": "DC-40",
+                       "9.9.9.9:443#US": "DC-90"}
+        rep_map = {
+            "9.9.9.9:443#US": {"score": 90, "risk": "low", "source": "netcoffee"},
+            "1.2.3.4:443#US": {"score": 90, "risk": "low", "source": "netcoffee"},
+            "5.6.7.8:8443#JP": {"score": 40, "risk": "medium",
+                                "source": "ip-api"},
+        }
+        qc.write_reputation_files(text, annotations, rep_map)
+        ranked = qc.REP_RANK_FILE.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(ranked[0].startswith("9.9.9.9:443"))
+        self.assertTrue(ranked[1].startswith("1.2.3.4:443"))
+        self.assertTrue(ranked[2].startswith("5.6.7.8:8443"))
+        self.assertTrue(ranked[0].endswith("-DC-90"))
+        data = json.loads(qc.REPUTATION_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(len(data["proxies"]), 3)
+        keys = list(data["proxies"])
+        self.assertEqual(keys[0], "1.2.3.4:443#US")
+        self.assertEqual(keys[1], "9.9.9.9:443#US")
+        self.assertEqual(data["proxies"]["5.6.7.8:8443#JP"]["score"], 40)
+
+    def test_write_reputation_files_unscored_last(self):
+        text = (
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms\n"
+            "5.6.7.8:8443#\U0001F1EF\U0001F1F5JP-50ms\n"
+        )
+        rep_map = {"5.6.7.8:8443#JP": {"score": 80, "risk": "low",
+                                        "source": "netcoffee"}}
+        qc.write_reputation_files(text, {}, rep_map)
+        lines = qc.REP_RANK_FILE.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(lines[0].startswith("5.6.7.8:8443"))
+        self.assertTrue(lines[1].startswith("1.2.3.4:443"))
 
 
 class TestFinalize(unittest.TestCase):

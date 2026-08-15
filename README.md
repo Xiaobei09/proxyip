@@ -70,7 +70,7 @@ data/all.txt                                # 全量去重清单（未验证）
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
-- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`。示例：`1.2.3.4:443#🇺🇸US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC`、`9.9.9.9:443#🇺🇸US-8ms-5.86MB/s-GPT-CF`。无结果的行保持原样
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt` 按速度降序
 
@@ -220,7 +220,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/ipinfo.json`（质量 CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`family`（ipv4/ipv6/dual）、`dual_stack`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`risk`（keyless 推导或滥用分）。
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`family`（ipv4/ipv6/dual）、`dual_stack`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`reputation_source`（netcoffee/ncgy/ip-api/ipdata/torlist/getipintel/ipapi_is/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。
 
 ### `data/valid/streaming.json`
 
@@ -228,11 +228,19 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/quality_meta.json`
 
-质量检测汇总（供 stats 消费）：`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`family`/`dual_stack`（地址族分布）、`country_mismatch`（错区数）、`risk`、`abuse_checked`。
+质量检测汇总（供 stats 消费）：`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`family`/`dual_stack`（地址族分布）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
 
 ### `data/valid/abuse.json`
 
 提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。
+
+### `data/valid/reputation.json`
+
+单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipdata`/`torlist`/`getipintel`/`ipapi_is`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表。按分数降序、同分按键序排列。
+
+### `data/valid/all_rep.txt`
+
+与 `all_ltd.txt` 同源（每国最快存活集）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。
 
 ### `data/history.jsonl`（每行一条）
 
@@ -308,13 +316,26 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `--source` | 输入代理列表 | `data/valid/all_ltd.txt` |
 | `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
+| `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipdata,torlist |
+| `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `-t, --timeout` | 单代理超时（秒） | 6 |
 | `--read-cap` | 单次响应读取上限（字节） | 524288 |
 | `-w, --workers` | asyncio 并发上限 | 40 |
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 
-滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过并回退到 ip-api 标志推导 `risk`（高/中/低，仅入 JSON 不入备注）。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
+滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）多因子加权合成：abuse 分存在时取 `100 - score`（最高优先级）；否则按源分别计算 0-100 干净分 `s_i`，再按权重合并 `round(Σ w_i·s_i / Σ w_i)`（按实际响应源归一化）。默认源与权重：
+
+| 源 | 权重 | 说明 |
+|---|---|---|
+| `netcoffee` | 35 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用，标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15 |
+| `ncgy` | 25 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
+| `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10（有标志才计入） |
+| `ipdata` | 10 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
+| `torlist` | 5 | 官方 Tor 出口列表（`check.torproject.org/exit-addresses` + `dan.me.uk/torlist`），命中 -25 |
+
+可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）；`ipapi_is`（5 权重，`ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20）。单源响应时直接取该源分数；无任何信号则该项无分（不误判满分）。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/generate_fingerprint.py`
 
@@ -374,10 +395,12 @@ data/sets/<集合>_ltd.txt               限量版（每国 --per-country-limit 
 data/all.txt                           全量去重 ip:port#国家（IP 数字序）
 data/all_ltd.txt                       全部国家每国限量后的并集
 data/valid/                            存活代理（结构同 data/，按延迟排序，_ltd 按速度排序，含 meta.json、index.json、speed.json、history.jsonl）
-data/valid/ipinfo.json                 出口 IP 地理 / 类型 / 双栈（质量 CI）
+data/valid/ipinfo.json                 出口 IP 地理 / 类型 / 双栈 / 信誉分（质量 CI）
 data/valid/streaming.json              各服务流媒体解锁结果（质量 CI）
 data/valid/quality_meta.json           质量检测汇总（质量 CI）
 data/valid/abuse.json                  滥用分结果（配置 key 时生成，质量 CI）
+data/valid/reputation.json             信誉分索引（0-100，质量 CI）
+data/valid/all_rep.txt                 信誉排行（按分数降序，质量 CI）
 data/diff/latest.json                  最近一次更新差异（added/removed）
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
