@@ -2,6 +2,7 @@
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -164,8 +165,11 @@ class TestSplit(unittest.TestCase):
 
 
 class TestLoadSample(unittest.TestCase):
+    def _path(self, name):
+        return Path(tempfile.mkdtemp(prefix="ef_")) / name
+
     def test_load_respects_limit(self):
-        path = Path("/tmp/opencode/exit_family_sample.txt")
+        path = self._path("exit_family_sample.txt")
         path.write_text(
             "1.1.1.1:80#US-1ms\n2.2.2.2:80#US-2ms\n3.3.3.3:80#US-3ms\n",
             encoding="utf-8",
@@ -175,7 +179,7 @@ class TestLoadSample(unittest.TestCase):
         self.assertEqual(sample[0][1], "1.1.1.1:80#US")
 
     def test_skips_bad_lines(self):
-        path = Path("/tmp/opencode/exit_family_sample_bad.txt")
+        path = self._path("exit_family_sample_bad.txt")
         path.write_text("garbage\n4.4.4.4:80#US-4ms\n", encoding="utf-8")
         sample = ef.load_sample(path, limit=0)
         self.assertEqual([s[1] for s in sample], ["4.4.4.4:80#US"])
@@ -183,13 +187,15 @@ class TestLoadSample(unittest.TestCase):
 
 class TestUpstreamMeta(unittest.TestCase):
     def setUp(self):
-        self.meta_file = Path("/tmp/opencode/upstream_meta_test.json")
+        self._base = Path(tempfile.mkdtemp(prefix="efm_"))
+        self.meta_file = self._base / "upstream_meta_test.json"
 
     def _write(self, data):
         self.meta_file.write_text(json.dumps(data), encoding="utf-8")
 
     def tearDown(self):
         self.meta_file.unlink(missing_ok=True)
+        self._base.rmdir()
 
     def test_missing_file_returns_empty(self):
         self.meta_file.unlink(missing_ok=True)

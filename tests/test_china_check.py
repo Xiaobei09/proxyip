@@ -1,6 +1,7 @@
 """Tests for china_check.py pure functions."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -264,8 +265,11 @@ class TestRateLimiter(unittest.TestCase):
 
 
 class TestLoadSample(unittest.TestCase):
+    def _path(self, name):
+        return Path(tempfile.mkdtemp(prefix="cc_")) / name
+
     def test_load_sample_respects_limit(self):
-        path = Path("/tmp/opencode/china_check_sample.txt")
+        path = self._path("china_check_sample.txt")
         path.write_text(
             "1.1.1.1:80#US-1ms\n2.2.2.2:80#US-2ms\n3.3.3.3:80#US-3ms\n",
             encoding="utf-8",
@@ -276,7 +280,7 @@ class TestLoadSample(unittest.TestCase):
         self.assertEqual(used, path)
 
     def test_load_sample_skips_bad_lines(self):
-        path = Path("/tmp/opencode/china_check_sample_bad.txt")
+        path = self._path("china_check_sample_bad.txt")
         path.write_text("garbage\n4.4.4.4:80#US-4ms\n", encoding="utf-8")
         sample, _ = cc.load_sample(path, limit=0)
         self.assertEqual([s[1] for s in sample], ["4.4.4.4:80#US"])
