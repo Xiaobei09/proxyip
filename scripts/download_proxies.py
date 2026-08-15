@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Download, extract and organize the proxy list from zip.cm.edu.kg.
 
-The upstream archive is a zip of TXT files organised as ``<port>/<country>.txt``,
-where each file holds one IP per line. Outputs are written in the
-``ip:port#country`` format, e.g. ``1.2.3.4:443#US``.
+The primary source is the upstream ``all.json`` payload: a JSON array of
+entries shaped ``{"ip", "port": [...], "meta": {clientIp, country, asn, ...}}``.
+Entries are expanded into ``ip:port#country`` lines (e.g. ``1.2.3.4:443#US``)
+and the per-IP metadata (actual exit ``clientIp``, ASN, geo, colo) is persisted
+into ``data/upstream_meta.json`` for downstream consumers (e.g. the exit-family
+cross-check in ``exit_family.py``).
+
+If ``all.json`` is unreachable, the legacy zip archive of ``<port>/<country>.txt``
+files is used as a fallback so scheduled runs never break.
 
 Each run also archives the added/removed entries versus the previous committed
 list into ``data/diff/`` and records the change counts in ``data/history.jsonl``.
@@ -22,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SOURCE_URL = "https://zip.cm.edu.kg"
+ALL_JSON_URL = SOURCE_URL + "/all.json"
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
 COUNTRIES_DIR = ROOT / "data" / "countries"
@@ -113,6 +120,55 @@ def extract(content: bytes) -> dict:
             if ips:
                 by_port[port][country] = sorted(set(ips), key=ip_sort_key)
     return by_port
+
+
+META_KEYS = ("clientIp", "asn", "asOrganization", "country", "city", "region",
+             "continent")
+
+
+def extract_json(content: bytes) -> tuple[dict, dict]:
+    """Parse the upstream ``all.json`` payload.
+
+    Returns ``(by_port, meta_map)`` where ``by_port`` matches the structure of
+    :func:`extract` (``by_port[port][country]`` = sorted set of bare IPs) and
+    ``meta_map`` maps each proxy IP to a trimmed copy of its metadata with a
+    derived ``family`` field ("ipv6" when the actual exit ``clientIp`` is an
+    IPv6 address, otherwise "ipv4").
+    """
+    print("[2/3] Extracting all.json ...")
+    payload = json.loads(content.decode("utf-8", errors="replace"))
+    entries = payload.get("data")
+    if not isinstance(entries, list):
+        raise ValueError("all.json has no 'data' list")
+    by_port: dict[str, dict[str, list[str]]] = defaultdict(dict)
+    meta_map: dict[str, dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not is_valid_ip(entry.get("ip") or ""):
+            continue
+        ip = entry["ip"]
+        meta = entry.get("meta")
+        country = meta.get("country") if isinstance(meta, dict) else None
+        if not isinstance(country, str) or not country:
+            continue
+        ports = entry.get("port")
+        if not isinstance(ports, list):
+            continue
+        for port in ports:
+            if not isinstance(port, int):
+                continue
+            by_port[str(port)].setdefault(country, []).append(ip)
+        if isinstance(meta, dict):
+            trimmed = {k: meta.get(k) for k in META_KEYS}
+            client_ip = meta.get("clientIp")
+            trimmed["family"] = "ipv6" if ":" in str(client_ip) else "ipv4"
+            colo = meta.get("colo")
+            trimmed["colo_iata"] = colo.get("iata") if isinstance(colo, dict) else None
+            meta_map[ip] = trimmed
+    for port in by_port:
+        for country in by_port[port]:
+            by_port[port][country] = sorted(set(by_port[port][country]),
+                                            key=ip_sort_key)
+    return by_port, meta_map
 
 
 def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> dict:
@@ -321,10 +377,51 @@ def append_history(record: dict) -> bool:
     return True
 
 
+def write_upstream_meta(meta_map: dict) -> None:
+    """Persist per-IP upstream metadata for downstream consumers."""
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    meta_file = OUT_DIR / "upstream_meta.json"
+    tmp = meta_file.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps(meta_map, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(meta_file)
+    print(f"Wrote upstream metadata for {len(meta_map)} IPs")
+
+
+def load_source(url: str, timeout: int) -> tuple[dict, dict | None]:
+    """Download the source, preferring ``all.json`` with a zip fallback.
+
+    Returns ``(by_port, meta_map)``; ``meta_map`` is ``None`` when the legacy
+    zip archive was used (no upstream metadata available).
+    """
+    if url == SOURCE_URL:
+        for attempt in range(2):
+            try:
+                content = download(ALL_JSON_URL, timeout=timeout)
+                return extract_json(content)
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 0:
+                    print(f"all.json attempt {attempt + 1} failed ({exc}); retrying",
+                          file=sys.stderr)
+                else:
+                    print(f"all.json failed ({exc}); falling back to zip",
+                          file=sys.stderr)
+        content = download(SOURCE_URL, timeout=timeout)
+        return extract(content), None
+    content = download(url, timeout=timeout)
+    if url.endswith(".json"):
+        return extract_json(content)
+    return extract(content), None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "-u", "--url", default=SOURCE_URL, help="Source archive URL"
+        "-u", "--url", default=SOURCE_URL,
+        help="Source URL (default: upstream all.json with zip fallback)",
     )
     parser.add_argument(
         "-t", "--timeout", type=int, default=60, help="Download timeout (seconds)"
@@ -338,9 +435,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        content = download(args.url, timeout=args.timeout)
-        by_port = extract(content)
+        by_port, meta_map = load_source(args.url, timeout=args.timeout)
         stats, all_entries = write_outputs(by_port, per_country_limit=args.per_country_limit)
+        if meta_map is not None:
+            write_upstream_meta(meta_map)
         previous = load_previous_all()
         added, removed = write_diff(previous, all_entries)
         append_history(build_history_record(stats, added, removed))

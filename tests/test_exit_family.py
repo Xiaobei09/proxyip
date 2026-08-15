@@ -1,5 +1,6 @@
 """Tests for exit_family.py pure functions."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -178,6 +179,63 @@ class TestLoadSample(unittest.TestCase):
         path.write_text("garbage\n4.4.4.4:80#US-4ms\n", encoding="utf-8")
         sample = ef.load_sample(path, limit=0)
         self.assertEqual([s[1] for s in sample], ["4.4.4.4:80#US"])
+
+
+class TestUpstreamMeta(unittest.TestCase):
+    def setUp(self):
+        self.meta_file = Path("/tmp/opencode/upstream_meta_test.json")
+
+    def _write(self, data):
+        self.meta_file.write_text(json.dumps(data), encoding="utf-8")
+
+    def tearDown(self):
+        self.meta_file.unlink(missing_ok=True)
+
+    def test_missing_file_returns_empty(self):
+        self.meta_file.unlink(missing_ok=True)
+        self.assertEqual(ef.load_upstream_meta(self.meta_file), {})
+
+    def test_corrupt_file_returns_empty(self):
+        self.meta_file.write_text("{not json", encoding="utf-8")
+        self.assertEqual(ef.load_upstream_meta(self.meta_file), {})
+
+    def test_non_dict_returns_empty(self):
+        self.meta_file.write_text("[1,2]", encoding="utf-8")
+        self.assertEqual(ef.load_upstream_meta(self.meta_file), {})
+
+    def test_loads_map(self):
+        self._write({"1.1.1.1": {"clientIp": "2603:c020::1", "family": "ipv6"}})
+        data = ef.load_upstream_meta(self.meta_file)
+        self.assertEqual(data["1.1.1.1"]["family"], "ipv6")
+
+
+class TestCrossCheck(unittest.TestCase):
+    def _res(self, ip, family):
+        return {"line": f"{ip}:443#US", "ip": ip, "family": family}
+
+    def test_match_and_mismatch(self):
+        upstream = {
+            "1.1.1.1": {"clientIp": "2603:c020::1", "family": "ipv6"},
+            "2.2.2.2": {"clientIp": "2.2.2.2", "family": "ipv4"},
+        }
+        results = {
+            "1.1.1.1:443#US": self._res("1.1.1.1", "ipv6"),
+            "2.2.2.2:443#US": self._res("2.2.2.2", "ipv6"),
+            "3.3.3.3:443#US": self._res("3.3.3.3", "ipv4"),
+        }
+        ef.cross_check(results, upstream)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], True)
+        self.assertEqual(results["1.1.1.1:443#US"]["upstream_client_ip"], "2603:c020::1")
+        self.assertIs(results["2.2.2.2:443#US"]["upstream_match"], False)
+        self.assertIs(results["3.3.3.3:443#US"]["upstream_absent"], True)
+        self.assertNotIn("upstream_match", results["3.3.3.3:443#US"])
+
+    def test_unknown_probe_skips_comparison(self):
+        upstream = {"1.1.1.1": {"clientIp": "2603:c020::1", "family": "ipv6"}}
+        results = {"1.1.1.1:443#US": self._res("1.1.1.1", "unknown")}
+        ef.cross_check(results, upstream)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], None)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_absent"], False)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 
 ## 1. 项目概览
 
-代理池：从上游 zip 抓取代理 → 多维度整理 → 验证存活/测速 → 流媒体解锁与出口 IP 质量检测 → 统计图表。全部使用 **Python 标准库**，零第三方依赖，由两个 GitHub Actions 工作流全自动维护数据。
+代理池：从上游 `all.json` 抓取代理（失败回退 zip）→ 多维度整理 → 验证存活/测速 → 流媒体解锁与出口 IP 质量检测 → 统计图表。全部使用 **Python 标准库**，零第三方依赖，由 GitHub Actions 工作流全自动维护数据。
 
 ### 数据流水线
 
@@ -20,11 +20,12 @@ download_proxies.py ──▶ validate_proxies.py ──▶ quality_check.py ─
     data/ports/           data/valid/index.json streaming.json         data/badge.json
     data/sets/            data/valid/speed.json reputation.json
     data/diff/                                    all_rep.txt
+    data/upstream_meta.json
 ```
 
 | 阶段 | 脚本 | CI 触发器 | 说明 |
 |---|---|---|---|
-| 1 下载整理 | `scripts/download_proxies.py` | `update-proxies.yml` 每 30 分钟 | zip → 按端口/国家/集合/全量去重 |
+| 1 下载整理 | `scripts/download_proxies.py` | `update-proxies.yml` 每 30 分钟 | all.json（失败回退 zip）→ 按端口/国家/集合/全量去重 + 上游元数据落盘 |
 | 2 验证测速 | `scripts/validate_proxies.py` | 同上 | CONNECT + TLS 双检、真实下载测速 |
 | 3 质量检测 | `scripts/quality_check.py` | `quality-check.yml`（依赖阶段 1 成功） | 流媒体解锁、出口 IP 地理/类型、多源信誉分 |
 | 4 统计图表 | `scripts/generate_stats.py` | 阶段 2/3 之后 | `stats.json` + 9 张 SVG 图 |
@@ -37,16 +38,18 @@ CI 提交说明：两个工作流都以 `github-actions[bot]` 身份 **`git add 
 
 ```
 scripts/
-  download_proxies.py    阶段 1：下载、解压、整理、去重、差异归档
+  download_proxies.py    阶段 1：下载（all.json + zip 回退）、解压、整理、去重、差异归档、上游元数据
   validate_proxies.py    阶段 2：存活验证 + 测速（asyncio）
   quality_check.py       阶段 3：流媒体解锁 + 出口 IP 质量 + 多源信誉
   generate_stats.py      阶段 4：统计与 SVG 图表
+  china_check.py         独立 CI：大陆连通性检测（CF 启发式 + check-host + xxapi + ping.pe）
+  exit_family.py         独立 CI：实际出口家族检测与分离（tls trace + connect 双回显 + 上游交叉验证）
   generate_fingerprint.py 独立工具：内部自洽的浏览器指纹
 tests/                   stdlib unittest（discover -s tests）
   test_download.py  test_validate.py  test_quality.py
-  test_stats.py    test_fingerprint.py
+  test_stats.py    test_fingerprint.py  test_china_check.py  test_exit_family.py
 data/                    CI 托管（本地 .gitignore，勿手动提交）
-.github/workflows/       update-proxies.yml / quality-check.yml
+.github/workflows/       update-proxies.yml / quality-check.yml / china-check.yml / exit-family.yml
 README.md                用户文档（数据规范 + CLI 参考）
 AGENTS.md                AI 协作硬性规则（必提交必推送）
 DEVELOPMENT.md           本文
@@ -67,7 +70,7 @@ python3 --version        # 需 3.11+
 ## 4. 测试与检查
 
 ```bash
-python3 -m unittest discover -s tests          # 全部测试（当前 156 个，须全绿）
+python3 -m unittest discover -s tests          # 全部测试（当前 171 个，须全绿）
 python3 -m unittest tests/test_quality.py      # 单文件
 python3 -m py_compile scripts/*.py             # 语法检查
 ```
@@ -78,7 +81,7 @@ python3 -m py_compile scripts/*.py             # 语法检查
 ## 5. 脚本与 CLI 速查
 
 ```bash
-python3 scripts/download_proxies.py            # 阶段 1（默认下载 zip.cm.edu.kg）
+python3 scripts/download_proxies.py            # 阶段 1（默认上游 all.json，失败回退 zip）
 python3 scripts/validate_proxies.py            # 阶段 2（跑完为止，可加 --time-budget）
 python3 scripts/quality_check.py --help        # 阶段 3（勿直接全量跑，会改 data/valid）
 python3 scripts/china_check.py --dry-run       # 大陆连通性（先用 --dry-run 看计划）
@@ -96,7 +99,7 @@ python3 scripts/generate_fingerprint.py -n 5   # 指纹工具
 | `--workers` | 16 | 并发上限 |
 | `--dry-run` | 关 | 只输出计划，不发请求不写盘 |
 
-tls 方法走 CF trace（`cloudflare.com/cdn-cgi/trace` 回显 `ip=`），connect 方法走 `api.ipify.org`/`api6.ipify.org` 双回显。产出 `all_ipv4.txt`/`all_ipv6.txt`（双栈双入）、`exit_family.json`，并向 `all.txt`/`all_ltd.txt` 追加 `-V4`/`-V6`/`-DS`。详见 README「实际出口家族检测」章节。
+tls 方法走 CF trace（`cloudflare.com/cdn-cgi/trace` 回显 `ip=`），connect 方法走 `api.ipify.org`/`api6.ipify.org` 双回显。产出 `all_ipv4.txt`/`all_ipv6.txt`（双栈双入）、`exit_family.json`，并向 `all.txt`/`all_ltd.txt` 追加 `-V4`/`-V6`/`-DS`。若 `data/upstream_meta.json` 存在，逐条对照上游真实出口 `clientIp` 交叉验证（`exit_family.json` 补充 `upstream_client_ip`/`upstream_family`/`upstream_match`）。详见 README「实际出口家族检测」章节。
 
 ### china_check.py 关键参数
 
@@ -209,6 +212,7 @@ git pull --rebase origin main && git push    # 最多重试 3 次
 
 | 日期 | 提交 | 说明 |
 |---|---|---|
+| 2026-08-15 | `feat(quality): all.json upstream meta + exit family cross-check` | 下载主源升级为上游 `all.json`（zip 回退），逐 IP 元数据（真实出口 clientIp/ASN/地理/colo）落盘 `upstream_meta.json`；exit_family 对照上游交叉验证并记录 `upstream_match` |
 | 2026-08-15 | `ci: conflict-tolerant data commit in workflows` | 修复两个工作流并发提交 `data/` 导致的 rebase 冲突失败；升级 checkout/setup-python 消除 Node 20 告警 |
 | 2026-08-15 | `feat(quality): multi-source weighted IP reputation` | 多源加权信誉（netcoffee/ncgy/ip-api/ipdata/torlist + opt-in getipintel/ipapi_is） |
 | 2026-08-13 | `feat(quality): streaming & exit IP quality check with dedicated CI` | 质量检测独立 CI 与数据产物 |
