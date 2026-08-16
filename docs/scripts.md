@@ -61,8 +61,11 @@
 | `chart_combo.svg` | 双轴复合趋势（unique/alive 左轴 + 存活率右轴） |
 | `chart_latency.svg` | 存活代理延迟分桶条形图（毫秒） |
 | `chart_speed.svg` | 存活代理速度分桶条形图（MB/s） |
-| `chart_streaming.svg` | 流媒体各服务解锁数条形图（质量 CI） |
-| `chart_streaming.svg` | 流媒体各服务解锁数条形图（质量 CI 生成） |
+| `chart_streaming.svg` | 流媒体各服务 ok/blocked/error 堆叠条形图 |
+| `chart_sets.svg` | 各命名集合存活代理条形图 |
+| `chart_cn.svg` | 大陆连通性 verdict 分布条形图 |
+| `chart_family.svg` | 实际出口 IP 家族分布条形图 |
+| `chart_rep.svg` | 信誉分分布条形图 |
 
 ### `scripts/quality_check.py`
 
