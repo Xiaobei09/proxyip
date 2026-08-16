@@ -66,6 +66,8 @@ ABUSE_FILE = VALID_DIR / "abuse.json"
 QUALITY_META_FILE = VALID_DIR / "quality_meta.json"
 REPUTATION_FILE = VALID_DIR / "reputation.json"
 REP_RANK_FILE = VALID_DIR / "all_rep.txt"
+REP_CACHE_FILE = VALID_DIR / "reputation_cache.json"
+REP_CACHE_TTL = 7 * 24 * 3600
 DEFAULT_SOURCE = VALID_DIR / "all_ltd.txt"
 
 REP_RISK_HIGH = 30
@@ -73,6 +75,19 @@ REP_RISK_MEDIUM = 75
 
 REP_WORKERS = 10
 REP_DELAY = 0.15
+
+# Per-IP reputation API sources whose signals are cached (static lists and the
+# geo ip-api source are re-computed fresh every run instead).
+CACHEABLE_SOURCES = frozenset((
+    "netcoffee",
+    "ncgy",
+    "ipdata",
+    "getipintel",
+    "ipapi_is",
+    "ipquery",
+    "ffraud",
+    "whatismyip",
+))
 
 NETCOFFEE_URL = "https://ip.net.coffee/api/iprisk/{ip}"
 NETCOFFEE_TIMEOUT = 8
@@ -1692,10 +1707,44 @@ async def run_abuse(
     return abuse_map
 
 
+def load_rep_cache() -> dict:
+    """Load the reputation signal cache; corrupt/missing files read as empty."""
+    try:
+        data = json.loads(REP_CACHE_FILE.read_text(encoding="utf-8"))
+        proxies = data.get("proxies") or {}
+        return {ip: e for ip, e in proxies.items() if isinstance(e, dict)}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_rep_cache(cache: dict) -> None:
+    write_json(REP_CACHE_FILE, keyed_json(cache))
+
+
+def cached_signal(
+    cache: dict, ip: str, source: str, now: float, ttl: int
+) -> dict | None:
+    """Fresh cached signal for ``ip``/``source``, else ``None``."""
+    if ttl <= 0:
+        return None
+    entry = cache.get(ip)
+    if not entry:
+        return None
+    if (entry.get("ts") or 0) + ttl < now:
+        return None
+    sig = entry.get("signals", {}).get(source)
+    return sig if isinstance(sig, dict) else None
+
+
 async def lookup_all_risk(
     ips: list, args: argparse.Namespace, asn_map: dict | None = None
 ) -> dict:
-    """Query all enabled reputation sources; ``{ip: {source: signal}}``."""
+    """Query all enabled reputation sources; ``{ip: {source: signal}}``.
+
+    Per-IP API source signals are served from ``REP_CACHE_FILE`` when still
+    fresh (``--rep-cache-ttl``); only missing/expired IPs are re-queried.
+    Static-list signals (torlist/abuse/ASN lists) are re-computed every run.
+    """
     sources = args.reputation_sources
     if not sources:
         return {}
@@ -1704,36 +1753,48 @@ async def lookup_all_risk(
     def put(name: str, ip: str, signal) -> None:
         risk_data.setdefault(ip, {})[name] = signal
 
+    cache_ttl = 0 if args.no_rep_cache else args.rep_cache_ttl
+    cache = load_rep_cache() if cache_ttl else {}
+    now = time.time()
+    uniq = list(dict.fromkeys(ips))
+
+    async def cached_batch(
+        name: str, fn, cap: int = 0, workers: int = REP_WORKERS,
+        delay: float = REP_DELAY,
+    ) -> None:
+        """Fill from fresh cache, query only missing/expired IPs, cache back."""
+        need = []
+        for ip in uniq:
+            sig = cached_signal(cache, ip, name, now, cache_ttl)
+            if sig is not None:
+                put(name, ip, sig)
+            else:
+                need.append(ip)
+        res = await batch_sync(
+            need, fn, cap=cap, workers=workers, delay=delay
+        )
+        for ip, sig in res.items():
+            put(name, ip, sig)
+            entry = cache.setdefault(ip, {"ts": now, "signals": {}})
+            entry["signals"][name] = sig
+
     pacing = SOURCE_PACING
     if "netcoffee" in sources:
         workers, delay = pacing.get("netcoffee", (REP_WORKERS, REP_DELAY))
-        for ip, sig in (
-            await batch_sync(ips, netcoffee_lookup_sync, workers=workers, delay=delay)
-        ).items():
-            put("netcoffee", ip, sig)
+        await cached_batch("netcoffee", netcoffee_lookup_sync, workers=workers, delay=delay)
     if "ncgy" in sources:
         workers, delay = pacing.get("ncgy", (REP_WORKERS, REP_DELAY))
-        for ip, sig in (
-            await batch_sync(ips, ncgy_lookup_sync, workers=workers, delay=delay)
-        ).items():
-            put("ncgy", ip, sig)
+        await cached_batch("ncgy", ncgy_lookup_sync, workers=workers, delay=delay)
     if "ipdata" in sources:
-        for ip, sig in (
-            await batch_sync(
-                ips, ipdata_lookup_sync,
-                cap=IPDATA_CAP, workers=2, delay=0.8,
-            )
-        ).items():
-            put("ipdata", ip, sig)
+        await cached_batch(
+            "ipdata", ipdata_lookup_sync, cap=IPDATA_CAP, workers=2, delay=0.8
+        )
     if "getipintel" in sources:
         if args.getipintel_email:
             fn = lambda ip: getipintel_lookup_sync(ip, args.getipintel_email)
-            for ip, sig in (
-                await batch_sync(
-                    ips, fn, cap=GETIPINTEL_CAP, workers=1, delay=4
-                )
-            ).items():
-                put("getipintel", ip, sig)
+            await cached_batch(
+                "getipintel", fn, cap=GETIPINTEL_CAP, workers=1, delay=4
+            )
         else:
             print(
                 "Warning: GETIPINTEL_EMAIL not set; skipping getipintel source",
@@ -1741,35 +1802,23 @@ async def lookup_all_risk(
             )
     if "ipapi_is" in sources:
         workers, delay = pacing.get("ipapi_is", (REP_WORKERS, REP_DELAY))
-        for ip, sig in (
-            await batch_sync(ips, ipapi_is_lookup_sync, workers=workers, delay=delay)
-        ).items():
-            put("ipapi_is", ip, sig)
+        await cached_batch("ipapi_is", ipapi_is_lookup_sync, workers=workers, delay=delay)
     if "ipquery" in sources:
         workers, delay = pacing.get("ipquery", (REP_WORKERS, REP_DELAY))
-        for ip, sig in (
-            await batch_sync(ips, ipquery_lookup_sync, workers=workers, delay=delay)
-        ).items():
-            put("ipquery", ip, sig)
+        await cached_batch("ipquery", ipquery_lookup_sync, workers=workers, delay=delay)
     if "ffraud" in sources:
         workers, delay = pacing.get("ffraud", (REP_WORKERS, REP_DELAY))
-        for ip, sig in (
-            await batch_sync(ips, ffraud_lookup_sync, workers=workers, delay=delay)
-        ).items():
-            put("ffraud", ip, sig)
+        await cached_batch("ffraud", ffraud_lookup_sync, workers=workers, delay=delay)
     if "whatismyip" in sources:
         workers, delay = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
-        for ip, sig in (
-            await batch_sync(ips, whatismyip_lookup_sync, workers=workers, delay=delay)
-        ).items():
-            put("whatismyip", ip, sig)
+        await cached_batch("whatismyip", whatismyip_lookup_sync, workers=workers, delay=delay)
     if "torlist" in sources:
         tor = await fetch_torlist()
-        for ip in dict.fromkeys(ips):
+        for ip in uniq:
             if ip in tor:
                 put("torlist", ip, {"is_tor": True})
     static = await fetch_static_lists(sources)
-    for ip in dict.fromkeys(ips):
+    for ip in uniq:
         if ip in static["abuse_list"]:
             put("abuse_list", ip, {"is_abuse": True})
         asn = (asn_map or {}).get(ip)
@@ -1781,6 +1830,13 @@ async def lookup_all_risk(
             put("vpn_asn", ip, {"is_vpn": True, "asn": asn})
         if asn in static["resproxy_asn"]:
             put("resproxy_asn", ip, {"is_proxy": True, "asn": asn})
+    if cache_ttl:
+        pruned = {
+            ip: entry
+            for ip, entry in cache.items()
+            if entry.get("ts", 0) + cache_ttl >= now
+        }
+        save_rep_cache(pruned)
     return risk_data
 
 
@@ -1893,6 +1949,17 @@ def main(argv: list[str] | None = None) -> int:
         dest="reputation_weights_override",
         default=None,
         help="Comma list of name:weight overrides, e.g. netcoffee:40,ncgy:20",
+    )
+    parser.add_argument(
+        "--rep-cache-ttl",
+        type=int,
+        default=REP_CACHE_TTL,
+        help="Reputation signal cache TTL in seconds (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--no-rep-cache",
+        action="store_true",
+        help="Disable the reputation signal cache",
     )
     parser.add_argument(
         "-t", "--timeout", type=int, default=TIMEOUT,
