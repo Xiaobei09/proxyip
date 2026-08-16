@@ -30,7 +30,10 @@ Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
 lines as ``-<streaming>-<type>-<rep>``, e.g.
 ``1.2.3.4:443#US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`` (streaming tokens
 space-separated, IP-type tokens after a second dash, then the 0-100 reputation
-score). Lines without results stay untouched.
+score). When the exit region is known it is inserted right after the entry
+country code as ``<cc>→<exit>`` (CF edge ``loc`` airport code for ``tls``
+proxies, exit-IP country otherwise), e.g. ``1.2.3.4:443#US→LAX-120ms-...``.
+Lines without results stay untouched.
 """
 
 import argparse
@@ -442,7 +445,7 @@ def parse_prime(status: int | None, headers: dict, body: bytes) -> dict:
 
 def parse_openai(status: int | None, headers: dict, body: bytes) -> dict:
     if status == 200:
-        match = re.search(r"^loc=([A-Z]{2})", body.decode("latin-1"), re.M)
+        match = re.search(r"^loc=([A-Z]{2,4})", body.decode("latin-1"), re.M)
         return {"status": "ok", "region": match.group(1) if match else None}
     if status == 403:
         return {"status": "blocked"}
@@ -1455,30 +1458,64 @@ def build_annotations(results: dict, ipinfo: dict, rep_map: dict) -> dict[str, s
     return annotations
 
 
-def annotate_text(text: str, annotations: dict) -> tuple[str, bool]:
+def build_exits(results: dict, ipinfo: dict) -> dict[str, str]:
+    """Exit region per key: CF edge ``loc`` for ``tls`` proxies, else the exit-IP
+    country. Used to annotate ``ip:port#<entry>→<exit>`` on valid lines."""
+    exits: dict[str, str] = {}
+    for res in results.values():
+        if res.get("tls"):
+            region = (res.get("streaming") or {}).get("openai", {}).get("region")
+        else:
+            region = (ipinfo.get(res["key"]) or {}).get("country_code")
+        if region:
+            exits[res["key"]] = region
+    return exits
+
+
+EXIT_REGION_RE = re.compile(r"^(.*#[^A-Z]*[A-Z]{2})")
+
+
+def insert_exit_region(line: str, exit_region: str) -> str:
+    """Insert ``→<exit>`` right after the entry country code (idempotent)."""
+    if not exit_region or "→" in line:
+        return line
+    m = EXIT_REGION_RE.match(line)
+    if not m:
+        return line
+    return line[: m.end(1)] + "→" + exit_region + line[m.end(1):]
+
+
+def annotate_text(
+    text: str, annotations: dict, exits: dict | None = None
+) -> tuple[str, bool]:
     out = []
     changed = False
+    exits = exits or {}
     for line in text.splitlines():
         if not line:
             continue
         key = line_to_key(line)
         ann = annotations.get(key) if key else None
-        if ann and not line.rstrip().endswith("-" + ann):
-            out.append(line + "-" + ann)
+        exit_region = exits.get(key) if key else None
+        out_line = insert_exit_region(line, exit_region) if exit_region else line
+        if ann and not out_line.rstrip().endswith("-" + ann):
+            out_line = out_line + "-" + ann
+        if out_line != line:
             changed = True
-        else:
-            out.append(line)
+        out.append(out_line)
     return "\n".join(out) + "\n", changed
 
 
-def annotate_valid_files(annotations: dict) -> None:
+def annotate_valid_files(annotations: dict, exits: dict | None = None) -> None:
     files: list[Path] = [VALID_DIR / "all.txt", VALID_DIR / "all_ltd.txt"]
     for sub in ("countries", "ports", "sets"):
         files.extend(sorted((VALID_DIR / sub).glob("*.txt")))
     for path in files:
         if not path.exists():
             continue
-        text, changed = annotate_text(path.read_text(encoding="utf-8"), annotations)
+        text, changed = annotate_text(
+            path.read_text(encoding="utf-8"), annotations, exits
+        )
         if changed:
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(text, encoding="utf-8")
@@ -1780,7 +1817,7 @@ async def run(args: argparse.Namespace) -> int:
         write_json(ABUSE_FILE, keyed_json(abuse_map))
     meta = build_meta(results, ipinfo, streaming, abuse_map)
     write_json(QUALITY_META_FILE, meta)
-    annotate_valid_files(annotations)
+    annotate_valid_files(annotations, build_exits(results, ipinfo))
 
     print(
         f"streaming_ok={meta['streaming_ok']} "
