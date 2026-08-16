@@ -33,17 +33,17 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from download_proxies import (
-    COUNTRY_SETS,
+from common import (
+    INDEX_FILE,
     OUT_DIR,
     PER_COUNTRY_LIMIT,
-    SMALL_SETS,
+    SPEED_FILE,
+    VALID_DIR,
+    VALID_HISTORY_FILE,
+    try_connect,
 )
+from download_proxies import COUNTRY_SETS, SMALL_SETS
 
-VALID_DIR = OUT_DIR / "valid"
-VALID_HISTORY_FILE = VALID_DIR / "history.jsonl"
-INDEX_FILE = VALID_DIR / "index.json"
-SPEED_FILE = VALID_DIR / "speed.json"
 MAX_HISTORY_RECORDS = 1000
 
 SPEED_HOST = "cdnjs.cloudflare.com"
@@ -161,31 +161,6 @@ async def open_conn(
         return await asyncio.open_connection(
             ip, int(port), ssl=ctx, server_hostname=sni
         )
-
-
-async def try_connect(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    host: str,
-    target_port: int,
-) -> bool:
-    req = (
-        f"CONNECT {host}:{target_port} HTTP/1.1\r\n"
-        f"Host: {host}:{target_port}\r\n"
-        "Proxy-Connection: Keep-Alive\r\n\r\n"
-    )
-    writer.write(req.encode("ascii"))
-    await writer.drain()
-    buf = b""
-    try:
-        while b"\r\n\r\n" not in buf:
-            chunk = await asyncio.wait_for(reader.read(4096), timeout=READ_CAP)
-            if not chunk:
-                return False
-            buf += chunk
-    except (asyncio.TimeoutError, ConnectionError, OSError):
-        return False
-    return b" 200 " in buf.split(b"\r\n", 1)[0]
 
 
 async def check_proxy(

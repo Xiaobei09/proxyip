@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from download_proxies import OUT_DIR
+from common import OUT_DIR
 
 WIDTH = 800
 HEIGHT = 300

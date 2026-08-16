@@ -39,18 +39,18 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from download_proxies import OUT_DIR
-from quality_check import (
+from common import (
+    VALID_DIR,
     build_request,
     keyed_json,
     line_to_key,
     load_methods,
+    OUT_DIR,
     parse_headers,
     parse_ltd_line,
     write_json,
 )
 
-VALID_DIR = OUT_DIR / "valid"
 DEFAULT_SOURCE = VALID_DIR / "all.txt"
 ALL_V4_FILE = VALID_DIR / "all_ipv4.txt"
 ALL_V6_FILE = VALID_DIR / "all_ipv6.txt"
