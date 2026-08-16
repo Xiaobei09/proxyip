@@ -42,6 +42,7 @@ from pathlib import Path
 from common import (
     VALID_DIR,
     build_request,
+    has_token,
     keyed_json,
     line_to_key,
     load_methods,
@@ -50,6 +51,7 @@ from common import (
     parse_ltd_line,
     write_json,
     write_text_if_changed,
+    _note,
 )
 
 DEFAULT_SOURCE = VALID_DIR / "all.txt"
@@ -278,28 +280,15 @@ def check_one(item, methods: dict, timeout: float):
 
 # ------------------------------------------------------------ 备注与分离
 
-def _note(line: str) -> str:
-    """``#`` 后、国家码之后的备注段（不含 CC）。"""
-    parsed = parse_ltd_line(line)
-    if not parsed:
-        return ""
-    addr, rest = line.rsplit("#", 1)
-    i = 0
-    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-        i += 1
-    cc = "ALL" if rest[i:].startswith("ALL-") else rest[i : i + 2]
-    return rest[i + len(cc):]
-
-
 def has_family_note(line: str) -> bool:
-    return bool(re.search(r"(?:^|-)(V4|V6|DS)(?:$|-)", _note(line)))
+    return any(has_token(_note(line), t) for t in ("V4", "V6", "DS"))
 
 
 def annotate_family(line: str, family: str) -> str:
     tok = FAMILY_TOKENS.get(family)
     if not tok:
         return line
-    if re.search(rf"(?:^|-){tok}(?:$|-)", _note(line)):
+    if has_token(_note(line), tok):
         return line
     return line + "-" + tok
 

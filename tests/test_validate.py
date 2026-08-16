@@ -297,3 +297,38 @@ class TestWriteHelpers(unittest.TestCase):
         self.assertEqual(json.loads(j.read_text()), {"proxies": {"a": 1}})
         self.cmn.write_json(j, {"proxies": {"a": 2}})
         self.assertEqual(json.loads(j.read_text()), {"proxies": {"a": 2}})
+
+
+class TestParseLineAndToken(unittest.TestCase):
+    """common.parse_line / common.has_token canonical parsing."""
+
+    def setUp(self):
+        import common
+        self.cmn = common
+
+    def test_parse_line_full(self):
+        got = self.cmn.parse_line("1.2.3.4:443#US-120ms-NF(US) DC")
+        self.assertEqual(got, ("1.2.3.4:443#US", "1.2.3.4", "443", "US", "-120ms-NF(US) DC"))
+
+    def test_parse_line_emoji_flag(self):
+        got = self.cmn.parse_line("1.2.3.4:443#\U0001F1FA\U0001F1F8US-1ms")
+        self.assertIsNotNone(got)
+        self.assertEqual(got[3], "US")
+        self.assertEqual(got[4], "-1ms")
+
+    def test_parse_line_exit_region(self):
+        got = self.cmn.parse_line("1.2.3.4:443#US\u2192LAX-8ms-GPT-CF-63")
+        self.assertEqual(got[2], "443")
+        self.assertEqual(got[4], "\u2192LAX-8ms-GPT-CF-63")
+
+    def test_parse_line_bad(self):
+        self.assertIsNone(self.cmn.parse_line("not a line"))
+        self.assertIsNone(self.cmn.parse_line("1.2.3.4:443"))
+
+    def test_has_token_boundaries(self):
+        self.assertTrue(self.cmn.has_token("-120ms-CF-63", "CF"))
+        self.assertTrue(self.cmn.has_token("CF-63", "CF"))
+        self.assertTrue(self.cmn.has_token("NF(US) D+ YT-GPT-DC-72", "GPT"))
+        self.assertFalse(self.cmn.has_token("-120ms-CN-V4", "CF"))
+        self.assertFalse(self.cmn.has_token("-V4", "V6"))
+        self.assertFalse(self.cmn.has_token("-1ms", "CF"))
