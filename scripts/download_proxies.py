@@ -578,11 +578,16 @@ def append_history(record: dict) -> bool:
 
 
 def write_upstream_meta(meta_map: dict) -> None:
-    """Persist per-IP upstream metadata for downstream consumers."""
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    """Persist per-IP upstream metadata for downstream consumers.
+
+    Stored as ``{"proxies": {...}}`` (keyed schema, consistent with the other
+    data JSON files).
+    """
     write_text_if_changed(
         OUT_DIR / "upstream_meta.json",
-        json.dumps(meta_map, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        json.dumps(
+            {"proxies": meta_map}, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
         + "\n",
     )
     print(f"Wrote upstream metadata for {len(meta_map)} IPs")

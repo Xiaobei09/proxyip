@@ -223,6 +223,11 @@ class TestUpstreamMeta(unittest.TestCase):
         data = ef.load_upstream_meta(self.meta_file)
         self.assertEqual(data["1.1.1.1"]["family"], "ipv6")
 
+    def test_loads_wrapped_map(self):
+        self._write({"proxies": {"1.1.1.1": {"family": "ipv6"}}})
+        data = ef.load_upstream_meta(self.meta_file)
+        self.assertEqual(data["1.1.1.1"]["family"], "ipv6")
+
 
 class TestCrossCheck(unittest.TestCase):
     def _res(self, ip, family):

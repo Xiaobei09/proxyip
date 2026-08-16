@@ -221,7 +221,7 @@ class TestWriteUpstreamMeta(unittest.TestCase):
         with unittest.mock.patch.object(dp, "OUT_DIR", base):
             dp.write_upstream_meta({"1.1.1.1": {"family": "ipv6"}})
         data = json.loads((base / "upstream_meta.json").read_text())
-        self.assertEqual(data["1.1.1.1"]["family"], "ipv6")
+        self.assertEqual(data["proxies"]["1.1.1.1"]["family"], "ipv6")
         self.assertFalse((base / "upstream_meta.json.tmp").exists())
 
 
