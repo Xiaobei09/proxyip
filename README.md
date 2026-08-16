@@ -61,8 +61,13 @@ head -1 data/valid/all.txt                  # 当前延迟最低的存活代理�
 data/valid/all_ltd.txt                      # 每国按实测速度最快的 20 条限量清单
 data/valid/countries/US/all.txt            # 仅美国的存活代理（含延迟/速度）
 data/valid/countries/US/ltd.txt            # 该国限量（每国最快 20 条，速度降序）
+data/valid/countries/US/v4.txt             # 该国出口为 IPv4 的代理（仅 v4-only，不含双栈）
+data/valid/countries/US/46.txt             # 该国出口为双栈（v4+v6）的代理
+data/valid/countries/US/cn.txt             # 该国大陆可达的代理
+data/valid/countries/US/cn4.txt            # 该国大陆可达且出口为 IPv4 的代理
 data/valid/countries/US/rep.txt            # 该国按信誉分降序（质量 CI 生成）
-data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录三件套）
+data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录多件套）
+data/valid/all_46.txt                      # 全部出口为双栈的代理（根级分组）
 data/valid/ports/443.txt                    # 仅 443 端口的存活代理
 data/valid/speed.json                       # 每存活代理的实测速度（MB/s，按速度降序）
 data/sets/hot.txt                           # 热门国家集合

@@ -19,6 +19,14 @@ per-set directories holding ``all.txt``, ``ltd.txt`` (and, after the quality
 run, ``rep.txt``). Lines use the ``ip:port#<flag><cc>-<latency>ms-<speed>MB/s``
 format (speed omitted when the test failed). Proxies that connect at the TCP
 level but fail both checks are retried once.
+
+Alongside ``all.txt`` each country/set directory also gets family and
+mainland-China group files: ``v4.txt`` (IPv4-only exit), ``v6.txt``
+(IPv6-only exit), ``46.txt`` (dual-stack exit), ``cn.txt`` (China-reachable),
+``cn4.txt`` / ``cn6.txt`` / ``cn46.txt`` (China-reachable × family), plus a
+``*_ltd.txt`` speed-limited variant per group. Family comes from
+``exit_family.json`` (falling back to ``-V4``/``-V6``/``-DS`` line notes);
+China reachability from the ``-CN`` line note.
 """
 
 import argparse
@@ -41,6 +49,7 @@ from common import (
     SPEED_FILE,
     VALID_DIR,
     VALID_HISTORY_FILE,
+    has_token,
     parse_line,
     try_connect,
     write_text_if_changed,
@@ -156,6 +165,64 @@ def merge_old_note(base_line: str, old_note: str) -> str:
     if not sep:
         return base_line + rest
     return head + region + sep + tail + rest
+
+
+GROUP_NAMES = ("v4", "v6", "46", "cn", "cn4", "cn6", "cn46")
+ROOT_GROUP_FILES = ("all_46", "all_cn4", "all_cn6", "all_cn46")
+
+
+def load_family_map(path: Path | None = None) -> dict:
+    """``exit_family.json`` → ``{key: family}``；缺失/损坏 → ``{}``。
+
+    ``key`` 为 ``ip:port#cc``，``family`` 取 ``ipv4``/``ipv6``/``dual``。
+    """
+    path = path or VALID_DIR / "exit_family.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    proxies = data.get("proxies", data)
+    return {
+        key: meta["family"]
+        for key, meta in proxies.items()
+        if isinstance(meta, dict) and meta.get("family") in ("ipv4", "ipv6", "dual")
+    }
+
+
+def family_of(entry: str, note: str, families: dict) -> str | None:
+    """入口家族：优先 ``exit_family.json``，缺失时按行内 ``-V4``/``-V6``/``-DS`` 兜底。"""
+    fam = families.get(entry)
+    if fam in ("ipv4", "ipv6", "dual"):
+        return fam
+    if has_token(note, "DS"):
+        return "dual"
+    if has_token(note, "V4"):
+        return "ipv4"
+    if has_token(note, "V6"):
+        return "ipv6"
+    return None
+
+
+def classify_groups(family: str | None, is_cn: bool) -> set[str]:
+    """按 家族 × 大陆可达 归组。unknown 家族仅可能进 ``cn`` 组。"""
+    groups: set[str] = set()
+    if family == "ipv4":
+        groups.add("v4")
+    elif family == "ipv6":
+        groups.add("v6")
+    elif family == "dual":
+        groups.add("46")
+    if is_cn:
+        groups.add("cn")
+        if family == "ipv4":
+            groups.add("cn4")
+        elif family == "ipv6":
+            groups.add("cn6")
+        elif family == "dual":
+            groups.add("cn46")
+    return groups
 
 
 def parse_entries(lines: list[str]) -> list[tuple[str, str, str]]:
@@ -365,8 +432,11 @@ def write_speed(alive: dict) -> None:
 def write_valid_outputs(
     alive: dict[str, tuple[str, str, str, str, float, float | None]],
     per_country_limit: int,
+    families: dict | None = None,
 ) -> dict:
     VALID_DIR.mkdir(parents=True, exist_ok=True)
+    if families is None:
+        families = load_family_map()
 
     old_notes: dict[str, str] = {}
     old_all = VALID_DIR / "all.txt"
@@ -390,6 +460,40 @@ def write_valid_outputs(
             return (0, -speed, 0.0)
         return (1, 0.0, alive[entry][4])
 
+    def entry_groups(entry: str) -> set[str]:
+        text = line(entry)
+        parsed = parse_line(text)
+        note = parsed[4] if parsed else ""
+        return classify_groups(family_of(entry, note, families), has_token(note, "CN"))
+
+    def group_map(entries: list[str]) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {g: [] for g in GROUP_NAMES}
+        for e in entries:
+            for g in entry_groups(e):
+                groups[g].append(e)
+        return groups
+
+    def write_group_files(
+        directory: Path, grouped: dict[str, list[str]], ltd: dict[str, list[str]] | None = None
+    ) -> None:
+        """写全量分组文件；``ltd`` 提供时写 ``*_ltd`` 分组，否则清理残留。"""
+        for g in GROUP_NAMES:
+            path = directory / f"{g}.txt"
+            if grouped[g]:
+                write_text_if_changed(
+                    path, "\n".join(line(e) for e in grouped[g]) + "\n"
+                )
+            elif path.exists():
+                path.unlink()
+            ltd_path = directory / f"{g}_ltd.txt"
+            entries = (ltd or {}).get(g, [])
+            if entries:
+                write_text_if_changed(
+                    ltd_path, "\n".join(line(e) for e in entries) + "\n"
+                )
+            elif ltd_path.exists():
+                ltd_path.unlink()
+
     by_country: dict[str, list[str]] = defaultdict(list)
     by_port: dict[str, list[str]] = defaultdict(list)
     for entry in ordered:
@@ -404,6 +508,7 @@ def write_valid_outputs(
     ports_dir.mkdir(parents=True, exist_ok=True)
     sets_dir.mkdir(parents=True, exist_ok=True)
 
+    country_group_ltd: dict[str, dict[str, list[str]]] = {}
     for country in sorted(by_country):
         if country == "ALL":
             continue
@@ -412,6 +517,13 @@ def write_valid_outputs(
         write_text_if_changed(
             cdir / "all.txt", "\n".join(line(e) for e in by_country[country]) + "\n"
         )
+        grouped = group_map(by_country[country])
+        country_group_ltd[country] = {
+            g: sorted(grouped[g], key=ltd_key)[:per_country_limit]
+            if per_country_limit > 0 else []
+            for g in GROUP_NAMES
+        }
+        write_group_files(cdir, grouped, country_group_ltd[country])
         if per_country_limit > 0:
             entries = sorted(by_country[country], key=ltd_key)[:per_country_limit]
             write_text_if_changed(
@@ -448,6 +560,20 @@ def write_valid_outputs(
             sdir / "all.txt", "\n".join(line(e) for e in full) + "\n"
         )
         set_counts[name] = len(full)
+        grouped = group_map(full)
+        set_group_ltd = {
+            g: sorted(
+                [
+                    e
+                    for cc in countries
+                    if cc in country_group_ltd
+                    for e in country_group_ltd[cc].get(g, [])
+                ],
+                key=ltd_key,
+            )
+            for g in GROUP_NAMES
+        }
+        write_group_files(sdir, grouped, set_group_ltd)
         if per_country_limit > 0:
             ltd: list[str] = []
             for cc in countries:
@@ -476,6 +602,33 @@ def write_valid_outputs(
             VALID_DIR / "all_ltd.txt", "\n".join(line(e) for e in ltd_all) + "\n"
         )
         set_counts["all_ltd"] = len(ltd_all)
+    root_grouped = group_map(ordered)
+    for name in ROOT_GROUP_FILES:
+        g = name[len("all_"):]
+        path = VALID_DIR / f"{name}.txt"
+        if root_grouped[g]:
+            write_text_if_changed(
+                path, "\n".join(line(e) for e in root_grouped[g]) + "\n"
+            )
+        elif path.exists():
+            path.unlink()
+        ltd_path = VALID_DIR / f"{name}_ltd.txt"
+        ltd = []
+        if per_country_limit > 0:
+            ltd = sorted(
+                [
+                    e
+                    for cc in country_group_ltd
+                    for e in country_group_ltd[cc].get(g, [])
+                ],
+                key=ltd_key,
+            )
+        if ltd:
+            write_text_if_changed(
+                ltd_path, "\n".join(line(e) for e in ltd) + "\n"
+            )
+        elif ltd_path.exists():
+            ltd_path.unlink()
     write_index(ordered, alive)
     write_speed(alive)
     return {

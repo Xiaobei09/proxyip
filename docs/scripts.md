@@ -40,6 +40,8 @@
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 | `--per-country-limit` | `_ltd` 输出每国条数 | 20 |
 
+除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（缺失时回退行内 `-V4`/`-V6`/`-DS`），大陆可达取自行内 `-CN`；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
+
 ### `scripts/generate_stats.py`
 
 读取历史与验证汇总，生成统计与一组零依赖 SVG 图表。
