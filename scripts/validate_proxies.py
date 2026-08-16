@@ -24,6 +24,7 @@ level but fail both checks are retried once.
 import argparse
 import asyncio
 import json
+import re
 import shutil
 import ssl
 import statistics
@@ -40,6 +41,7 @@ from common import (
     SPEED_FILE,
     VALID_DIR,
     VALID_HISTORY_FILE,
+    parse_line,
     try_connect,
     write_text_if_changed,
 )
@@ -133,6 +135,27 @@ def fmt_entry(
     if speed is not None:
         parts.append(f"{speed:.2f}MB/s")
     return f"{ip}:{port}#{'-'.join(parts)}"
+
+
+def merge_old_note(base_line: str, old_note: str) -> str:
+    """把旧行备注里的静态 token 接回重生成的基础行。
+
+    ``old_note`` 形如 ``→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72-V4-CN``：
+    延迟与测速会被本次重新计算，故剥离；可选的出口区域（``→XXX``）插回
+    延迟横线之前，其余静态 token 追加到行尾。存活 key 跨 update 周期保留
+    注解，使 quality/china/exit 标注不再被基础重生成抹平。
+    """
+    match = re.match(r"^(→[A-Z0-9]+)?", old_note)
+    region = match.group(1) or ""
+    rest = old_note[len(region):]
+    rest = re.sub(r"^-[0-9]+(?:\.[0-9]+)?ms", "", rest)
+    rest = re.sub(r"^-[0-9]+(?:\.[0-9]+)?MB/s", "", rest)
+    if not region and not rest:
+        return base_line
+    head, sep, tail = base_line.partition("-")
+    if not sep:
+        return base_line + rest
+    return head + region + sep + tail + rest
 
 
 def parse_entries(lines: list[str]) -> list[tuple[str, str, str]]:
@@ -345,11 +368,21 @@ def write_valid_outputs(
 ) -> dict:
     VALID_DIR.mkdir(parents=True, exist_ok=True)
 
+    old_notes: dict[str, str] = {}
+    old_all = VALID_DIR / "all.txt"
+    if old_all.exists():
+        for old_line in old_all.read_text(encoding="utf-8").splitlines():
+            parsed = parse_line(old_line)
+            if parsed:
+                old_notes[parsed[0]] = parsed[4]
+
     ordered = sorted(alive, key=lambda e: (alive[e][4], e))
 
     def line(entry: str) -> str:
         ip, port, cc, _m, latency, speed = alive[entry]
-        return fmt_entry(ip, port, cc, latency, speed)
+        base = fmt_entry(ip, port, cc, latency, speed)
+        old = old_notes.get(entry)
+        return merge_old_note(base, old) if old else base
 
     def ltd_key(entry: str) -> tuple:
         speed = alive[entry][5]

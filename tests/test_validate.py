@@ -85,6 +85,35 @@ class TestSpeedHelpers(unittest.TestCase):
         )
 
 
+class TestMergeOldNote(unittest.TestCase):
+    def test_region_speed_tokens(self):
+        base = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-90ms-1.00MB/s"
+        old = "\u2192LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72-V4-CN"
+        self.assertEqual(
+            vp.merge_old_note(base, old),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192LAX-90ms-1.00MB/s-NF(US) D+ YT GPT-DC-72-V4-CN",
+        )
+
+    def test_no_region_tokens_only(self):
+        base = "1.2.3.4:443#US-90ms"
+        self.assertEqual(vp.merge_old_note(base, "-120ms-0.44MB/s-CN"), "1.2.3.4:443#US-90ms-CN")
+
+    def test_region_no_measurements(self):
+        base = "1.2.3.4:443#US-90ms-1.00MB/s"
+        self.assertEqual(
+            vp.merge_old_note(base, "\u2192LAX-120ms-0.44MB/s"),
+            "1.2.3.4:443#US\u2192LAX-90ms-1.00MB/s",
+        )
+
+    def test_bare_latency_only(self):
+        base = "1.2.3.4:443#US-90ms"
+        self.assertEqual(vp.merge_old_note(base, "-120ms"), "1.2.3.4:443#US-90ms")
+
+    def test_empty_note(self):
+        base = "1.2.3.4:443#US-90ms"
+        self.assertEqual(vp.merge_old_note(base, ""), "1.2.3.4:443#US-90ms")
+
+
 class TestWriteIndex(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="vp_"))
@@ -258,6 +287,34 @@ class TestWriteValidOutputs(unittest.TestCase):
             ["2.0.0.1:443#JP", "1.0.0.1:443#US"],
         )
         self.assertEqual(data["proxies"]["2.0.0.1:443#JP"], 5.0)
+
+    def test_preserves_existing_annotations(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US\u2192LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72-V4-CN\n"
+            "2.0.0.1:443#\U0001F1EF\U0001F1F5JP-99ms-GPT-CF\n"
+            "9.9.9.9:443#DE-50ms\n",
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 90.0, 1.0),
+            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 70.0, None),
+            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 50.0, 0.5),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
+        self.assertIn(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US\u2192LAX-90ms-1.00MB/s-NF(US) D+ YT GPT-DC-72-V4-CN",
+            lines,
+        )
+        self.assertIn("2.0.0.1:443#\U0001F1EF\U0001F1F5JP-70ms-GPT-CF", lines)
+        self.assertFalse(any(line.startswith("9.9.9.9") for line in lines))
+        self.assertTrue(
+            any(line.startswith("3.0.0.1:443#\U0001F1FA\U0001F1F8US-50ms-0.50MB/s") for line in lines)
+        )
+        us_all = (vp.VALID_DIR / "countries" / "US" / "all.txt").read_text().splitlines()
+        self.assertTrue(
+            any("\u2192LAX-90ms-1.00MB/s-NF(US) D+ YT GPT-DC-72-V4-CN" in line for line in us_all)
+        )
 
 
 if __name__ == "__main__":
