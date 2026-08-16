@@ -122,7 +122,7 @@ scripts/china_itdog.py                 itdog.cn 批量探活模块（china_check
 scripts/exit_family.py                 实际出口 IP 家族检测与分离（tls trace + connect 双回显）
 scripts/generate_fingerprint.py        浏览器指纹生成
 scripts/common.py                      共享常量与助手（data 布局、HTTP/JSON/CONNECT 探测）
-data/raw/<port>/<country>.txt          按端口+国家的原始组织（含 #ALL，ip:port#国家）
+data/raw/<port>/<country>.txt          按端口+国家的原始组织（含 #ALL，ip:port#国家；可重建中间产物，不入库）
 data/countries/<country>.txt           按国家汇总（跨端口去重）
 data/ports/<port>.txt                  按端口汇总（跨国家去重）
 data/sets/<集合>.txt                   常用国家集合（europe、asia、hot、cn_common 等）

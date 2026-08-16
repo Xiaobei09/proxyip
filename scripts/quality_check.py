@@ -440,7 +440,10 @@ async def run(args: argparse.Namespace) -> int:
     if rep_map:
         write_reputation_files(source_text, annotations, rep_map)
 
-    write_json(IPINFO_FILE, keyed_json(ipinfo))
+    if ipinfo:
+        write_json(IPINFO_FILE, keyed_json(ipinfo))
+    else:
+        IPINFO_FILE.unlink(missing_ok=True)
     write_json(STREAMING_FILE, keyed_json(streaming))
     if abuse_map:
         write_json(ABUSE_FILE, keyed_json(abuse_map))

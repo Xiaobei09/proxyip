@@ -18,7 +18,7 @@
 压缩包结构为 `<port>/<country>.txt`，每个文件内每行一个 IP。脚本依次：
 
 1. 下载 zip 归档（默认来源 `zip.cm.edu.kg`，可 `-u` 指定）
-2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`）
+2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`；`raw/` 为可重建中间产物，git 不入库，仅下载侧在 CI 运行期生成）
 3. 并行拉取并合并 CF 反代补充来源（见下方「CF 反代补充来源」；`--no-extra-sources` 跳过），无国家标签的条目经 `ip-api.com/batch` 尽力补齐国家码（失败保留 `#ALL`）；合并时同端口已有国家标注的重复 `#ALL` 条目会被剔除
 4. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
 5. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重；`#ALL` 条目亦计入）
