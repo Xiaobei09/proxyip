@@ -12,8 +12,12 @@ per-country fastest survivors) and writes under ``data/valid/``:
                       net.coffee / ip.nc.gy / ip-api / ipdata / Tor exit lists,
                       optionally GetIPIntel + ipapi.is), keyed by ``ip:port#CC``
 - ``all_rep.txt``      ``all_ltd.txt`` lines re-sorted by reputation desc
+- ``countries/<cc>/rep.txt``, ``sets/<name>/rep.txt``
+                      per-country / per-set ``all.txt`` re-sorted by reputation
 - ``quality_meta.json`` aggregated summary for stats and charts
 - annotated ``*.txt``  all/countries/ports/sets lines get ``#``-suffix segments
+                      (``countries/*/all.txt`` and ``*/ltd.txt``; ``rep.txt`` is
+                      written pre-annotated by ``write_reputation_files``)
 
 Two proxy flavors are handled, selected by the method recorded in
 ``data/valid/index.json``:
@@ -1406,11 +1410,15 @@ def build_reputation_map(
 LATENCY_RE = re.compile(r"-(\d+)ms")
 
 
-def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
-    lines = source_text.splitlines()
-    scored: list[tuple[dict | None, str, str]] = []
+def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
+    """Annotate ``text`` lines and re-order them by reputation desc.
+
+    Lines with a reputation score are sorted by ``(score desc, latency asc,
+    key)``; unscored lines keep their original relative order at the end.
+    """
+    scored: list[tuple[dict, str, str]] = []
     unscored: list[str] = []
-    for line in lines:
+    for line in text.splitlines():
         if not line:
             continue
         key = line_to_key(line)
@@ -1422,18 +1430,33 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
         else:
             unscored.append(out)
 
-    def sort_key(item: tuple[dict | None, str, str]) -> tuple:
+    def sort_key(item: tuple[dict, str, str]) -> tuple:
         rep, key, line = item
         lat_match = LATENCY_RE.search(line)
         lat = int(lat_match.group(1)) if lat_match else float("inf")
         return (-rep["score"], lat, key)
 
     scored.sort(key=sort_key)
-    ranked = [line for _rep, _key, line in scored] + unscored
-    REP_RANK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = REP_RANK_FILE.with_suffix(".tmp")
-    tmp.write_text("\n".join(ranked) + "\n", encoding="utf-8")
-    tmp.replace(REP_RANK_FILE)
+    return [line for _rep, _key, line in scored] + unscored
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
+    ranked = build_ranked(source_text, annotations, rep_map)
+    _write_atomic(REP_RANK_FILE, "\n".join(ranked) + "\n")
+    valid_root = REP_RANK_FILE.parent
+    for sub in ("countries", "sets"):
+        for src in sorted((valid_root / sub).glob("*/all.txt")):
+            ranked = build_ranked(
+                src.read_text(encoding="utf-8"), annotations, rep_map
+            )
+            _write_atomic(src.with_name("rep.txt"), "\n".join(ranked) + "\n")
     entries = {
         key: {
             "score": rep["score"],
@@ -1515,8 +1538,10 @@ def annotate_text(
 
 def annotate_valid_files(annotations: dict, exits: dict | None = None) -> None:
     files: list[Path] = [VALID_DIR / "all.txt", VALID_DIR / "all_ltd.txt"]
-    for sub in ("countries", "ports", "sets"):
-        files.extend(sorted((VALID_DIR / sub).glob("*.txt")))
+    for sub in ("countries", "sets"):
+        files.extend(sorted((VALID_DIR / sub).glob("*/all.txt")))
+        files.extend(sorted((VALID_DIR / sub).glob("*/ltd.txt")))
+    files.extend(sorted((VALID_DIR / "ports").glob("*.txt")))
     for path in files:
         if not path.exists():
             continue
