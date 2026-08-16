@@ -54,7 +54,7 @@ python scripts/quality_check.py             # 4. 流媒体解锁 + 出口 IP 质
 ### 消费数据
 
 未验证目录统一 `ip:port#国家` 格式（如 `1.2.3.4:443#US`），按 IP 数字序排列；`data/valid/` 内为
-`ip:port#🇺🇸US-120ms-0.44MB/s`（国旗+国家-延迟毫秒-速度 MB/s，测速失败时省略速度段），**按延迟升序**（`_ltd` 按速度降序）。
+`ip:port#🇺🇸US-120ms-0.44MB/s`（国旗+国家-延迟毫秒-速度 MB/s，测速失败时省略速度段），**按延迟升序**（`_ltd` 按速度降序）。被质量 CI 检测后行内追加 `→` 出口地区与备注段（见下方格式）。
 
 ```bash
 head -1 data/valid/all.txt                  # 当前延迟最低的存活代理（延迟升序）
@@ -72,7 +72,8 @@ data/all.txt                                # 全量去重清单（未验证）
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
-- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
+- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…），CONNECT 代理为出口 IP 的国家代号（ISO2）
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→NRT-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt` 按速度降序
 
@@ -82,14 +83,15 @@ data/all.txt                                # 全量去重清单（未验证）
 
 1. 下载 zip 归档（默认来源 `zip.cm.edu.kg`，可 `-u` 指定）
 2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`）
-3. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
-4. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重，不含 ALL 派生条目）
-5. 按常用集合汇总为 `data/sets/<集合>.txt`（见下方集合表）
-6. 去重合并为 `data/all.txt`
+3. 拉取并合并 CF 反代补充来源（见下方「CF 反代补充来源」；`--no-extra-sources` 跳过），无国家标签的条目经 `ip-api.com/batch` 尽力补齐国家码（失败保留 `#ALL`）
+4. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
+5. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重；`#ALL` 条目亦计入）
+6. 按常用集合汇总为 `data/sets/<集合>.txt`（见下方集合表）
+7. 去重合并为 `data/all.txt`（含 `#ALL` 条目）
 
 ### 限量版 `_ltd`
 
-- 下载侧 `data/sets/<集合>_ltd.txt`、`data/all_ltd.txt`：每国最多取前 `--per-country-limit` 条（默认 20，按 IP 序）
+- 下载侧 `data/sets/<集合>_ltd.txt`、`data/all_ltd.txt`：每国最多取前 `--per-country-limit` 条（默认 20，按 IP 序）；`#ALL` 条目在 `all_ltd` 中单独取前 `--per-country-limit` 条
 - 验证侧 `data/valid/*_ltd.txt`：每国取**实测下载速度最快**的 20 条（速度并列/无速度时按延迟兜底），集合内与 `all_ltd` 全局按速度降序
 - `--per-country-limit 0` 时不生成限量文件
 
@@ -267,6 +269,12 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `-u, --url` | 源地址（默认上游 `all.json`，失败回退 zip） | `zip.cm.edu.kg` |
 | `-t, --timeout` | 下载超时（秒） | 60 |
 | `--per-country-limit` | 限量版每国条数（0 = 不生成） | 20 |
+| `--extra-source KIND,URL` | 追加一个补充来源（`plain`/`ip`/`csv`，可重复） | 无 |
+| `--no-extra-sources` | 跳过内置 CF 反代补充来源 | 关 |
+
+#### CF 反代补充来源
+
+除主源外，默认还会拉取一批 **Cloudflare 反代（非官方 CF 段）** 来源并合并：`wentao883/TG-wxgqlfx_ZBDW`（`fdip`/`vlid`/`yxip`）、`ChatBotPlus/cf-proxyips`、`ymyuuu/IPDB`（`BestProxy/proxy.txt` 与 `bestproxy&country.txt`）、`mountain787/Lunch-Bag-ip`。解析方式分三种：`plain`（`ip:port#国家`/`ip:port#中文`）、`ip`（裸 IP，统一按 443 端口）、`csv`（`IP,端口,地区,延迟`，地区为机场码或国家码）。中文名与机场码经映射表归一为 ISO2；仍无国家的条目经 `ip-api.com/batch` 尽力补齐（每批 100、失败保留 `#ALL`）。单个来源失败仅告警跳过，不影响整体运行。
 
 ### `scripts/validate_proxies.py`
 
@@ -315,7 +323,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all_ltd.txt`（每国最快存活集）检测，按 `index.json` 记录的方法分流：
 
 - **connect 方法**（标准 HTTP CONNECT 代理）：出口 IP 回显（`api.ipify.org`/`api6.ipify.org` 双栈）→ 本地 `ip-api.com/batch` 批量查地理/ASN/IP 类型 → 各流媒体服务经 CONNECT + TLS 隧道逐项检测
-- **tls 方法**（Cloudflare 边缘）：仅能按 SNI 路由到 CF 托管域名，只做 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`
+- **tls 方法**（Cloudflare 边缘）：仅能按 SNI 路由到 CF 托管域名，只做 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`；`loc` 机场码同时写入行备注的 `→` 出口地区段
 
 | 参数 | 说明 | 默认 |
 |---|---|---|

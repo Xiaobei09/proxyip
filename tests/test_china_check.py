@@ -25,6 +25,9 @@ class TestHeuristic(unittest.TestCase):
     def test_cf_only_line(self):
         self.assertTrue(cc.is_cf_heuristic("9.9.9.9:80#US-1ms-CF"))
 
+    def test_cf_line_with_exit_arrow(self):
+        self.assertTrue(cc.is_cf_heuristic("9.9.9.9:80#US\u2192NRT-1ms-CF"))
+
     def test_no_annotation(self):
         self.assertFalse(cc.is_cf_heuristic("1.2.3.4:80#US"))
 

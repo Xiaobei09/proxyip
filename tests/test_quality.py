@@ -24,6 +24,12 @@ class TestParseEntry(unittest.TestCase):
             ("1.2.3.4:443#US", "1.2.3.4", "443", "US"),
         )
 
+    def test_parses_line_with_exit_arrow(self):
+        self.assertEqual(
+            qc.parse_ltd_line("1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192NRT-8ms-5.86MB/s"),
+            ("1.2.3.4:443#US", "1.2.3.4", "443", "US"),
+        )
+
     def test_rejects_bad_lines(self):
         self.assertIsNone(qc.parse_ltd_line(""))
         self.assertIsNone(qc.parse_ltd_line("garbage"))
@@ -286,6 +292,64 @@ class TestAnnotation(unittest.TestCase):
         self.assertTrue(lines[0].endswith("-NF(US)-DC"))
         self.assertTrue(lines[1].endswith("-GPT-CF"))
         self.assertFalse(lines[2].endswith("-"))
+
+    def test_annotate_text_with_exits(self):
+        annotations = {"1.2.3.4:443#US": "GPT-CF"}
+        exits = {"1.2.3.4:443#US": "NRT"}
+        text = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s\n"
+        out, changed = qc.annotate_text(text, annotations, exits)
+        self.assertTrue(changed)
+        self.assertEqual(
+            out.strip(),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192NRT-120ms-0.44MB/s-GPT-CF",
+        )
+        out2, changed2 = qc.annotate_text(out, annotations, exits)
+        self.assertFalse(changed2)
+        self.assertEqual(out2.strip(), out.strip())
+
+    def test_insert_exit_region(self):
+        self.assertEqual(
+            qc.insert_exit_region("1.2.3.4:443#\U0001F1FA\U0001F1F8US-8ms", "LAX"),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192LAX-8ms",
+        )
+        self.assertEqual(
+            qc.insert_exit_region("1.2.3.4:443#US-8ms", "LAX"),
+            "1.2.3.4:443#US\u2192LAX-8ms",
+        )
+        self.assertEqual(
+            qc.insert_exit_region("1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192NRT-8ms", "LAX"),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192NRT-8ms",
+        )
+        self.assertEqual(qc.insert_exit_region("1.2.3.4:443", "LAX"), "1.2.3.4:443")
+        self.assertEqual(
+            qc.insert_exit_region("1.2.3.4:443#US-8ms", ""), "1.2.3.4:443#US-8ms"
+        )
+
+    def test_build_exits(self):
+        results = {
+            "1.2.3.4:443#US": {
+                "key": "1.2.3.4:443#US", "tls": True,
+                "streaming": {"openai": {"status": "ok", "region": "NRT"}},
+            },
+            "2.2.2.2:443#JP": {
+                "key": "2.2.2.2:443#JP", "tls": True,
+                "streaming": {"openai": {"status": "blocked"}},
+            },
+            "3.3.3.3:80#SG": {
+                "key": "3.3.3.3:80#SG", "method": "connect", "streaming": {},
+            },
+            "4.4.4.4:80#DE": {
+                "key": "4.4.4.4:80#DE", "method": "connect", "streaming": {},
+            },
+        }
+        ipinfo = {
+            "3.3.3.3:80#SG": {"country_code": "US"},
+            "4.4.4.4:80#DE": {"country_code": None},
+        }
+        self.assertEqual(
+            qc.build_exits(results, ipinfo),
+            {"1.2.3.4:443#US": "NRT", "3.3.3.3:80#SG": "US"},
+        )
 
 
 class TestReputation(unittest.TestCase):
