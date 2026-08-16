@@ -26,7 +26,8 @@ mainland-China group files: ``v4.txt`` (IPv4-only exit), ``v6.txt``
 ``cn4.txt`` / ``cn6.txt`` / ``cn46.txt`` (China-reachable × family), plus a
 ``*_ltd.txt`` speed-limited variant per group. Family comes from
 ``exit_family.json`` (falling back to ``-V4``/``-V6``/``-DS`` line notes);
-China reachability from the ``-CN`` line note.
+China reachability from the ``-CN`` line note or ``china.json``
+(``verdict == reachable``) as a fallback, matching ``all_cn.txt`` semantics.
 """
 
 import argparse
@@ -183,11 +184,40 @@ def load_family_map(path: Path | None = None) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    if not isinstance(data, dict):
+        return {}
     proxies = data.get("proxies", data)
+    if not isinstance(proxies, dict):
+        return {}
     return {
         key: meta["family"]
         for key, meta in proxies.items()
         if isinstance(meta, dict) and meta.get("family") in ("ipv4", "ipv6", "dual")
+    }
+
+
+def load_cn_reachable(path: Path | None = None) -> set[str]:
+    """``china.json`` verdict==reachable 的 key 集合；缺失/损坏 → ``set()``。
+
+    与 ``all_cn.txt``（``reachable OR has_cn_note``）的 reachable 侧语义对齐，
+    供 cn 分组兜底：行内 ``-CN`` 备注缺失时仍可归入 cn 组。
+    """
+    path = path or VALID_DIR / "china.json"
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    proxies = data.get("proxies", data)
+    if not isinstance(proxies, dict):
+        return set()
+    return {
+        key
+        for key, meta in proxies.items()
+        if isinstance(meta, dict) and meta.get("verdict") == "reachable"
     }
 
 
@@ -197,6 +227,8 @@ def family_of(entry: str, note: str, families: dict) -> str | None:
     if fam in ("ipv4", "ipv6", "dual"):
         return fam
     if has_token(note, "DS"):
+        return "dual"
+    if has_token(note, "V4") and has_token(note, "V6"):
         return "dual"
     if has_token(note, "V4"):
         return "ipv4"
@@ -433,10 +465,13 @@ def write_valid_outputs(
     alive: dict[str, tuple[str, str, str, str, float, float | None]],
     per_country_limit: int,
     families: dict | None = None,
+    cn_reachable: set[str] | None = None,
 ) -> dict:
     VALID_DIR.mkdir(parents=True, exist_ok=True)
     if families is None:
         families = load_family_map()
+    if cn_reachable is None:
+        cn_reachable = load_cn_reachable()
 
     old_notes: dict[str, str] = {}
     old_all = VALID_DIR / "all.txt"
@@ -448,11 +483,18 @@ def write_valid_outputs(
 
     ordered = sorted(alive, key=lambda e: (alive[e][4], e))
 
+    line_cache: dict[str, str] = {}
+    groups_cache: dict[str, set[str]] = {}
+
     def line(entry: str) -> str:
+        if entry in line_cache:
+            return line_cache[entry]
         ip, port, cc, _m, latency, speed = alive[entry]
         base = fmt_entry(ip, port, cc, latency, speed)
         old = old_notes.get(entry)
-        return merge_old_note(base, old) if old else base
+        text = merge_old_note(base, old) if old else base
+        line_cache[entry] = text
+        return text
 
     def ltd_key(entry: str) -> tuple:
         speed = alive[entry][5]
@@ -461,10 +503,17 @@ def write_valid_outputs(
         return (1, 0.0, alive[entry][4])
 
     def entry_groups(entry: str) -> set[str]:
+        if entry in groups_cache:
+            return groups_cache[entry]
         text = line(entry)
         parsed = parse_line(text)
         note = parsed[4] if parsed else ""
-        return classify_groups(family_of(entry, note, families), has_token(note, "CN"))
+        groups = classify_groups(
+            family_of(entry, note, families),
+            has_token(note, "CN") or entry in cn_reachable,
+        )
+        groups_cache[entry] = groups
+        return groups
 
     def group_map(entries: list[str]) -> dict[str, list[str]]:
         groups: dict[str, list[str]] = {g: [] for g in GROUP_NAMES}
@@ -510,6 +559,12 @@ def write_valid_outputs(
 
     country_group_ltd: dict[str, dict[str, list[str]]] = {}
     for country in sorted(by_country):
+        grouped = group_map(by_country[country])
+        country_group_ltd[country] = {
+            g: sorted(grouped[g], key=ltd_key)[:per_country_limit]
+            if per_country_limit > 0 else []
+            for g in GROUP_NAMES
+        }
         if country == "ALL":
             continue
         cdir = countries_dir / country
@@ -517,12 +572,6 @@ def write_valid_outputs(
         write_text_if_changed(
             cdir / "all.txt", "\n".join(line(e) for e in by_country[country]) + "\n"
         )
-        grouped = group_map(by_country[country])
-        country_group_ltd[country] = {
-            g: sorted(grouped[g], key=ltd_key)[:per_country_limit]
-            if per_country_limit > 0 else []
-            for g in GROUP_NAMES
-        }
         write_group_files(cdir, grouped, country_group_ltd[country])
         if per_country_limit > 0:
             entries = sorted(by_country[country], key=ltd_key)[:per_country_limit]
