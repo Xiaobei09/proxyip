@@ -245,6 +245,10 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`torlist`/`vpn_asn`/`resproxy_asn`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表。按分数降序、同分按键序排列。
 
+### `data/valid/reputation_cache.json`
+
+单行 JSON，按 IP 缓存各按 IP 信誉 API 源的原始信号，键为出口 IP，值为 `{ts, signals: {source: signal}}`：`ts` 为查询时间戳（epoch 秒），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP 发起外部查询；静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存。
+
 ### `data/valid/all_rep.txt`
 
 与 `all_ltd.txt` 同源（每国最快存活集）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
@@ -336,6 +340,8 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
 | `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
+| `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
+| `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 6 |
 | `--read-cap` | 单次响应读取上限（字节） | 524288 |
 | `-w, --workers` | asyncio 并发上限 | 40 |
@@ -360,7 +366,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `vpn_asn` | 3 | iplogs `vpn-providers.csv` 静态 VPN 服务商 ASN 表，命中 -30（fail-open） |
 | `resproxy_asn` | 2 | iplogs `residential-proxy-backbones.csv` 住宅代理骨干 ASN 表，命中 -25（fail-open） |
 
-可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（ipquery/ffraud/whatismyip：4 worker、0.25s；netcoffee/ncgy/ipapi_is：6 worker、0.25s）避免限流掉单。单源响应时直接取该源分数。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
+可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（ipquery/ffraud/whatismyip：4 worker、0.25s；netcoffee/ncgy/ipapi_is：6 worker、0.25s）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/valid/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。单源响应时直接取该源分数。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/china_check.py`
 
@@ -442,10 +448,10 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
-- **触发**：主更新工作流完成后自动执行（`workflow_run`）；支持 `workflow_dispatch`；每 3 小时 cron 兜底（主更新失败/未触发时仍出质量数据）
-- **流程**：跑测试（`unittest`）→ `quality_check.py`（默认 `--time-budget 1800` 兜底）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
+- **触发**：每 12 小时定时（`cron: 23 */12 * * *`）；支持 `workflow_dispatch` 手动触发（不随主更新自动执行）
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（默认 `--time-budget 1800` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
-- **说明**：主更新每 30 分钟重写 `data/valid/*.txt` 为无备注行，质量 CI 紧随其后重新加备注——两状态间存在短暂窗口，属独立 CI 固有节奏
+- **说明**：主更新每 30 分钟重写 `data/valid/*.txt` 为无备注行，质量 CI 每 12 小时重新加备注——备注（流媒体/出口/信誉）在两次质量运行之间可能滞后于最新一次主更新，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
