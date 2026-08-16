@@ -88,6 +88,11 @@ CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅�
 
 - `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
 - `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
+- 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
+  - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
+  - `cn.txt` — 大陆可达（`-CN` 备注）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
+  - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），缺失时回退行内 `-V4`/`-V6`/`-DS` 备注；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
+  - 根级另有 `all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`（及 `*_ltd.txt`）；v4/v6 复用既有 `all_ipv4.txt`/`all_ipv6.txt`，不重复生成
 - `data/valid/meta.json`：本次验证汇总（字段见下）
 - `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）
 - `data/valid/speed.json`：每测速成功代理的实测速度（MB/s，按速度降序）
@@ -202,6 +207,10 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ### `data/valid/all_cn.txt`
 
 **全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 或历史已带 `-CN` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注；顺序沿用源文件（全量池按延迟升序）。逐条检测明细见 `china.json`。
+
+### `data/valid/all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`
+
+**根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。
 
 ### `data/history.jsonl`（每行一条）
 

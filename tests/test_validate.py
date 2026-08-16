@@ -316,9 +316,217 @@ class TestWriteValidOutputs(unittest.TestCase):
             any("\u2192LAX-90ms-1.00MB/s-NF(US) D+ YT GPT-DC-72-V4-CN" in line for line in us_all)
         )
 
+    def _keys(self, path) -> list:
+        if not path.exists():
+            return []
+        return [line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()]
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_country_group_files_written(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n"
+            "2.0.0.1:8443#\U0001F1FA\U0001F1F8US-100ms-V6\n"
+            "3.0.0.1:443#\U0001F1FA\U0001F1F8US-80ms-CN-DS\n"
+            "4.0.0.1:443#\U0001F1E9\U0001F1EADE-90ms-CN-V4\n",
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
+            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 100.0, 0.5),
+            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 80.0, 0.5),
+            "4.0.0.1:443#DE": ("4.0.0.1", "443", "DE", "tls", 90.0, 0.5),
+        }
+        families = {
+            "1.0.0.1:443#US": "ipv4",
+            "2.0.0.1:8443#US": "ipv6",
+            "3.0.0.1:443#US": "dual",
+            "4.0.0.1:443#DE": "ipv4",
+        }
+        vp.write_valid_outputs(alive, per_country_limit=2, families=families)
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertEqual(self._keys(us / "v4.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(us / "v6.txt"), ["2.0.0.1:8443"])
+        self.assertEqual(self._keys(us / "46.txt"), ["3.0.0.1:443"])
+        self.assertEqual(self._keys(us / "cn.txt"), ["3.0.0.1:443", "1.0.0.1:443"])
+        self.assertEqual(self._keys(us / "cn4.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(us / "cn6.txt"), [])
+        self.assertEqual(self._keys(us / "cn46.txt"), ["3.0.0.1:443"])
+        de = vp.VALID_DIR / "countries" / "DE"
+        self.assertEqual(self._keys(de / "v4.txt"), ["4.0.0.1:443"])
+        self.assertEqual(self._keys(de / "cn.txt"), ["4.0.0.1:443"])
+        self.assertEqual(self._keys(de / "cn4.txt"), ["4.0.0.1:443"])
+
+    def test_group_ltd_per_country_cap(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n"
+            "2.0.0.1:443#\U0001F1FA\U0001F1F8US-100ms-CN-V4\n"
+            "3.0.0.1:443#\U0001F1FA\U0001F1F8US-80ms-V4\n",
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.2),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 5.0),
+            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 80.0, 1.0),
+        }
+        families = {k: "ipv4" for k in alive}
+        vp.write_valid_outputs(alive, per_country_limit=2, families=families)
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertEqual(self._keys(us / "v4_ltd.txt"), ["2.0.0.1:443", "3.0.0.1:443"])
+        self.assertEqual(self._keys(us / "cn_ltd.txt"), ["2.0.0.1:443", "1.0.0.1:443"])
+
+    def test_set_group_files(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n"
+            "2.0.0.1:8443#\U0001F1EF\U0001F1F5JP-100ms-V6\n",
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 100.0, 0.5),
+        }
+        families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:8443#JP": "ipv6"}
+        vp.write_valid_outputs(alive, per_country_limit=1, families=families)
+        hot = vp.VALID_DIR / "sets" / "hot"
+        self.assertEqual(self._keys(hot / "v4.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(hot / "v6.txt"), ["2.0.0.1:8443"])
+        self.assertEqual(self._keys(hot / "cn.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(hot / "v4_ltd.txt"), ["1.0.0.1:443"])
+
+    def test_root_group_files(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n"
+            "2.0.0.1:443#\U0001F1FA\U0001F1F8US-80ms-CN-DS\n"
+            "3.0.0.1:443#\U0001F1E9\U0001F1EADE-90ms-CN-V6\n",
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 80.0, 2.0),
+            "3.0.0.1:443#DE": ("3.0.0.1", "443", "DE", "tls", 90.0, 0.5),
+        }
+        families = {
+            "1.0.0.1:443#US": "ipv4",
+            "2.0.0.1:443#US": "dual",
+            "3.0.0.1:443#DE": "ipv6",
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1, families=families)
+        root = vp.VALID_DIR
+        self.assertEqual(self._keys(root / "all_46.txt"), ["2.0.0.1:443"])
+        self.assertEqual(self._keys(root / "all_cn4.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(root / "all_cn6.txt"), ["3.0.0.1:443"])
+        self.assertEqual(self._keys(root / "all_cn46.txt"), ["2.0.0.1:443"])
+        self.assertEqual(self._keys(root / "all_46_ltd.txt"), ["2.0.0.1:443"])
+        self.assertEqual(self._keys(root / "all_cn4_ltd.txt"), ["1.0.0.1:443"])
+
+    def test_token_fallback_groups(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n"
+            "2.0.0.1:8443#\U0001F1FA\U0001F1F8US-100ms-V6\n",
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
+            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 100.0, 0.5),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertEqual(self._keys(us / "v4.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(us / "v6.txt"), ["2.0.0.1:8443"])
+        self.assertEqual(self._keys(us / "cn.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(us / "cn4.txt"), ["1.0.0.1:443"])
+
+    def test_empty_group_cleanup(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-V4\n",
+            encoding="utf-8",
+        )
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        vp.write_valid_outputs(alive, per_country_limit=1, families={"1.0.0.1:443#US": "ipv4"})
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertTrue((us / "v4.txt").exists())
+        vp.write_valid_outputs(alive, per_country_limit=1, families={"1.0.0.1:443#US": "dual"})
+        self.assertFalse((us / "v4.txt").exists())
+        self.assertTrue((us / "46.txt").exists())
+        self.assertFalse((us / "v4_ltd.txt").exists())
+
+    def test_per_country_limit_zero_removes_group_ltd(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n",
+            encoding="utf-8",
+        )
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        families = {"1.0.0.1:443#US": "ipv4"}
+        vp.write_valid_outputs(alive, per_country_limit=1, families=families)
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertTrue((us / "v4_ltd.txt").exists())
+        vp.write_valid_outputs(alive, per_country_limit=0, families=families)
+        self.assertTrue((us / "v4.txt").exists())
+        self.assertFalse((us / "v4_ltd.txt").exists())
+        self.assertFalse((vp.VALID_DIR / "all_46_ltd.txt").exists())
+
+
+class TestClassifyGroups(unittest.TestCase):
+    """classify_groups / family_of / load_family_map pure logic."""
+
+    def test_exclusive_families(self):
+        self.assertEqual(vp.classify_groups("ipv4", False), {"v4"})
+        self.assertEqual(vp.classify_groups("ipv6", False), {"v6"})
+        self.assertEqual(vp.classify_groups("dual", False), {"46"})
+
+    def test_unknown_family_no_groups(self):
+        self.assertEqual(vp.classify_groups(None, False), set())
+        self.assertEqual(vp.classify_groups("unknown", False), set())
+
+    def test_cn_cross_product(self):
+        self.assertEqual(vp.classify_groups("ipv4", True), {"v4", "cn", "cn4"})
+        self.assertEqual(vp.classify_groups("ipv6", True), {"v6", "cn", "cn6"})
+        self.assertEqual(vp.classify_groups("dual", True), {"46", "cn", "cn46"})
+
+    def test_cn_unknown_family(self):
+        self.assertEqual(vp.classify_groups(None, True), {"cn"})
+        self.assertEqual(vp.classify_groups("unknown", True), {"cn"})
+
+    def test_family_of_map_priority(self):
+        families = {"1.0.0.1:443#US": "dual"}
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-V4", families), "dual")
+
+    def test_family_of_token_fallback(self):
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-V4", {}), "ipv4")
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-V6", {}), "ipv6")
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-DS", {}), "dual")
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-CN-63", {}), None)
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "", {}), None)
+
+    def test_load_family_map(self):
+        tmp = Path(tempfile.mkdtemp(prefix="fm_"))
+        j = tmp / "exit_family.json"
+        j.write_text(
+            json.dumps(
+                {
+                    "proxies": {
+                        "1.0.0.1:443#US": {"family": "ipv4"},
+                        "2.0.0.1:443#JP": {"family": "dual"},
+                        "3.0.0.1:443#DE": {"family": "unknown"},
+                        "4.0.0.1:443#FR": {"family": "ipv6"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        got = vp.load_family_map(j)
+        self.assertEqual(
+            got,
+            {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#JP": "dual", "4.0.0.1:443#FR": "ipv6"},
+        )
+
+    def test_load_family_map_missing_or_broken(self):
+        tmp = Path(tempfile.mkdtemp(prefix="fm_"))
+        self.assertEqual(vp.load_family_map(tmp / "nope.json"), {})
+        bad = tmp / "exit_family.json"
+        bad.write_text("not json", encoding="utf-8")
+        self.assertEqual(vp.load_family_map(bad), {})
+        bare = tmp / "bare.json"
+        bare.write_text(json.dumps({"1.0.0.1:443#US": {"family": "ipv6"}}), encoding="utf-8")
+        self.assertEqual(vp.load_family_map(bare), {"1.0.0.1:443#US": "ipv6"})
 
 
 class TestWriteHelpers(unittest.TestCase):
@@ -389,3 +597,7 @@ class TestParseLineAndToken(unittest.TestCase):
         self.assertFalse(self.cmn.has_token("-120ms-CN-V4", "CF"))
         self.assertFalse(self.cmn.has_token("-V4", "V6"))
         self.assertFalse(self.cmn.has_token("-1ms", "CF"))
+
+
+if __name__ == "__main__":
+    unittest.main()
