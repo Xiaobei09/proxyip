@@ -401,10 +401,12 @@ def write_valid_outputs(
     sets_dir.mkdir(parents=True, exist_ok=True)
 
     for country in sorted(by_country):
+        if country == "ALL":
+            continue
         (countries_dir / f"{country}.txt").write_text(
             "\n".join(line(e) for e in by_country[country]) + "\n"
         )
-    expected_countries = {f"{c}.txt" for c in by_country}
+    expected_countries = {f"{c}.txt" for c in by_country if c != "ALL"}
     for stale in countries_dir.iterdir():
         if stale.name not in expected_countries:
             stale.unlink()

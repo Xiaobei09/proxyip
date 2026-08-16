@@ -127,6 +127,15 @@ class TestNotes(unittest.TestCase):
         self.assertFalse(ef.has_family_note("1.2.3.4:80#US-1ms-CN"))
         self.assertFalse(ef.has_family_note("1.2.3.4:80#\U0001F1FA\U0001F1F8US-1ms"))
 
+    def test_all_line_note(self):
+        line = "9.9.9.9:80#ALL-120ms-0.44MB/s-V4"
+        self.assertEqual(ef._note(line), "-120ms-0.44MB/s-V4")
+        self.assertTrue(ef.has_family_note(line))
+        self.assertEqual(
+            ef.annotate_family("9.9.9.9:80#ALL-120ms", "ipv4"),
+            "9.9.9.9:80#ALL-120ms-V4",
+        )
+
     def test_annotate_family(self):
         self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms", "ipv4"),
                          "1.2.3.4:80#US-1ms-V4")

@@ -259,7 +259,11 @@ def now_ts() -> str:
 
 
 def parse_ltd_line(line: str):
-    """``ip:port#<flag><cc>-...`` -> ``(key, ip, port, cc)`` or ``None``."""
+    """``ip:port#<flag><cc>-...`` -> ``(key, ip, port, cc)`` or ``None``.
+
+    The pseudo-country ``ALL`` (unknown entry country, 3 letters) is kept
+    intact instead of collapsing to ``AL`` so it never collides with Albania.
+    """
     line = line.strip()
     if not line or "#" not in line:
         return None
@@ -267,8 +271,11 @@ def parse_ltd_line(line: str):
     i = 0
     while i < len(rest) and not ("A" <= rest[i] <= "Z"):
         i += 1
-    cc = rest[i : i + 2]
-    if len(cc) != 2 or not cc.isalpha() or ":" not in addr:
+    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-")):
+        cc = "ALL"
+    else:
+        cc = rest[i : i + 2]
+    if (len(cc) != 2 and cc != "ALL") or not cc.isalpha() or ":" not in addr:
         return None
     ip, port = addr.rsplit(":", 1)
     if not port.isdigit():
@@ -1472,7 +1479,7 @@ def build_exits(results: dict, ipinfo: dict) -> dict[str, str]:
     return exits
 
 
-EXIT_REGION_RE = re.compile(r"^(.*#[^A-Z]*[A-Z]{2})")
+EXIT_REGION_RE = re.compile(r"^(.*#[^A-Z]*[A-Z]+)")
 
 
 def insert_exit_region(line: str, exit_region: str) -> str:

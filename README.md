@@ -72,7 +72,7 @@ data/all.txt                                # 全量去重清单（未验证）
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
-- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…），CONNECT 代理为出口 IP 的国家代号（ISO2）
+- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…），CONNECT 代理为出口 IP 的国家代号（ISO2）。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
 - **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→NRT-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt` 按速度降序
@@ -83,7 +83,7 @@ data/all.txt                                # 全量去重清单（未验证）
 
 1. 下载 zip 归档（默认来源 `zip.cm.edu.kg`，可 `-u` 指定）
 2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`）
-3. 拉取并合并 CF 反代补充来源（见下方「CF 反代补充来源」；`--no-extra-sources` 跳过），无国家标签的条目经 `ip-api.com/batch` 尽力补齐国家码（失败保留 `#ALL`）
+3. 并行拉取并合并 CF 反代补充来源（见下方「CF 反代补充来源」；`--no-extra-sources` 跳过），无国家标签的条目经 `ip-api.com/batch` 尽力补齐国家码（失败保留 `#ALL`）；合并时同端口已有国家标注的重复 `#ALL` 条目会被剔除
 4. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
 5. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重；`#ALL` 条目亦计入）
 6. 按常用集合汇总为 `data/sets/<集合>.txt`（见下方集合表）
@@ -141,7 +141,7 @@ CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅�
 
 ### 输出
 
-- `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序
+- `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
 - `data/valid/countries/`、`ports/`、`sets/`：按国家/端口/集合分组的存活列表（同样含延迟/速度）
 - `data/valid/meta.json`：本次验证汇总（字段见下）
 - `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）
