@@ -17,6 +17,10 @@
 ![Latency distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_latency.svg)
 ![Speed distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_speed.svg)
 ![Streaming unlock](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_streaming.svg)
+![Sets](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_sets.svg)
+![Mainland China reachability](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_cn.svg)
+![Exit IP family](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_family.svg)
+![Reputation score](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_rep.svg)
 
 ## 功能特性
 
@@ -26,7 +30,7 @@
 - **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），启发式 CF 边缘判定 + itdog.cn 批量 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `china.json` 全量明细与 `all_cn.txt` 全量大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
-- **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量与双轴复合图
+- **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量、双轴复合图、集合规模、大陆可达性、出口家族与信誉分分布
 - **结构化索引**：`valid/index.json` 提供每存活代理的延迟与检测方法索引，`valid/speed.json` 提供实测速度索引，便于程序直接消费
 - **CI 自动化**：每 30 分钟全自动执行下载→验证→统计→提交，无需人工干预；提交前自动跑测试套件（stdlib `unittest`）
 - **浏览器指纹生成**：生成内部自洽、同一设备配置的 UA/分辨率/时区/WebGL 等指纹
@@ -158,6 +162,11 @@ data/chart_churn.svg                   每次更新 added/removed 条形图
 data/chart_combo.svg                   双轴复合趋势（计数 + 存活率）
 data/chart_latency.svg                 存活代理延迟分桶条形图
 data/chart_speed.svg                   存活代理速度分桶条形图（MB/s）
+data/chart_streaming.svg               各服务流媒体解锁 ok/blocked/error 堆叠条形图
+data/chart_sets.svg                    各命名集合存活代理条形图
+data/chart_cn.svg                      大陆连通性 verdict 分布条形图
+data/chart_family.svg                  实际出口 IP 家族分布条形图
+data/chart_rep.svg                     信誉分分布条形图
 data/history.jsonl                     更新历史记录（每行一条，最多 1000 条）
 tests/                                 标准库 unittest 测试套件
 archive/Check_Proxy.js                 遗留的单节点连通性检查脚本（已停用归档）
