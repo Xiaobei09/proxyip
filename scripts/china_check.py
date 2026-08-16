@@ -38,17 +38,24 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from download_proxies import OUT_DIR
-from quality_check import keyed_json, line_to_key, parse_ltd_line, write_json
+from common import (
+    DEFAULT_SOURCE,
+    REP_RANK_FILE,
+    VALID_DIR,
+    is_cf_heuristic,
+    keyed_json,
+    line_to_key,
+    parse_ltd_line,
+    request_follow,
+    write_json,
+    _note,
+)
 
-VALID_DIR = OUT_DIR / "valid"
-REP_RANK_FILE = VALID_DIR / "all_rep.txt"
-FALLBACK_SOURCE = VALID_DIR / "all_ltd.txt"
+FALLBACK_SOURCE = DEFAULT_SOURCE
 CHINA_FILE = VALID_DIR / "china.json"
 ALL_CN_FILE = VALID_DIR / "all_cn.txt"
 
@@ -126,65 +133,6 @@ class RateLimiter:
                     return
                 wait = self.window - (now - self._times[0])
             time.sleep(max(wait, 0.05))
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def request_follow(
-    url: str,
-    headers: dict,
-    timeout: float = TIMEOUT_DEFAULT,
-    method: str = "GET",
-    data: bytes | None = None,
-):
-    """手动跟随重定向的 HTTP 请求，返回 ``(status, headers, body)``。
-
-    不依赖 urllib 默认跳转，以便在 ping.pe 的 303 往返中保持 Cookie 头。
-    """
-    current = url
-    opener = urllib.request.build_opener(_NoRedirect)
-    for _ in range(6):
-        req = urllib.request.Request(current, data=data, method=method)
-        for k, v in headers.items():
-            req.add_header(k, v)
-        try:
-            with opener.open(req, timeout=timeout) as resp:
-                return resp.status, dict(resp.headers), resp.read()
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308):
-                loc = e.headers.get("Location")
-                if not loc:
-                    raise
-                current = urllib.parse.urljoin(current, loc)
-                if e.code in (301, 302, 303) and method == "POST":
-                    method = "GET"
-                    data = None
-                continue
-            raise
-    raise RuntimeError("too many redirects")
-
-
-# ---------------------------------------------------------------- 启发式 L1
-
-def _note(line: str) -> str:
-    """``#`` 后、国家码之后的备注段（不含 CC，避免把 ``#CN``/``#CF`` 国家码误判为备注）。"""
-    parsed = parse_ltd_line(line)
-    if not parsed:
-        return ""
-    addr, rest = line.rsplit("#", 1)
-    i = 0
-    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-        i += 1
-    cc = "ALL" if rest[i:].startswith("ALL-") else rest[i : i + 2]
-    return rest[i + len(cc):]
-
-
-def is_cf_heuristic(line: str) -> bool:
-    """行备注已带 ``-CF``（Cloudflare 边缘）即判定大陆可达（零网络）。"""
-    return bool(re.search(r"(?:^|-)CF(?:$|-)", _note(line)))
 
 
 # ------------------------------------------------------------ 解析函数（纯）

@@ -35,14 +35,22 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from common import (
+    COUNTRIES_DIR,
+    DIFF_DIR,
+    HISTORY_FILE,
+    MAX_DIFF_FILES,
+    MAX_HISTORY_RECORDS,
+    OUT_DIR,
+    PER_COUNTRY_LIMIT,
+    PORTS_DIR,
+    RAW_DIR,
+    ROOT,
+    SETS_DIR,
+)
+
 SOURCE_URL = "https://zip.cm.edu.kg"
 ALL_JSON_URL = SOURCE_URL + "/all.json"
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-COUNTRIES_DIR = ROOT / "data" / "countries"
-PORTS_DIR = ROOT / "data" / "ports"
-SETS_DIR = ROOT / "data" / "sets"
-OUT_DIR = ROOT / "data"
 
 COUNTRY_SETS: dict[str, list[str]] = {
     "europe": [
@@ -72,12 +80,6 @@ SMALL_SETS: dict[str, list[str]] = {
     ],
     "hk_us_jp_sg_tw_kr": ["HK", "US", "JP", "SG", "TW", "KR"],
 }
-
-PER_COUNTRY_LIMIT = 20
-HISTORY_FILE = ROOT / "data" / "history.jsonl"
-MAX_HISTORY_RECORDS = 1000
-DIFF_DIR = OUT_DIR / "diff"
-MAX_DIFF_FILES = 500
 
 # Cloudflare 反代 IP 补充来源：(解析方式, URL)。解析方式：
 #   plain —— ``ip:port(#note)?`` 行（note 可为国家码或中文名）
