@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import quality_check as qc
+import quality_reputation as qr
 
 
 class TestParseEntry(unittest.TestCase):
@@ -1091,11 +1092,11 @@ class TestReputationCache(unittest.TestCase):
         import tempfile
 
         self.tmp = Path(tempfile.mkdtemp())
-        self._cache_file = qc.REP_CACHE_FILE
-        qc.REP_CACHE_FILE = self.tmp / "reputation_cache.json"
+        self._cache_file = qr.REP_CACHE_FILE
+        qr.REP_CACHE_FILE = self.tmp / "reputation_cache.json"
 
     def tearDown(self):
-        qc.REP_CACHE_FILE = self._cache_file
+        qr.REP_CACHE_FILE = self._cache_file
 
     def _args(self, ttl=604800, no_cache=False):
         return argparse.Namespace(
@@ -1107,8 +1108,8 @@ class TestReputationCache(unittest.TestCase):
 
     def test_cache_reused_within_ttl(self):
         calls = []
-        orig = qc.netcoffee_lookup_sync
-        qc.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
         try:
             first = asyncio.run(qc.lookup_all_risk(
                 ["1.1.1.1", "2.2.2.2"], self._args()
@@ -1118,12 +1119,12 @@ class TestReputationCache(unittest.TestCase):
                 ["1.1.1.1", "2.2.2.2"], self._args()
             ))
         finally:
-            qc.netcoffee_lookup_sync = orig
+            qr.netcoffee_lookup_sync = orig
         self.assertEqual(n1, 2)
         self.assertEqual(len(calls), 2)
         self.assertEqual(first["1.1.1.1"]["netcoffee"], {"risk": "low"})
         self.assertEqual(second["1.1.1.1"]["netcoffee"], {"risk": "low"})
-        self.assertTrue(qc.REP_CACHE_FILE.exists())
+        self.assertTrue(qr.REP_CACHE_FILE.exists())
 
     def test_cache_expired_requeries(self):
         now = time.time()
@@ -1131,43 +1132,43 @@ class TestReputationCache(unittest.TestCase):
             "1.1.1.1": {"ts": now - 2 * 604800, "signals": {"netcoffee": {"risk": "low"}}},
         })
         calls = []
-        orig = qc.netcoffee_lookup_sync
-        qc.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
         try:
             asyncio.run(qc.lookup_all_risk(
                 ["1.1.1.1", "2.2.2.2"], self._args()
             ))
         finally:
-            qc.netcoffee_lookup_sync = orig
+            qr.netcoffee_lookup_sync = orig
         self.assertEqual(calls, ["1.1.1.1", "2.2.2.2"])
 
     def test_no_rep_cache_flag(self):
         calls = []
-        orig = qc.netcoffee_lookup_sync
-        qc.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
         try:
             asyncio.run(qc.lookup_all_risk(
                 ["1.1.1.1", "2.2.2.2"], self._args(no_cache=True)
             ))
         finally:
-            qc.netcoffee_lookup_sync = orig
+            qr.netcoffee_lookup_sync = orig
         self.assertEqual(len(calls), 2)
-        self.assertFalse(qc.REP_CACHE_FILE.exists())
+        self.assertFalse(qr.REP_CACHE_FILE.exists())
 
     def test_malformed_cache_tolerated(self):
-        qc.REP_CACHE_FILE.write_text("{not json\n", encoding="utf-8")
+        qr.REP_CACHE_FILE.write_text("{not json\n", encoding="utf-8")
         calls = []
-        orig = qc.netcoffee_lookup_sync
-        qc.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
         try:
             out = asyncio.run(qc.lookup_all_risk(
                 ["1.1.1.1", "2.2.2.2"], self._args()
             ))
         finally:
-            qc.netcoffee_lookup_sync = orig
+            qr.netcoffee_lookup_sync = orig
         self.assertEqual(len(calls), 2)
         self.assertEqual(len(out), 2)
-        data = json.loads(qc.REP_CACHE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))
         self.assertIn("1.1.1.1", data["proxies"])
 
 
