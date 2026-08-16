@@ -222,7 +222,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/ipinfo.json`（质量 CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`family`（ipv4/ipv6/dual）、`dual_stack`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`reputation_source`（netcoffee/ncgy/ip-api/ipdata/torlist/getipintel/ipapi_is/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`family`（ipv4/ipv6/dual）、`dual_stack`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/torlist/vpn_asn/resproxy_asn/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。
 
 ### `data/valid/streaming.json`
 
@@ -238,7 +238,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/reputation.json`
 
-单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipdata`/`torlist`/`getipintel`/`ipapi_is`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表。按分数降序、同分按键序排列。
+单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`torlist`/`vpn_asn`/`resproxy_asn`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表。按分数降序、同分按键序排列。
 
 ### `data/valid/all_rep.txt`
 
@@ -323,7 +323,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipdata,torlist |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `-t, --timeout` | 单代理超时（秒） | 6 |
 | `--read-cap` | 单次响应读取上限（字节） | 524288 |
@@ -331,17 +331,25 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 
-滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）多因子加权合成：abuse 分存在时取 `100 - score`（最高优先级）；否则按源分别计算 0-100 干净分 `s_i`，再按权重合并 `round(Σ w_i·s_i / Σ w_i)`（按实际响应源归一化）。默认源与权重：
+滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）多因子加权合成：abuse 分存在时取 `100 - score`（最高优先级）；否则按源分别计算 0-100 干净分 `s_i`，再按权重合并 `round(Σ w_i·s_i / Σ w_i)`（按实际响应源归一化）。查到出口地理（`countryCode`）即把 `ip-api` 计入（干净 IP 得 100）；无任何信号则该项无分（不误判满分）。默认源与权重：
 
 | 源 | 权重 | 说明 |
 |---|---|---|
-| `netcoffee` | 35 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用，标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15 |
-| `ncgy` | 25 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
-| `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10（有标志才计入） |
-| `ipdata` | 10 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
+| `netcoffee` | 30 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
+| `ncgy` | 20 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
+| `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10；`countryCode` 存在即计入 |
+| `ipquery` | 10 | `api.ipquery.io/{ip}`，免 key；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
+| `ffraud` | 10 | `api.ffraud.com/public/ip/{ip}`，免 key；`fraud_score` 直用，或 tor/vpn/proxy/hosting/abuser/recent_abuse 罚分（取较大者） |
+| `ipapi_is` | 8 | `api.ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
+| `ipdata` | 8 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
+| `whatismyip` | 5 | `whatismyip.ai/api/lookup/{ip}`，免 key；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
+| `dc_asn` | 5 | iplogs `datacenter-asns.csv` 静态机房 ASN 表，出口 `asn` 命中即 -15（fail-open） |
+| `abuse_list` | 5 | FireHOL `firehol_abusers_1d` 静态滥用 IP/CIDR 表，命中即 -40（fail-open） |
 | `torlist` | 5 | 官方 Tor 出口列表（`check.torproject.org/exit-addresses` + `dan.me.uk/torlist`），命中 -25 |
+| `vpn_asn` | 3 | iplogs `vpn-providers.csv` 静态 VPN 服务商 ASN 表，命中 -30（fail-open） |
+| `resproxy_asn` | 2 | iplogs `residential-proxy-backbones.csv` 住宅代理骨干 ASN 表，命中 -25（fail-open） |
 
-可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）；`ipapi_is`（5 权重，`ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20）。单源响应时直接取该源分数；无任何信号则该项无分（不误判满分）。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
+可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（ipquery/ffraud/whatismyip：4 worker、0.25s；netcoffee/ncgy/ipapi_is：6 worker、0.25s）避免限流掉单。单源响应时直接取该源分数。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/china_check.py`
 
