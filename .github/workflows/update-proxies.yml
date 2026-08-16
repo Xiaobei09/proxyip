@@ -75,10 +75,12 @@ jobs:
             fi
             echo "Push attempt $i failed, reapplying local data on origin/main..."
             git fetch origin main || { sleep 5; continue; }
-            # data/ 每次全量重生成，last-writer-wins 安全：reset --soft 把 HEAD 移到
-            # 最新远端（工作区保留本次生成的数据），再重新 stage + commit 为直接子提交，
-            # 天然避免 -X theirs 无法解决的 modify/delete 等一切冲突。
-            git reset --soft origin/main
+            # data/ 每次全量重生成，last-writer-wins 安全：reset --mixed 把 HEAD 和
+            # index 对齐到最新远端（工作区保留本次生成的数据），再重新 stage + commit
+            # 为直接子提交，天然避免 -X theirs 无法解决的 modify/delete 等一切冲突。
+            # 必须用 --mixed（而非 --soft）：--soft 只动 HEAD 不动 index，陈旧 checkout
+            # 的 index 会连非 data 文件一起带进数据提交，回退他人已推送的代码改动。
+            git reset --mixed origin/main
             git add -Af data/
             if git diff --cached --quiet; then
               echo "No changes to push"
