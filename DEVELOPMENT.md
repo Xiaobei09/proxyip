@@ -67,10 +67,17 @@ python3 --version        # 需 3.11+
 
 无依赖安装步骤。虚拟环境可选（`.venv/` 已被 `.gitignore` 排除）。
 
+### 本沙箱的 git 布局
+
+- 真实 git 目录在 **`/root/proxyip-git/.git`**（f2fs 持久盘）；项目内 `./.git` 是指针文件，内容 `gitdir: /root/proxyip-git/.git`。日常 git 命令在项目目录内照常使用。
+- 原因：项目目录挂载为 **fuseblk（FUSE）**，`linkat`（git 发布 loose object 所需）被拒，git 目录无法放进项目文件夹；f2fs 的 `/root` 与 tmpfs 的 `/tmp` 正常。
+- 提交身份 `root <root@localhost>`（本地 config 已设）。GitHub 认证走 `gh` credential helper。
+- **铁律**：不删除对象库内 `.l2s.*` 文件（真实对象可能是符号链接指向它们的后备）；不在对象目录做跨盘 `mv`/`cp -a`；不手动重建 git 目录（见 §9 排查）。
+
 ## 4. 测试与检查
 
 ```bash
-python3 -m unittest discover -s tests          # 全部测试（当前 171 个，须全绿）
+python3 -m unittest discover -s tests          # 全部测试（当前 250 个，须全绿）
 python3 -m unittest tests/test_quality.py      # 单文件
 python3 -m py_compile scripts/*.py             # 语法检查
 ```
@@ -148,6 +155,9 @@ git commit -m "feat(quality): multi-source weighted IP reputation"
 # 5) 推送（先 rebase 再推，规避并发 data 提交）
 git pull --rebase origin main
 git push
+
+# 6) 会话记录（固化步骤）：向仓库外文件 /root/proxyip-sessions.md
+#    追加本次会话的详细记录（完成事项/提交 hash/关键决策/教训）。该文件绝不提交。
 ```
 
 ### 冒烟验证（可选，改逻辑时推荐）
@@ -207,11 +217,24 @@ git pull --rebase origin main && git push    # 最多重试 3 次
 - **测试不过**：确认没改 `data/` 输入；`quality_check.py` 的单元测试全部用 fake `urlopen`，不依赖网络。
 - **本地冒烟把 data 弄脏**：`git checkout -- data/`。
 - **权限问题（secrets 缺 key）**：CI 环境变量在 `.github/workflows/*.yml` 的 `env:` 配置；本地缺 key 时脚本自动降级（跳过滥用分/GetIPIntel）。
+- **fsck 报 `.l2s.*` bad sha1 / missing**：无害噪音，**不要删除任何 `.l2s.*` 文件**——真实对象可能是符号链接指向它们的后备，误删会损坏对象库（曾致 33 个对象丢失）。
+- **`git` 报 bad object / 仓库损坏**：先检查是否误删 `.l2s.*` 或跨盘 `mv`/`cp -a` 过对象目录。重建方法（不动工作区文件）：
+  ```bash
+  git clone --no-checkout --separate-git-dir=/root/proxyip-git/.git \
+      https://github.com/Xiaobei09/proxyip.git /tmp/recover
+  rm -rf /root/proxyip-git/.git && mv /tmp/recover/.git /root/proxyip-git/.git
+  # 注意：mv 后若对象为 L2S 绝对路径符号链接会断链，故改用 tar 复制更稳妥：
+  # rm -rf /root/proxyip-git/.git && mkdir -p /root/proxyip-git/.git
+  # tar cf - --exclude='.l2s.*' -C /tmp/recover/.git . | tar xf - -C /root/proxyip-git/.git
+  cd /root/projects/proxyip && git reset --mixed HEAD
+  ```
+  重建后需重新设置：`core.worktree=/root/projects/proxyip`、`user.name/email`、`remote.origin.url`。
 
 ## 10. 改动清单（历史）
 
 | 日期 | 提交 | 说明 |
 |---|---|---|
+| 2026-08-16 | `docs: session log + sandbox git env rules` | 会话记录固化为收尾流程第 6 步；细化 AGENTS/DEVELOPMENT：git 目录落点（`/root/proxyip-git`）、fuseblk/L2S 铁律（禁删 `.l2s.*`、禁跨盘 mv 对象目录）、fsck 噪音说明、测试数更新至 250 |
 | 2026-08-16 | `feat(quality): multi-source IP risk (ipquery/ffraud/whatismyip + static ASN/abuse lists)` | 新增免 key 源 ipquery/ffraud/whatismyip，默认启用 ipapi_is 并扩展 company/asn 类型与 abuser_score，新增 FireHOL 滥用 + iplogs 机房/VPN/住宅代理 ASN 静态列表源；ip-api 查到出口地理即计入；新权重表 |
 | 2026-08-15 | `feat(quality): all.json upstream meta + exit family cross-check` | 下载主源升级为上游 `all.json`（zip 回退），逐 IP 元数据（真实出口 clientIp/ASN/地理/colo）落盘 `upstream_meta.json`；exit_family 对照上游交叉验证并记录 `upstream_match` |
 | 2026-08-15 | `ci: conflict-tolerant data commit in workflows` | 修复两个工作流并发提交 `data/` 导致的 rebase 冲突失败；升级 checkout/setup-python 消除 Node 20 告警 |
