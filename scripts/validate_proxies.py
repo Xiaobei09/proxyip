@@ -41,6 +41,7 @@ from common import (
     VALID_DIR,
     VALID_HISTORY_FILE,
     try_connect,
+    write_text_if_changed,
 )
 from download_proxies import COUNTRY_SETS, SMALL_SETS
 
@@ -317,11 +318,7 @@ def write_index(ordered: list[str], alive: dict) -> None:
         json.dumps({"proxies": proxies}, ensure_ascii=False, separators=(",", ":"))
         + "\n"
     )
-    if INDEX_FILE.exists() and INDEX_FILE.read_text(encoding="utf-8") == content:
-        return
-    tmp = INDEX_FILE.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(INDEX_FILE)
+    write_text_if_changed(INDEX_FILE, content)
 
 
 def write_speed(alive: dict) -> None:
@@ -339,11 +336,7 @@ def write_speed(alive: dict) -> None:
         )
         + "\n"
     )
-    if SPEED_FILE.exists() and SPEED_FILE.read_text(encoding="utf-8") == content:
-        return
-    tmp = SPEED_FILE.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(SPEED_FILE)
+    write_text_if_changed(SPEED_FILE, content)
 
 
 def write_valid_outputs(
@@ -383,13 +376,13 @@ def write_valid_outputs(
             continue
         cdir = countries_dir / country
         cdir.mkdir(parents=True, exist_ok=True)
-        (cdir / "all.txt").write_text(
-            "\n".join(line(e) for e in by_country[country]) + "\n"
+        write_text_if_changed(
+            cdir / "all.txt", "\n".join(line(e) for e in by_country[country]) + "\n"
         )
         if per_country_limit > 0:
             entries = sorted(by_country[country], key=ltd_key)[:per_country_limit]
-            (cdir / "ltd.txt").write_text(
-                "\n".join(line(e) for e in entries) + "\n"
+            write_text_if_changed(
+                cdir / "ltd.txt", "\n".join(line(e) for e in entries) + "\n"
             )
     expected_countries = {c for c in by_country if c != "ALL"}
     for stale in countries_dir.iterdir():
@@ -400,8 +393,8 @@ def write_valid_outputs(
             stale.unlink()
 
     for port in sorted(by_port, key=int):
-        (ports_dir / f"{port}.txt").write_text(
-            "\n".join(line(e) for e in by_port[port]) + "\n"
+        write_text_if_changed(
+            ports_dir / f"{port}.txt", "\n".join(line(e) for e in by_port[port]) + "\n"
         )
     expected_ports = {f"{p}.txt" for p in by_port}
     for stale in ports_dir.iterdir():
@@ -418,8 +411,8 @@ def write_valid_outputs(
         full = [e for e in ordered if alive[e][2] in cc_set]
         sdir = sets_dir / name
         sdir.mkdir(parents=True, exist_ok=True)
-        (sdir / "all.txt").write_text(
-            "\n".join(line(e) for e in full) + "\n"
+        write_text_if_changed(
+            sdir / "all.txt", "\n".join(line(e) for e in full) + "\n"
         )
         set_counts[name] = len(full)
         if per_country_limit > 0:
@@ -428,8 +421,8 @@ def write_valid_outputs(
                 if cc in country_ltd:
                     ltd.extend(country_ltd[cc])
             ltd = sorted(ltd, key=ltd_key)
-            (sdir / "ltd.txt").write_text(
-                "\n".join(line(e) for e in ltd) + "\n"
+            write_text_if_changed(
+                sdir / "ltd.txt", "\n".join(line(e) for e in ltd) + "\n"
             )
             set_counts[f"{name}_ltd"] = len(ltd)
     expected_sets = set({**COUNTRY_SETS, **SMALL_SETS})
@@ -440,14 +433,14 @@ def write_valid_outputs(
         else:
             stale.unlink()
 
-    (VALID_DIR / "all.txt").write_text("\n".join(line(e) for e in ordered) + "\n")
+    write_text_if_changed(VALID_DIR / "all.txt", "\n".join(line(e) for e in ordered) + "\n")
     set_counts["all"] = len(ordered)
     if per_country_limit > 0:
         ltd_all = sorted(
             [e for cc in country_ltd for e in country_ltd[cc]], key=ltd_key
         )
-        (VALID_DIR / "all_ltd.txt").write_text(
-            "\n".join(line(e) for e in ltd_all) + "\n"
+        write_text_if_changed(
+            VALID_DIR / "all_ltd.txt", "\n".join(line(e) for e in ltd_all) + "\n"
         )
         set_counts["all_ltd"] = len(ltd_all)
     write_index(ordered, alive)
@@ -599,9 +592,9 @@ async def run(args: argparse.Namespace) -> int:
         "sets": stats["__sets__"],
     }
     meta_file = VALID_DIR / "meta.json"
-    tmp = meta_file.with_suffix(".tmp")
-    tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(meta_file)
+    write_text_if_changed(
+        meta_file, json.dumps(meta, ensure_ascii=False, indent=2) + "\n"
+    )
     print(f"Wrote {meta_file}")
 
     append_history(meta)

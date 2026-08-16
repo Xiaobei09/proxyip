@@ -198,6 +198,8 @@ def read_json(path: Path) -> dict:
 
 
 def write_atomic(path: Path, content: str) -> None:
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(content, encoding="utf-8")

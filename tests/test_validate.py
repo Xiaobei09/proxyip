@@ -262,3 +262,38 @@ class TestWriteValidOutputs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWriteHelpers(unittest.TestCase):
+    """write_text_if_changed / write_json skip identical rewrites."""
+
+    def setUp(self):
+        import common
+        self.cmn = common
+        self.tmp = Path(tempfile.mkdtemp(prefix="wh_"))
+        self.p = self.tmp / "out.txt"
+
+    def test_writes_content(self):
+        written = self.cmn.write_text_if_changed(self.p, "a\n")
+        self.assertTrue(written)
+        self.assertEqual(self.p.read_text(), "a\n")
+
+    def test_skips_identical_rewrite(self):
+        self.cmn.write_text_if_changed(self.p, "a\n")
+        written = self.cmn.write_text_if_changed(self.p, "a\n")
+        self.assertFalse(written)
+        self.assertEqual(self.p.read_text(), "a\n")
+
+    def test_rewrites_on_change(self):
+        self.cmn.write_text_if_changed(self.p, "a\n")
+        written = self.cmn.write_text_if_changed(self.p, "b\n")
+        self.assertTrue(written)
+        self.assertEqual(self.p.read_text(), "b\n")
+
+    def test_write_json_skips_identical(self):
+        j = self.tmp / "d.json"
+        self.cmn.write_json(j, {"proxies": {"a": 1}})
+        self.cmn.write_json(j, {"proxies": {"a": 1}})
+        self.assertEqual(json.loads(j.read_text()), {"proxies": {"a": 1}})
+        self.cmn.write_json(j, {"proxies": {"a": 2}})
+        self.assertEqual(json.loads(j.read_text()), {"proxies": {"a": 2}})

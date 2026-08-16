@@ -216,10 +216,7 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
 
 
 def _write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    write_text_if_changed(path, text)
 
 
 def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
