@@ -55,7 +55,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f data/
+          git add -Af data/
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -66,15 +66,18 @@ jobs:
               echo "Pushed successfully"
               exit 0
             fi
-            echo "Push attempt $i failed, rebasing on origin/main and retrying..."
-            git fetch origin main || break
-            # -X theirs: on conflict with concurrent data commits, prefer the
-            # freshly generated data from this run (last-writer-wins is safe
-            # because data/ is fully regenerated on every run).
-            git rebase --autostash -X theirs origin/main || {
-              echo "Rebase failed, aborting and retrying"
-              git rebase --abort
-            }
+            echo "Push attempt $i failed, reapplying local data on origin/main..."
+            git fetch origin main || { sleep 5; continue; }
+            # data/ 每次全量重生成，last-writer-wins 安全：reset --soft 把 HEAD 移到
+            # 最新远端（工作区保留本次生成的数据），再重新 stage + commit 为直接子提交，
+            # 天然避免 -X theirs 无法解决的 modify/delete 等一切冲突。
+            git reset --soft origin/main
+            git add -Af data/
+            if git diff --cached --quiet; then
+              echo "No changes to push"
+              exit 0
+            fi
+            git commit -m "chore(data): streaming & exit IP quality check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           done
           echo "Push failed after 5 attempts"
           exit 1
