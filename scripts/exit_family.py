@@ -335,7 +335,11 @@ def load_sample(source: Path, limit: int) -> list:
 
 
 def load_upstream_meta(path: Path | None = None) -> dict:
-    """读入上游 ``all.json`` 生成的元数据表（keyed by ip）。缺失/损坏 → ``{}``。"""
+    """读入上游 ``all.json`` 生成的元数据表（keyed by ip）。缺失/损坏 → ``{}``。
+
+    新版以 ``{"proxies": {ip: meta}}`` 包裹（与其余 keyed JSON 统一），
+    旧版裸 dict 兼容读取。
+    """
     path = path or UPSTREAM_META_FILE
     if not path.exists():
         return {}
@@ -343,7 +347,12 @@ def load_upstream_meta(path: Path | None = None) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    wrapped = data.get("proxies")
+    if isinstance(wrapped, dict):
+        return wrapped
+    return data
 
 
 def cross_check(results: dict, upstream: dict) -> None:
@@ -446,8 +455,13 @@ def main(argv=None) -> int:
     v4_lines, v6_lines = split_by_family(results)
     upstream = load_upstream_meta()
     cross_check(results, upstream)
+    # keyed 写入，值只保留探测/交叉验证字段（line/ip/port/cc 均可由 key 推导，不落盘）
+    keep = (
+        "method", "ts", "family", "exit_v4", "exit_v6",
+        "upstream_client_ip", "upstream_family", "upstream_absent", "upstream_match",
+    )
     entries = {
-        key: {k: v for k, v in res.items() if k != "line"}
+        key: {k: res[k] for k in keep if k in res}
         for key, res in results.items()
     }
     write_json(EXIT_FAMILY_FILE, keyed_json(entries))
