@@ -121,7 +121,7 @@ tls 方法走 CF trace（`cloudflare.com/cdn-cgi/trace` 回显 `ip=`），connec
 | `--services` | 全部 | netflix disney youtube max prime openai |
 | `--abuse-service` | none | 滥用分：abuseipdb / ipqs（key 走 Secrets） |
 | `--reputation-provider` | multi | multi / netcoffee / ip-api / none |
-| `--reputation-sources` | netcoffee,ncgy,ip-api,ipdata,torlist | multi 的启用源 |
+| `--reputation-sources` | netcoffee,ncgy,ip-api,ipquery,ffraud,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn | multi 的启用源 |
 | `--reputation-weights` | 内置权重表 | 形如 `netcoffee:40,ncgy:20` 覆盖 |
 | `--time-budget` | 0 | 最大秒数，CI 用 1800 |
 
@@ -212,6 +212,7 @@ git pull --rebase origin main && git push    # 最多重试 3 次
 
 | 日期 | 提交 | 说明 |
 |---|---|---|
+| 2026-08-16 | `feat(quality): multi-source IP risk (ipquery/ffraud/whatismyip + static ASN/abuse lists)` | 新增免 key 源 ipquery/ffraud/whatismyip，默认启用 ipapi_is 并扩展 company/asn 类型与 abuser_score，新增 FireHOL 滥用 + iplogs 机房/VPN/住宅代理 ASN 静态列表源；ip-api 查到出口地理即计入；新权重表 |
 | 2026-08-15 | `feat(quality): all.json upstream meta + exit family cross-check` | 下载主源升级为上游 `all.json`（zip 回退），逐 IP 元数据（真实出口 clientIp/ASN/地理/colo）落盘 `upstream_meta.json`；exit_family 对照上游交叉验证并记录 `upstream_match` |
 | 2026-08-15 | `ci: conflict-tolerant data commit in workflows` | 修复两个工作流并发提交 `data/` 导致的 rebase 冲突失败；升级 checkout/setup-python 消除 Node 20 告警 |
 | 2026-08-15 | `feat(quality): multi-source weighted IP reputation` | 多源加权信誉（netcoffee/ncgy/ip-api/ipdata/torlist + opt-in getipintel/ipapi_is） |

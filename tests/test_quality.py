@@ -1,5 +1,6 @@
 """Tests for quality_check.py pure functions."""
 
+import asyncio
 import json
 import sys
 import unittest
@@ -205,8 +206,8 @@ class TestBuildIpinfo(unittest.TestCase):
         nc = {"9.9.9.9": {"netcoffee": {"trust_score": 42,
                                          "is_datacenter": True}}}
         info = qc.build_ipinfo_map(results, geo, {}, nc)["1.2.3.4:443#US"]
-        self.assertEqual(info["reputation"], 42)
-        self.assertEqual(info["reputation_source"], "netcoffee")
+        self.assertEqual(info["reputation"], 61)
+        self.assertEqual(info["reputation_source"], "multi")
         self.assertEqual(info["risk"], "medium")
         self.assertEqual(info["risk_flags"]["netcoffee"]["trust_score"], 42)
 
@@ -556,6 +557,312 @@ class TestReputation(unittest.TestCase):
             self.assertIsNone(qc.getipintel_lookup_sync("1.2.3.4", "a@b.com"))
         finally:
             qc.urllib.request.urlopen = orig
+
+    def test_netcoffee_enriched_fields(self):
+        payload = (
+            b'{"trust_score":61,"is_datacenter":true,"company_type":"hosting",'
+            b'"asn_kind":"hosting","abuser_score":"0.35 (High)"}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.netcoffee_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out["company_type"], "hosting")
+        self.assertEqual(out["asn_kind"], "hosting")
+        self.assertEqual(out["abuser_score"], 0.35)
+
+    def test_ipapi_is_enriched_fields(self):
+        payload = (
+            b'{"is_datacenter":false,"is_vpn":true,"is_abuser":false,'
+            b'"company":{"type":"hosting","abuser_score":"0.50 (Medium)"},'
+            b'"asn":{"type":"hosting","abuser_score":"0.20 (Medium)"}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("api.ipapi.is", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.ipapi_is_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertTrue(out["is_vpn"])
+        self.assertEqual(out["company_type"], "hosting")
+        self.assertEqual(out["asn_type"], "hosting")
+        self.assertEqual(out["company_abuser_score"], 0.50)
+        self.assertEqual(out["asn_abuser_score"], 0.20)
+
+    def test_ipquery_lookup_parsing(self):
+        payload = (
+            b'{"risk":{"is_mobile":false,"is_vpn":true,"is_tor":false,'
+            b'"is_proxy":false,"is_datacenter":true,"risk_score":35},'
+            b'"isp":{"asn":"AS15169","org":"Google LLC","isp":"Google"}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("api.ipquery.io/1.2.3.4", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.ipquery_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertTrue(out["is_vpn"])
+        self.assertTrue(out["is_datacenter"])
+        self.assertEqual(out["risk_score"], 35)
+        self.assertEqual(out["asn"], "AS15169")
+
+    def test_ffraud_lookup_parsing(self):
+        payload = (
+            b'{"fraud_score":0,"risk":"none","proxy":false,"vpn":false,'
+            b'"tor":false,"hosting":true,"is_abuser":false,'
+            b'"recent_abuse":false,"connection_type":"Residential"}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("api.ffraud.com", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.ffraud_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out["fraud_score"], 0)
+        self.assertTrue(out["is_hosting"])
+        self.assertEqual(out["connection_type"], "Residential")
+
+    def test_whatismyip_lookup_parsing(self):
+        payload = (
+            b'{"data":{"security":{"isVpn":false,"isProxy":true,"isTor":false,'
+            b'"isHosting":false,"isBlacklisted":true,"score":40},'
+            b'"network":{"connectionType":"Residential"}}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("whatismyip.ai", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.whatismyip_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertTrue(out["is_proxy"])
+        self.assertTrue(out["is_blacklisted"])
+        self.assertEqual(out["score"], 40)
+        self.assertEqual(out["connection_type"], "Residential")
+
+    def test_parse_abuser_score(self):
+        self.assertEqual(qc.parse_abuser_score("0.0039 (Low)"), 0.0039)
+        self.assertEqual(qc.parse_abuser_score("42"), 42.0)
+        self.assertEqual(qc.parse_abuser_score(0.5), 0.5)
+        self.assertIsNone(qc.parse_abuser_score("n/a"))
+
+    def test_norm_asn(self):
+        self.assertEqual(qc.norm_asn("AS15169"), "AS15169")
+        self.assertEqual(qc.norm_asn("15169"), "AS15169")
+        self.assertEqual(qc.norm_asn("AS15169,Google LLC,US"), "AS15169")
+        self.assertIsNone(qc.norm_asn("Google LLC"))
+
+    def test_source_score_new_sources(self):
+        self.assertEqual(qc.source_score("ipquery", {"risk_score": 20}), 80)
+        self.assertEqual(qc.source_score("ipquery", {"is_vpn": True}), 70)
+        self.assertEqual(
+            qc.source_score("ipquery", {"is_datacenter": True, "asn": "AS1"}),
+            85,
+        )
+        self.assertIsNone(qc.source_score("ipquery", {"asn": ""}))
+        self.assertEqual(
+            qc.source_score("ffraud", {"fraud_score": 0, "is_hosting": True}),
+            85,
+        )
+        self.assertEqual(qc.source_score("ffraud", {"is_abuser": True}), 80)
+        self.assertIsNone(qc.source_score("ffraud", {}))
+        self.assertEqual(qc.source_score("whatismyip", {"score": 40}), 60)
+        self.assertEqual(qc.source_score("whatismyip", {"is_tor": True}), 55)
+        self.assertIsNone(qc.source_score("whatismyip", {}))
+        self.assertEqual(qc.source_score("abuse_list", {"is_abuse": True}), 60)
+        self.assertIsNone(qc.source_score("abuse_list", {"is_abuse": False}))
+        self.assertEqual(qc.source_score("dc_asn", {"is_hosting": True}), 85)
+        self.assertIsNone(qc.source_score("dc_asn", {}))
+        self.assertEqual(qc.source_score("vpn_asn", {"is_vpn": True}), 70)
+        self.assertEqual(
+            qc.source_score("resproxy_asn", {"is_proxy": True}), 75)
+
+    def test_source_score_enriched_penalties(self):
+        self.assertEqual(
+            qc.source_score("netcoffee", {"company_type": "hosting"}), 85)
+        self.assertEqual(
+            qc.source_score("netcoffee", {"abuser_score": 0.5}), 80)
+        self.assertEqual(
+            qc.source_score("netcoffee", {"abuser_score": 0.0039}), 100)
+        self.assertEqual(
+            qc.source_score("ipapi_is", {"company_type": "hosting"}), 85)
+        self.assertEqual(
+            qc.source_score("ipapi_is", {"company_abuser_score": 0.5}), 80)
+
+    def test_collect_signals_clean_geo_includes_ipapi(self):
+        signals = qc.collect_signals(
+            "9.9.9.9",
+            {"status": "success", "countryCode": "US"},
+            {},
+            qc.REPUTATION_WEIGHTS,
+        )
+        self.assertIn("ip-api", signals)
+
+    def test_collect_signals_no_geo_excludes_ipapi(self):
+        signals = qc.collect_signals(
+            "9.9.9.9", {}, {}, qc.REPUTATION_WEIGHTS
+        )
+        self.assertNotIn("ip-api", signals)
+
+    def test_static_sources_in_defaults(self):
+        for name in ("ipquery", "ffraud", "whatismyip", "ipapi_is",
+                     "dc_asn", "abuse_list", "vpn_asn", "resproxy_asn"):
+            self.assertIn(name, qc.DEFAULT_REP_SOURCES)
+            self.assertGreater(qc.REPUTATION_WEIGHTS.get(name, 0), 0)
+
+
+class TestIpSet(unittest.TestCase):
+    def test_exact_ip(self):
+        s = qc.IpSet(["1.2.3.4", "5.6.7.8/32"])
+        self.assertIn("1.2.3.4", s)
+        self.assertIn("5.6.7.8", s)
+
+    def test_cidr_containment(self):
+        s = qc.IpSet(["10.0.0.0/24", "2001:db8::/32"])
+        self.assertIn("10.0.0.1", s)
+        self.assertIn("10.0.0.255", s)
+        self.assertNotIn("10.0.1.1", s)
+        self.assertIn("2001:db8::1", s)
+        self.assertNotIn("2001:db9::1", s)
+
+    def test_skips_comments_and_garbage(self):
+        s = qc.IpSet(["# comment", "; skip", "not-an-ip", "1.2.3.4"])
+        self.assertIn("1.2.3.4", s)
+        self.assertEqual(len(s), 1)
+
+    def test_bad_ip_returns_false(self):
+        s = qc.IpSet(["1.2.3.4"])
+        self.assertNotIn("not-an-ip", s)
+
+
+class TestStaticLists(unittest.TestCase):
+    def _patch_urlopen(self, text):
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return text.encode()
+
+            return FakeResp()
+
+        return fake_urlopen
+
+    def test_fetch_asn_list_finds_asn_column(self):
+        text = (
+            "slug,name,jurisdiction,asn,protocols\n"
+            "airvpn,AirVPN,Italy,,WireGuard\n"
+            "nord,NordVPN,Panama,AS212238,WireGuard\n"
+        )
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = self._patch_urlopen(text)
+        try:
+            out = asyncio.run(qc.fetch_asn_list("http://x/asn.csv"))
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out, {"AS212238"})
+
+    def test_fetch_asn_list_first_col_fallback(self):
+        text = "asn,name\nAS15169,Google\nAS8075,Microsoft\n"
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = self._patch_urlopen(text)
+        try:
+            out = asyncio.run(qc.fetch_asn_list("http://x/asn.csv"))
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out, {"AS15169", "AS8075"})
+
+    def test_fetch_static_lists_fail_open(self):
+        def boom(req, timeout=0):
+            raise OSError("network down")
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = boom
+        try:
+            out = asyncio.run(qc.fetch_static_lists(["abuse_list", "dc_asn"]))
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(len(out["abuse_list"]), 0)
+        self.assertEqual(out["dc_asn"], set())
 
 
 class TestReputationFiles(unittest.TestCase):

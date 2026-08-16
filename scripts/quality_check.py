@@ -35,6 +35,7 @@ score). Lines without results stay untouched.
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import re
 import ssl
@@ -42,6 +43,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,6 +87,28 @@ GETIPINTEL_CAP = 300
 IPAPI_IS_URL = "https://api.ipapi.is/?q={ip}"
 IPAPI_IS_TIMEOUT = 8
 
+IPQUERY_URL = "https://api.ipquery.io/{ip}"
+IPQUERY_TIMEOUT = 8
+
+FFRAUD_URL = "https://api.ffraud.com/public/ip/{ip}"
+FFRAUD_TIMEOUT = 8
+
+WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
+WHATISMYIP_TIMEOUT = 8
+
+# 静态列表（torlist 同款：每 run 拉一次、fail-open、失败即跳过）
+FIREHOL_ABUSERS_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
+    "master/firehol_abusers_1d.netset"
+)
+DC_ASN_URL = "https://iplogs.com/data/datacenter-asns.csv"
+VPN_ASN_URL = "https://iplogs.com/data/vpn-providers.csv"
+RESPROXY_ASN_URL = "https://iplogs.com/data/residential-proxy-backbones.csv"
+STATIC_LIST_TIMEOUT = 15
+
+ABUSER_SCORE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
+ABUSER_SCORE_THRESHOLD = 0.1
+
 TORLIST_URLS = (
     "https://check.torproject.org/exit-addresses",
     "https://www.dan.me.uk/torlist/",
@@ -123,17 +147,70 @@ IPAPI_IS_FLAG_PENALTIES = {
     "is_abuser": 20,
 }
 
-REPUTATION_WEIGHTS = {
-    "netcoffee": 35,
-    "ncgy": 25,
-    "ip-api": 15,
-    "ipdata": 10,
-    "torlist": 5,
-    "getipintel": 5,
-    "ipapi_is": 5,
+IPQUERY_FLAG_PENALTIES = {
+    "is_tor": 45,
+    "is_vpn": 30,
+    "is_proxy": 25,
+    "is_datacenter": 15,
 }
 
-DEFAULT_REP_SOURCES = ("netcoffee", "ncgy", "ip-api", "ipdata", "torlist")
+FFRAUD_FLAG_PENALTIES = {
+    "is_tor": 45,
+    "is_vpn": 30,
+    "is_proxy": 25,
+    "is_hosting": 15,
+    "is_abuser": 20,
+    "recent_abuse": 15,
+}
+
+WHATISMYIP_FLAG_PENALTIES = {
+    "is_tor": 45,
+    "is_vpn": 30,
+    "is_proxy": 25,
+    "is_hosting": 15,
+    "is_blacklisted": 30,
+}
+
+# 静态列表源命中即返回固定干净分（100 - 罚分）
+STATIC_LIST_SCORES = {
+    "abuse_list": 60,   # is_abuse（历史滥用，强信号）
+    "dc_asn": 85,       # is_hosting（机房/数据中心）
+    "vpn_asn": 70,      # is_vpn
+    "resproxy_asn": 75, # is_proxy（住宅代理骨干）
+}
+
+REPUTATION_WEIGHTS = {
+    "netcoffee": 30,
+    "ncgy": 20,
+    "ip-api": 15,
+    "ipquery": 10,
+    "ffraud": 10,
+    "ipapi_is": 8,
+    "ipdata": 8,
+    "whatismyip": 5,
+    "dc_asn": 5,
+    "abuse_list": 5,
+    "torlist": 5,
+    "getipintel": 5,
+    "vpn_asn": 3,
+    "resproxy_asn": 2,
+}
+
+DEFAULT_REP_SOURCES = (
+    "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
+    "ipapi_is", "ipdata", "whatismyip", "dc_asn",
+    "abuse_list", "torlist", "vpn_asn", "resproxy_asn",
+)
+
+# 按源控速 (workers, delay)，避免免 key 接口限流掉单
+SOURCE_PACING = {
+    "netcoffee": (6, 0.25),
+    "ncgy": (6, 0.25),
+    "ipapi_is": (6, 0.25),
+    "ipquery": (4, 0.25),
+    "ffraud": (4, 0.25),
+    "whatismyip": (4, 0.25),
+}
 
 ECHO_V4_HOST = "api.ipify.org"
 ECHO_V6_HOST = "api6.ipify.org"
@@ -581,6 +658,64 @@ async def batch_ipapi(ips: list) -> dict:
     return out
 
 
+def parse_abuser_score(value) -> float | None:
+    """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = ABUSER_SCORE_RE.search(str(value))
+    return float(m.group(1)) if m else None
+
+
+ASN_RE = re.compile(r"(?:AS)?(\d+)", re.IGNORECASE)
+
+
+def norm_asn(value) -> str | None:
+    """``"AS15169"`` / ``"15169"`` → ``"AS15169"``；无法解析返回 ``None``。"""
+    m = ASN_RE.search(str(value))
+    return f"AS{m.group(1)}" if m else None
+
+
+class IpSet:
+    """IP / CIDR 集合，支持精确 IP 与 CIDR 包含判断（stdlib ipaddress + bisect）。"""
+
+    def __init__(self, entries=()):
+        self._ips: set = set()
+        nets: list = []
+        for raw in entries:
+            raw = str(raw).strip()
+            if not raw or raw.startswith(("#", ";")):
+                continue
+            if "/" in raw:
+                try:
+                    nets.append(ipaddress.ip_network(raw, strict=False))
+                except ValueError:
+                    continue
+            else:
+                try:
+                    self._ips.add(ipaddress.ip_address(raw))
+                except ValueError:
+                    continue
+        nets.sort(key=lambda n: int(n.network_address))
+        self._nets = nets
+        self._starts = [int(n.network_address) for n in nets]
+
+    def __len__(self) -> int:
+        return len(self._ips) + len(self._nets)
+
+    def __contains__(self, ip) -> bool:
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        if addr in self._ips:
+            return True
+        idx = bisect_right(self._starts, int(addr)) - 1
+        for j in range(idx, max(-1, idx - 8), -1):
+            if addr in self._nets[j]:
+                return True
+        return False
+
+
 def netcoffee_lookup_sync(ip: str) -> dict | None:
     """``GET /api/iprisk/{ip}`` (free, keyless); returns reputation flags."""
     url = NETCOFFEE_URL.format(ip=ip)
@@ -605,7 +740,12 @@ def netcoffee_lookup_sync(ip: str) -> dict | None:
         "is_mobile": bool(data.get("is_mobile")),
         "is_crawler": bool(data.get("is_crawler")),
         "isResidential": bool(data.get("isResidential")),
+        "company_type": data.get("company_type"),
+        "asn_kind": data.get("asn_kind"),
     }
+    abuser = parse_abuser_score(data.get("abuser_score"))
+    if abuser is not None:
+        out["abuser_score"] = abuser
     if out["trust_score"] is None and not any(
         v for k, v in out.items() if k != "trust_score"
     ):
@@ -693,7 +833,9 @@ def ipapi_is_lookup_sync(ip: str) -> dict | None:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
-    return {
+    company = data.get("company") or {}
+    asn = data.get("asn") or {}
+    out = {
         "is_bogon": bool(data.get("is_bogon")),
         "is_mobile": bool(data.get("is_mobile")),
         "is_crawler": bool(data.get("is_crawler")),
@@ -702,7 +844,97 @@ def ipapi_is_lookup_sync(ip: str) -> dict | None:
         "is_proxy": bool(data.get("is_proxy")),
         "is_vpn": bool(data.get("is_vpn")),
         "is_abuser": bool(data.get("is_abuser")),
+        "company_type": company.get("type"),
+        "asn_type": asn.get("type"),
     }
+    abuser = parse_abuser_score(company.get("abuser_score"))
+    if abuser is not None:
+        out["company_abuser_score"] = abuser
+    abuser = parse_abuser_score(asn.get("abuser_score"))
+    if abuser is not None:
+        out["asn_abuser_score"] = abuser
+    return out
+
+
+def ipquery_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``api.ipquery.io/{ip}`` risk flags + ISP (proxy/vpn/tor/datacenter)."""
+    req = urllib.request.Request(
+        IPQUERY_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=IPQUERY_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    risk = data.get("risk") or {}
+    isp = data.get("isp") or {}
+    out = {
+        "is_mobile": bool(risk.get("is_mobile")),
+        "is_vpn": bool(risk.get("is_vpn")),
+        "is_tor": bool(risk.get("is_tor")),
+        "is_proxy": bool(risk.get("is_proxy")),
+        "is_datacenter": bool(risk.get("is_datacenter")),
+        "asn": isp.get("asn"),
+        "org": isp.get("org"),
+    }
+    score = risk.get("risk_score")
+    if isinstance(score, (int, float)):
+        out["risk_score"] = round(score)
+    return out
+
+
+def ffraud_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``api.ffraud.com/public/ip/{ip}`` fraud score + flags."""
+    req = urllib.request.Request(
+        FFRAUD_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=FFRAUD_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    out = {
+        "is_vpn": bool(data.get("vpn")),
+        "is_proxy": bool(data.get("proxy")),
+        "is_tor": bool(data.get("tor")),
+        "is_hosting": bool(data.get("hosting")),
+        "is_mobile": bool(data.get("mobile")),
+        "is_abuser": bool(data.get("is_abuser")),
+        "recent_abuse": bool(data.get("recent_abuse")),
+        "is_residential_proxy": bool(data.get("is_residential_proxy")),
+        "connection_type": data.get("connection_type"),
+    }
+    score = data.get("fraud_score")
+    if isinstance(score, (int, float)):
+        out["fraud_score"] = round(score)
+    return out
+
+
+def whatismyip_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``whatismyip.ai/api/lookup/{ip}`` security score + flags."""
+    req = urllib.request.Request(
+        WHATISMYIP_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=WHATISMYIP_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    payload = data.get("data") if isinstance(data.get("data"), dict) else {}
+    security = payload.get("security") or {}
+    network = payload.get("network") or {}
+    out = {
+        "is_vpn": bool(security.get("isVpn")),
+        "is_proxy": bool(security.get("isProxy")),
+        "is_tor": bool(security.get("isTor")),
+        "is_hosting": bool(security.get("isHosting")),
+        "is_blacklisted": bool(security.get("isBlacklisted")),
+        "connection_type": network.get("connectionType"),
+    }
+    score = security.get("score")
+    if isinstance(score, (int, float)):
+        out["score"] = round(score)
+    return out
 
 
 async def fetch_torlist() -> set[str]:
@@ -730,6 +962,81 @@ async def fetch_torlist() -> set[str]:
 
     await asyncio.gather(*(fetch_one(u) for u in TORLIST_URLS))
     return exits
+
+
+async def fetch_text_list(url: str) -> set[str]:
+    """Fetch a static list; any failure returns an empty set (fail-open)."""
+    out: set[str] = set()
+    try:
+        text = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(
+                urllib.request.Request(url, headers={"User-Agent": UA}),
+                timeout=STATIC_LIST_TIMEOUT,
+            ).read().decode("utf-8", errors="replace")
+        )
+    except Exception:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        out.add(line)
+    return out
+
+
+async def fetch_firehol_abusers() -> IpSet:
+    """FireHOL ``firehol_abusers_1d`` (abusive IPs/CIDRs) as an ``IpSet``."""
+    return IpSet(await fetch_text_list(FIREHOL_ABUSERS_URL))
+
+
+async def fetch_asn_list(url: str) -> set[str]:
+    """CSV → normalized ``ASxxxx`` set (locates the ``asn`` column by header)."""
+    rows = list(await fetch_text_list(url))
+    asns: set[str] = set()
+    col = 0
+    header_idx = None
+    for i, row in enumerate(rows):
+        parts = [p.strip() for p in row.split(",")]
+        if any(p.lower() == "asn" for p in parts):
+            col = next(j for j, p in enumerate(parts) if p.lower() == "asn")
+            header_idx = i
+            break
+    for i, row in enumerate(rows):
+        if i == header_idx:
+            continue
+        parts = row.split(",")
+        if len(parts) <= col:
+            continue
+        asn = norm_asn(parts[col].strip())
+        if asn:
+            asns.add(asn)
+    return asns
+
+
+async def fetch_static_lists(sources: list) -> dict:
+    """Fetch enabled static lists in parallel; disabled/failed sources stay empty."""
+    out: dict = {
+        "abuse_list": IpSet(),
+        "dc_asn": set(),
+        "vpn_asn": set(),
+        "resproxy_asn": set(),
+    }
+    mapping = []
+    if "abuse_list" in sources:
+        mapping.append(("abuse_list", fetch_firehol_abusers()))
+    if "dc_asn" in sources:
+        mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
+    if "vpn_asn" in sources:
+        mapping.append(("vpn_asn", fetch_asn_list(VPN_ASN_URL)))
+    if "resproxy_asn" in sources:
+        mapping.append(("resproxy_asn", fetch_asn_list(RESPROXY_ASN_URL)))
+    results = await asyncio.gather(
+        *(task for _name, task in mapping), return_exceptions=True
+    )
+    for (name, _task), res in zip(mapping, results):
+        if not isinstance(res, Exception):
+            out[name] = res
+    return out
 
 
 async def batch_sync(
@@ -772,6 +1079,11 @@ def source_score(name: str, signal) -> int | None:
             amt for flag, amt in NETCOFFEE_FLAG_PENALTIES.items()
             if signal.get(flag)
         )
+        if signal.get("company_type") in ("hosting", "datacenter") or \
+           signal.get("asn_kind") in ("hosting", "datacenter"):
+            penalty += 15
+        if (signal.get("abuser_score") or 0) >= ABUSER_SCORE_THRESHOLD:
+            penalty += 20
         return max(0, min(100, 100 - penalty))
     if name == "ncgy":
         penalty = sum(
@@ -806,7 +1118,56 @@ def source_score(name: str, signal) -> int | None:
             amt for flag, amt in IPAPI_IS_FLAG_PENALTIES.items()
             if signal.get(flag)
         )
+        if signal.get("company_type") in ("hosting", "datacenter") or \
+           signal.get("asn_type") in ("hosting", "datacenter"):
+            penalty += 15
+        abuser = signal.get("company_abuser_score")
+        if abuser is None:
+            abuser = signal.get("asn_abuser_score")
+        if (abuser or 0) >= ABUSER_SCORE_THRESHOLD:
+            penalty += 20
         return max(0, min(100, 100 - penalty))
+    if name == "ipquery":
+        penalty = sum(
+            amt for flag, amt in IPQUERY_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        raw = signal.get("risk_score")
+        if isinstance(raw, (int, float)):
+            penalty = max(penalty, round(raw))
+        if not penalty and not signal.get("asn"):
+            return None
+        return max(0, min(100, 100 - penalty))
+    if name == "ffraud":
+        penalty = sum(
+            amt for flag, amt in FFRAUD_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        raw = signal.get("fraud_score")
+        if isinstance(raw, (int, float)):
+            penalty = max(penalty, round(raw))
+        if not penalty and not signal.get("connection_type"):
+            return None
+        return max(0, min(100, 100 - penalty))
+    if name == "whatismyip":
+        penalty = sum(
+            amt for flag, amt in WHATISMYIP_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        raw = signal.get("score")
+        if isinstance(raw, (int, float)):
+            penalty = max(penalty, round(raw))
+        if not penalty and not signal.get("connection_type"):
+            return None
+        return max(0, min(100, 100 - penalty))
+    if name in STATIC_LIST_SCORES:
+        flag = {
+            "abuse_list": "is_abuse",
+            "dc_asn": "is_hosting",
+            "vpn_asn": "is_vpn",
+            "resproxy_asn": "is_proxy",
+        }[name]
+        return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
 
 
@@ -875,7 +1236,7 @@ def collect_signals(
         signal = risk_data.get(ip, {}).get(source)
         if signal is not None:
             signals[source] = signal
-    if include_ipapi and (geo_item.get("proxy") or geo_item.get("hosting")):
+    if include_ipapi and geo_item.get("countryCode"):
         signals["ip-api"] = geo_item
     return signals
 
@@ -1262,7 +1623,9 @@ async def run_abuse(
     return abuse_map
 
 
-async def lookup_all_risk(ips: list, args: argparse.Namespace) -> dict:
+async def lookup_all_risk(
+    ips: list, args: argparse.Namespace, asn_map: dict | None = None
+) -> dict:
     """Query all enabled reputation sources; ``{ip: {source: signal}}``."""
     sources = args.reputation_sources
     if not sources:
@@ -1272,11 +1635,18 @@ async def lookup_all_risk(ips: list, args: argparse.Namespace) -> dict:
     def put(name: str, ip: str, signal) -> None:
         risk_data.setdefault(ip, {})[name] = signal
 
+    pacing = SOURCE_PACING
     if "netcoffee" in sources:
-        for ip, sig in (await batch_netcoffee(ips)).items():
+        workers, delay = pacing.get("netcoffee", (REP_WORKERS, REP_DELAY))
+        for ip, sig in (
+            await batch_sync(ips, netcoffee_lookup_sync, workers=workers, delay=delay)
+        ).items():
             put("netcoffee", ip, sig)
     if "ncgy" in sources:
-        for ip, sig in (await batch_sync(ips, ncgy_lookup_sync)).items():
+        workers, delay = pacing.get("ncgy", (REP_WORKERS, REP_DELAY))
+        for ip, sig in (
+            await batch_sync(ips, ncgy_lookup_sync, workers=workers, delay=delay)
+        ).items():
             put("ncgy", ip, sig)
     if "ipdata" in sources:
         for ip, sig in (
@@ -1301,13 +1671,47 @@ async def lookup_all_risk(ips: list, args: argparse.Namespace) -> dict:
                 file=sys.stderr,
             )
     if "ipapi_is" in sources:
-        for ip, sig in (await batch_sync(ips, ipapi_is_lookup_sync)).items():
+        workers, delay = pacing.get("ipapi_is", (REP_WORKERS, REP_DELAY))
+        for ip, sig in (
+            await batch_sync(ips, ipapi_is_lookup_sync, workers=workers, delay=delay)
+        ).items():
             put("ipapi_is", ip, sig)
+    if "ipquery" in sources:
+        workers, delay = pacing.get("ipquery", (REP_WORKERS, REP_DELAY))
+        for ip, sig in (
+            await batch_sync(ips, ipquery_lookup_sync, workers=workers, delay=delay)
+        ).items():
+            put("ipquery", ip, sig)
+    if "ffraud" in sources:
+        workers, delay = pacing.get("ffraud", (REP_WORKERS, REP_DELAY))
+        for ip, sig in (
+            await batch_sync(ips, ffraud_lookup_sync, workers=workers, delay=delay)
+        ).items():
+            put("ffraud", ip, sig)
+    if "whatismyip" in sources:
+        workers, delay = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
+        for ip, sig in (
+            await batch_sync(ips, whatismyip_lookup_sync, workers=workers, delay=delay)
+        ).items():
+            put("whatismyip", ip, sig)
     if "torlist" in sources:
         tor = await fetch_torlist()
         for ip in dict.fromkeys(ips):
             if ip in tor:
                 put("torlist", ip, {"is_tor": True})
+    static = await fetch_static_lists(sources)
+    for ip in dict.fromkeys(ips):
+        if ip in static["abuse_list"]:
+            put("abuse_list", ip, {"is_abuse": True})
+        asn = (asn_map or {}).get(ip)
+        if not asn:
+            continue
+        if asn in static["dc_asn"]:
+            put("dc_asn", ip, {"is_hosting": True, "asn": asn})
+        if asn in static["vpn_asn"]:
+            put("vpn_asn", ip, {"is_vpn": True, "asn": asn})
+        if asn in static["resproxy_asn"]:
+            put("resproxy_asn", ip, {"is_proxy": True, "asn": asn})
     return risk_data
 
 
@@ -1341,6 +1745,7 @@ async def run(args: argparse.Namespace) -> int:
     abuse_map = await run_abuse(results, ipinfo, args)
 
     rep_ips = []
+    asn_map: dict[str, str] = {}
     for res in results.values():
         if res.get("tls"):
             rep_ips.append(res["ip"])
@@ -1348,7 +1753,9 @@ async def run(args: argparse.Namespace) -> int:
             info = ipinfo.get(res["key"]) or {}
             if info.get("exit_ip"):
                 rep_ips.append(info["exit_ip"])
-    risk_data = await lookup_all_risk(rep_ips, args)
+                if info.get("asn"):
+                    asn_map[info["exit_ip"]] = info["asn"]
+    risk_data = await lookup_all_risk(rep_ips, args, asn_map)
     if risk_data:
         print(
             f"Reputation: {len(risk_data)}/{len(set(rep_ips))} IPs from "
@@ -1409,7 +1816,8 @@ def main(argv: list[str] | None = None) -> int:
         "--reputation-sources",
         default=None,
         help="Comma list of sources for --reputation-provider multi "
-        "(default: netcoffee,ncgy,ip-api,ipdata,torlist)",
+        "(default: netcoffee,ncgy,ip-api,ipquery,ffraud,ipapi_is,ipdata,"
+        "whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn)",
     )
     parser.add_argument(
         "--reputation-weights",
