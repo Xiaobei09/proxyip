@@ -463,6 +463,68 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertFalse((us / "v4_ltd.txt").exists())
         self.assertFalse((vp.VALID_DIR / "all_46_ltd.txt").exists())
 
+    def test_cn_fallback_via_china_json(self):
+        (vp.VALID_DIR / "china.json").write_text(
+            json.dumps({"proxies": {"1.0.0.1:443#US": {"verdict": "reachable"}}}),
+            encoding="utf-8",
+        )
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 0.5),
+        }
+        families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#US": "ipv4"}
+        vp.write_valid_outputs(alive, per_country_limit=1, families=families)
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertEqual(self._keys(us / "cn.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(us / "cn4.txt"), ["1.0.0.1:443"])
+        self.assertFalse((us / "v6.txt").exists())
+
+    def test_cn_reachable_arg_override(self):
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        families = {"1.0.0.1:443#US": "ipv4"}
+        vp.write_valid_outputs(
+            alive,
+            per_country_limit=1,
+            families=families,
+            cn_reachable={"1.0.0.1:443#US"},
+        )
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertEqual(self._keys(us / "cn.txt"), ["1.0.0.1:443"])
+        vp.write_valid_outputs(
+            alive,
+            per_country_limit=1,
+            families=families,
+            cn_reachable=set(),
+        )
+        self.assertEqual(self._keys(us / "cn.txt"), [])
+
+    def test_root_group_ltd_includes_all_pseudo_country(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#ALL-120ms-CN-DS\n",
+            encoding="utf-8",
+        )
+        alive = {"1.0.0.1:443#ALL": ("1.0.0.1", "443", "ALL", "tls", 120.0, 0.5)}
+        families = {"1.0.0.1:443#ALL": "dual"}
+        vp.write_valid_outputs(alive, per_country_limit=1, families=families)
+        self.assertEqual(self._keys(vp.VALID_DIR / "all_46.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(vp.VALID_DIR / "all_46_ltd.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(vp.VALID_DIR / "all_cn46.txt"), ["1.0.0.1:443"])
+        self.assertEqual(self._keys(vp.VALID_DIR / "all_cn46_ltd.txt"), ["1.0.0.1:443"])
+        self.assertFalse((vp.VALID_DIR / "countries" / "ALL").exists())
+
+    def test_cn_groups_preserve_old_notes_when_cached(self):
+        (vp.VALID_DIR / "all.txt").write_text(
+            "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4-DC-72\n",
+            encoding="utf-8",
+        )
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        us = vp.VALID_DIR / "countries" / "US"
+        for name in ("v4.txt", "cn.txt", "cn4.txt"):
+            content = (us / name).read_text(encoding="utf-8")
+            self.assertIn("120ms", content, name)
+            self.assertIn("DC-72", content, name)
+
 
 class TestClassifyGroups(unittest.TestCase):
     """classify_groups / family_of / load_family_map pure logic."""
@@ -496,6 +558,10 @@ class TestClassifyGroups(unittest.TestCase):
         self.assertEqual(vp.family_of("1.0.0.1:443#US", "-CN-63", {}), None)
         self.assertEqual(vp.family_of("1.0.0.1:443#US", "", {}), None)
 
+    def test_family_of_both_v4_v6_is_dual(self):
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-V4-V6", {}), "dual")
+        self.assertEqual(vp.family_of("1.0.0.1:443#US", "-CN-V4-V6", {}), "dual")
+
     def test_load_family_map(self):
         tmp = Path(tempfile.mkdtemp(prefix="fm_"))
         j = tmp / "exit_family.json"
@@ -527,6 +593,50 @@ class TestClassifyGroups(unittest.TestCase):
         bare = tmp / "bare.json"
         bare.write_text(json.dumps({"1.0.0.1:443#US": {"family": "ipv6"}}), encoding="utf-8")
         self.assertEqual(vp.load_family_map(bare), {"1.0.0.1:443#US": "ipv6"})
+
+    def test_load_family_map_non_dict_shapes(self):
+        tmp = Path(tempfile.mkdtemp(prefix="fm_"))
+        for payload in (
+            [{"family": "ipv4"}],
+            {"proxies": []},
+            {"proxies": None},
+            "not a dict",
+            42,
+        ):
+            p = tmp / "shape.json"
+            p.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(vp.load_family_map(p), {}, f"payload={payload!r}")
+
+    def test_load_cn_reachable(self):
+        tmp = Path(tempfile.mkdtemp(prefix="fm_"))
+        p = tmp / "china.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "proxies": {
+                        "1.0.0.1:443#US": {"verdict": "reachable", "ms": 12.0},
+                        "2.0.0.1:443#JP": {"verdict": "unreachable", "ms": None},
+                        "3.0.0.1:443#DE": {"verdict": "uncertain", "ms": None},
+                        "4.0.0.1:443#FR": {"verdict": "reachable", "basis": ["heuristic"]},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            vp.load_cn_reachable(p), {"1.0.0.1:443#US", "4.0.0.1:443#FR"}
+        )
+
+    def test_load_cn_reachable_missing_or_broken(self):
+        tmp = Path(tempfile.mkdtemp(prefix="fm_"))
+        self.assertEqual(vp.load_cn_reachable(tmp / "nope.json"), set())
+        bad = tmp / "china.json"
+        bad.write_text("not json", encoding="utf-8")
+        self.assertEqual(vp.load_cn_reachable(bad), set())
+        for payload in ([{"verdict": "reachable"}], {"proxies": []}, 42):
+            p = tmp / "shape.json"
+            p.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(vp.load_cn_reachable(p), set(), f"payload={payload!r}")
 
 
 class TestWriteHelpers(unittest.TestCase):
