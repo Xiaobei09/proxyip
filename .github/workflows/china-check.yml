@@ -16,7 +16,7 @@ jobs:
   check:
     name: Mainland-China reachability
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     env:
       CHINA_CHECK_API_KEY: ${{ secrets.CHINA_CHECK_API_KEY }}
       TCPPING_CN_TOKEN: ${{ secrets.TCPPING_CN_TOKEN }}
@@ -33,7 +33,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: China reachability check
-        run: python scripts/china_check.py --limit 250
+        run: python scripts/china_check.py --source data/valid/all.txt --limit 0
 
       - name: Show summary
         run: |
