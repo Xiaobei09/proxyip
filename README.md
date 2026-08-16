@@ -23,7 +23,7 @@
 - **自动抓取整理**：下载上游 `all.json`（失败自动回退 zip）→ 按端口/国家/常用集合/全量多维度汇总，去重合并；并把上游真实出口 IP、ASN、地理等元数据落盘为 `upstream_meta.json` 供下游消费
 - **可用性验证**：HTTP CONNECT + TLS 双重检测，asyncio 高并发测活，并在判活连接内**真实下载测速**（MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
 - **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对每国最快的限量存活集做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
-- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），启发式 CF 边缘判定 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `china.json` 明细与 `all_cn.txt` 大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
+- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），启发式 CF 边缘判定 + itdog.cn 批量 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `china.json` 全量明细与 `all_cn.txt` 全量大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量与双轴复合图
@@ -88,14 +88,14 @@ data/all.txt                                # 全量去重清单（未验证）
 - **触发**：每 12 小时定时（`cron: 23 */12 * * *`）；支持 `workflow_dispatch` 手动触发（不随主更新自动执行）
 - **流程**：跑测试（`unittest`）→ `quality_check.py`（默认 `--time-budget 1800` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
-- **说明**：主更新每 30 分钟重写 `data/valid/*.txt` 为无备注行，质量 CI 每 12 小时重新加备注——备注（流媒体/出口/信誉）在两次质量运行之间可能滞后于最新一次主更新，属独立 CI 固有节奏
+- **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每 6 小时定时（`cron: 17 */6 * * *`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `china_check.py`（`--limit 250`，启发式 CF + check-host.cc + xxapi.cn + ping.pe 分层判定）→ 有变更则自动提交并推送
-- **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
-- **说明**：复用质量 CI 的冲突容错提交（rebase `-X theirs`），与主更新/质量 CI 的并发 `data/` 提交安全共存
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ 有变更则自动提交并推送
+- **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
+- **说明**：各工作流按文件所有权范围提交 `data/`（update-proxies 不触碰 `china.json`/`all_cn.txt`），与主更新/质量 CI 的并发提交安全共存
 
 `.github/workflows/exit-family.yml`（实际出口家族独立 CI）：
 
@@ -137,7 +137,7 @@ data/valid/abuse.json                  滥用分结果（配置 key 时生成，
 data/valid/reputation.json             信誉分索引（0-100，质量 CI）
 data/valid/all_rep.txt                 信誉排行（按分数降序，质量 CI）
 data/valid/china.json                  大陆连通性检测明细（keyed，china-check CI）
-data/valid/all_cn.txt                  大陆可达清单（china-check CI）
+data/valid/all_cn.txt                  全量大陆可达清单（全量池，china-check CI）
 data/valid/all_ipv4.txt                出口为 IPv4 的代理清单（exit-family CI，双栈双入）
 data/valid/all_ipv6.txt                出口为 IPv6 的代理清单（exit-family CI，双栈双入）
 data/valid/exit_family.json            实际出口家族明细（keyed，含上游交叉验证，exit-family CI）

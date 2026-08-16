@@ -247,6 +247,36 @@ class TestAnnotations(unittest.TestCase):
         self.assertIn("5.6.7.8:80#US-2ms-CN", cn_text)
         self.assertIn("9.9.9.9:80#US-3ms-CN", cn_text)
 
+    def test_generate_all_cn_full_pool_subset(self):
+        # 全量池文本里非限量（超出每国 20 条）的行同样进入 all_cn.txt
+        text = "\n".join(f"10.{i}.0.{i}:80#US-{i}ms" for i in range(1, 30)) + "\n"
+        reachable = {f"10.{i}.0.{i}:80#US" for i in range(1, 30)}
+        cn_text, count = cc.generate_all_cn(text, reachable)
+        self.assertEqual(count, 29)
+        self.assertIn("10.25.0.25:80#US-25ms-CN", cn_text)
+
+
+class TestLoadCnPool(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cc_pool_"))
+        self._valid = cc.VALID_DIR
+        cc.VALID_DIR = self.tmp
+
+    def tearDown(self):
+        cc.VALID_DIR = self._valid
+
+    def test_prefers_all_txt(self):
+        (self.tmp / "all_ltd.txt").write_text("1.0.0.1:80#US-1ms\n", encoding="utf-8")
+        (self.tmp / "all.txt").write_text("2.0.0.1:80#US-2ms\n", encoding="utf-8")
+        self.assertEqual(cc.load_cn_pool(), "2.0.0.1:80#US-2ms\n")
+
+    def test_falls_back_to_all_ltd(self):
+        (self.tmp / "all_ltd.txt").write_text("1.0.0.1:80#US-1ms\n", encoding="utf-8")
+        self.assertEqual(cc.load_cn_pool(), "1.0.0.1:80#US-1ms\n")
+
+    def test_missing_pool(self):
+        self.assertEqual(cc.load_cn_pool(), "")
+
 
 class TestRateLimiter(unittest.TestCase):
     def test_allows_within_window(self):

@@ -107,9 +107,10 @@
 
 ### `scripts/china_check.py`
 
-大陆连通性检测（独立 CI 运行）。默认对 `data/valid/all_rep.txt` 按信誉降序采样前 250 条（缺失时回退 `all_ltd.txt`），从大陆视角实测 TCP 可达性，分三层判定：
+大陆连通性检测（独立 CI 运行）。CI 以 `--source data/valid/all.txt --limit 0` 全量池检测；本地缺省按 `data/valid/all_rep.txt` 信誉降序采样前 250 条（缺失时回退 `all_ltd.txt`）。从大陆视角实测 TCP 可达性，分四层判定：
 
 - **L1 启发式（零网络）**：行备注已带 `-CF`（Cloudflare 边缘 tls 代理）即判大陆可达——这类代理走 CF 边缘节点，不依赖源站回程
+- **L2 itdog.cn 批量实测（主源）**：每任务 5 目标 × 电信/联通/移动各 1 节点，经 WebSocket 收结果，TCP 连通即判可达
 - **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 6/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**任一成功 → reachable；二者均失败 → unreachable；单方失败 → uncertain（不误判）**
 - **L3 多节点复核（串行小样本）**：`ping.pe`（约 13 个大陆节点，多数可达即判可达，报告不足则 inconclusive）；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
 
@@ -125,7 +126,7 @@
 | `--skip-pingpe` | 跳过 ping.pe 复核（本地快速冒烟） | 关 |
 | `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
 
-结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict）与 `all_cn.txt`（大陆可达清单，含历史已判可达者）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等）。
+结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，含历史已判可达者；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等）。
 
 ### `scripts/exit_family.py`
 

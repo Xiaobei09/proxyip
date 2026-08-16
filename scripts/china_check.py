@@ -6,7 +6,8 @@
 （本地缺省仍走 ``all_rep.txt`` 按信誉降序取前 250 的小样本）
 
 - ``data/valid/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``）
-- ``data/valid/all_cn.txt``  — 大陆可达清单（仅含判定 reachable 或已带 ``-CN`` 的行）
+- ``data/valid/all_cn.txt``  — 全量大陆可达清单（源为 ``data/valid/all.txt`` 全量存活池，
+  仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
 
 检测分层（均为无账号/免登录）：
@@ -531,10 +532,18 @@ def build_entry(item, sources: dict) -> dict:
     }
 
 
-def generate_all_cn(all_ltd_text: str, reachable_keys: set) -> tuple[str, int]:
-    """大陆可达清单：本次判可达或历史已带 ``-CN`` 的行。"""
+def load_cn_pool() -> str:
+    """全量存活池文本（``all_cn.txt`` 生成源）：优先 ``data/valid/all.txt``，缺则回退 all_ltd.txt。"""
+    path = VALID_DIR / "all.txt"
+    if not path.exists():
+        path = VALID_DIR / "all_ltd.txt"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def generate_all_cn(pool_text: str, reachable_keys: set) -> tuple[str, int]:
+    """大陆可达清单：本次判可达或历史已带 ``-CN`` 的行（源为全量池文本）。"""
     lines = []
-    for line in all_ltd_text.splitlines():
+    for line in pool_text.splitlines():
         if not line.strip():
             continue
         key = line_to_key(line)
@@ -683,9 +692,8 @@ def main(argv=None) -> int:
     print(f"reachable: {len(reachable)} uncertain: {len(uncertain)}", file=sys.stderr)
     write_json(CHINA_FILE, keyed_json(entries))
 
-    all_ltd_path = VALID_DIR / "all_ltd.txt"
-    all_ltd_text = all_ltd_path.read_text(encoding="utf-8") if all_ltd_path.exists() else ""
-    cn_text, cn_count = generate_all_cn(all_ltd_text, reachable)
+    all_pool_text = load_cn_pool()
+    cn_text, cn_count = generate_all_cn(all_pool_text, reachable)
     if cn_text:
         write_text_if_changed(ALL_CN_FILE, cn_text)
     annotate_cn_files(reachable)
