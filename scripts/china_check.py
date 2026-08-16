@@ -41,6 +41,7 @@ from common import (
     DEFAULT_SOURCE,
     REP_RANK_FILE,
     VALID_DIR,
+    has_token,
     is_cf_heuristic,
     keyed_json,
     line_to_key,
@@ -486,7 +487,7 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
 
 
 def has_cn_note(line: str) -> bool:
-    return bool(re.search(r"(?:^|-)CN(?:$|-)", _note(line)))
+    return has_token(_note(line), "CN")
 
 
 def annotate_cn(line: str) -> str:

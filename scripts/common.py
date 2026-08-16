@@ -89,6 +89,20 @@ def line_to_key(line: str) -> str | None:
     return parsed[0] if parsed else None
 
 
+def parse_line(line: str):
+    """``ip:port#<cc>-<note>`` -> ``(key, ip, port, cc, note)`` or ``None``.
+
+    统一解析入口：地址、国家码与备注段一次取齐；``key`` 由
+    ``parse_ltd_line`` 生成（``ip:port#<cc>``），``note`` 为 ``#`` 后、
+    国家码之后的备注段（不含 CC）。
+    """
+    parsed = parse_ltd_line(line)
+    if not parsed:
+        return None
+    key, ip, port, cc = parsed
+    return key, ip, port, cc, _note(line)
+
+
 def load_methods() -> dict:
     """``entry`` -> ``"connect"``/``"tls"`` from ``index.json``."""
     if not INDEX_FILE.exists():
@@ -213,9 +227,14 @@ def _note(line: str) -> str:
     return rest[i + len(cc):]
 
 
+def has_token(note: str, token: str) -> bool:
+    """备注段是否含独立 ``token``（以段首或 ``-`` 为界，如 ``-CF``/``-CN``/``-V4``）。"""
+    return bool(re.search(rf"(?:^|-){re.escape(token)}(?:$|-)", note))
+
+
 def is_cf_heuristic(line: str) -> bool:
     """行备注已带 ``-CF``（Cloudflare 边缘）即判定大陆可达（零网络）。"""
-    return bool(re.search(r"(?:^|-)CF(?:$|-)", _note(line)))
+    return has_token(_note(line), "CF")
 
 
 # --------------------------------------------------------- CONNECT 隧道探测
