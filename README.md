@@ -59,7 +59,10 @@ python scripts/quality_check.py             # 4. 流媒体解锁 + 出口 IP 质
 ```bash
 head -1 data/valid/all.txt                  # 当前延迟最低的存活代理（延迟升序）
 data/valid/all_ltd.txt                      # 每国按实测速度最快的 20 条限量清单
-data/valid/countries/US.txt                 # 仅美国的存活代理（含延迟/速度）
+data/valid/countries/US/all.txt            # 仅美国的存活代理（含延迟/速度）
+data/valid/countries/US/ltd.txt            # 该国限量（每国最快 20 条，速度降序）
+data/valid/countries/US/rep.txt            # 该国按信誉分降序（质量 CI 生成）
+data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录三件套）
 data/valid/ports/443.txt                    # 仅 443 端口的存活代理
 data/valid/speed.json                       # 每存活代理的实测速度（MB/s，按速度降序）
 data/sets/hot.txt                           # 热门国家集合
@@ -75,7 +78,7 @@ data/all.txt                                # 全量去重清单（未验证）
 - **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…），CONNECT 代理为出口 IP 的国家代号（ISO2）。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
 - **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→NRT-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
-- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt` 按速度降序
+- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）
 
 ### 处理流程
 
@@ -92,7 +95,7 @@ data/all.txt                                # 全量去重清单（未验证）
 ### 限量版 `_ltd`
 
 - 下载侧 `data/sets/<集合>_ltd.txt`、`data/all_ltd.txt`：每国最多取前 `--per-country-limit` 条（默认 20，按 IP 序）；`#ALL` 条目在 `all_ltd` 中单独取前 `--per-country-limit` 条
-- 验证侧 `data/valid/*_ltd.txt`：每国取**实测下载速度最快**的 20 条（速度并列/无速度时按延迟兜底），集合内与 `all_ltd` 全局按速度降序
+- 验证侧 `data/valid/*_ltd.txt` 及各国家/集合目录内 `ltd.txt`：每国取**实测下载速度最快**的 20 条（速度并列/无速度时按延迟兜底），集合内与 `all_ltd` 全局按速度降序
 - `--per-country-limit 0` 时不生成限量文件
 
 ## 国家集合
@@ -142,7 +145,7 @@ CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅�
 ### 输出
 
 - `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
-- `data/valid/countries/`、`ports/`、`sets/`：按国家/端口/集合分组的存活列表（同样含延迟/速度）
+- `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
 - `data/valid/meta.json`：本次验证汇总（字段见下）
 - `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）
 - `data/valid/speed.json`：每测速成功代理的实测速度（MB/s，按速度降序）
@@ -244,7 +247,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/all_rep.txt`
 
-与 `all_ltd.txt` 同源（每国最快存活集）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。
+与 `all_ltd.txt` 同源（每国最快存活集）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
 
 ### `data/history.jsonl`（每行一条）
 

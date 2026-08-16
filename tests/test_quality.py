@@ -1012,6 +1012,77 @@ class TestReputationFiles(unittest.TestCase):
         self.assertTrue(lines[0].startswith("5.6.7.8:8443"))
         self.assertTrue(lines[1].startswith("1.2.3.4:443"))
 
+    def test_write_reputation_files_nested_dirs(self):
+        cdir = self.tmp / "countries" / "US"
+        sdir = self.tmp / "sets" / "hot"
+        cdir.mkdir(parents=True)
+        sdir.mkdir(parents=True)
+        (cdir / "all.txt").write_text(
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms-1.00MB/s\n"
+            "9.9.9.9:443#\U0001F1FA\U0001F1F8US-30ms-3.00MB/s\n",
+            encoding="utf-8",
+        )
+        (sdir / "all.txt").write_text(
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms-1.00MB/s\n"
+            "5.6.7.8:8443#\U0001F1EF\U0001F1F5JP-50ms-2.00MB/s\n",
+            encoding="utf-8",
+        )
+        annotations = {"9.9.9.9:443#US": "DC-90", "5.6.7.8:8443#JP": "GPT-CF"}
+        rep_map = {
+            "9.9.9.9:443#US": {"score": 90, "risk": "low", "source": "netcoffee"},
+            "1.2.3.4:443#US": {"score": 70, "risk": "low", "source": "ip-api"},
+            "5.6.7.8:8443#JP": {"score": 40, "risk": "medium",
+                                "source": "ip-api"},
+        }
+        qc.write_reputation_files("", annotations, rep_map)
+        c_rep = (cdir / "rep.txt").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(c_rep), 2)
+        self.assertTrue(c_rep[0].startswith("9.9.9.9:443"))
+        self.assertTrue(c_rep[0].endswith("-DC-90"))
+        self.assertTrue(c_rep[1].startswith("1.2.3.4:443"))
+        s_rep = (sdir / "rep.txt").read_text(encoding="utf-8").splitlines()
+        self.assertTrue(s_rep[0].startswith("1.2.3.4:443"))
+        self.assertTrue(s_rep[1].startswith("5.6.7.8:8443"))
+        self.assertTrue(s_rep[1].endswith("-GPT-CF"))
+        self.assertFalse((sdir / "ltd.txt").exists())
+
+
+class TestAnnotateNestedValidFiles(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self._valid = qc.VALID_DIR
+        qc.VALID_DIR = self.tmp
+
+    def tearDown(self):
+        qc.VALID_DIR = self._valid
+
+    def test_annotates_nested_all_and_ltd(self):
+        cdir = self.tmp / "countries" / "US"
+        sdir = self.tmp / "sets" / "hot"
+        cdir.mkdir(parents=True)
+        sdir.mkdir(parents=True)
+        line = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s\n"
+        (cdir / "all.txt").write_text(line, encoding="utf-8")
+        (cdir / "ltd.txt").write_text(line, encoding="utf-8")
+        (sdir / "all.txt").write_text(line, encoding="utf-8")
+        (sdir / "rep.txt").write_text(line, encoding="utf-8")
+        annotations = {"1.2.3.4:443#US": "GPT-CF"}
+        qc.annotate_valid_files(annotations)
+        self.assertTrue(
+            (cdir / "all.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+        )
+        self.assertTrue(
+            (cdir / "ltd.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+        )
+        self.assertTrue(
+            (sdir / "all.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+        )
+        self.assertFalse(
+            (sdir / "rep.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+        )
+
 
 class TestFinalize(unittest.TestCase):
     def test_netflix_native(self):

@@ -14,7 +14,9 @@ a freshly-opened connection (CONNECT tunnel or TLS), gated by a semaphore so
 bandwidth stays low-contention. Outputs are written under ``data/valid/``
 mirroring the structure of ``data/``. Non-limited outputs are ordered by
 latency (fastest first); ``*_ltd`` outputs pick the fastest per country by
-measured speed. Lines use the ``ip:port#<flag><cc>-<latency>ms-<speed>MB/s``
+measured speed. ``countries/<cc>/`` and ``sets/<name>/`` are per-country and
+per-set directories holding ``all.txt``, ``ltd.txt`` (and, after the quality
+run, ``rep.txt``). Lines use the ``ip:port#<flag><cc>-<latency>ms-<speed>MB/s``
 format (speed omitted when the test failed). Proxies that connect at the TCP
 level but fail both checks are retried once.
 """
@@ -22,6 +24,7 @@ level but fail both checks are retried once.
 import argparse
 import asyncio
 import json
+import shutil
 import ssl
 import statistics
 import sys
@@ -403,12 +406,22 @@ def write_valid_outputs(
     for country in sorted(by_country):
         if country == "ALL":
             continue
-        (countries_dir / f"{country}.txt").write_text(
+        cdir = countries_dir / country
+        cdir.mkdir(parents=True, exist_ok=True)
+        (cdir / "all.txt").write_text(
             "\n".join(line(e) for e in by_country[country]) + "\n"
         )
-    expected_countries = {f"{c}.txt" for c in by_country if c != "ALL"}
+        if per_country_limit > 0:
+            entries = sorted(by_country[country], key=ltd_key)[:per_country_limit]
+            (cdir / "ltd.txt").write_text(
+                "\n".join(line(e) for e in entries) + "\n"
+            )
+    expected_countries = {c for c in by_country if c != "ALL"}
     for stale in countries_dir.iterdir():
-        if stale.name not in expected_countries:
+        if stale.is_dir():
+            if stale.name not in expected_countries:
+                shutil.rmtree(stale)
+        else:
             stale.unlink()
 
     for port in sorted(by_port, key=int):
@@ -428,7 +441,9 @@ def write_valid_outputs(
     for name, countries in {**COUNTRY_SETS, **SMALL_SETS}.items():
         cc_set = set(countries)
         full = [e for e in ordered if alive[e][2] in cc_set]
-        (sets_dir / f"{name}.txt").write_text(
+        sdir = sets_dir / name
+        sdir.mkdir(parents=True, exist_ok=True)
+        (sdir / "all.txt").write_text(
             "\n".join(line(e) for e in full) + "\n"
         )
         set_counts[name] = len(full)
@@ -438,15 +453,16 @@ def write_valid_outputs(
                 if cc in country_ltd:
                     ltd.extend(country_ltd[cc])
             ltd = sorted(ltd, key=ltd_key)
-            (sets_dir / f"{name}_ltd.txt").write_text(
+            (sdir / "ltd.txt").write_text(
                 "\n".join(line(e) for e in ltd) + "\n"
             )
             set_counts[f"{name}_ltd"] = len(ltd)
-    expected_sets = {f"{n}.txt" for n in {**COUNTRY_SETS, **SMALL_SETS}} | {
-        f"{n}_ltd.txt" for n in {**COUNTRY_SETS, **SMALL_SETS}
-    }
+    expected_sets = set({**COUNTRY_SETS, **SMALL_SETS})
     for stale in sets_dir.iterdir():
-        if stale.name not in expected_sets:
+        if stale.is_dir():
+            if stale.name not in expected_sets:
+                shutil.rmtree(stale)
+        else:
             stale.unlink()
 
     (VALID_DIR / "all.txt").write_text("\n".join(line(e) for e in ordered) + "\n")

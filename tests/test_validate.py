@@ -140,10 +140,16 @@ class TestWriteValidOutputs(unittest.TestCase):
             ["3.0.0.1:80", "1.0.0.1:443", "2.0.0.1:8443"],
         )
         self.assertIn("\U0001F1FA\U0001F1F8US-50ms-0.30MB/s", lines[0])
+        us_dir = vp.VALID_DIR / "countries" / "US"
         self.assertEqual(
-            [line.split("#", 1)[0] for line in (vp.VALID_DIR / "countries" / "US.txt").read_text().splitlines()],
+            [line.split("#", 1)[0] for line in (us_dir / "all.txt").read_text().splitlines()],
             ["3.0.0.1:80", "1.0.0.1:443"],
         )
+        self.assertEqual(
+            [line.split("#", 1)[0] for line in (us_dir / "ltd.txt").read_text().splitlines()],
+            ["1.0.0.1:443"],
+        )
+        self.assertFalse((vp.VALID_DIR / "countries" / "US.txt").exists())
         # index matches all.txt order
         self.assertEqual(
             list(json.loads(vp.INDEX_FILE.read_text())["proxies"]),
@@ -191,11 +197,53 @@ class TestWriteValidOutputs(unittest.TestCase):
             "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 80.0, 1.0),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
+        self.assertFalse((vp.VALID_DIR / "countries" / "ALL").exists())
         self.assertFalse((vp.VALID_DIR / "countries" / "ALL.txt").exists())
         all_lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
         self.assertTrue(any(line.startswith("1.0.0.1:443#ALL") for line in all_lines))
         ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
         self.assertTrue(any(line.startswith("1.0.0.1:443#ALL") for line in ltd))
+
+    def test_sets_written_as_directories(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 80.0, 1.0),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        hot = vp.VALID_DIR / "sets" / "hot"
+        self.assertEqual(
+            {p.name for p in (vp.VALID_DIR / "sets").iterdir()},
+            {name for name in {**vp.COUNTRY_SETS, **vp.SMALL_SETS}},
+        )
+        self.assertEqual(
+            [line.split("#", 1)[0] for line in (hot / "all.txt").read_text().splitlines()],
+            ["2.0.0.1:8443", "1.0.0.1:443"],
+        )
+        self.assertEqual(
+            [line.split("#", 1)[0] for line in (hot / "ltd.txt").read_text().splitlines()],
+            ["2.0.0.1:8443", "1.0.0.1:443"],
+        )
+        self.assertFalse((vp.VALID_DIR / "sets" / "hot.txt").exists())
+        self.assertFalse((vp.VALID_DIR / "sets" / "hot_ltd.txt").exists())
+
+    def test_stale_flat_files_and_dirs_removed(self):
+        (vp.VALID_DIR / "countries").mkdir(parents=True)
+        (vp.VALID_DIR / "sets").mkdir(parents=True)
+        (vp.VALID_DIR / "countries" / "US.txt").write_text("stale\n")
+        stale_dir = vp.VALID_DIR / "countries" / "XX"
+        stale_dir.mkdir()
+        (stale_dir / "all.txt").write_text("stale\n")
+        (vp.VALID_DIR / "sets" / "old.txt").write_text("stale\n")
+        stale_set = vp.VALID_DIR / "sets" / "old"
+        stale_set.mkdir()
+        (stale_set / "all.txt").write_text("stale\n")
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5)}
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        self.assertFalse((vp.VALID_DIR / "countries" / "US.txt").exists())
+        self.assertFalse(stale_dir.exists())
+        self.assertFalse((vp.VALID_DIR / "sets" / "old.txt").exists())
+        self.assertFalse(stale_set.exists())
+        self.assertTrue((vp.VALID_DIR / "countries" / "US" / "all.txt").exists())
 
     def test_speed_json(self):
         alive = {
