@@ -1,5 +1,6 @@
 """Tests for china_check.py pure functions."""
 
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -294,6 +295,132 @@ class TestBuildEntry(unittest.TestCase):
         self.assertEqual(entry["ip"], "1.2.3.4")
         self.assertIn("ts", entry)
         self.assertEqual(entry["sources"]["check_host"]["ms"], 100)
+
+
+class TestItdogMd5(unittest.TestCase):
+    def test_md5_16_length_and_slice(self):
+        s = "abc"
+        self.assertEqual(
+            cc.itdog_md5_16(s), hashlib.md5(s.encode()).hexdigest()[8:24]
+        )
+
+
+class TestItdogParseNodes(unittest.TestCase):
+    def test_parses_isp_groups(self):
+        html = (
+            '<select id="node_select">'
+            '<optgroup label="中国电信">'
+            '<option value="aaa">湖北十堰 - 电信</option>'
+            '<option value="bbb">湖北襄阳 - 电信</option>'
+            "</optgroup>"
+            '<optgroup label="中国联通">'
+            '<option value="ccc">山东济南 - 联通</option>'
+            "</optgroup>"
+            '<optgroup label="中国移动">'
+            '<option value="ddd">山东济南2 - 移动</option>'
+            "</optgroup>"
+            "</select>"
+        )
+        self.assertEqual(cc.itdog_parse_nodes(html, 1), ["aaa", "ccc", "ddd"])
+        self.assertEqual(cc.itdog_parse_nodes(html, 2), ["aaa", "bbb", "ccc", "ddd"])
+
+    def test_missing_group_skipped(self):
+        html = '<optgroup label="中国电信"><option value="aaa">x</option></optgroup>'
+        self.assertEqual(cc.itdog_parse_nodes(html, 1), ["aaa"])
+
+
+class TestItdogParseSubmit(unittest.TestCase):
+    def test_task_id(self):
+        html = "var task_id='20260816105915300ivbsnctru1ylah0';"
+        tid, err = cc.itdog_parse_submit(html)
+        self.assertEqual(tid, "20260816105915300ivbsnctru1ylah0")
+        self.assertEqual(err, "")
+
+    def test_captcha_page(self):
+        tid, err = cc.itdog_parse_submit('<div class="clicaptcha"></div>')
+        self.assertIsNone(tid)
+        self.assertEqual(err, "captcha")
+
+    def test_no_task(self):
+        tid, err = cc.itdog_parse_submit("<html>nothing</html>")
+        self.assertIsNone(tid)
+        self.assertEqual(err, "no task_id")
+
+
+class TestItdogRecOk(unittest.TestCase):
+    def test_http_ok(self):
+        ok, ms = cc.itdog_rec_ok({"http_code": 200, "connect_time": 0.02, "all_time": 0.05})
+        self.assertIs(ok, True)
+        self.assertEqual(ms, 20.0)
+
+    def test_tcp_only_port(self):
+        ok, ms = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.013, "all_time": 10.0})
+        self.assertIs(ok, True)
+        self.assertEqual(ms, 13.0)
+
+    def test_connect_refused(self):
+        ok, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.001, "all_time": 10.0})
+        self.assertIs(ok, False)
+
+    def test_connect_timeout(self):
+        ok, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 10.0, "all_time": 10.0})
+        self.assertIs(ok, False)
+
+    def test_node_error_inconclusive(self):
+        ok, _ = cc.itdog_rec_ok({"type": "node_error", "task_num": 1})
+        self.assertIsNone(ok)
+
+
+class TestItdogAggregate(unittest.TestCase):
+    def test_any_node_ok(self):
+        records = [
+            {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.001},
+            {"task_num": 1, "node_id": "b", "http_code": 0, "connect_time": 0.020},
+        ]
+        agg = cc.itdog_aggregate(records, 1)
+        self.assertEqual(agg[1]["status"], "ok")
+        self.assertEqual(agg[1]["ms"], 20.0)
+
+    def test_all_fail(self):
+        records = [
+            {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.001},
+            {"task_num": 1, "node_id": "b", "http_code": 0, "connect_time": 10.0},
+        ]
+        self.assertEqual(cc.itdog_aggregate(records, 1)[1]["status"], "fail")
+
+    def test_no_records_error(self):
+        self.assertEqual(cc.itdog_aggregate([], 2)[2]["status"], "error")
+        self.assertEqual(cc.itdog_aggregate([], 2)[1]["status"], "error")
+
+    def test_node_error_only_error(self):
+        records = [{"task_num": 1, "node_id": "a", "type": "node_error"}]
+        self.assertEqual(cc.itdog_aggregate(records, 1)[1]["status"], "error")
+
+
+class TestItdogMergeVerdict(unittest.TestCase):
+    def _s(self, status):
+        return {"status": status, "ok": status == "ok", "ms": 12 if status == "ok" else None}
+
+    def test_itdog_ok_reachable(self):
+        sources = {"itdog": self._s("ok"), "check_host": self._s("error")}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+
+    def test_itdog_fail_alone_uncertain(self):
+        sources = {"itdog": self._s("fail"), "check_host": self._s("error")}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+
+    def test_itdog_fail_plus_checkhost_fail(self):
+        sources = {"itdog": self._s("fail"), "check_host": self._s("fail")}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+
+    def test_pingpe_fail_plus_itdog_fail(self):
+        sources = {"pingpe": self._s("fail"), "itdog": self._s("fail")}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+
+    def test_itdog_rate_limited_neutral(self):
+        sources = {"itdog": {"status": "rate_limited", "ok": False, "ms": None},
+                   "check_host": {"status": "error", "ok": False, "ms": None}}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "skipped")
 
 
 if __name__ == "__main__":

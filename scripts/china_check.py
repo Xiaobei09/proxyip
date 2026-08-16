@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Mainland-China reachability checks for the alive proxy pool.
 
-独立 CI（``china-check.yml``）运行：对 ``data/valid/all_rep.txt`` 前 N 条
-（按信誉降序采样，缺省 250；文件不存在时回退 ``all_ltd.txt``）做大陆连通性
-检测，产出一致结论后写回：
+独立 CI（``china-check.yml``）运行：对 ``data/valid/all.txt`` 全量（约 1.9 万行，
+``--source data/valid/all.txt --limit 0``）做大陆连通性检测，产出一致结论后写回：
+（本地缺省仍走 ``all_rep.txt`` 按信誉降序取前 250 的小样本）
 
 - ``data/valid/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``）
 - ``data/valid/all_cn.txt``  — 大陆可达清单（仅含判定 reachable 或已带 ``-CN`` 的行）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
 
-检测分三层（均为无账号/免登录）：
+检测分层（均为无账号/免登录）：
 
 - L1 启发式（零网络）：行备注已带 ``CF``（Cloudflare 边缘 tls 代理）即视为大陆可达，
   这类代理走 CF 边缘节点，不依赖源站回程。
+- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 3 节点
+  （电信/联通/移动各 1），经 WebSocket 收结果，TCP 连通即判可达。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+ `xxapi.cn`
   （北京节点，免 key）。二者均判失败 → unreachable；任一成功 → reachable；单方失败 → uncertain。
 - L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，多数可达即判可达）；
@@ -23,8 +25,14 @@
 """
 
 import argparse
+import base64
+import hashlib
 import json
+import os
 import re
+import socket
+import ssl
+import struct
 import sys
 import threading
 import time
@@ -74,6 +82,18 @@ PINGPE_MIN_REPORTED = 5  # 报告节点不足 → inconclusive，避免误判
 
 # tcpping.cn —— 多运营商，需站长签发的 token（缺则跳过）
 TCPPING_URL = "https://tcpping.cn/ping_api"
+
+# itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
+ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
+ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
+ITDOG_TOKEN = "What this is is no longer important."
+ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
+ITDOG_NODES_PER_ISP = 1  # 电信/联通/移动各取前 N 节点（默认 1 → 共 3）
+ITDOG_CONCURRENCY = 8
+ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
+ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
+ITDOG_WS_IDLE = 20.0  # WS 单次 recv 空闲超时
+ITDOG_ISP_GROUPS = ("中国电信", "中国联通", "中国移动")
 
 CN_TOKEN = "CN"
 
@@ -321,7 +341,10 @@ def parse_tcpping(payload) -> dict:
 # ------------------------------------------------------------ 探测 I/O（网络）
 
 def check_host_check(ip: str, port: str, limiter: RateLimiter, timeout: float, api_key: str) -> dict:
-    limiter.acquire()
+    try:
+        limiter.acquire()
+    except RateLimited:
+        return {"status": "rate_limited", "ok": False, "ms": None, "error": "hourly cap"}
     hdrs = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -490,6 +513,378 @@ def tcpping_check(ip: str, port: str, token: str, timeout: float) -> dict:
     return parse_tcpping(payload)
 
 
+# ------------------------------------------------------- itdog.cn 批量探活
+
+def itdog_md5_16(s: str) -> str:
+    """itdog WebSocket 路径签名（MD5 中段 16 位）。"""
+    return hashlib.md5(s.encode()).hexdigest()[8:24]
+
+
+def itdog_parse_nodes(html: str, per_isp: int) -> list[str]:
+    """从 batch_http 页面 optgroup 提取各大陆运营商节点 id（每组前 ``per_isp`` 个）。"""
+    ids: list[str] = []
+    for label in ITDOG_ISP_GROUPS:
+        m = re.search(r'<optgroup label="%s">(.*?)</optgroup>' % label, html, re.S)
+        if not m:
+            continue
+        opts = re.findall(r'<option[^>]*value="([^"]+)"', m.group(1))
+        ids.extend(opts[:per_isp])
+    return ids
+
+
+def itdog_fetch_nodes(per_isp: int) -> list[str]:
+    """拉取当前节点列表（节点 id 会轮换，必须每次运行现取）。"""
+    hdrs = {"User-Agent": UA, "Referer": "https://www.itdog.cn/"}
+    for _ in range(2):
+        try:
+            _, _, body = request_follow(ITDOG_BATCH_URL, hdrs, 20)
+            ids = itdog_parse_nodes(body.decode("utf-8", "replace"), per_isp)
+            if ids:
+                return ids
+        except Exception:
+            pass
+        time.sleep(2)
+    return []
+
+
+def itdog_parse_submit(html: str) -> tuple[str | None, str]:
+    """解析提交响应 → ``(task_id, err)``；无 task_id 时给出原因（captcha / no task）。"""
+    tid = re.search(r"task_id='([^']+)'", html)
+    if tid:
+        return tid.group(1), ""
+    if "clicaptcha" in html or "验证码" in html:
+        return None, "captcha"
+    return None, "no task_id"
+
+
+def itdog_submit_task(targets: list[str], node_ids: list[str]) -> tuple[str | None, str]:
+    """POST 一个批量任务（host 以 CRLF 连接，itdog 对 LF 会拒绝）。"""
+    data = urllib.parse.urlencode({
+        "host": "\r\n".join(targets),
+        "node_id": ",".join(node_ids),
+        "cidr_filter": "false",
+        "gateway": "first",
+        "port": "80",
+    }).encode()
+    hdrs = {
+        "User-Agent": UA,
+        "Origin": "https://www.itdog.cn",
+        "Referer": "https://www.itdog.cn/batch_http/",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    try:
+        status, _, resp = request_follow(ITDOG_BATCH_URL, hdrs, 20, method="POST", data=data)
+    except urllib.error.HTTPError as e:
+        return None, f"http {e.code}"
+    except Exception as e:
+        return None, str(e)[:120]
+    if status != 200:
+        return None, f"http {status}"
+    return itdog_parse_submit(resp.decode("utf-8", "replace"))
+
+
+class _WebSocket:
+    """极简 WebSocket 客户端（只读文本帧，纯标准库）。"""
+
+    def __init__(self, url: str, timeout: float = ITDOG_WS_IDLE):
+        m = re.match(r"wss://([^/]+)(/.*)$", url)
+        if not m:
+            raise ValueError(f"bad ws url: {url}")
+        host, path = m.group(1), m.group(2)
+        key = base64.b64encode(os.urandom(16)).decode()
+        ctx = ssl.create_default_context()
+        self.sock = socket.create_connection((host, 443), timeout=timeout)
+        self.sock = ctx.wrap_socket(self.sock, server_hostname=host)
+        req = (
+            f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+            f"Origin: https://{host}\r\nUser-Agent: {UA}\r\n\r\n"
+        )
+        self.sock.sendall(req.encode())
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise RuntimeError("closed during handshake")
+            data += chunk
+        head, _, self.buf = data.partition(b"\r\n\r\n")
+        if b"101" not in head.splitlines()[0]:
+            raise RuntimeError(head.splitlines()[0].decode("utf-8", "replace")[:80])
+        self.sock.settimeout(timeout)
+
+    def settimeout(self, timeout: float) -> None:
+        self.sock.settimeout(timeout)
+
+    def send_text(self, payload) -> None:
+        if isinstance(payload, str):
+            payload = payload.encode()
+        mask = os.urandom(4)
+        ln = len(payload)
+        if ln < 126:
+            head = bytes([0x81, 0x80 | ln])
+        elif ln < 65536:
+            head = bytes([0x81, 0x80 | 126]) + struct.pack(">H", ln)
+        else:
+            head = bytes([0x81, 0x80 | 127]) + struct.pack(">Q", ln)
+        head += mask
+        self.sock.sendall(head + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    def _send(self, opcode: int, payload: bytes) -> None:
+        mask = os.urandom(4)
+        ln = len(payload)
+        if ln < 126:
+            head = bytes([0x80 | opcode, 0x80 | ln])
+        elif ln < 65536:
+            head = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(">H", ln)
+        else:
+            head = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(">Q", ln)
+        head += mask
+        self.sock.sendall(head + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    @staticmethod
+    def _decode(buf: bytes) -> tuple[dict | None, bytes]:
+        if len(buf) < 2:
+            return None, buf
+        b1, b2 = buf[0], buf[1]
+        opcode = b1 & 0x0F
+        ln = b2 & 0x7F
+        idx = 2
+        if ln == 126:
+            if len(buf) < 4:
+                return None, buf
+            ln = struct.unpack(">H", buf[2:4])[0]
+            idx = 4
+        elif ln == 127:
+            if len(buf) < 10:
+                return None, buf
+            ln = struct.unpack(">Q", buf[2:10])[0]
+            idx = 10
+        if b2 >> 7:
+            if len(buf) < idx + 4:
+                return None, buf
+            mask = buf[idx:idx + 4]
+            idx += 4
+        if len(buf) < idx + ln:
+            return None, buf
+        payload = buf[idx:idx + ln]
+        if b2 >> 7:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        return {"opcode": opcode, "payload": payload}, buf[idx + ln:]
+
+    def read(self) -> tuple[str, dict | None]:
+        """返回 ``(kind, msg)``：rec=节点记录、done=任务完成、close/closed/err/timeout=异常。"""
+        while True:
+            try:
+                chunk = self.sock.recv(65536)
+            except socket.timeout:
+                return ("timeout", None)
+            except (ConnectionError, ssl.SSLError, OSError) as e:
+                return ("err", {"error": str(e)[:80]})
+            if not chunk:
+                return ("closed", None)
+            self.buf += chunk
+            while True:
+                frame, self.buf = self._decode(self.buf)
+                if frame is None:
+                    break
+                op = frame["opcode"]
+                if op == 8:
+                    return ("close", None)
+                if op == 9:
+                    self._send(10, frame["payload"])
+                    continue
+                if op == 1:
+                    try:
+                        msg = json.loads(frame["payload"].decode("utf-8", "replace"))
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    if not isinstance(msg, dict):
+                        continue
+                    if msg.get("type") == "finished":
+                        return ("done", msg)
+                    if msg.get("task_num") is not None:
+                        return ("rec", msg)
+                    return ("evt", msg)
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+
+def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
+    """连接 WS 收集记录，直到完成/收齐/超时。
+
+    注意：itdog 每任务仅接受一次 WS 连接（重连返回 403），且连接需在提交后
+    尽快建立，故首连失败时短退避重试，但中途断开不再重连。
+    """
+    path = f"/{task_id}/{itdog_md5_16(task_id + ITDOG_TOKEN)}"
+    url = ITDOG_WS_BASE + path
+    records: list[dict] = []
+    t0 = time.monotonic()
+    ws = None
+    connected = False
+    try:
+        for attempt in range(3):
+            if time.monotonic() - t0 > timeout:
+                break
+            try:
+                ws = _WebSocket(url)
+                ws.send_text(json.dumps({"task_id": task_id}))
+                connected = True
+                break
+            except Exception:
+                time.sleep(1.0)
+        if connected:
+            while time.monotonic() - t0 < timeout:
+                kind, msg = ws.read()
+                if kind in ("rec", "evt") and isinstance(msg, dict):
+                    records.append(msg)
+                elif kind == "done":
+                    break
+                elif kind in ("close", "closed", "err", "timeout"):
+                    break
+                if len(records) >= expected:
+                    break
+    except Exception:
+        pass
+    finally:
+        if ws:
+            ws.close()
+    return records
+
+
+def itdog_rec_ok(rec: dict) -> tuple[bool | None, float | None]:
+    """单节点记录 → ``(可达, ms)``。
+
+    - http_code>0 → 可达
+    - connect_time 介于 5ms 与 9s → TCP 连通但非 HTTP 端口，仍判可达
+    - connect_time≈0（拒绝）或 ≈10s（超时）→ 不可达
+    - node_error / 无字段 → None（不确定）
+    """
+    if rec.get("type") == "node_error":
+        return None, None
+    try:
+        ct = float(rec.get("connect_time") or 0)
+    except (TypeError, ValueError):
+        ct = 0.0
+    code = rec.get("http_code")
+    if isinstance(code, (int, float)) and code > 0:
+        return True, (ct * 1000 if 0.005 < ct < 9.0 else None)
+    if 0.005 < ct < 9.0:
+        return True, ct * 1000
+    return False, None
+
+
+def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
+    """按 task_num 聚合节点结果 → ``{task_num: source_result}``。"""
+    out: dict = {}
+    for tn in range(1, n_targets + 1):
+        recs = [r for r in records if r.get("task_num") == tn]
+        real = [r for r in recs if r.get("type") != "node_error"]
+        if not real:
+            out[tn] = {"status": "error", "ok": False, "ms": None,
+                       "error": "no records" if not recs else "node_error"}
+            continue
+        oks = [(r, itdog_rec_ok(r)) for r in real]
+        good = [(r, ok) for r, ok in oks if ok[0] is True]
+        if good:
+            mss = [ms for _, (_, ms) in good if ms]
+            out[tn] = {"status": "ok", "ok": True,
+                       "ms": round(min(mss), 1) if mss else None, "error": ""}
+        else:
+            out[tn] = {"status": "fail", "ok": False, "ms": None,
+                       "error": f"unreachable ({len(real)} nodes)"}
+    return out
+
+
+def itdog_task(batch: list[tuple[str, str]], node_ids: list[str], args) -> dict:
+    """单批（≤5 目标）：提交 → 收记录 → 聚合；失败重试并降级。"""
+    keys = [k for k, _ in batch]
+    target_strs = [t for _, t in batch]
+    last_err = ""
+    for attempt in range(3):
+        task_id, err = itdog_submit_task(target_strs, node_ids)
+        if task_id:
+            expected = len(batch) * len(node_ids)
+            records = itdog_collect(task_id, expected, args.itdog_timeout)
+            agg = itdog_aggregate(records, len(batch))
+            return {
+                key: dict(agg.get(i) or {"status": "error", "ok": False, "ms": None, "error": "missing"})
+                for i, key in enumerate(keys, start=1)
+            }
+        last_err = err
+        time.sleep(15 if err == "captcha" else 2)
+    status = "rate_limited" if last_err == "captcha" else "error"
+    return {key: {"status": status, "ok": False, "ms": None, "error": last_err or "submit failed"}
+            for key in keys}
+
+
+_pace_lock = threading.Lock()
+_pace_next = [0.0]
+
+
+def _pace(interval: float) -> None:
+    """全局最小任务启动间隔（itdog 端有节流，全量硬跑需控速）。"""
+    with _pace_lock:
+        now = time.monotonic()
+        wait = _pace_next[0] - now
+        _pace_next[0] = max(now, _pace_next[0]) + interval
+    if wait > 0:
+        time.sleep(wait)
+
+
+def itdog_batch_run(sample, args) -> dict:
+    """对非 CF 启发式目标分批跑 itdog，返回 ``{key: source_result}``。"""
+    targets: list[tuple[str, str]] = []
+    seen: set = set()
+    for item in sample:
+        line, key, ip, port, _ = item
+        if is_cf_heuristic(line) or key in seen:
+            continue
+        seen.add(key)
+        targets.append((key, f"{ip}:{port}"))
+    if not targets:
+        return {}
+    node_ids = itdog_fetch_nodes(args.itdog_nodes)
+    if not node_ids:
+        return {key: {"status": "error", "ok": False, "ms": None, "error": "no itdog nodes"}
+                for key, _ in targets}
+    batch_size = max(1, min(args.itdog_batch_size, ITDOG_BATCH_SIZE))
+    batches = [targets[i:i + batch_size] for i in range(0, len(targets), batch_size)]
+    results: dict = {}
+    state = {"fails": 0, "tripped": False}
+    state_lock = threading.Lock()
+
+    def mark(ok: bool) -> None:
+        with state_lock:
+            if ok:
+                state["fails"] = 0
+            else:
+                state["fails"] += 1
+                if state["fails"] >= 8:
+                    state["tripped"] = True
+
+    def run(batch):
+        _pace(args.itdog_pacing)
+        with state_lock:
+            tripped = state["tripped"]
+        if tripped:
+            return {key: {"status": "error", "ok": False, "ms": None, "error": "itdog breaker"}
+                    for key, _ in batch}
+        res = itdog_task(batch, node_ids, args)
+        mark(any(r["status"] in ("ok", "fail") for r in res.values()))
+        return res
+
+    with ThreadPoolExecutor(max_workers=args.itdog_concurrency) as pool:
+        futures = [pool.submit(run, batch) for batch in batches]
+        for fut in futures:
+            results.update(fut.result())
+    return results
+
+
 # ------------------------------------------------------------ 判定合成
 
 def merge_verdict(sources: dict, cf: bool) -> dict:
@@ -497,7 +892,7 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
 
     - 任一来源成功 → reachable（cf 启发式时 basis 标注 heuristic）
     - check_host 与 xxapi 均失败 → unreachable
-    - ping.pe 失败且另有单节点源失败 → unreachable
+    - 多节点源（ping.pe / itdog）失败且另有单节点源失败 → unreachable
     - 仅单方失败 → uncertain
     - 全部为错误/跳过 → skipped（不误判）
     """
@@ -517,7 +912,9 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         return {"verdict": "reachable", "basis": ["heuristic"], "ms": None}
     if "check_host" in fail_sources and "xxapi" in fail_sources:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
-    if "pingpe" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi")):
+    if "pingpe" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "itdog")):
+        return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
+    if "itdog" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "pingpe")):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
     if fail_sources:
         return {"verdict": "uncertain", "basis": fail_sources, "ms": None}
@@ -610,7 +1007,7 @@ def annotate_cn_files(reachable_keys: set) -> None:
 # ------------------------------------------------------------ 主流程
 
 def run_measurements(sample, args) -> tuple[dict, set, set]:
-    """并发跑 L2、串行跑 L3；返回 (entries, reachable_keys, uncertain_keys)。"""
+    """L2 并发单节点、itdog 批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
     entries: dict = {}
     ch_limiter = RateLimiter(CH_WINDOW_SEC, CH_PER_WINDOW, CH_HOUR_CAP)
 
@@ -627,6 +1024,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         for future in futures:
             key, sources = future.result()
             entries[key] = sources
+
+    if not args.skip_itdog:
+        for key, res in itdog_batch_run(sample, args).items():
+            entries.setdefault(key, {})["itdog"] = res
 
     for item in sample[: args.pingpe_limit]:
         _, key, ip, port, _ = item
@@ -658,7 +1059,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="china_check.py",
-        description="大陆连通性检测（启发式 CF + check-host.cc + xxapi.cn + ping.pe [+ tcpping.cn]）",
+        description="大陆连通性检测（启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe [+ tcpping.cn]）",
     )
     parser.add_argument("--source", type=Path, default=REP_RANK_FILE,
                         help=f"输入清单（默认 {REP_RANK_FILE.name}，缺失回退 all_ltd.txt）")
@@ -674,6 +1075,18 @@ def main(argv=None) -> int:
                         help="check-host.cc API key（默认读 CHINA_CHECK_API_KEY，可选）")
     parser.add_argument("--tcpping-token", default="",
                         help="tcpping.cn token（默认读 TCPPING_CN_TOKEN，缺则跳过）")
+    parser.add_argument("--itdog-nodes", type=int, default=ITDOG_NODES_PER_ISP,
+                        help=f"itdog 每大陆运营商取前 N 节点（默认 {ITDOG_NODES_PER_ISP} → 共 3）")
+    parser.add_argument("--itdog-batch-size", type=int, default=ITDOG_BATCH_SIZE,
+                        help=f"itdog 每任务目标数（上限 {ITDOG_BATCH_SIZE}；默认 {ITDOG_BATCH_SIZE}）")
+    parser.add_argument("--itdog-concurrency", type=int, default=ITDOG_CONCURRENCY,
+                        help=f"itdog 并发任务数（默认 {ITDOG_CONCURRENCY}）")
+    parser.add_argument("--itdog-pacing", type=float, default=ITDOG_PACING,
+                        help=f"itdog 任务启动最小间隔秒（默认 {ITDOG_PACING}）")
+    parser.add_argument("--itdog-timeout", type=float, default=ITDOG_TASK_TIMEOUT,
+                        help=f"itdog 单任务收结果上限秒（默认 {ITDOG_TASK_TIMEOUT}）")
+    parser.add_argument("--skip-itdog", action="store_true",
+                        help="跳过 itdog 批量探活（快速冒烟用）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只输出计划，不做任何网络请求与写盘")
     parser.add_argument("--skip-pingpe", action="store_true",
