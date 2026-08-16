@@ -49,6 +49,7 @@ from common import (
     parse_headers,
     parse_ltd_line,
     write_json,
+    write_text_if_changed,
 )
 
 DEFAULT_SOURCE = VALID_DIR / "all.txt"
@@ -369,10 +370,7 @@ def cross_check(results: dict, upstream: dict) -> None:
 
 
 def write_lines(path: Path, lines: list) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-    tmp.replace(path)
+    write_text_if_changed(path, "\n".join(lines) + ("\n" if lines else ""))
 
 
 def annotate_source_files(families: dict, source: Path) -> None:

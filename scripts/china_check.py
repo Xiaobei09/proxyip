@@ -47,6 +47,7 @@ from common import (
     parse_ltd_line,
     request_follow,
     write_json,
+    write_text_if_changed,
     _note,
 )
 from china_itdog import *
@@ -685,7 +686,7 @@ def main(argv=None) -> int:
     all_ltd_text = all_ltd_path.read_text(encoding="utf-8") if all_ltd_path.exists() else ""
     cn_text, cn_count = generate_all_cn(all_ltd_text, reachable)
     if cn_text:
-        ALL_CN_FILE.write_text(cn_text, encoding="utf-8")
+        write_text_if_changed(ALL_CN_FILE, cn_text)
     annotate_cn_files(reachable)
     print(f"all_cn.txt: {cn_count} lines; china.json: {len(entries)} entries", file=sys.stderr)
     return 0

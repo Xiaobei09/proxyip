@@ -47,6 +47,7 @@ from common import (
     RAW_DIR,
     ROOT,
     SETS_DIR,
+    write_text_if_changed,
 )
 
 SOURCE_URL = "https://zip.cm.edu.kg"
@@ -375,7 +376,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
             entries = sorted(
                 (f"{ip}:{port}#{country}" for ip in ips), key=ip_sort_key
             )
-            (port_dir / f"{country}.txt").write_text("\n".join(entries) + "\n")
+            write_text_if_changed(port_dir / f"{country}.txt", "\n".join(entries) + "\n")
             count += len(ips)
         stats[port] = count
         total += count
@@ -406,8 +407,9 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
 
     COUNTRIES_DIR.mkdir(parents=True, exist_ok=True)
     for country in sorted(by_country):
-        (COUNTRIES_DIR / f"{country}.txt").write_text(
-            "\n".join(sorted(by_country[country], key=ip_sort_key)) + "\n"
+        write_text_if_changed(
+            COUNTRIES_DIR / f"{country}.txt",
+            "\n".join(sorted(by_country[country], key=ip_sort_key)) + "\n",
         )
     expected_countries = {f"{c}.txt" for c in by_country}
     for stale in COUNTRIES_DIR.iterdir():
@@ -416,8 +418,9 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
 
     PORTS_DIR.mkdir(parents=True, exist_ok=True)
     for port in sorted(by_port_all, key=int):
-        (PORTS_DIR / f"{port}.txt").write_text(
-            "\n".join(sorted(by_port_all[port], key=ip_sort_key)) + "\n"
+        write_text_if_changed(
+            PORTS_DIR / f"{port}.txt",
+            "\n".join(sorted(by_port_all[port], key=ip_sort_key)) + "\n",
         )
     expected_ports = {f"{p}.txt" for p in by_port_all}
     for stale in PORTS_DIR.iterdir():
@@ -438,11 +441,11 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
             if per_country_limit > 0:
                 ltd_entries.update(cc_entries[:per_country_limit])
         full_entries = sorted(full_entries, key=ip_sort_key)
-        (SETS_DIR / f"{name}.txt").write_text("\n".join(full_entries) + "\n")
+        write_text_if_changed(SETS_DIR / f"{name}.txt", "\n".join(full_entries) + "\n")
         set_counts[name] = len(full_entries)
         if per_country_limit > 0:
             ltd_entries = sorted(ltd_entries, key=ip_sort_key)
-            (SETS_DIR / f"{name}_ltd.txt").write_text("\n".join(ltd_entries) + "\n")
+            write_text_if_changed(SETS_DIR / f"{name}_ltd.txt", "\n".join(ltd_entries) + "\n")
             set_counts[f"{name}_ltd"] = len(ltd_entries)
     expected_sets = {f"{n}.txt" for n in all_sets} | {f"{n}_ltd.txt" for n in all_sets}
     for stale in SETS_DIR.iterdir():
@@ -453,7 +456,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         {e for entries in by_country.values() for e in entries} | all_only,
         key=ip_sort_key,
     )
-    (OUT_DIR / "all.txt").write_text("\n".join(all_entries) + "\n")
+    write_text_if_changed(OUT_DIR / "all.txt", "\n".join(all_entries) + "\n")
     set_counts["all"] = len(all_entries)
     if per_country_limit > 0:
         all_ltd_entries = {
@@ -462,8 +465,8 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
             for e in sorted(by_country[cc], key=ip_sort_key)[:per_country_limit]
         }
         all_ltd_entries.update(sorted(all_only, key=ip_sort_key)[:per_country_limit])
-        (OUT_DIR / "all_ltd.txt").write_text(
-            "\n".join(sorted(all_ltd_entries, key=ip_sort_key)) + "\n"
+        write_text_if_changed(
+            OUT_DIR / "all_ltd.txt", "\n".join(sorted(all_ltd_entries, key=ip_sort_key)) + "\n"
         )
         set_counts["all_ltd"] = len(all_ltd_entries)
     stats["__total__"] = total
@@ -518,9 +521,10 @@ def write_diff(previous: list[str] | None, current: list[str]) -> tuple[int, int
     }
 
     def write(name: str, data: dict) -> None:
-        tmp = DIFF_DIR / f"{name}.json.tmp"
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(DIFF_DIR / f"{name}.json")
+        write_text_if_changed(
+            DIFF_DIR / f"{name}.json",
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        )
 
     write("latest", record)
     if added or removed:
@@ -576,14 +580,11 @@ def append_history(record: dict) -> bool:
 def write_upstream_meta(meta_map: dict) -> None:
     """Persist per-IP upstream metadata for downstream consumers."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    meta_file = OUT_DIR / "upstream_meta.json"
-    tmp = meta_file.with_suffix(".json.tmp")
-    tmp.write_text(
+    write_text_if_changed(
+        OUT_DIR / "upstream_meta.json",
         json.dumps(meta_map, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         + "\n",
-        encoding="utf-8",
     )
-    tmp.replace(meta_file)
     print(f"Wrote upstream metadata for {len(meta_map)} IPs")
 
 

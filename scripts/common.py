@@ -131,13 +131,28 @@ def parse_headers(raw: bytes) -> tuple[int | None, dict]:
 
 
 def write_json(path: Path, data: dict) -> None:
+    content = json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
+    tmp.write_text(content, encoding="utf-8")
     tmp.replace(path)
+
+
+def write_text_if_changed(path: Path, content: str) -> bool:
+    """原子写 ``content``；与现文件字节相同时跳过。返回是否真正写入。
+
+    稳定数据不产生无意义重写（git 按内容去重，这里主要省 IO 并让本地
+    工作区与 CI 提交步的 diff 只反映真实变化）。
+    """
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
+    return True
 
 
 def keyed_json(entries: dict) -> dict:
