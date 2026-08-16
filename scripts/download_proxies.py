@@ -21,6 +21,7 @@ list into ``data/diff/`` and records the change counts in ``data/history.jsonl``
 """
 
 import argparse
+import concurrent.futures
 import io
 import ipaddress
 import json
@@ -331,12 +332,31 @@ def extract_csv_ports(content) -> dict:
 
 
 def merge_by_port(base: dict, extra: dict) -> dict:
-    """Merge ``extra`` buckets into ``base``, dedup+sort within each (port, cc)."""
+    """Merge ``extra`` buckets into ``base``, dedup+sort within each (port, cc).
+
+    After merging, any ``ALL`` entry whose IP already exists on the same port
+    with a known country is dropped (the tagged entry is authoritative). This
+    keeps ``ALL`` buckets free of duplicates regardless of merge order and
+    avoids pointless geo lookups for them. Returns ``base``.
+    """
     for port, countries in extra.items():
         for country, ips in countries.items():
             base.setdefault(port, {}).setdefault(country, [])
             base[port][country] = sorted(set(base[port][country]) | set(ips),
                                          key=ip_sort_key)
+    for port in base:
+        if "ALL" not in base[port]:
+            continue
+        known = {
+            ip for country, ips in base[port].items()
+            if country != "ALL" for ip in ips
+        }
+        if known:
+            base[port]["ALL"] = sorted(set(base[port]["ALL"]) - known,
+                                       key=ip_sort_key)
+        if not base[port]["ALL"]:
+            del base[port]["ALL"]
+    return base
     return base
 
 
@@ -638,7 +658,11 @@ def enrich_countries(
     """
     if not extra_all_ips:
         return 0
-    cc_map = lookup_countries(sorted(extra_all_ips), timeout=timeout, delay=delay)
+    still_all = {
+        ip for countries in by_port.values() for ip in countries.get("ALL", [])
+    }
+    to_lookup = extra_all_ips & still_all
+    cc_map = lookup_countries(sorted(to_lookup), timeout=timeout, delay=delay)
     if not cc_map:
         return 0
     moved = 0
@@ -668,7 +692,8 @@ def enrich_countries(
 
 
 def load_extras(sources: list, timeout: int) -> tuple[dict, set[str]]:
-    """Fetch and parse extra proxy sources; per-source failures are non-fatal.
+    """Fetch and parse extra proxy sources in parallel; per-source failures are
+    non-fatal.
 
     Returns ``(by_port, extra_all_ips)`` where ``extra_all_ips`` is the set of
     IPs that arrived without a country tag (candidates for geo enrichment).
@@ -677,28 +702,41 @@ def load_extras(sources: list, timeout: int) -> tuple[dict, set[str]]:
     extra_all_ips: set[str] = set()
     if not sources:
         return by_port, extra_all_ips
+
+    def parse_source(kind: str, url: str) -> dict:
+        content = fetch(url, timeout=timeout)
+        if kind == "plain":
+            return extract_plain(content)
+        if kind == "ip":
+            return extract_bare_ips(content)
+        if kind == "csv":
+            return extract_csv_ports(content)
+        print(f"Skipping unknown extra source kind {kind!r} ({url})",
+              file=sys.stderr)
+        return {}
+
     print(f"Downloading {len(sources)} extra source(s) ...")
-    for kind, url in sources:
-        try:
-            content = fetch(url, timeout=timeout)
-            if kind == "plain":
-                part = extract_plain(content)
-            elif kind == "ip":
-                part = extract_bare_ips(content)
-            elif kind == "csv":
-                part = extract_csv_ports(content)
-            else:
-                print(f"Skipping unknown extra source kind {kind!r} ({url})",
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(sources), 4)
+    ) as pool:
+        futures = {
+            pool.submit(parse_source, kind, url): (kind, url)
+            for kind, url in sources
+        }
+        for future in concurrent.futures.as_completed(futures):
+            kind, url = futures[future]
+            try:
+                part = future.result()
+                if not part:
+                    continue
+                count = sum(len(v) for c in part.values() for v in c.values())
+                print(f"Extra source {url}: {count} entries")
+                merge_by_port(by_port, part)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Extra source {url} failed ({exc}); skipping",
                       file=sys.stderr)
-                continue
-            count = sum(len(v) for c in part.values() for v in c.values())
-            print(f"Extra source {url}: {count} entries")
-            for countries in part.values():
-                extra_all_ips.update(countries.get("ALL", []))
-            merge_by_port(by_port, part)
-        except Exception as exc:  # noqa: BLE001
-            print(f"Extra source {url} failed ({exc}); skipping",
-                  file=sys.stderr)
+    for countries in by_port.values():
+        extra_all_ips.update(countries.get("ALL", []))
     return by_port, extra_all_ips
 
 

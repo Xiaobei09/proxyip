@@ -322,6 +322,19 @@ class TestMergeByPort(unittest.TestCase):
         self.assertEqual(merged["443"]["JP"], ["3.3.3.3"])
         self.assertEqual(merged["80"]["US"], ["4.4.4.4"])
 
+    def test_skips_all_dup_of_known_country(self):
+        base = {"443": {"US": ["1.1.1.1"]}}
+        extra = {"443": {"ALL": ["1.1.1.1", "2.2.2.2"]}}
+        merged = dp.merge_by_port(base, extra)
+        self.assertEqual(merged["443"]["ALL"], ["2.2.2.2"])
+        self.assertNotIn("1.1.1.1", merged["443"]["ALL"])
+
+    def test_keeps_all_for_unknown_port(self):
+        base = {"443": {"US": ["1.1.1.1"]}}
+        extra = {"8443": {"ALL": ["1.1.1.1"]}}
+        merged = dp.merge_by_port(base, extra)
+        self.assertEqual(merged["8443"]["ALL"], ["1.1.1.1"])
+
 
 class TestLookupAndEnrich(unittest.TestCase):
     class _Resp:
@@ -422,6 +435,34 @@ class TestWriteOutputsAll(unittest.TestCase):
         finally:
             for k, v in orig.items():
                 setattr(dp, k, v)
+
+
+class TestLoadExtras(unittest.TestCase):
+    def test_parallel_fetch_with_failure_and_postmerge_all(self):
+        def fake_fetch(url, timeout):
+            if url == "http://bad/cf.txt":
+                raise OSError("boom")
+            if url == "http://x/plain.txt":
+                return b"1.1.1.1:443#US\n2.2.2.2:8443\n"
+            if url == "http://x/ips.txt":
+                return b"3.3.3.3\n1.1.1.1\n"
+            if url == "http://x/csv.txt":
+                return b"IP,port,region,ms\n4.4.4.4,443,US,10\n"
+            raise AssertionError(url)
+
+        with unittest.mock.patch.object(dp, "fetch", side_effect=fake_fetch):
+            by_port, extra_all_ips = dp.load_extras(
+                [("plain", "http://x/plain.txt"),
+                 ("ip", "http://x/ips.txt"),
+                 ("csv", "http://x/csv.txt"),
+                 ("plain", "http://bad/cf.txt")],
+                timeout=10,
+            )
+        self.assertEqual(set(by_port), {"443", "8443"})
+        self.assertEqual(set(by_port["443"]), {"US", "ALL"})
+        self.assertEqual(by_port["443"]["ALL"], ["3.3.3.3"])
+        self.assertEqual(extra_all_ips, {"3.3.3.3", "2.2.2.2"})
+        self.assertEqual(by_port["8443"]["ALL"], ["2.2.2.2"])
 
 
 if __name__ == "__main__":

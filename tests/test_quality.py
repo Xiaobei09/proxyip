@@ -30,6 +30,18 @@ class TestParseEntry(unittest.TestCase):
             ("1.2.3.4:443#US", "1.2.3.4", "443", "US"),
         )
 
+    def test_parses_all_cc_as_pseudo_country(self):
+        self.assertEqual(
+            qc.parse_ltd_line("1.2.3.4:443#ALL-120ms-0.44MB/s"),
+            ("1.2.3.4:443#ALL", "1.2.3.4", "443", "ALL"),
+        )
+
+    def test_all_not_collapsed_to_albania(self):
+        parsed = qc.parse_ltd_line("1.2.3.4:443#ALL-120ms")
+        self.assertEqual(parsed[0], "1.2.3.4:443#ALL")
+        parsed_al = qc.parse_ltd_line("1.2.3.4:443#AL-120ms")
+        self.assertEqual(parsed_al[0], "1.2.3.4:443#AL")
+
     def test_rejects_bad_lines(self):
         self.assertIsNone(qc.parse_ltd_line(""))
         self.assertIsNone(qc.parse_ltd_line("garbage"))
@@ -324,6 +336,22 @@ class TestAnnotation(unittest.TestCase):
         self.assertEqual(
             qc.insert_exit_region("1.2.3.4:443#US-8ms", ""), "1.2.3.4:443#US-8ms"
         )
+
+    def test_insert_exit_region_after_all(self):
+        self.assertEqual(
+            qc.insert_exit_region("1.2.3.4:443#ALL-120ms-0.44MB/s", "US"),
+            "1.2.3.4:443#ALL\u2192US-120ms-0.44MB/s",
+        )
+
+    def test_annotate_all_line_with_exit(self):
+        exits = {"1.2.3.4:443#ALL": "US"}
+        text = "1.2.3.4:443#ALL-120ms-0.44MB/s\n"
+        out, changed = qc.annotate_text(text, {}, exits)
+        self.assertTrue(changed)
+        self.assertEqual(out.strip(), "1.2.3.4:443#ALL\u2192US-120ms-0.44MB/s")
+        out2, changed2 = qc.annotate_text(out, {}, exits)
+        self.assertFalse(changed2)
+        self.assertEqual(out2.strip(), out.strip())
 
     def test_build_exits(self):
         results = {

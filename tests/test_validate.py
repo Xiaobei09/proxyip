@@ -185,6 +185,18 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertEqual(len(no_speed), 1)
         self.assertTrue(no_speed[0].endswith("ms"), no_speed[0])
 
+    def test_all_cc_kept_in_all_but_not_countries(self):
+        alive = {
+            "1.0.0.1:443#ALL": ("1.0.0.1", "443", "ALL", "tls", 100.0, 0.5),
+            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 80.0, 1.0),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        self.assertFalse((vp.VALID_DIR / "countries" / "ALL.txt").exists())
+        all_lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
+        self.assertTrue(any(line.startswith("1.0.0.1:443#ALL") for line in all_lines))
+        ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
+        self.assertTrue(any(line.startswith("1.0.0.1:443#ALL") for line in ltd))
+
     def test_speed_json(self):
         alive = {
             "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, 0.2),

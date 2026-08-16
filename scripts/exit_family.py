@@ -286,7 +286,8 @@ def _note(line: str) -> str:
     i = 0
     while i < len(rest) and not ("A" <= rest[i] <= "Z"):
         i += 1
-    return rest[i + 2:]
+    cc = "ALL" if rest[i:].startswith("ALL-") else rest[i : i + 2]
+    return rest[i + len(cc):]
 
 
 def has_family_note(line: str) -> bool:
