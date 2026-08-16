@@ -195,6 +195,14 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 与 `all_ltd.txt` 同源（每国最快存活集）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
 
+### `data/valid/china.json`（china-check CI 输出）
+
+单行 JSON，键为 `ip:port#国家`，值为大陆连通性逐条检测明细：`ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`pingpe`/`heuristic`）、`ms`（可达延迟）、`sources`（各源原始结果）、`ts`（检测时间）。
+
+### `data/valid/all_cn.txt`
+
+**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 或历史已带 `-CN` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注；顺序沿用源文件（全量池按延迟升序）。逐条检测明细见 `china.json`。
+
 ### `data/history.jsonl`（每行一条）
 
 `ts`、`total`、`unique`、`countries`、`ports`、`sets`、`added`、`removed`。数据未变化时跳过，最多保留最近 1000 条。
