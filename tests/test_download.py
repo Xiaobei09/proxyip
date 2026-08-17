@@ -451,7 +451,7 @@ class TestLoadExtras(unittest.TestCase):
             raise AssertionError(url)
 
         with unittest.mock.patch.object(dp, "fetch", side_effect=fake_fetch):
-            by_port, extra_all_ips = dp.load_extras(
+            by_port, extra_all_ips, source_ip_sets = dp.load_extras(
                 [("plain", "http://x/plain.txt"),
                  ("ip", "http://x/ips.txt"),
                  ("csv", "http://x/csv.txt"),
@@ -463,6 +463,10 @@ class TestLoadExtras(unittest.TestCase):
         self.assertEqual(by_port["443"]["ALL"], ["3.3.3.3"])
         self.assertEqual(extra_all_ips, {"3.3.3.3", "2.2.2.2"})
         self.assertEqual(by_port["8443"]["ALL"], ["2.2.2.2"])
+        self.assertIn("http://x/plain.txt", source_ip_sets)
+        self.assertIn("http://x/ips.txt", source_ip_sets)
+        self.assertIn("http://x/csv.txt", source_ip_sets)
+        self.assertNotIn("http://bad/cf.txt", source_ip_sets)
 
 
 if __name__ == "__main__":
