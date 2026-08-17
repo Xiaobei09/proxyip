@@ -53,18 +53,16 @@
 
 | 输出文件 | 内容 |
 |---|---|
-| `chart.svg` | unique / alive 趋势折线图 |
-| `chart_alive_rate.svg` | 存活率（%）随时间变化 |
+| `chart_combo.svg` | 代理计数 + 存活率双轴折线图 |
 | `chart_country.svg` | 存活代理按国家 top-15 横向条形图 |
 | `chart_port.svg` | 存活代理按端口纵向条形图 |
 | `chart_churn.svg` | 每次更新 added / removed 分组条形图 |
-| `chart_combo.svg` | 双轴复合趋势（unique/alive 左轴 + 存活率右轴） |
-| `chart_latency.svg` | 存活代理延迟分桶条形图（毫秒） |
-| `chart_speed.svg` | 存活代理速度分桶条形图（MB/s） |
+| `chart_latency_speed.svg` | 延迟与速度分桶双面板条形图 |
 | `chart_streaming.svg` | 流媒体各服务 ok/blocked/error 堆叠条形图 |
 | `chart_sets.svg` | 各命名集合存活代理条形图 |
 | `chart_cn.svg` | 大陆连通性 verdict 分布条形图 |
 | `chart_family.svg` | 实际出口 IP 家族分布条形图 |
+| `chart_source_avail.svg` | IP 来源覆盖率 + 每代理源数量分布 |
 | `chart_rep.svg` | 信誉分分布条形图 |
 
 ### `scripts/quality_check.py`
@@ -178,4 +176,48 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 
 ```json
 {"os": "macos", "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ...", "platform": "MacIntel", "language": "en-US", "languages": ["en-US", "en"], "timezone": "Europe/Paris", "screen": {"width": 2560, "height": 1440, "colorDepth": 24, "devicePixelRatio": 2.0}, "hardwareConcurrency": 10, "deviceMemory": 16, "webgl": {"renderer": "ANGLE (Apple, Apple M1, OpenGL 4.1)", "vendor": "Apple"}, "canvasHash": "9f3b2c1d4e5a6b7c"}
+```
+
+### `scripts/annotate_classify.py`
+
+后缀填充 + 节点分类（CI 在 quality-check 完成后自动运行）。读取 5 个 JSON 数据源，向所有 `data/valid/*.txt` 文件填充缺失后缀并追加分类 token。幂等设计：多次运行结果一致。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--data-dir` | 数据根目录（含 `valid/` 子目录） | `data` |
+
+**输入 JSON 数据源**：
+
+| 文件 | 填充内容 |
+|---|---|
+| `ipinfo.json` | IP 类型 token（DC/RES/MOB/PROXY） |
+| `reputation.json` | 信誉评分（仅缺失时追加） |
+| `china.json` | 大陆可达 token（CN） |
+| `exit_family.json` | IP 家族 token（V4/V6/DS） |
+| `streaming.json` | 流媒体解锁 tokens（NF/D+/YT/MX/PV/GPT） |
+
+**分类 token**：
+
+| Token | 含义 | 来源 |
+|---|---|---|
+| DC | Datacenter（数据中心） | `ipinfo.json` → `ip_type` |
+| RES | Residential（住宅） | `ipinfo.json` → `ip_type` |
+| MOB | Mobile（移动网络） | `ipinfo.json` → `ip_type` |
+| PROXY | Proxy（代理） | `ipinfo.json` → `ip_type` |
+| fast | 快速（≥5 MB/s） | 行内 speed 值解析 |
+| mid | 中速（1-5 MB/s） | 行内 speed 值解析 |
+| slow | 慢速（<1 MB/s） | 行内 speed 值解析 |
+
+**行格式变化**：
+
+```
+Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-GPT-CF-77
+After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-GPT-CF-77-DC-fast
+```
+
+**处理范围**：`data/valid/all.txt`、`all_ltd.txt`、`countries/*/all.txt`、`countries/*/ltd.txt`、`sets/*/all.txt`、`sets/*/ltd.txt`、`ports/*.txt`
+
+```bash
+python scripts/annotate_classify.py
+python scripts/annotate_classify.py --data-dir /path/to/data
 ```

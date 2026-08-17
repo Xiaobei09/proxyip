@@ -92,7 +92,7 @@ data/all.txt                                # 全量去重清单（未验证）
 
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
-- **触发**：每 12 小时定时（`cron: 23 */12 * * *`）；支持 `workflow_dispatch` 手动触发（不随主更新自动执行）
+- **触发**：每 4 小时定时（`cron: 23 */4 * * *`）；quality-check 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `quality_check.py`（默认 `--time-budget 1800` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
@@ -111,6 +111,13 @@ data/all.txt                                # 全量去重清单（未验证）
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
 - **说明**：CF 边缘代理真实出口常为 IPv6（尽管呈现为 v4 地址），分离清单供按家族选路使用；上游交叉验证仅作参照，实时探测仍是判定依据
 
+`.github/workflows/annotate-classify.yml`（后缀填充 + 节点分类）：
+
+- **触发**：quality-check 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
+- **流程**：跑测试（`unittest`）→ `annotate_classify.py`（读取 5 个 JSON 数据源，填充缺失后缀 + 追加分类 token）→ `generate_stats.py` → 有变更则自动提交并推送
+- **细节**：作业超时 30 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
+- **说明**：分类维度：IP 类型（DC/RES/MOB/PROXY，来自 ipinfo.json）+ 速度等级（fast≥5MB/s / mid 1-5 / slow<1，来自行内 speed 解析）。行格式：`...-DC-fast`
+
 ## 目录结构
 
 ```
@@ -118,6 +125,7 @@ data/all.txt                                # 全量去重清单（未验证）
 .github/workflows/quality-check.yml    独立 CI：流媒体解锁 + 出口 IP 质量检测
 .github/workflows/china-check.yml       独立 CI：大陆连通性检测
 .github/workflows/exit-family.yml       独立 CI：实际出口 IPv4/IPv6 分离
+.github/workflows/annotate-classify.yml  独立 CI：后缀填充 + 节点分类
 scripts/download_proxies.py            下载与解压整理
 scripts/validate_proxies.py            可用性验证与测速
 scripts/generate_stats.py              统计与趋势图
@@ -128,6 +136,7 @@ scripts/china_check.py                 大陆连通性检测（CF 启发式 + ch
 scripts/china_itdog.py                 itdog.cn 批量探活模块（china_check 拆分）
 scripts/exit_family.py                 实际出口 IP 家族检测与分离（tls trace + connect 双回显）
 scripts/generate_fingerprint.py        浏览器指纹生成
+scripts/annotate_classify.py           后缀填充 + 节点分类（CI 自动运行）
 scripts/common.py                      共享常量与助手（data 布局、HTTP/JSON/CONNECT 探测）
 data/raw/<port>/<country>.txt          按端口+国家的原始组织（含 #ALL，ip:port#国家；可重建中间产物，不入库）
 data/countries/<country>.txt           按国家汇总（跨端口去重）
@@ -152,18 +161,16 @@ data/upstream_meta.json               上游 all.json 逐 IP 元数据（真实�
 data/diff/latest.json                  最近一次更新差异（added/removed）
 data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
-data/chart.svg                         趋势折线图（unique 与 alive 随时间变化）
-data/chart_alive_rate.svg              存活率（%）随时间变化折线图
+data/chart_combo.svg                   代理计数 + 存活率双轴折线图
 data/chart_country.svg                 存活代理按国家 top-15 条形图
 data/chart_port.svg                    存活代理按端口条形图
 data/chart_churn.svg                   每次更新 added/removed 条形图
-data/chart_combo.svg                   双轴复合趋势（计数 + 存活率）
-data/chart_latency.svg                 存活代理延迟分桶条形图
-data/chart_speed.svg                   存活代理速度分桶条形图（MB/s）
+data/chart_latency_speed.svg           延迟与速度分桶双面板条形图
 data/chart_streaming.svg               各服务流媒体解锁 ok/blocked/error 堆叠条形图
 data/chart_sets.svg                    各命名集合存活代理条形图
 data/chart_cn.svg                      大陆连通性 verdict 分布条形图
 data/chart_family.svg                  实际出口 IP 家族分布条形图
+data/chart_source_avail.svg            IP 来源可用性图表
 data/chart_rep.svg                     信誉分分布条形图
 data/history.jsonl                     更新历史记录（每行一条，最多 1000 条）
 tests/                                 标准库 unittest 测试套件
