@@ -17,6 +17,7 @@ import ssl
 import struct
 import threading
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
 from common import UA, is_cf_heuristic, request_follow

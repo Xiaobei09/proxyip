@@ -92,7 +92,10 @@ def read_http_response_sync(sock: socket.socket, cap: int) -> tuple[int | None, 
         body += _read_chunked_sync(sock, cap, len(body))
     else:
         clen = headers.get("content-length")
-        want = min(int(clen), cap) if clen else cap
+        try:
+            want = min(int(clen), cap) if clen else cap
+        except (ValueError, TypeError):
+            want = cap
         while len(body) < want:
             chunk = sock.recv(65536)
             if not chunk:
@@ -107,7 +110,10 @@ def _read_chunked_sync(sock: socket.socket, cap: int, start: int) -> bytes:
         head = _read_until(sock, b"\r\n", 64)
         if b"\r\n" not in head:
             return body
-        size = int(head.split(b";", 1)[0].strip() or b"0", 16)
+        try:
+            size = int(head.split(b";", 1)[0].strip() or b"0", 16)
+        except ValueError:
+            return body
         if size == 0:
             _read_until(sock, b"\r\n", 16)
             return body

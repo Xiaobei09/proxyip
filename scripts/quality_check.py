@@ -35,6 +35,7 @@ Lines without results stay untouched.
 
 import argparse
 import asyncio
+import logging
 import re
 import sys
 from collections import Counter
@@ -499,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 args.reputation_weights[name.strip()] = int(weight)
             except ValueError:
-                pass
+                logging.warning("Invalid weight value for %s: %s", name, weight)
     args.reputation_sources = args.reputation_sources or ""
     if args.reputation_provider == "none":
         args.reputation_sources = []
