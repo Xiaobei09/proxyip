@@ -93,8 +93,8 @@ data/all.txt                                # 全量去重清单（未验证）
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
 - **触发**：每 4 小时定时（`cron: 23 */4 * * *`）；quality-check 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `quality_check.py`（默认 `--time-budget 1800` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
-- **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
+- **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
@@ -132,6 +132,7 @@ scripts/generate_stats.py              统计与趋势图
 scripts/quality_check.py               流媒体解锁与出口 IP 质量检测（入口）
 scripts/quality_reputation.py          信誉分/滥用分模块（quality_check 拆分）
 scripts/quality_streaming.py           流媒体解锁模块（quality_check 拆分）
+scripts/reorg_country.py               按出口国家重组 country/set/port 文件
 scripts/china_check.py                 大陆连通性检测（CF 启发式 + check-host + xxapi + ping.pe）
 scripts/china_itdog.py                 itdog.cn 批量探活模块（china_check 拆分）
 scripts/exit_family.py                 实际出口 IP 家族检测与分离（tls trace + connect 双回显）
