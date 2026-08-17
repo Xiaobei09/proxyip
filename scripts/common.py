@@ -38,6 +38,7 @@ STREAMING_FILE = VALID_DIR / "streaming.json"
 ABUSE_FILE = VALID_DIR / "abuse.json"
 QUALITY_META_FILE = VALID_DIR / "quality_meta.json"
 REPUTATION_FILE = VALID_DIR / "reputation.json"
+EXTERNAL_CHECK_FILE = VALID_DIR / "external_check.json"
 REP_RANK_FILE = VALID_DIR / "all_rep.txt"
 REP_CACHE_FILE = VALID_DIR / "reputation_cache.json"
 REP_CACHE_TTL = 7 * 24 * 3600
@@ -46,6 +47,8 @@ DEFAULT_SOURCE = VALID_DIR / "all_ltd.txt"
 MAX_HISTORY_RECORDS = 1000
 MAX_DIFF_FILES = 50
 PER_COUNTRY_LIMIT = 20
+
+EXTERNAL_CHECK_URL = "https://api.090227.xyz/check"
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
