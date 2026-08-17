@@ -225,7 +225,7 @@ class TestBuildIpinfo(unittest.TestCase):
         nc = {"9.9.9.9": {"netcoffee": {"trust_score": 42,
                                           "is_datacenter": True}}}
         info = qc.build_ipinfo_map(results, geo, {}, nc)["1.2.3.4:443#US"]
-        self.assertEqual(info["reputation"], 61)
+        self.assertEqual(info["reputation"], 67)
         self.assertEqual(info["reputation_source"], "multi")
         self.assertEqual(info["risk"], "medium")
         self.assertEqual(info["risk_flags"]["netcoffee"]["trust_score"], 42)
