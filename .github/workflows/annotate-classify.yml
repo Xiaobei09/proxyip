@@ -44,13 +44,15 @@ jobs:
               exit 0
             fi
           fi
-          # 3. 数据变更检查：quality check 是否产生了新的 streaming/ipinfo 数据
+          # 3. 数据变更检查：上游有新提交但本工作流尚未处理则运行
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            LAST_SHA=$(git log --oneline --all -1 --grep="suffix filling" --format=%h 2>/dev/null || echo "")
-            if [ -n "$LAST_SHA" ] && git diff --quiet "$LAST_SHA" -- \
-                data/quality/streaming.json data/quality/ipinfo.json data/quality/reputation.json; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "::notice::No quality data changes since last annotation, skipping"
+            LAST_UPSTREAM=$(git log --oneline -1 --grep="quality check" --format=%H 2>/dev/null || echo "")
+            LAST_DOWNSTREAM=$(git log --oneline -1 --grep="suffix filling" --format=%H 2>/dev/null || echo "")
+            if [ -n "$LAST_UPSTREAM" ] && [ -n "$LAST_DOWNSTREAM" ]; then
+              if git merge-base --is-ancestor "$LAST_UPSTREAM" "$LAST_DOWNSTREAM" 2>/dev/null; then
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "::notice::No new quality data since last annotation, skipping"
+              fi
             fi
           fi
         env:
