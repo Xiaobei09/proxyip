@@ -356,8 +356,8 @@ async def run(args: argparse.Namespace) -> int:
     geo = await batch_ipapi([res["ip"] for res in results.values()])
 
     rep_ips = [res["ip"] for res in results.values()]
-    asn_map = {ip: geo[ip]["asn"] for ip in rep_ips
-               if ip in geo and geo[ip].get("asn")}
+    asn_map = {ip: norm_asn(geo[ip].get("asn")) for ip in rep_ips
+               if ip in geo and norm_asn(geo[ip].get("asn"))}
     risk_data = await lookup_all_risk(rep_ips, args, asn_map)
     if risk_data:
         print(
