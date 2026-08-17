@@ -5,7 +5,7 @@
 ``--source data/valid/all.txt --limit 0``）做大陆连通性检测，产出一致结论后写回：
 （本地缺省仍走 ``all_rep.txt`` 按信誉降序取前 250 的小样本）
 
-- ``data/valid/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``）
+- ``data/quality/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``）
 - ``data/valid/all_cn.txt``  — 全量大陆可达清单（源为 ``data/valid/all.txt`` 全量存活池，
   仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
@@ -40,10 +40,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
+    CHINA_FILE,
     DEFAULT_SOURCE,
     REP_RANK_FILE,
     UA,
-    VALID_DIR,
+    VALID_ALL_CN_FILE,
+    VALID_ALL_FILE,
+    VALID_ALL_LTD_FILE,
     has_token,
     is_cf_heuristic,
     keyed_json,
@@ -57,8 +60,6 @@ from common import (
 from china_itdog import *
 
 FALLBACK_SOURCE = DEFAULT_SOURCE
-CHINA_FILE = VALID_DIR / "china.json"
-ALL_CN_FILE = VALID_DIR / "all_cn.txt"
 
 LIMIT_DEFAULT = 250
 PINGPE_LIMIT_DEFAULT = 40
@@ -536,9 +537,9 @@ def build_entry(item, sources: dict) -> dict:
 
 def load_cn_pool() -> str:
     """全量存活池文本（``all_cn.txt`` 生成源）：优先 ``data/valid/all.txt``，缺则回退 all_ltd.txt。"""
-    path = VALID_DIR / "all.txt"
+    path = VALID_ALL_FILE
     if not path.exists():
-        path = VALID_DIR / "all_ltd.txt"
+        path = VALID_ALL_LTD_FILE
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
@@ -697,7 +698,7 @@ def main(argv=None) -> int:
     all_pool_text = load_cn_pool()
     cn_text, cn_count = generate_all_cn(all_pool_text, reachable)
     if cn_text:
-        write_text_if_changed(ALL_CN_FILE, cn_text)
+        write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
     annotate_cn_files(reachable)
     print(f"all_cn.txt: {cn_count} lines; china.json: {len(entries)} entries", file=sys.stderr)
     return 0

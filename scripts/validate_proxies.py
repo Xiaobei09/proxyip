@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate proxy reachability and measure latency.
 
-Reads ``data/all.txt`` (``ip:port#country`` lines) and checks each proxy.
+Reads ``data/download/all.txt`` (``ip:port#country`` lines) and checks each proxy.
 A TLS handshake to the proxy itself (works for Cloudflare edge proxies,
 which serve TLS on 443/8443/2053/2083/2087/2096) is performed.
 
@@ -42,9 +42,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
+    ALL_FILE,
     INDEX_FILE,
     MAX_HISTORY_RECORDS,
-    OUT_DIR,
     PER_COUNTRY_LIMIT,
     SPEED_FILE,
     VALID_DIR,
@@ -792,7 +792,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=OUT_DIR / "all.txt", help="Input proxy list")
+    parser.add_argument("--source", type=Path, default=ALL_FILE, help="Input proxy list")
     parser.add_argument("--sni", default=TARGET_SNI, help="TLS SNI used for the handshake check")
     parser.add_argument("--speed-host", default=SPEED_HOST, help="Host used for the speed download")
     parser.add_argument("--speed-path", default=SPEED_PATH, help="Path to download for the speed test")
