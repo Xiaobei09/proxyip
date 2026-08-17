@@ -38,21 +38,24 @@ WIDTH = 800
 HEIGHT = 300
 MARGIN_L = 46
 MARGIN_R = 46
-MARGIN_T = 16
+MARGIN_T = 24
 MARGIN_B = 34
 
 COLOR_UNIQUE = "#4c78a8"
-COLOR_ALIVE = "#e45756"
+COLOR_ALIVE = "#54a24b"
 COLOR_RATE = "#f58518"
 COLOR_DEAD = "#8c564b"
 COLOR_ADDED = "#72b7b2"
 COLOR_REMOVED = "#e45756"
 COLOR_BAR = "#4c78a8"
 COLOR_PORT = "#58508d"
-COLOR_LATENCY = "#bcbd22"
-COLOR_SPEED = "#17becf"
+COLOR_LATENCY = "#b07d2e"
+COLOR_SPEED = "#1a7a8a"
 COLOR_STREAMING = "#9b59b6"
 COLOR_SOURCE = "#2ecc71"
+COLOR_OK = "#72b7b2"
+COLOR_BLOCKED = "#e45756"
+COLOR_ERROR = "#9c9c9c"
 
 MAX_HOVER_POINTS = 600
 STALE_AFTER_S = 3 * 3600
@@ -229,11 +232,12 @@ CSS_STYLE = (
     "text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}"
     ".g{stroke:#e8e8e8;stroke-width:1}"
     ".a{stroke:#999;stroke-width:1}"
-    ".t{font-size:9px;fill:#666}"
-    ".m{font-size:9px;text-anchor:middle;fill:#666}"
-    ".e{font-size:9px;text-anchor:end;fill:#666}"
-    ".l{font-size:10px;fill:#333}"
-    ".tt{font-size:11px;font-weight:600;text-anchor:middle;fill:#444}"
+    ".t{font-size:10px;fill:#666}"
+    ".m{font-size:10px;text-anchor:middle;fill:#666}"
+    ".e{font-size:10px;text-anchor:end;fill:#666}"
+    ".l{font-size:11px;fill:#333}"
+    ".tt{font-size:14px;font-weight:600;text-anchor:middle;fill:#444}"
+    ".em{font-size:13px;text-anchor:middle;fill:#999}"
     "</style>"
 )
 
@@ -250,7 +254,7 @@ def svg_head(width: int, height: int) -> str:
 def empty_svg(height: int = HEIGHT, text: str = "No data yet") -> str:
     return (
         svg_head(WIDTH, height)
-        + f'<text class="m" x="{WIDTH / 2}" y="{height / 2}" font-size="13">'
+        + f'<text class="em" x="{WIDTH / 2}" y="{height / 2}">'
         f"{esc(text)}</text>"
         + "</svg>"
     )
@@ -270,9 +274,9 @@ def legend_svg(series: list[Series]) -> str:
         dash_attr = ' stroke-dasharray="4,3"' if s.dash else ""
         last = s.values[-1]
         parts.append(
-            f'<line x1="{x}" y1="10" x2="{x + sw}" y2="10" '
+            f'<line x1="{x}" y1="20" x2="{x + sw}" y2="20" '
             f'stroke="{s.color}" stroke-width="2"{dash_attr}/>'
-            f'<text class="l" x="{x + sw + 4}" y="13">'
+            f'<text class="l" x="{x + sw + 4}" y="23">'
             f"{esc(s.name)} {last:g}</text>"
         )
         x += sw + 4 + len(f"{s.name} {last:g}") * 6.4 + 16
@@ -632,22 +636,6 @@ def plot_grouped_vbars(
     return "\n".join(parts)
 
 
-def build_trend(history: list[dict], valid_history: list[dict]) -> str:
-    series = [
-        Series(
-            "unique", COLOR_UNIQUE,
-            [r.get("ts", "") for r in history],
-            [r.get("unique", 0) for r in history],
-        ),
-        Series(
-            "alive", COLOR_ALIVE,
-            [r.get("ts", "") for r in valid_history],
-            [r.get("alive", 0) for r in valid_history],
-        ),
-    ]
-    return plot_lines(series, title="Unique & Alive trend")
-
-
 def build_country(meta: dict) -> str:
     per_country = meta.get("per_country", {})
     items = sorted(per_country.items(), key=lambda kv: kv[1], reverse=True)[:15]
@@ -658,21 +646,6 @@ def build_port(meta: dict) -> str:
     per_port = meta.get("per_port", {})
     items = [(p, per_port[p]) for p in sorted(per_port, key=lambda p: int(p))]
     return plot_vbars(items, title="Alive proxies by port")
-
-
-def build_alive_rate(valid_history: list[dict]) -> str:
-    ts = [r.get("ts", "") for r in valid_history]
-    rate = []
-    dead = []
-    for r in valid_history:
-        checked = r.get("checked", 0)
-        rate.append(round(r.get("alive", 0) / checked * 100, 1) if checked else 0)
-        dead.append(r.get("dead", 0))
-    series = [
-        Series("alive rate", COLOR_RATE, ts, rate, axis="l"),
-        Series("dead", COLOR_DEAD, ts, dead, axis="r"),
-    ]
-    return plot_lines(series, left_unit="%", title="Alive rate (%) & dead")
 
 
 def build_churn(history: list[dict]) -> str:
@@ -694,29 +667,61 @@ def build_combo(history: list[dict], valid_history: list[dict]) -> str:
     series = [
         Series("unique", COLOR_UNIQUE, u_ts, [r.get("unique", 0) for r in history]),
         Series("alive", COLOR_ALIVE, v_ts, [r.get("alive", 0) for r in valid_history]),
-        Series("alive rate", COLOR_RATE, v_ts, pct, dash="dash", axis="r"),
+        Series("dead", COLOR_DEAD, v_ts, [r.get("dead", 0) for r in valid_history], dash="dash"),
+        Series("alive rate", COLOR_RATE, v_ts, pct, dash="dot", axis="r"),
     ]
     return plot_lines(
-        series, right_unit="%", title="Unique / Alive / Alive rate"
+        series, right_unit="%", title="Proxy count & alive rate"
     )
 
 
-def build_latency(meta: dict) -> str:
-    dist = meta.get("latency_dist", {})
-    if not dist:
-        return empty_svg(text="No latency data yet")
-    return plot_vbars(
-        list(dist.items()), color=COLOR_LATENCY, title="Alive proxies by latency (ms)"
-    )
-
-
-def build_speed(meta: dict) -> str:
-    dist = meta.get("speed_dist", {})
-    if not dist:
-        return empty_svg(text="No speed data yet")
-    return plot_vbars(
-        list(dist.items()), color=COLOR_SPEED, title="Alive proxies by speed (MB/s)"
-    )
+def build_latency_speed(meta: dict) -> str:
+    lat = meta.get("latency_dist", {})
+    spd = meta.get("speed_dist", {})
+    if not lat and not spd:
+        return empty_svg(text="No latency/speed data yet")
+    panel_h = 180
+    total_h = panel_h * 2 + MARGIN_T + MARGIN_B
+    parts = [svg_head(WIDTH, total_h)]
+    parts.append(f'<text class="tt" x="{WIDTH / 2}" y="{MARGIN_T}">'
+                 "Latency (ms) &amp; speed (MB/s)</text>")
+    for idx, (dist, color, label) in enumerate([
+        (lat, COLOR_LATENCY, "Latency (ms)"),
+        (spd, COLOR_SPEED, "Speed (MB/s)"),
+    ]):
+        if not dist:
+            continue
+        y_off = MARGIN_T + 20 + idx * panel_h
+        plot_w = WIDTH - MARGIN_L - MARGIN_R
+        n = len(dist)
+        if n == 0:
+            continue
+        slot = plot_w / n
+        vals = list(dist.values())
+        mx = max(vals) if vals else 1
+        if mx == 0:
+            mx = 1
+        bw = max(14, min(80, slot * 0.55))
+        ph = panel_h - MARGIN_T - 8
+        parts.append(f'<text class="tt" x="{WIDTH / 2}" y="{y_off}">{esc(label)}</text>')
+        plot_y = y_off + 8
+        for i, (k, v) in enumerate(dist.items()):
+            cx = MARGIN_L + slot * i + slot / 2
+            bh = max(2, v / mx * ph)
+            by = plot_y + ph - bh
+            parts.append(
+                f'<rect x="{cx - bw / 2}" y="{by}" width="{bw}" '
+                f'height="{bh}" fill="{color}" rx="1.5">'
+                f"<title>{esc(k)}: {v}</title></rect>"
+            )
+            parts.append(
+                f'<text class="m" x="{cx}" y="{by - 3}">{v}</text>'
+            )
+            parts.append(
+                f'<text class="m" x="{cx}" y="{plot_y + ph + 12}">{esc(k)}</text>'
+            )
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def plot_stacked_vbars(
@@ -785,15 +790,15 @@ def build_streaming(quality_meta: dict) -> str:
         return empty_svg(text="No streaming data yet")
     layers = [
         Series(
-            "ok", "#72b7b2", list(names),
+            "ok", COLOR_OK, list(names),
             [streaming.get(n, {}).get("ok", 0) for n in names],
         ),
         Series(
-            "blocked", "#e45756", list(names),
+            "blocked", COLOR_BLOCKED, list(names),
             [streaming.get(n, {}).get("blocked", 0) for n in names],
         ),
         Series(
-            "error", "#9c9c9c", list(names),
+            "error", COLOR_ERROR, list(names),
             [streaming.get(n, {}).get("error", 0) for n in names],
         ),
     ]
@@ -1022,14 +1027,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Wrote {badge_file}")
 
     charts = {
-        "chart.svg": build_trend(history, valid_history),
+        "chart_combo.svg": build_combo(history, valid_history),
         "chart_country.svg": build_country(meta),
         "chart_port.svg": build_port(meta),
-        "chart_alive_rate.svg": build_alive_rate(valid_history),
         "chart_churn.svg": build_churn(history),
-        "chart_combo.svg": build_combo(history, valid_history),
-        "chart_latency.svg": build_latency(meta),
-        "chart_speed.svg": build_speed(meta),
+        "chart_latency_speed.svg": build_latency_speed(meta),
         "chart_streaming.svg": build_streaming(quality_meta),
         "chart_sets.svg": build_sets(meta),
         "chart_cn.svg": build_cn(china_data),
