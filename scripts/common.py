@@ -253,6 +253,7 @@ def annotate_files(
     streaming_map: dict[str, dict],
     rep_map: dict[str, int],
     ip_type_map: dict[str, str],
+    exit_map: dict[str, str] | None = None,
 ) -> int:
     """Annotate all files with suffixes + classification, return lines changed.
 
@@ -270,7 +271,8 @@ def annotate_files(
             if not line:
                 continue
             new_line = fill_and_classify(
-                line, china_set, family_map, streaming_map, rep_map, ip_type_map
+                line, china_set, family_map, streaming_map, rep_map,
+                ip_type_map, exit_map,
             )
             if new_line != line:
                 changed += 1

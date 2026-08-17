@@ -306,16 +306,17 @@ class TestAnnotation(unittest.TestCase):
         self.assertFalse(lines[2].endswith("-"))
 
     def test_annotate_text_with_exits(self):
+        """Exit markers are now handled by annotate_classify; annotate_text
+        only appends annotation tokens."""
         annotations = {"1.2.3.4:443#US": "GPT-CF"}
-        exits = {"1.2.3.4:443#US": "NRT"}
         text = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s\n"
-        out, changed = qc.annotate_text(text, annotations, exits)
+        out, changed = qc.annotate_text(text, annotations)
         self.assertTrue(changed)
         self.assertEqual(
             out.strip(),
-            "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192NRT-120ms-0.44MB/s-GPT-CF",
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s-GPT-CF",
         )
-        out2, changed2 = qc.annotate_text(out, annotations, exits)
+        out2, changed2 = qc.annotate_text(out, annotations)
         self.assertFalse(changed2)
         self.assertEqual(out2.strip(), out.strip())
 
@@ -344,14 +345,11 @@ class TestAnnotation(unittest.TestCase):
         )
 
     def test_annotate_all_line_with_exit(self):
-        exits = {"1.2.3.4:443#ALL": "US"}
+        """annotate_text no longer handles exit markers (→CC is annotate_classify's job)."""
         text = "1.2.3.4:443#ALL-120ms-0.44MB/s\n"
-        out, changed = qc.annotate_text(text, {}, exits)
-        self.assertTrue(changed)
-        self.assertEqual(out.strip(), "1.2.3.4:443#ALL\u2192US-120ms-0.44MB/s")
-        out2, changed2 = qc.annotate_text(out, {}, exits)
-        self.assertFalse(changed2)
-        self.assertEqual(out2.strip(), out.strip())
+        out, changed = qc.annotate_text(text, {})
+        self.assertFalse(changed)
+        self.assertEqual(out.strip(), "1.2.3.4:443#ALL-120ms-0.44MB/s")
 
     def test_build_exits(self):
         results = {
@@ -1272,6 +1270,92 @@ class TestAnnotateClassify(unittest.TestCase):
             line, set(), {}, {}, {}, {},
         )
         self.assertEqual(result, line)
+
+    def test_fill_exit_marker(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={},
+            exit_map={"1.2.3.4:443#US": "JP"},
+        )
+        self.assertIn("→JP", result)
+        self.assertTrue(result.startswith("1.2.3.4:443#"))
+        # CC should still be US, exit marker inserted after it
+        self.assertIn("#🇺🇸US→JP-", result)
+
+    def test_fill_exit_marker_existing(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US→LAX-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={},
+            exit_map={"1.2.3.4:443#US": "JP"},
+        )
+        # Already has →, should not add another
+        self.assertEqual(result, line)
+
+    def test_fill_exit_marker_no_match(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={},
+            exit_map={"9.9.9.9:443#DE": "FR"},
+        )
+        # Key not in exit_map → no change
+        self.assertEqual(result, line)
+
+
+class TestBuildExitMap(unittest.TestCase):
+    def test_build_exit_map(self):
+        from annotate_classify import _build_exit_map
+        ipinfo = {
+            "proxies": {
+                "1.2.3.4:443#US": {
+                    "country_code": "JP",
+                    "country_match": False,
+                },
+                "5.6.7.8:443#US": {
+                    "country_code": "US",
+                    "country_match": True,
+                },
+                "9.9.9.9:443#DE": {
+                    "country_code": "FR",
+                    "country_match": False,
+                },
+            }
+        }
+        exit_map = _build_exit_map(ipinfo)
+        self.assertEqual(exit_map, {
+            "1.2.3.4:443#US": "JP",
+            "9.9.9.9:443#DE": "FR",
+        })
+
+    def test_build_exit_map_missing_fields(self):
+        from annotate_classify import _build_exit_map
+        ipinfo = {
+            "proxies": {
+                "a:443#US": {"country_match": None},  # unknown → skip
+                "b:443#US": {"country_code": "XX", "country_match": False},  # mismatch → included
+                "c:443#US": {},  # no country_match → skip
+                "d:443#US": {"country_code": "", "country_match": False},  # empty cc → skip
+            }
+        }
+        exit_map = _build_exit_map(ipinfo)
+        self.assertEqual(exit_map, {"b:443#US": "XX"})
 
 
 class TestBuildMetaCountryMismatch(unittest.TestCase):
