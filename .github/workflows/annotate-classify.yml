@@ -55,8 +55,8 @@ jobs:
             ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
             ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' \
             ':(exclude)data/history.jsonl' \
-            ':(exclude)data/valid/index.json' ':(exclude=data/valid/speed.json)' \
-            ':(exclude=data/valid/meta.json)' ':(exclude=data/valid/history.jsonl)'
+            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
+            ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -71,12 +71,12 @@ jobs:
             git fetch origin main || { sleep 5; continue; }
             git reset --mixed origin/main
             git add -Af data/ ':(exclude)data/raw' \
-              ':(exclude)data/all.txt' ':(exclude=data/all_ltd.txt' \
-              ':(exclude)data/countries' ':(exclude=data/ports' ':(exclude)data/sets' \
+              ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
+              ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
               ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' \
               ':(exclude)data/history.jsonl' \
               ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
-              ':(exclude)data/valid/meta.json' ':(exclude=data/valid/history.jsonl)'
+              ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0
