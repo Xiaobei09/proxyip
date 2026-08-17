@@ -40,18 +40,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from common import *  # noqa: F401,F403  (paths + shared helpers)
+from common import *  # noqa: F401,F403  (paths + shared helpers + regex + classify_ip)
 from quality_reputation import *  # noqa: F401,F403
 from quality_streaming import *  # noqa: F401,F403
-
-def classify_ip(geo: dict) -> str:
-    if geo.get("hosting"):
-        return "DC"
-    if geo.get("mobile"):
-        return "MOB"
-    if geo.get("proxy"):
-        return "PROXY"
-    return "RES"
 
 
 def build_ipinfo_map(
@@ -161,9 +152,6 @@ def build_reputation_map(
     return rep_map
 
 
-LATENCY_RE = re.compile(r"-(\d+)ms")
-
-
 def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
     """Annotate ``text`` lines and re-order them by reputation desc.
 
@@ -242,19 +230,6 @@ def build_exits(results: dict, ipinfo: dict) -> dict[str, str]:
         if region:
             exits[res["key"]] = region
     return exits
-
-
-EXIT_REGION_RE = re.compile(r"^(.*#[^A-Z]*[A-Z]+)")
-
-
-def insert_exit_region(line: str, exit_region: str) -> str:
-    """Insert ``→<exit>`` right after the entry country code (idempotent)."""
-    if not exit_region or "→" in line:
-        return line
-    m = EXIT_REGION_RE.match(line)
-    if not m:
-        return line
-    return line[: m.end(1)] + "→" + exit_region + line[m.end(1):]
 
 
 def annotate_text(

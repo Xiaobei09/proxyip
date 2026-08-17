@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Shared path constants and small helpers used across all scripts.
+"""Shared path constants, regex patterns, and small helpers used across all
+scripts.
 
-Holds the ``data/`` layout constants and the tiny line/HTTP/JSON helpers that
+Holds the ``data/`` layout constants, the tiny line/HTTP/JSON helpers that
 the entry-point scripts used to import from each other (``download_proxies``
 for paths, ``quality_check`` for helpers, ``china_check`` for
-``request_follow``/``is_cf_heuristic``).
+``request_follow``/``is_cf_heuristic``), the common regex patterns
+(``EXIT_REGION_RE``, ``LATENCY_RE``, ``SPEED_RE``), and shared I/O
+utilities (``read_json``, ``load_sample``, ``collect_txt_files``,
+``annotate_files``).
+
 ``common`` imports nothing from the other scripts, so every script can depend
 on it without creating import cycles.
 """
@@ -12,6 +17,7 @@ on it without creating import cycles.
 import asyncio
 import json
 import re
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,6 +55,19 @@ MAX_DIFF_FILES = 50
 PER_COUNTRY_LIMIT = 20
 
 EXTERNAL_CHECK_URL = "https://api.090227.xyz/check"
+
+# ---------------------------------------------------------------- ip-api 共享常量
+IPAPI_BATCH_URL = "http://ip-api.com/batch"
+IPAPI_BATCH_SIZE = 100
+IPAPI_BATCH_DELAY = 1.2
+
+# ---------------------------------------------------------------- 共享正则
+EXIT_REGION_RE = re.compile(r"^(.*#[^A-Z]*[A-Z]+)")
+LATENCY_RE = re.compile(r"-(\d+)ms")
+SPEED_RE = re.compile(r"(\d+(?:\.\d+)?)MB/s")
+
+# ---------------------------------------------------------------- SSL 上下文
+_SSL_CTX = ssl.create_default_context()
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -174,6 +193,112 @@ def write_text_if_changed(path: Path, content: str) -> bool:
 
 def keyed_json(entries: dict) -> dict:
     return {"proxies": entries}
+
+
+# ------------------------------------------------------- 共享 JSON / 文件读写
+
+
+def read_json(path: Path) -> dict:
+    """Read a JSON file; return ``{}`` on missing / broken / OS errors."""
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def load_sample(source: Path, limit: int) -> list:
+    """Return ``[(line, key, ip, port, cc), ...]`` truncated to ``limit``."""
+    lines = [l for l in source.read_text(encoding="utf-8").splitlines() if l.strip()]
+    out = []
+    for line in lines:
+        parsed = parse_ltd_line(line)
+        if not parsed:
+            continue
+        key, ip, port, cc = parsed
+        out.append((line, key, ip, port, cc))
+    if limit and limit > 0:
+        out = out[:limit]
+    return out
+
+
+def collect_txt_files(valid_dir: Path) -> list[Path]:
+    """Collect all proxy txt files to annotate (shared layout)."""
+    files: list[Path] = []
+    for name in ("all.txt", "all_ltd.txt"):
+        p = valid_dir / name
+        if p.exists():
+            files.append(p)
+    for sub in ("countries", "sets"):
+        d = valid_dir / sub
+        if d.is_dir():
+            files.extend(sorted(d.glob("*/all.txt")))
+            files.extend(sorted(d.glob("*/ltd.txt")))
+    ports_dir = valid_dir / "ports"
+    if ports_dir.is_dir():
+        files.extend(sorted(ports_dir.glob("*.txt")))
+    return files
+
+
+def annotate_files(
+    files: list[Path],
+    china_set: set[str],
+    family_map: dict[str, str],
+    streaming_map: dict[str, dict],
+    rep_map: dict[str, int],
+    ip_type_map: dict[str, str],
+) -> int:
+    """Annotate all files with suffixes + classification, return lines changed.
+
+    Imports ``fill_and_classify`` lazily from ``annotate_classify`` to avoid
+    import cycles when this module is loaded at startup.
+    """
+    from annotate_classify import fill_and_classify
+
+    total_changed = 0
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        out_lines = []
+        changed = 0
+        for line in text.splitlines():
+            if not line:
+                continue
+            new_line = fill_and_classify(
+                line, china_set, family_map, streaming_map, rep_map, ip_type_map
+            )
+            if new_line != line:
+                changed += 1
+            out_lines.append(new_line)
+        if changed:
+            write_text_if_changed(path, "\n".join(out_lines) + "\n")
+            total_changed += changed
+            print(f"  {path.name}: {changed} lines updated")
+    return total_changed
+
+
+# ------------------------------------------------------- 共享注解 / 分类函数
+
+
+def insert_exit_region(line: str, exit_region: str) -> str:
+    """Insert ``→<exit>`` right after the entry country code (idempotent)."""
+    if not exit_region or "→" in line:
+        return line
+    m = EXIT_REGION_RE.match(line)
+    if not m:
+        return line
+    return line[: m.end(1)] + "→" + exit_region + line[m.end(1) :]
+
+
+def classify_ip(geo: dict) -> str:
+    """Return ``DC``/``MOB``/``PROXY``/``RES`` from ip-api geo dict."""
+    if geo.get("hosting"):
+        return "DC"
+    if geo.get("mobile"):
+        return "MOB"
+    if geo.get("proxy"):
+        return "PROXY"
+    return "RES"
 
 
 # ------------------------------------------------------- 重定向跟随请求

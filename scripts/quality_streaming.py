@@ -17,22 +17,18 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from common import *  # noqa: F401,F403  (paths, UA, build_request, ...)
+from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, _SSL_CTX, ...)
 
-IPAPI_BATCH_URL = "http://ip-api.com/batch"
 IPAPI_GET_URL = "http://ip-api.com/json/{ip}"
 IPAPI_FIELDS = (
     "status,message,country,countryCode,regionName,city,"
     "as,asn,org,isp,proxy,hosting,mobile"
 )
-BATCH_SIZE = 100
 TIMEOUT = 6
 READ_CAP = 524288
 READ_TIMEOUT = 3
 HEADER_CAP = 65536
 WORKERS = 60
-BATCH_DELAY = 1.2
-_SSL_CTX = ssl.create_default_context()
 SERVICES = {
     "netflix": {"host": "www.netflix.com", "path": "/title/80018499"},
     "disney": {"host": "www.disneyplus.com", "path": "/"},
@@ -286,7 +282,7 @@ async def run_checks(
     return results
 
 
-def group_chunks(items: list, size: int = BATCH_SIZE) -> list[list]:
+def group_chunks(items: list, size: int = IPAPI_BATCH_SIZE) -> list[list]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
@@ -327,7 +323,7 @@ async def batch_ipapi(ips: list) -> dict:
         for item, ip in zip(data, chunk):
             if isinstance(item, dict) and item.get("status") == "success":
                 out[ip] = item
-        await asyncio.sleep(BATCH_DELAY)
+        await asyncio.sleep(IPAPI_BATCH_DELAY)
     if any_batch_ok or out:
         return out
     for ip in dict.fromkeys(ips):

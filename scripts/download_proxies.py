@@ -39,6 +39,9 @@ from common import (
     COUNTRIES_DIR,
     DIFF_DIR,
     HISTORY_FILE,
+    IPAPI_BATCH_URL,
+    IPAPI_BATCH_SIZE,
+    IPAPI_BATCH_DELAY,
     MAX_DIFF_FILES,
     MAX_HISTORY_RECORDS,
     OUT_DIR,
@@ -96,9 +99,6 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
 DEFAULT_EXTRA_PORT = "443"
-IPAPI_BATCH_URL = "http://ip-api.com/batch"
-IPAPI_BATCH_SIZE = 100
-IPAPI_BATCH_DELAY = 1.2
 
 CN_COUNTRY_MAP: dict[str, str] = {
     "香港": "HK", "台湾": "TW", "中国": "CN", "澳门": "MO",

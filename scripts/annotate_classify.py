@@ -14,25 +14,26 @@ where ``<type>`` is ``DC``/``RES``/``MOB``/``PROXY`` and ``<tier>`` is
 """
 
 import argparse
-import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import (
+    SPEED_RE,
+    LATENCY_RE,
+    EXIT_REGION_RE,
     VALID_DIR,
     has_token,
     line_to_key,
     parse_line,
+    read_json,
     write_text_if_changed,
+    collect_txt_files,
+    annotate_files,
 )
 from quality_streaming import streaming_tokens
 
-SPEED_RE = re.compile(r"(\d+(?:\.\d+)?)MB/s")
-LATENCY_RE = re.compile(r"-(\d+)ms")
-EXIT_REGION_RE = re.compile(r"^(.*#[^A-Z]*[A-Z]+)")
 
 IP_TYPES = frozenset({"DC", "RES", "MOB", "PROXY"})
 FAMILY_TOKENS = frozenset({"V4", "V6", "DS"})
@@ -49,15 +50,6 @@ def speed_tier(note: str) -> str:
     if mbps >= 1:
         return "mid"
     return "slow"
-
-
-def _load_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
 
 
 def _build_china_set(data: dict) -> set[str]:
@@ -103,16 +95,6 @@ def _build_rep_map(data: dict) -> dict[str, int]:
         for k, v in data.get("proxies", {}).items()
         if v.get("score")
     }
-
-
-def _insert_exit_region(line: str, exit_region: str) -> str:
-    """Insert ``→<exit>`` right after the entry country code (idempotent)."""
-    if not exit_region or "→" in line:
-        return line
-    m = EXIT_REGION_RE.match(line)
-    if not m:
-        return line
-    return line[: m.end(1)] + "→" + exit_region + line[m.end(1) :]
 
 
 def fill_and_classify(
@@ -177,54 +159,6 @@ def fill_and_classify(
     return out
 
 
-def collect_txt_files(valid_dir: Path) -> list[Path]:
-    """Collect all proxy txt files to annotate."""
-    files: list[Path] = []
-    for name in ("all.txt", "all_ltd.txt"):
-        p = valid_dir / name
-        if p.exists():
-            files.append(p)
-    for sub in ("countries", "sets"):
-        d = valid_dir / sub
-        if d.is_dir():
-            files.extend(sorted(d.glob("*/all.txt")))
-            files.extend(sorted(d.glob("*/ltd.txt")))
-    ports_dir = valid_dir / "ports"
-    if ports_dir.is_dir():
-        files.extend(sorted(ports_dir.glob("*.txt")))
-    return files
-
-
-def annotate_files(
-    files: list[Path],
-    china_set: set[str],
-    family_map: dict[str, str],
-    streaming_map: dict[str, dict],
-    rep_map: dict[str, int],
-    ip_type_map: dict[str, str],
-) -> int:
-    """Annotate all files, return total lines changed."""
-    total_changed = 0
-    for path in files:
-        text = path.read_text(encoding="utf-8")
-        out_lines = []
-        changed = 0
-        for line in text.splitlines():
-            if not line:
-                continue
-            new_line = fill_and_classify(
-                line, china_set, family_map, streaming_map, rep_map, ip_type_map
-            )
-            if new_line != line:
-                changed += 1
-            out_lines.append(new_line)
-        if changed:
-            write_text_if_changed(path, "\n".join(out_lines) + "\n")
-            total_changed += changed
-            print(f"  {path.name}: {changed} lines updated")
-    return total_changed
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -237,11 +171,11 @@ def main(argv: list[str] | None = None) -> int:
     valid_dir = args.data_dir / "valid"
 
     # load data
-    ipinfo = _load_json(valid_dir / "ipinfo.json")
-    rep_data = _load_json(valid_dir / "reputation.json")
-    china_data = _load_json(valid_dir / "china.json")
-    family_data = _load_json(valid_dir / "exit_family.json")
-    streaming_data = _load_json(valid_dir / "streaming.json")
+    ipinfo = read_json(valid_dir / "ipinfo.json")
+    rep_data = read_json(valid_dir / "reputation.json")
+    china_data = read_json(valid_dir / "china.json")
+    family_data = read_json(valid_dir / "exit_family.json")
+    streaming_data = read_json(valid_dir / "streaming.json")
 
     # build maps
     china_set = _build_china_set(china_data)
