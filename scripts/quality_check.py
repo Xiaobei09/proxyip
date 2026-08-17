@@ -166,7 +166,10 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
             continue
         key = line_to_key(line)
         ann = annotations.get(key) if key else None
-        out = line + ("-" + ann if ann else "")
+        if ann and not line.rstrip().endswith("-" + ann):
+            out = line + "-" + ann
+        else:
+            out = line
         rep = rep_map.get(key)
         if rep:
             scored.append((rep, key, out))
