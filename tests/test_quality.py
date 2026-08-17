@@ -189,11 +189,11 @@ class TestIpTypeAndRisk(unittest.TestCase):
 
 
 class TestBuildIpinfo(unittest.TestCase):
-    def test_dual_stack_and_match(self):
+    def test_tls_proxy_geo_match(self):
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "cc": "US",
-                "v4": "9.9.9.9", "v6": "2606:4700::1",
+                "ip": "9.9.9.9",
             }
         }
         geo = {
@@ -207,8 +207,6 @@ class TestBuildIpinfo(unittest.TestCase):
         }
         info = qc.build_ipinfo_map(results, geo, {})["1.2.3.4:443#US"]
         self.assertEqual(info["exit_ip"], "9.9.9.9")
-        self.assertEqual(info["family"], "dual")
-        self.assertTrue(info["dual_stack"])
         self.assertTrue(info["country_match"])
         self.assertEqual(info["ip_type"], "DC")
         self.assertEqual(info["risk"], "low")
@@ -220,12 +218,12 @@ class TestBuildIpinfo(unittest.TestCase):
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "cc": "US",
-                "v4": "9.9.9.9", "v6": None,
+                "ip": "9.9.9.9",
             }
         }
         geo = {"9.9.9.9": {"status": "success", "countryCode": "US"}}
         nc = {"9.9.9.9": {"netcoffee": {"trust_score": 42,
-                                         "is_datacenter": True}}}
+                                          "is_datacenter": True}}}
         info = qc.build_ipinfo_map(results, geo, {}, nc)["1.2.3.4:443#US"]
         self.assertEqual(info["reputation"], 61)
         self.assertEqual(info["reputation_source"], "multi")
@@ -236,7 +234,7 @@ class TestBuildIpinfo(unittest.TestCase):
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "cc": "US",
-                "v4": "9.9.9.9", "v6": None,
+                "ip": "9.9.9.9",
             }
         }
         info = qc.build_ipinfo_map(results, {}, {})["1.2.3.4:443#US"]
@@ -248,13 +246,12 @@ class TestBuildIpinfo(unittest.TestCase):
         results = {
             "1.2.3.4:443#JP": {
                 "key": "1.2.3.4:443#JP", "cc": "JP",
-                "v4": "8.8.8.8", "v6": None,
+                "ip": "8.8.8.8",
             }
         }
         geo = {"8.8.8.8": {"status": "success", "countryCode": "US"}}
         info = qc.build_ipinfo_map(results, geo, {})["1.2.3.4:443#JP"]
         self.assertFalse(info["country_match"])
-        self.assertEqual(info["family"], "ipv4")
 
 
 class TestAnnotation(unittest.TestCase):
@@ -359,27 +356,20 @@ class TestAnnotation(unittest.TestCase):
     def test_build_exits(self):
         results = {
             "1.2.3.4:443#US": {
-                "key": "1.2.3.4:443#US", "tls": True,
+                "key": "1.2.3.4:443#US",
                 "streaming": {"openai": {"status": "ok", "region": "NRT"}},
             },
             "2.2.2.2:443#JP": {
-                "key": "2.2.2.2:443#JP", "tls": True,
+                "key": "2.2.2.2:443#JP",
                 "streaming": {"openai": {"status": "blocked"}},
             },
             "3.3.3.3:80#SG": {
-                "key": "3.3.3.3:80#SG", "method": "connect", "streaming": {},
+                "key": "3.3.3.3:80#SG", "streaming": {},
             },
-            "4.4.4.4:80#DE": {
-                "key": "4.4.4.4:80#DE", "method": "connect", "streaming": {},
-            },
-        }
-        ipinfo = {
-            "3.3.3.3:80#SG": {"country_code": "US"},
-            "4.4.4.4:80#DE": {"country_code": None},
         }
         self.assertEqual(
-            qc.build_exits(results, ipinfo),
-            {"1.2.3.4:443#US": "NRT", "3.3.3.3:80#SG": "US"},
+            qc.build_exits(results, {}),
+            {"1.2.3.4:443#US": "NRT"},
         )
 
 
@@ -476,26 +466,16 @@ class TestReputation(unittest.TestCase):
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "ip": "1.2.3.4",
-                "method": "connect", "streaming": {},
+                "streaming": {},
             },
             "5.6.7.8:8443#JP": {
                 "key": "5.6.7.8:8443#JP", "ip": "5.6.7.8",
-                "method": "tls", "tls": True, "streaming": {},
-            },
-        }
-        ipinfo = {
-            "1.2.3.4:443#US": {
-                "reputation": 40, "reputation_source": "multi",
-                "risk_sources": ["netcoffee", "ncgy"],
+                "streaming": {},
             },
         }
         risk_data = {"5.6.7.8": {"netcoffee": {"trust_score": 70}}}
-        rep = qc.build_reputation_map(results, ipinfo, risk_data, self.W)
-        self.assertEqual(rep["1.2.3.4:443#US"]["score"], 40)
-        self.assertEqual(rep["1.2.3.4:443#US"]["source"], "multi")
-        self.assertEqual(
-            rep["1.2.3.4:443#US"]["sources"], ["netcoffee", "ncgy"])
-        self.assertEqual(rep["1.2.3.4:443#US"]["risk"], "medium")
+        rep = qc.build_reputation_map(results, {}, risk_data, self.W)
+        self.assertNotIn("1.2.3.4:443#US", rep)
         self.assertEqual(rep["5.6.7.8:8443#JP"]["score"], 70)
         self.assertEqual(rep["5.6.7.8:8443#JP"]["source"], "netcoffee")
         self.assertEqual(rep["5.6.7.8:8443#JP"]["sources"], ["netcoffee"])

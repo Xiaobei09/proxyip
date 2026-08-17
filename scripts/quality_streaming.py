@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Streaming unlock + exit geo checks (extracted from quality_check.py).
 
-CONNECT/TLS tunnel GETs against the streaming providers in ``SERVICES`` plus
-``api.ipify.org``(v4)/``api6.ipify.org``(v6) exit echoes and ip-api geo batch.
+TLS direct GETs against the streaming providers in ``SERVICES`` plus
+``cloudflare.com/cdn-cgi/trace`` exit echo and ip-api geo batch.
 Imported by ``quality_check``.
 """
 
@@ -16,12 +16,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from common import *  # noqa: F401,F403  (paths, UA, build_request, try_connect, ...)
+from common import *  # noqa: F401,F403  (paths, UA, build_request, ...)
 
-ECHO_V4_HOST = "api.ipify.org"
-ECHO_V6_HOST = "api6.ipify.org"
-ECHO_PATH = "/"
-ECHO_PORT = 80
 IPAPI_BATCH_URL = "http://ip-api.com/batch"
 IPAPI_GET_URL = "http://ip-api.com/json/{ip}"
 IPAPI_FIELDS = (
@@ -186,65 +182,6 @@ PARSERS = {
 }
 
 
-async def http_get_via_tunnel(
-    ip: str, port: str, host: str, path: str, target_port: int, timeout: int
-) -> str | None:
-    """Plain-HTTP GET through a CONNECT tunnel; returns the response body text."""
-    try:
-        reader, writer = await asyncio.open_connection(ip, int(port))
-    except (OSError, asyncio.TimeoutError, ValueError):
-        return None
-    try:
-        if not await try_connect(reader, writer, host, target_port):
-            return None
-        writer.write(build_request("GET", path, host))
-        await writer.drain()
-        status, _headers, body = await read_http_response(reader, 8192)
-        if status != 200:
-            return None
-        return body.decode("utf-8", errors="replace").strip()
-    except (OSError, asyncio.TimeoutError, ssl.SSLError, ConnectionError):
-        return None
-    finally:
-        try:
-            writer.close()
-        except OSError:
-            pass
-
-
-async def https_get_via_tunnel(
-    ip: str,
-    port: str,
-    host: str,
-    path: str,
-    timeout: int,
-    read_cap: int,
-) -> tuple[int | None, dict, bytes, str | None]:
-    """CONNECT + TLS (``StreamWriter.start_tls``) + GET to ``host``."""
-    try:
-        reader, writer = await asyncio.open_connection(ip, int(port))
-    except (OSError, asyncio.TimeoutError, ValueError) as exc:
-        return None, {}, b"", f"connect: {exc}"
-    try:
-        if not await try_connect(reader, writer, host, 443):
-            return None, {}, b"", "CONNECT rejected"
-        await asyncio.wait_for(
-            writer.start_tls(_SSL_CTX, server_hostname=host),
-            timeout=timeout,
-        )
-        writer.write(build_request("GET", path, host))
-        await writer.drain()
-        status, headers, body = await read_http_response(reader, read_cap)
-        return status, headers, body, None
-    except (OSError, asyncio.TimeoutError, ssl.SSLError, ConnectionError) as exc:
-        return None, {}, b"", str(exc)
-    finally:
-        try:
-            writer.close()
-        except OSError:
-            pass
-
-
 async def tls_get_direct(
     ip: str,
     port: str,
@@ -277,29 +214,12 @@ async def tls_get_direct(
 async def check_one(entry: tuple, method: str, args: argparse.Namespace) -> dict:
     """Run the checks for a single proxy entry."""
     key, ip, port, cc = entry
-    base = {"key": key, "ip": ip, "port": port, "cc": cc, "method": method}
-    if method == "tls":
-        base["tls"] = True
-        status, headers, body, _err = await tls_get_direct(
-            ip, port, SERVICES["openai"]["host"], SERVICES["openai"]["path"],
-            args.timeout, args.read_cap,
-        )
-        base["streaming"] = {"openai": parse_openai(status, headers, body)}
-        return base
-    base["v4"] = await http_get_via_tunnel(
-        ip, port, ECHO_V4_HOST, ECHO_PATH, ECHO_PORT, args.timeout
+    base = {"key": key, "ip": ip, "port": port, "cc": cc, "method": "tls", "tls": True}
+    status, headers, body, _err = await tls_get_direct(
+        ip, port, SERVICES["openai"]["host"], SERVICES["openai"]["path"],
+        args.timeout, args.read_cap,
     )
-    base["v6"] = await http_get_via_tunnel(
-        ip, port, ECHO_V6_HOST, ECHO_PATH, ECHO_PORT, args.timeout
-    )
-    streaming = {}
-    for name in args.services:
-        svc = SERVICES[name]
-        status, headers, body, _err = await https_get_via_tunnel(
-            ip, port, svc["host"], svc["path"], args.timeout, args.read_cap
-        )
-        streaming[name] = PARSERS[name](status, headers, body)
-    base["streaming"] = streaming
+    base["streaming"] = {"openai": parse_openai(status, headers, body)}
     return base
 
 
@@ -313,7 +233,7 @@ async def run_checks(
     async def work(entry: tuple) -> None:
         key = entry[0]
         async with sem:
-            res = await check_one(entry, methods.get(key, "connect"), args)
+            res = await check_one(entry, methods.get(key, "tls"), args)
         async with lock:
             results[key] = res
 

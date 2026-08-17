@@ -127,13 +127,13 @@ class TestWriteIndex(unittest.TestCase):
     def test_writes_ordered_compact(self):
         alive = {
             "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44),
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "connect", 80.1, 1.2),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 80.1, 1.2),
         }
         vp.write_index(["2.0.0.1:8443#JP", "1.0.0.1:443#US"], alive)
         data = json.loads(vp.INDEX_FILE.read_text())
         self.assertEqual(
             data,
-            {"proxies": {"2.0.0.1:8443#JP": [80.1, "connect"], "1.0.0.1:443#US": [120.5, "tls"]}},
+            {"proxies": {"2.0.0.1:8443#JP": [80.1, "tls"], "1.0.0.1:443#US": [120.5, "tls"]}},
         )
 
     def test_skips_rewrite_when_unchanged(self):
@@ -158,7 +158,7 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_outputs_ordered_by_latency(self):
         alive = {
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "connect", 300.0, 0.5),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 300.0, 0.5),
             "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.0),
             "3.0.0.1:80#US": ("3.0.0.1", "80", "US", "tls", 50.0, 0.3),
         }

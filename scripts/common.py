@@ -3,8 +3,8 @@
 
 Holds the ``data/`` layout constants and the tiny line/HTTP/JSON helpers that
 the entry-point scripts used to import from each other (``download_proxies``
-for paths, ``quality_check`` for helpers, ``validate_proxies`` for
-``try_connect``, ``china_check`` for ``request_follow``/``is_cf_heuristic``).
+for paths, ``quality_check`` for helpers, ``china_check`` for
+``request_follow``/``is_cf_heuristic``).
 ``common`` imports nothing from the other scripts, so every script can depend
 on it without creating import cycles.
 """
@@ -104,7 +104,7 @@ def parse_line(line: str):
 
 
 def load_methods() -> dict:
-    """``entry`` -> ``"connect"``/``"tls"`` from ``index.json``."""
+    """``entry`` -> ``"tls"`` from ``index.json``."""
     if not INDEX_FILE.exists():
         return {}
     try:
@@ -237,31 +237,4 @@ def is_cf_heuristic(line: str) -> bool:
     return has_token(_note(line), "CF")
 
 
-# --------------------------------------------------------- CONNECT 隧道探测
 
-_CONNECT_READ_CAP = 3
-
-
-async def try_connect(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    host: str,
-    target_port: int,
-) -> bool:
-    req = (
-        f"CONNECT {host}:{target_port} HTTP/1.1\r\n"
-        f"Host: {host}:{target_port}\r\n"
-        "Proxy-Connection: Keep-Alive\r\n\r\n"
-    )
-    writer.write(req.encode("ascii"))
-    await writer.drain()
-    buf = b""
-    try:
-        while b"\r\n\r\n" not in buf:
-            chunk = await asyncio.wait_for(reader.read(4096), timeout=_CONNECT_READ_CAP)
-            if not chunk:
-                return False
-            buf += chunk
-    except (asyncio.TimeoutError, ConnectionError, OSError):
-        return False
-    return b" 200 " in buf.split(b"\r\n", 1)[0]

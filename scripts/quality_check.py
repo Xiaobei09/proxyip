@@ -4,8 +4,8 @@
 Runs on a bounded population (default ``data/valid/all_ltd.txt``, the
 per-country fastest survivors) and writes under ``data/valid/``:
 
-- ``ipinfo.json``      exit IP / address family / dual-stack / geo / IP type /
-                      reputation score + source (per checked proxy)
+- ``ipinfo.json``      exit IP / geo / IP type / reputation score + source
+                      (per checked proxy)
 - ``streaming.json``   per-service unlock results (incl. native Netflix)
 - ``abuse.json``       optional abuse-score results (key-gated)
 - ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
@@ -19,33 +19,17 @@ per-country fastest survivors) and writes under ``data/valid/``:
                       (``countries/*/all.txt`` and ``*/ltd.txt``; ``rep.txt`` is
                       written pre-annotated by ``write_reputation_files``)
 
-Two proxy flavors are handled, selected by the method recorded in
-``data/valid/index.json``:
-
-1. ``connect`` (standard HTTP CONNECT proxies): full suite - plain-HTTP exit
-   IP echo (IPv4 + IPv6 for dual-stack), geo/IP type via ip-api batch, and
-   per-service streaming unlocks over a CONNECT + TLS tunnel.
-2. ``tls`` (Cloudflare edge proxies): only Cloudflare-fronted hosts are
-   reachable via SNI routing, so only ChatGPT/OpenAI
-   (``chat.openai.com/cdn-cgi/trace``) is probed; the exit is the edge itself
-   and is tagged ``CF``.
+All proxies use the TLS (Cloudflare edge) method: direct TLS connections with
+SNI routing. Only Cloudflare-fronted hosts are reachable. The exit is the edge
+itself and is tagged ``CF``.
 
 Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
 lines as ``-<streaming>-<type>-<rep>``, e.g.
-``1.2.3.4:443#US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`` (streaming tokens
-space-separated, IP-type tokens after a second dash, then the 0-100 reputation
-score). When the exit region is known it is inserted right after the entry
-country code as ``<cc>→<exit>`` (CF edge ``loc`` airport code for ``tls``
-proxies, exit-IP country otherwise), e.g. ``1.2.3.4:443#US→LAX-120ms-...``.
+``1.2.3.4:443#US-120ms-0.44MB/s-NF(US) D+ YT GPT-CF-72``. When the exit
+region is known it is inserted right after the entry country code as
+``<cc>→<exit>`` (CF edge ``loc`` airport code), e.g.
+``1.2.3.4:443#US→LAX-120ms-...``.
 Lines without results stay untouched.
-"""
-#!/usr/bin/env python3
-"""Streaming unlock and exit-IP quality checks for alive proxies.
-
-Facade module: the reputation/IP-risk domain lives in ``quality_reputation``
-and the streaming/geo/network domain in ``quality_streaming``; both are
-re-exported here so ``import quality_check as qc; qc.*`` keeps working.
-File-writing, annotation and CLI orchestration stay in this module.
 """
 
 import argparse
@@ -80,22 +64,11 @@ def build_ipinfo_map(
     weights = weights or REPUTATION_WEIGHTS
     info_map: dict[str, dict] = {}
     for res in results.values():
-        if res.get("tls"):
-            continue
-        ip4, ip6 = res.get("v4"), res.get("v6")
-        geo_item = geo.get(ip4) or {}
-        family, dual = "ipv4", False
-        if ip4 and ip6:
-            family, dual = "dual", True
-        elif not ip4 and ip6:
-            family = "ipv6"
+        ip = res.get("ip", "")
+        geo_item = geo.get(ip) or {}
         cc = geo_item.get("countryCode")
-        exit_ip = ip4 or ip6
-        abuse_item = abuse_map.get(res["key"])
         info = {
-            "exit_ip": exit_ip,
-            "family": family,
-            "dual_stack": dual,
+            "exit_ip": ip,
             "country": geo_item.get("country"),
             "country_code": cc,
             "region": geo_item.get("regionName"),
@@ -113,11 +86,12 @@ def build_ipinfo_map(
         }
         risk_flags = {
             source: signal
-            for source, signal in risk_data.get(exit_ip, {}).items()
+            for source, signal in risk_data.get(ip, {}).items()
         }
         if risk_flags:
             info["risk_flags"] = risk_flags
-        signals = collect_signals(exit_ip, geo_item, risk_data, weights)
+        signals = collect_signals(ip, geo_item, risk_data, weights)
+        abuse_item = abuse_map.get(res["key"])
         score = compute_reputation(signals, abuse_item, weights)
         if score is not None:
             info["reputation"] = score
@@ -159,18 +133,12 @@ def build_reputation_map(
 ) -> dict[str, dict]:
     rep_map: dict[str, dict] = {}
     for res in results.values():
-        if res.get("tls"):
-            signals = collect_signals(
-                res["ip"], {}, risk_data, weights, include_ipapi=False
-            )
-            score = compute_reputation(signals, None, weights)
-            _score, sources = weighted_reputation(signals, weights)
-            source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
-        else:
-            info = ipinfo.get(res["key"]) or {}
-            score = info.get("reputation")
-            sources = info.get("risk_sources") or []
-            source = info.get("reputation_source")
+        signals = collect_signals(
+            res["ip"], {}, risk_data, weights, include_ipapi=False
+        )
+        score = compute_reputation(signals, None, weights)
+        _score, sources = weighted_reputation(signals, weights)
+        source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
         if score is None:
             continue
         rep_map[res["key"]] = {
@@ -248,11 +216,7 @@ def build_annotations(results: dict, ipinfo: dict, rep_map: dict) -> dict[str, s
     annotations: dict[str, str] = {}
     for res in results.values():
         stream_toks = streaming_tokens(res["streaming"])
-        if res.get("tls"):
-            type_toks = "CF"
-        else:
-            type_toks = type_tokens(ipinfo.get(res["key"]) or {})
-        ann = build_annotation(stream_toks, type_toks)
+        ann = build_annotation(stream_toks, "CF")
         rep = rep_map.get(res["key"])
         if rep:
             ann = build_annotation(ann, str(rep["score"]))
@@ -261,14 +225,10 @@ def build_annotations(results: dict, ipinfo: dict, rep_map: dict) -> dict[str, s
 
 
 def build_exits(results: dict, ipinfo: dict) -> dict[str, str]:
-    """Exit region per key: CF edge ``loc`` for ``tls`` proxies, else the exit-IP
-    country. Used to annotate ``ip:port#<entry>→<exit>`` on valid lines."""
+    """Exit region per key: CF edge ``loc`` from the OpenAI trace response."""
     exits: dict[str, str] = {}
     for res in results.values():
-        if res.get("tls"):
-            region = (res.get("streaming") or {}).get("openai", {}).get("region")
-        else:
-            region = (ipinfo.get(res["key"]) or {}).get("country_code")
+        region = (res.get("streaming") or {}).get("openai", {}).get("region")
         if region:
             exits[res["key"]] = region
     return exits
@@ -327,8 +287,10 @@ def annotate_valid_files(annotations: dict, exits: dict | None = None) -> None:
 
 
 def build_meta(
-    results: dict, ipinfo: dict, streaming: dict, abuse_map: dict
+    results: dict, ipinfo: dict, streaming: dict, abuse_map: dict,
+    rep_map: dict | None = None,
 ) -> dict:
+    rep_map = rep_map or {}
     per_service = {name: {"ok": 0, "blocked": 0, "error": 0} for name in SERVICES}
     streaming_ok = 0
     for st in streaming.values():
@@ -340,17 +302,12 @@ def build_meta(
                 status = "error"
             per_service[name][status] += 1
     by_type = Counter(info["ip_type"] for info in ipinfo.values())
-    family = Counter(info["family"] for info in ipinfo.values())
-    mismatch = sum(
-        1 for info in ipinfo.values() if info.get("country_match") is False
-    )
-    dual = sum(1 for info in ipinfo.values() if info.get("dual_stack"))
     risk = Counter(
         info["risk"] for info in ipinfo.values() if info.get("risk")
     )
     reps = [
-        info["reputation"] for info in ipinfo.values()
-        if info.get("reputation") is not None
+        rep["score"] for rep in rep_map.values()
+        if rep.get("score") is not None
     ]
     rep_dist = {
         "0-25": sum(1 for r in reps if r < 25),
@@ -361,15 +318,11 @@ def build_meta(
     return {
         "ts": now_ts(),
         "total": len(results),
-        "connect": sum(1 for r in results.values() if not r.get("tls")),
-        "tls": sum(1 for r in results.values() if r.get("tls")),
+        "tls": len(results),
         "services": list(SERVICES),
         "streaming": per_service,
         "streaming_ok": streaming_ok,
         "by_type": dict(sorted(by_type.items())),
-        "family": dict(sorted(family.items())),
-        "dual_stack": dual,
-        "country_mismatch": mismatch,
         "risk": dict(sorted(risk.items())),
         "abuse_checked": len(abuse_map),
         "reputation_checked": len(reps),
@@ -404,29 +357,18 @@ async def run(args: argparse.Namespace) -> int:
     results = await run_checks(entries, methods, args)
     print(f"Completed {len(results)} checks")
 
-    geo = await batch_ipapi(
-        [res["v4"] for res in results.values() if res.get("v4")]
-    )
-    ipinfo = build_ipinfo_map(results, geo, {})
-    abuse_map = await run_abuse(results, ipinfo, args)
+    geo = await batch_ipapi([res["ip"] for res in results.values()])
 
-    rep_ips = []
-    asn_map: dict[str, str] = {}
-    for res in results.values():
-        if res.get("tls"):
-            rep_ips.append(res["ip"])
-        else:
-            info = ipinfo.get(res["key"]) or {}
-            if info.get("exit_ip"):
-                rep_ips.append(info["exit_ip"])
-                if info.get("asn"):
-                    asn_map[info["exit_ip"]] = info["asn"]
-    risk_data = await lookup_all_risk(rep_ips, args, asn_map)
+    rep_ips = [res["ip"] for res in results.values()]
+    risk_data = await lookup_all_risk(rep_ips, args)
     if risk_data:
         print(
             f"Reputation: {len(risk_data)}/{len(set(rep_ips))} IPs from "
             f"{', '.join(args.reputation_sources)}"
         )
+    abuse_map = await run_abuse(results, {
+        k: {"exit_ip": res["ip"]} for k, res in results.items()
+    }, args)
     ipinfo = build_ipinfo_map(
         results, geo, abuse_map, risk_data, args.reputation_weights
     )
@@ -447,14 +389,13 @@ async def run(args: argparse.Namespace) -> int:
     write_json(STREAMING_FILE, keyed_json(streaming))
     if abuse_map:
         write_json(ABUSE_FILE, keyed_json(abuse_map))
-    meta = build_meta(results, ipinfo, streaming, abuse_map)
+    meta = build_meta(results, ipinfo, streaming, abuse_map, rep_map)
     write_json(QUALITY_META_FILE, meta)
     annotate_valid_files(annotations, build_exits(results, ipinfo))
 
     print(
         f"streaming_ok={meta['streaming_ok']} "
-        f"by_type={meta['by_type']} family={meta['family']} "
-        f"mismatch={meta['country_mismatch']} "
+        f"by_type={meta['by_type']} "
         f"rep_avg={meta['rep_avg']} rep_dist={meta['rep_dist']}"
     )
     return 0
