@@ -212,6 +212,39 @@ async def tls_get_direct(
             pass
 
 
+async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
+    """Call external ProxyIP verification API.
+
+    Returns a dict with ``success``, ``response_ms``, ``colo``,
+    ``ipv4_ok``, ``ipv6_ok`` and ``exit_geo`` fields. On any error
+    returns ``{"success": false}``.
+    """
+    url = f"{EXTERNAL_CHECK_URL}?proxyip={ip}:{port}"
+
+    def _fetch() -> dict:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "proxyip-checker/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+    try:
+        data = await asyncio.to_thread(_fetch)
+        ipv4 = data.get("probe_results", {}).get("ipv4", {})
+        ipv6 = data.get("probe_results", {}).get("ipv6", {})
+        return {
+            "success": bool(data.get("success")),
+            "response_ms": data.get("responseTime"),
+            "colo": data.get("colo"),
+            "ipv4_ok": bool(ipv4.get("ok")),
+            "ipv6_ok": bool(ipv6.get("ok")),
+            "exit_geo": ipv4.get("exit"),
+        }
+    except Exception:  # noqa: BLE001
+        return {"success": False}
+
+
 async def check_one(entry: tuple, method: str, args: argparse.Namespace) -> dict:
     """Run the checks for a single proxy entry."""
     key, ip, port, cc = entry
@@ -221,6 +254,7 @@ async def check_one(entry: tuple, method: str, args: argparse.Namespace) -> dict
         args.timeout, args.read_cap,
     )
     base["streaming"] = {"openai": parse_openai(status, headers, body)}
+    base["external_check"] = await check_external_api(ip, port, timeout=30)
     return base
 
 

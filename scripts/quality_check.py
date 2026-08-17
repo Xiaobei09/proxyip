@@ -68,23 +68,33 @@ def build_ipinfo_map(
         ip = res.get("ip", "")
         geo_item = geo.get(ip) or {}
         cc = geo_item.get("countryCode")
+        # Supplement with external API exit geo when ip-api is missing data
+        ext_geo = (res.get("external_check") or {}).get("exit_geo") or {}
         info = {
             "exit_ip": ip,
-            "country": geo_item.get("country"),
-            "country_code": cc,
+            "country": geo_item.get("country") or ext_geo.get("country"),
+            "country_code": cc or ext_geo.get("countryCode"),
             "region": geo_item.get("regionName"),
-            "city": geo_item.get("city"),
-            "asn": geo_item.get("asn"),
-            "org": geo_item.get("org"),
+            "city": geo_item.get("city") or ext_geo.get("city"),
+            "asn": geo_item.get("asn") or ext_geo.get("asn"),
+            "org": geo_item.get("org") or ext_geo.get("asOrganization"),
             "isp": geo_item.get("isp"),
             "proxy": geo_item.get("proxy"),
             "hosting": geo_item.get("hosting"),
             "mobile": geo_item.get("mobile"),
             "listed_country": res["cc"],
-            "country_match": (cc == res["cc"]) if cc else None,
+            "country_match": (
+                (cc or ext_geo.get("countryCode")) == res["cc"]
+            ) if (cc or ext_geo.get("countryCode")) else None,
             "ip_type": classify_ip(geo_item),
-            "geo_checked": bool(cc),
+            "geo_checked": bool(cc or ext_geo.get("countryCode")),
         }
+        # Attach external check summary
+        ext = res.get("external_check")
+        if ext:
+            info["ext_ok"] = ext.get("success", False)
+            info["ext_colo"] = ext.get("colo")
+            info["ext_response_ms"] = ext.get("response_ms")
         risk_flags = {
             source: signal
             for source, signal in risk_data.get(ip, {}).items()
@@ -319,6 +329,13 @@ def build_meta(
         1 for info in ipinfo.values()
         if isinstance(info, dict) and info.get("country_match") is False
     )
+    ext_ok = sum(
+        1 for res in results.values()
+        if (res.get("external_check") or {}).get("success")
+    )
+    ext_total = sum(
+        1 for res in results.values() if "external_check" in res
+    )
     return {
         "ts": now_ts(),
         "total": len(results),
@@ -336,6 +353,8 @@ def build_meta(
             round(sorted(reps)[len(reps) // 2], 1) if reps else None
         ),
         "country_mismatch": country_mismatch,
+        "ext_check_total": ext_total,
+        "ext_check_ok": ext_ok,
     }
 
 
@@ -388,6 +407,15 @@ async def run(args: argparse.Namespace) -> int:
     source_text = args.source.read_text(encoding="utf-8")
     if rep_map:
         write_reputation_files(source_text, annotations, rep_map)
+
+    # Extract and persist external check results
+    ext_checks = {}
+    for key, res in results.items():
+        ext = res.get("external_check")
+        if ext:
+            ext_checks[key] = ext
+    if ext_checks:
+        write_json(EXTERNAL_CHECK_FILE, keyed_json(ext_checks))
 
     if ipinfo:
         write_json(IPINFO_FILE, keyed_json(ipinfo))

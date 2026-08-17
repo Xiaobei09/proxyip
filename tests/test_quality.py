@@ -1348,5 +1348,67 @@ class TestReorgCountry(unittest.TestCase):
             self.assertIn("#\U0001F1E6\U0001F1E8CA→EG", eg_lines[0])
 
 
+class TestExternalCheck(unittest.TestCase):
+    def test_check_external_api_success(self):
+        import quality_streaming as qs
+        fake_data = {
+            "success": True,
+            "responseTime": 123,
+            "colo": "HKG",
+            "probe_results": {
+                "ipv4": {
+                    "ok": True,
+                    "exit": {"countryCode": "HK", "country": "Hong Kong", "asn": 12345},
+                },
+                "ipv6": {"ok": False},
+            },
+        }
+        fake_resp = json.dumps(fake_data).encode()
+
+        class FakeResp:
+            def read(self):
+                return fake_resp
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+
+        def fake_urlopen(req, timeout=30):
+            return FakeResp()
+
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = asyncio.get_event_loop().run_until_complete(
+                qs.check_external_api("1.2.3.4", "443", timeout=5)
+            )
+        self.assertTrue(result["success"])
+        self.assertEqual(result["response_ms"], 123)
+        self.assertEqual(result["colo"], "HKG")
+        self.assertTrue(result["ipv4_ok"])
+        self.assertFalse(result["ipv6_ok"])
+        self.assertEqual(result["exit_geo"]["countryCode"], "HK")
+
+    def test_check_external_api_failure(self):
+        import quality_streaming as qs
+
+        def fake_urlopen(req, timeout=30):
+            raise ConnectionError("nope")
+
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = asyncio.get_event_loop().run_until_complete(
+                qs.check_external_api("1.2.3.4", "443", timeout=5)
+            )
+        self.assertFalse(result["success"])
+
+    def test_build_meta_includes_ext_check(self):
+        results = {
+            "k1": {"ip": "1.1.1.1", "external_check": {"success": True}},
+            "k2": {"ip": "2.2.2.2", "external_check": {"success": False}},
+            "k3": {"ip": "3.3.3.3"},
+        }
+        meta = qc.build_meta(results, {}, {}, {})
+        self.assertEqual(meta["ext_check_total"], 2)
+        self.assertEqual(meta["ext_check_ok"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
