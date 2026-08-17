@@ -9,6 +9,7 @@ HTTP 任务 → 经 ``wss://www.itdog.cn`` 轮询收集记录 → 聚合成源�
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
 import socket
@@ -30,17 +31,6 @@ ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
 ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
 ITDOG_WS_IDLE = 20.0  # WS 单次 recv 空闲超时
 ITDOG_ISP_GROUPS = ("中国电信", "中国联通", "中国移动")
-
-ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
-ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
-ITDOG_TOKEN = "What this is is no longer important."
-ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
-ITDOG_NODES_PER_ISP = 1  # 电信/联通/移动各取前 N 节点（默认 1 → 共 3）
-ITDOG_CONCURRENCY = 8
-ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
-ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
-ITDOG_WS_IDLE = 20.0  # WS 单次 recv 空闲超时
-ITDOG_ISP_GROUPS = ("中国电信", "中国联通", "中国移动")# ------------------------------------------------------- itdog.cn 批量探活
 
 def itdog_md5_16(s: str) -> str:
     """itdog WebSocket 路径签名（MD5 中段 16 位）。"""
@@ -68,8 +58,8 @@ def itdog_fetch_nodes(per_isp: int) -> list[str]:
             ids = itdog_parse_nodes(body.decode("utf-8", "replace"), per_isp)
             if ids:
                 return ids
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("itdog fetch nodes: %s", exc)
         time.sleep(2)
     return []
 
@@ -237,8 +227,8 @@ class _WebSocket:
     def close(self) -> None:
         try:
             self.sock.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("ws close: %s", exc)
 
 
 def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
@@ -262,7 +252,8 @@ def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
                 ws.send_text(json.dumps({"task_id": task_id}))
                 connected = True
                 break
-            except Exception:
+            except Exception as exc:
+                logging.debug("itdog ws connect: %s", exc)
                 time.sleep(1.0)
         if connected:
             while time.monotonic() - t0 < timeout:
@@ -275,8 +266,8 @@ def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
                     break
                 if len(records) >= expected:
                     break
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.debug("itdog ws poll: %s", exc)
     finally:
         if ws:
             ws.close()

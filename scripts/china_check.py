@@ -27,6 +27,7 @@
 
 import argparse
 import json
+import logging
 import os
 import re
 import sys
@@ -41,6 +42,7 @@ from pathlib import Path
 from common import (
     DEFAULT_SOURCE,
     REP_RANK_FILE,
+    UA,
     VALID_DIR,
     has_token,
     is_cf_heuristic,
@@ -64,8 +66,6 @@ WORKERS_DEFAULT = 8
 TIMEOUT_DEFAULT = 10
 POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
-
-UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
 # check-host.cc —— 呼和浩特（阿里云 AS37963），每目标仅 1 大陆节点
 CHECKHOST_URL = "https://api.check-host.cc/tcp"
@@ -322,7 +322,8 @@ def check_host_check(ip: str, port: str, limiter: RateLimiter, timeout: float, a
             if status != 200:
                 continue
             payload = json.loads(resp.decode("utf-8", "replace"))
-        except Exception:
+        except Exception as exc:
+            logging.debug("check-host poll: %s", exc)
             continue
         last = parse_check_host_report(payload)
         if last["status"] in ("ok", "fail"):
@@ -368,8 +369,8 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
             re_parsed = parse_pingpe_page(body.decode("utf-8", "replace"))
             if re_parsed["has_page"]:
                 parsed = re_parsed
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("ping.pe fetch: %s", exc)
     token = parsed["token"]
     if not token:
         return {"status": "error", "ok": False, "ms": None, "error": "no start token", "count": 0, "ok_count": 0}
@@ -408,7 +409,8 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
                 url, {"User-Agent": UA, **({"Cookie": f"antiflood={cookie}"} if cookie else {})}, timeout
             )
             payload = json.loads(body.decode("utf-8", "replace"))
-        except Exception:
+        except Exception as exc:
+            logging.debug("ping.pe results poll: %s", exc)
             time.sleep(POLL_INTERVAL)
             continue
         last_agg = parse_pingpe_results(payload, cn_ids)
@@ -499,7 +501,7 @@ def annotate_cn(line: str) -> str:
 
 # ------------------------------------------------------------ 数据装载与写出
 
-def load_sample(source: Path, limit: int):
+def load_sample(source: Path, limit: int) -> tuple[list, Path]:
     """返回 ``([(line, key, ip, port, cc), ...], used_path)``，按信誉降序截取。"""
     path = source if source.exists() else FALLBACK_SOURCE
     lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]

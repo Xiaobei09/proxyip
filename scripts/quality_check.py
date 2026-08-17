@@ -183,20 +183,16 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
     return [line for _rep, _key, line in scored] + unscored
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    write_text_if_changed(path, text)
-
-
 def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
     ranked = build_ranked(source_text, annotations, rep_map)
-    _write_atomic(REP_RANK_FILE, "\n".join(ranked) + "\n")
+    write_text_if_changed(REP_RANK_FILE, "\n".join(ranked) + "\n")
     valid_root = REP_RANK_FILE.parent
     for sub in ("countries", "sets"):
         for src in sorted((valid_root / sub).glob("*/all.txt")):
             ranked = build_ranked(
                 src.read_text(encoding="utf-8"), annotations, rep_map
             )
-            _write_atomic(src.with_name("rep.txt"), "\n".join(ranked) + "\n")
+            write_text_if_changed(src.with_name("rep.txt"), "\n".join(ranked) + "\n")
     entries = {
         key: {
             "score": rep["score"],
