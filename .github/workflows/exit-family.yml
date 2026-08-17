@@ -1,9 +1,10 @@
 name: Exit family check
 
 on:
-  schedule:
-    - cron: "31 */6 * * *"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Update proxy list"]
+    types: [completed]
 
 permissions:
   contents: write
@@ -21,18 +22,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 2. 触发者成功检查
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+            if [ "$CONCLUSION" != "success" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Triggering run concluded: $CONCLUSION, skipping"
+              exit 0
+            fi
+          fi
+          # 3. 数据变更检查
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            LAST_SHA=$(git log --oneline --all -1 --grep="exit ipv4/ipv6 split" --format=%h 2>/dev/null || echo "")
+            if [ -n "$LAST_SHA" ] && git diff --quiet "$LAST_SHA" -- data/valid/all.txt; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::No IP data changes since last exit family check, skipping"
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
       - name: Run tests
+        if: steps.gate.outputs.skip != 'true'
         run: python -m unittest discover -s tests -v
 
       - name: Exit family check
+        if: steps.gate.outputs.skip != 'true'
         run: python scripts/exit_family.py
 
+      - name: Annotate and classify
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/annotate_classify.py
+
       - name: Show summary
+        if: steps.gate.outputs.skip != 'true'
         run: |
           echo "IPv4 exit:"
           wc -l data/valid/all_ipv4.txt 2>/dev/null || true
@@ -43,25 +85,28 @@ jobs:
             data/valid/exit_family.json 2>/dev/null || true
 
       - name: Commit changes
+        if: steps.gate.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
+            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
+            ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
             ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
-            ':(exclude)data/stats.json' ':(exclude)data/badge.json' ':(exclude)data/chart*.svg' \
-            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
-            ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' ':(exclude)data/valid/reputation_cache.json' \
-            ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' ':(exclude)data/valid/ipinfo.json' \
+            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
+            ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
+            ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' \
+            ':(exclude)data/valid/reputation_cache.json' \
+            ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' \
+            ':(exclude)data/valid/ipinfo.json' \
             ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt' \
-            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt' \
-            ':(exclude)data/valid/countries' ':(exclude)data/valid/ports' ':(exclude)data/valid/sets'
+            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "chore(data): actual exit ipv4/ipv6 split ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git commit -m "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           for i in 1 2 3 4 5; do
             if git push; then
               echo "Pushed successfully"
@@ -69,27 +114,24 @@ jobs:
             fi
             echo "Push attempt $i failed, reapplying local data on origin/main..."
             git fetch origin main || { sleep 5; continue; }
-            # data/ 每次全量重生成，last-writer-wins 安全：reset --mixed 把 HEAD 和
-            # index 对齐到最新远端（工作区保留本次生成的数据），再重新 stage + commit
-            # 为直接子提交，天然避免 -X theirs 无法解决的 modify/delete 等一切冲突。
-            # 必须用 --mixed（而非 --soft）：--soft 只动 HEAD 不动 index，陈旧 checkout
-            # 的 index 会连非 data 文件一起带进数据提交，回退他人已推送的代码改动。
             git reset --mixed origin/main
             git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
-            ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
-            ':(exclude)data/stats.json' ':(exclude)data/badge.json' ':(exclude)data/chart*.svg' \
-            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
-            ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' ':(exclude)data/valid/reputation_cache.json' \
-            ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' ':(exclude)data/valid/ipinfo.json' \
-            ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt' \
-            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt' \
-            ':(exclude)data/valid/countries' ':(exclude)data/valid/ports' ':(exclude)data/valid/sets'
+              ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
+              ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
+              ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
+              ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
+              ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
+              ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' \
+              ':(exclude)data/valid/reputation_cache.json' \
+              ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' \
+              ':(exclude)data/valid/ipinfo.json' \
+              ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt' \
+              ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0
             fi
-            git commit -m "chore(data): actual exit ipv4/ipv6 split ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git commit -m "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           done
           echo "Push failed after 5 attempts"
           exit 1
