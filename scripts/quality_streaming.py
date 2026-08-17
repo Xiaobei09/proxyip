@@ -9,6 +9,7 @@ Imported by ``quality_check``.
 import argparse
 import asyncio
 import json
+import logging
 import re
 import ssl
 import time
@@ -29,7 +30,7 @@ TIMEOUT = 6
 READ_CAP = 524288
 READ_TIMEOUT = 3
 HEADER_CAP = 65536
-WORKERS = 40
+WORKERS = 60
 BATCH_DELAY = 1.2
 _SSL_CTX = ssl.create_default_context()
 SERVICES = {
@@ -246,8 +247,8 @@ async def run_checks(
     for task in done:
         try:
             task.result()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("streaming task result: %s", exc)
     return results
 
 
@@ -286,7 +287,8 @@ async def batch_ipapi(ips: list) -> dict:
         try:
             data = await asyncio.to_thread(ipapi_batch_sync, chunk)
             any_batch_ok = True
-        except Exception:
+        except Exception as exc:
+            logging.debug("ipapi batch failed: %s", exc)
             continue
         for item, ip in zip(data, chunk):
             if isinstance(item, dict) and item.get("status") == "success":
@@ -299,8 +301,8 @@ async def batch_ipapi(ips: list) -> dict:
             item = await asyncio.to_thread(ipapi_get_sync, ip)
             if item.get("status") == "success":
                 out[ip] = item
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("ipapi get %s: %s", ip, exc)
         await asyncio.sleep(1.5)
     return out
 
