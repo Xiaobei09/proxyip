@@ -43,13 +43,13 @@ NCGY_URL = "https://ip.nc.gy/json?ip={ip}"
 NCGY_TIMEOUT = 12
 IPDATA_URL = "https://ipdata.info/json/{ip}"
 IPDATA_TIMEOUT = 8
-IPDATA_CAP = 200
+IPDATA_CAP = 2000
 GETIPINTEL_URL = (
     "https://check.getipintel.net/check.php?ip={ip}"
     "&contact={email}&flags=m"
 )
 GETIPINTEL_TIMEOUT = 8
-GETIPINTEL_CAP = 300
+GETIPINTEL_CAP = 2000
 IPAPI_IS_URL = "https://api.ipapi.is/?q={ip}"
 IPAPI_IS_TIMEOUT = 8
 IPQUERY_URL = "https://api.ipquery.io/{ip}"

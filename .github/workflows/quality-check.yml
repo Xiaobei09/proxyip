@@ -19,7 +19,7 @@ jobs:
   check:
     name: Streaming and exit IP quality
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       ABUSEIPDB_KEY: ${{ secrets.ABUSEIPDB_KEY }}
       IPQS_KEY: ${{ secrets.IPQS_KEY }}
@@ -36,7 +36,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Deep quality check
-        run: python scripts/quality_check.py --time-budget 3600 --rep-cache-ttl 604800
+        run: python scripts/quality_check.py --source data/valid/all.txt --time-budget 5400 --rep-cache-ttl 604800
 
       - name: Generate stats and chart
         run: python scripts/generate_stats.py
@@ -44,7 +44,7 @@ jobs:
       - name: Show summary
         run: |
           echo "Checked proxies:"
-          wc -l data/valid/all_ltd.txt
+          wc -l data/valid/all.txt
           echo "Streaming unlock:"
           jq -r '.streaming // empty' data/valid/quality_meta.json 2>/dev/null || true
           echo "IP type distribution:"
