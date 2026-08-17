@@ -3,9 +3,9 @@
 
 Reads ``data/valid/ipinfo.json`` (written by ``quality_check.py``) and moves
 proxy lines whose exit-IP country differs from the listed country (``#CC``)
-to the exit country directory.  The ``#CC`` + flag-emoji in each moved line is
-rewritten to reflect the exit country so that directory and line content stay
-consistent.
+to the exit country directory.  The line format becomes ``#<IC>→<OC>`` where
+IC is the listed country and OC is the exit country; if ``→`` is already
+present (from OpenAI trace), it is left unchanged.
 
 Idempotent: running twice with the same ``ipinfo.json`` produces no changes.
 
@@ -40,33 +40,26 @@ from common import (
 )
 
 
-def flag_of(cc: str) -> str:
-    """Regional-indicator emoji flag for an ISO 3166-1 alpha-2 code."""
-    if len(cc) != 2 or not cc.isalpha():
-        return ""
-    return "".join(chr(0x1F1E6 + ord(c.upper()) - ord("A")) for c in cc)
+def ensure_exit_marker(line: str, exit_cc: str) -> str:
+    """Append ``→<exit_cc>`` after ``#<emoji><CC>`` if not already present.
 
-
-def rewrite_cc(line: str, new_cc: str) -> str:
-    """Replace the ``#<emoji><CC>`` segment with ``#<new_emoji><new_cc>``.
-
-    Everything after the first ``-`` following the CC (annotations, exit
-    region marker, …) is preserved unchanged.
+    The listed ``#CC`` is preserved; only the exit-country marker is added.
+    If the line already contains ``→`` after the CC (from OpenAI trace), it
+    is left unchanged.
     """
     parsed = parse_ltd_line(line)
     if not parsed:
         return line
-    _old_key, _ip, _port, old_cc = parsed
-    if old_cc == new_cc:
-        return line
+    _key, _ip, _port, listed_cc = parsed
     addr, rest = line.rsplit("#", 1)
     # Skip emoji (non-ASCII) to reach the 2-letter CC
     i = 0
     while i < len(rest) and ord(rest[i]) > 127:
         i += 1
-    after_cc = rest[i + 2:]  # keep everything after old CC (starting with '-')
-    new_emoji = flag_of(new_cc)
-    return f"{addr}#{new_emoji}{new_cc}{after_cc}"
+    after_cc = rest[i + 2:]  # everything after CC (starts with '-' or '→')
+    if after_cc.startswith("→"):
+        return line  # already has exit marker, leave as-is
+    return f"{addr}#{rest[:i + 2]}→{exit_cc}{after_cc}"
 
 
 def load_ipinfo(ipinfo_path: Path) -> dict:
@@ -96,8 +89,9 @@ def reorganize_file(
 ) -> None:
     """Reorganize a single txt file in-place based on ``exit_map``.
 
-    Lines whose key is in ``exit_map`` are rewritten (CC + emoji) and moved
-    to the exit country's counterpart path.  ``stats`` accumulates counts.
+    Lines whose key is in ``exit_map`` get an ``→OC`` exit-country marker
+    appended and are moved to the exit country's counterpart path.  The
+    listed ``#CC`` is preserved unchanged.  ``stats`` accumulates counts.
     """
     if not path.exists():
         return
@@ -105,15 +99,20 @@ def reorganize_file(
     keep: list[str] = []
     # {exit_cc: [line, …]}
     moves: dict[str, list[str]] = {}
+    # Determine this file's country code from path (countries/<CC>/all.txt)
+    src_cc = _path_country(path)
     for raw in lines:
         line = raw.strip()
         if not line:
             continue
         key = line_to_key(line)
         if key and key in exit_map:
-            new_cc = exit_map[key]
-            moved_line = rewrite_cc(line, new_cc)
-            moves.setdefault(new_cc, []).append(moved_line)
+            exit_cc = exit_map[key]
+            if src_cc == exit_cc:
+                keep.append(raw)  # already in correct directory
+                continue
+            moved_line = ensure_exit_marker(line, exit_cc)
+            moves.setdefault(exit_cc, []).append(moved_line)
             stats["moved"] += 1
         else:
             keep.append(raw)
@@ -135,15 +134,26 @@ def _target_path(src: Path, new_cc: str) -> Path:
     """Map ``src`` to its counterpart under the exit country directory."""
     parts = src.parts
     # countries/<CC>/all.txt → countries/<new_cc>/all.txt
-    # sets/<name>/all.txt    → sets/<name>/all.txt   (no change, just rewrite CC)
-    # ports/<port>.txt       → ports/<port>.txt       (no change, just rewrite CC)
+    # sets/<name>/all.txt    → sets/<name>/all.txt   (no change)
+    # ports/<port>.txt       → ports/<port>.txt       (no change)
     if "countries" in parts:
         idx = parts.index("countries")
         new_parts = list(parts)
         new_parts[idx + 1] = new_cc
         return Path(*new_parts)
-    # sets/ and ports/ stay in the same directory (only line content changes)
     return src
+
+
+def _path_country(path: Path) -> str | None:
+    """Extract country code from ``countries/<CC>/…`` path, or ``None``."""
+    parts = path.parts
+    if "countries" in parts:
+        idx = parts.index("countries")
+        if idx + 1 < len(parts):
+            cc = parts[idx + 1]
+            if len(cc) == 2 and cc.isalpha():
+                return cc.upper()
+    return None
 
 
 def reorganize(ipinfo_path: Path, data_dir: Path) -> int:

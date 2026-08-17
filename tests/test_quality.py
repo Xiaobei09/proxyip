@@ -1292,17 +1292,18 @@ class TestBuildMetaCountryMismatch(unittest.TestCase):
 
 
 class TestReorgCountry(unittest.TestCase):
-    def test_rewrite_cc(self):
-        from reorg_country import rewrite_cc
+    def test_ensure_exit_marker(self):
+        from reorg_country import ensure_exit_marker
         line = "1.2.3.4:443#\U0001F1E6\U0001F1E8CA-10ms"
-        result = rewrite_cc(line, "US")
-        self.assertIn("#\U0001F1FA\U0001F1F8US-", result)
+        result = ensure_exit_marker(line, "EG")
+        self.assertIn("#\U0001F1E6\U0001F1E8CA→EG-", result)
         self.assertIn("1.2.3.4:443", result)
 
-    def test_rewrite_cc_same_noop(self):
-        from reorg_country import rewrite_cc
-        line = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-10ms"
-        result = rewrite_cc(line, "US")
+    def test_ensure_exit_marker_existing(self):
+        from reorg_country import ensure_exit_marker
+        line = "1.2.3.4:443#\U0001F1F3\U0001F1F5NP→JP-10ms"
+        result = ensure_exit_marker(line, "US")
+        # Already has →, should be unchanged
         self.assertEqual(result, line)
 
     def test_reorganize_mismatched_line(self):
@@ -1342,7 +1343,9 @@ class TestReorgCountry(unittest.TestCase):
             eg_lines = (countries / "EG" / "all.txt").read_text().strip().splitlines()
             self.assertEqual(len(eg_lines), 1)
             self.assertIn("166.1.228.218:443", eg_lines[0])
-            self.assertIn("EG", eg_lines[0])
+            # Should have →EG marker, NOT rewritten CC
+            self.assertIn("→EG", eg_lines[0])
+            self.assertIn("#\U0001F1E6\U0001F1E8CA→EG", eg_lines[0])
 
 
 if __name__ == "__main__":
