@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: annotate-classify
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   annotate:

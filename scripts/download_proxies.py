@@ -39,6 +39,7 @@ from common import (
     ALL_FILE,
     ALL_LTD_FILE,
     COUNTRIES_DIR,
+    DIFF_DIR,
     DOWNLOAD_DIR,
     HISTORY_FILE,
     IPAPI_BATCH_URL,
