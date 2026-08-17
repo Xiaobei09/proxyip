@@ -1174,5 +1174,105 @@ class TestFinalize(unittest.TestCase):
         self.assertFalse(streaming["5.6.7.8:8443#JP"]["netflix"]["native"])
 
 
+class TestAnnotateClassify(unittest.TestCase):
+    """Tests for annotate_classify.py suffix filling and classification."""
+
+    def test_speed_tier(self):
+        from annotate_classify import speed_tier
+        self.assertEqual(speed_tier("-10ms-10.5MB/s"), "fast")
+        self.assertEqual(speed_tier("-10ms-3.2MB/s"), "mid")
+        self.assertEqual(speed_tier("-10ms-0.5MB/s"), "slow")
+        self.assertEqual(speed_tier("-10ms"), "unknown")
+
+    def test_fill_cn_token(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set={"1.2.3.4:443#US"},
+            family_map={},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertIn("-CN", result)
+        self.assertTrue(result.endswith("-CN"))
+
+    def test_fill_family_token(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={"1.2.3.4:443#US": "ipv6"},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertIn("-V6", result)
+
+    def test_fill_streaming_tokens(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            streaming_map={"1.2.3.4:443#US": {"openai": {"status": "ok"}}},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertIn("-GPT", result)
+
+    def test_fill_rep_score(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            streaming_map={},
+            rep_map={"1.2.3.4:443#US": 85},
+            ip_type_map={},
+        )
+        self.assertTrue(result.endswith("-85"))
+
+    def test_add_ip_type_and_tier(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms-5.5MB/s"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={"1.2.3.4:443#US": "DC"},
+        )
+        self.assertIn("-DC", result)
+        self.assertIn("-fast", result)
+        self.assertTrue(result.endswith("-DC-fast"))
+
+    def test_idempotent(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms-5.5MB/s-CN-V6-GPT-85-DC-fast"
+        result = fill_and_classify(
+            line,
+            china_set={"1.2.3.4:443#US"},
+            family_map={"1.2.3.4:443#US": "ipv6"},
+            streaming_map={"1.2.3.4:443#US": {"openai": {"status": "ok"}}},
+            rep_map={"1.2.3.4:443#US": 85},
+            ip_type_map={"1.2.3.4:443#US": "DC"},
+        )
+        self.assertEqual(result, line)
+
+    def test_skip_no_cc_line(self):
+        from annotate_classify import fill_and_classify
+        line = "not-a-proxy-line"
+        result = fill_and_classify(
+            line, set(), {}, {}, {}, {},
+        )
+        self.assertEqual(result, line)
+
+
 if __name__ == "__main__":
     unittest.main()
