@@ -80,10 +80,10 @@ class TestBuilders(unittest.TestCase):
     }
     REP_DATA = {
         "proxies": {
-            "1.1.1.1:80#US": {"score": 95},
-            "2.2.2.2:80#JP": {"score": 80},
-            "3.3.3.3:80#DE": {"score": 80},
-            "4.4.4.4:80#FR": {"score": 50},
+            "1.1.1.1:80#US": {"score": 95, "sources": ["ipquery", "ffraud", "netcoffee"]},
+            "2.2.2.2:80#JP": {"score": 80, "sources": ["ipquery", "ffraud"]},
+            "3.3.3.3:80#DE": {"score": 80, "sources": ["ipquery", "ffraud", "netcoffee", "ncgy"]},
+            "4.4.4.4:80#FR": {"score": 50, "sources": ["ipquery", "ffraud", "ipdata"]},
         }
     }
 
@@ -103,6 +103,7 @@ class TestBuilders(unittest.TestCase):
             "chart_sets.svg": gs.build_sets(self.META),
             "chart_cn.svg": gs.build_cn(self.CN_DATA),
             "chart_family.svg": gs.build_family(self.FAMILY_DATA),
+            "chart_source_avail.svg": gs.build_source_avail(self.REP_DATA),
             "chart_rep.svg": gs.build_rep(self.REP_DATA),
         }
         for name, svg in builders.items():
@@ -119,6 +120,7 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("No CN data", gs.build_cn({}))
         self.assertIn("No family data", gs.build_family({}))
         self.assertIn("No reputation data", gs.build_rep({}))
+        self.assertIn("No source data", gs.build_source_avail({}))
         svg_ok(gs.build_alive_rate([]))
 
     def test_chart_latency_has_bars_and_labels(self):
@@ -192,7 +194,7 @@ class TestMain(unittest.TestCase):
                 "chart_alive_rate.svg", "chart_churn.svg", "chart_combo.svg",
                 "chart_latency.svg", "chart_speed.svg", "chart_streaming.svg",
                 "chart_sets.svg", "chart_cn.svg", "chart_family.svg",
-                "chart_rep.svg",
+                "chart_source_avail.svg", "chart_rep.svg",
             ):
                 self.assertTrue((out / f).exists(), f)
                 svg_ok((out / f).read_text())

@@ -52,6 +52,7 @@ COLOR_PORT = "#58508d"
 COLOR_LATENCY = "#bcbd22"
 COLOR_SPEED = "#17becf"
 COLOR_STREAMING = "#9b59b6"
+COLOR_SOURCE = "#2ecc71"
 
 MAX_HOVER_POINTS = 600
 STALE_AFTER_S = 3 * 3600
@@ -835,6 +836,97 @@ def build_family(family_data: dict) -> str:
     return plot_hbars(items, color=COLOR_ALIVE, title="Exit IP family distribution")
 
 
+def build_source_avail(rep_data: dict) -> str:
+    """Combined chart: per-source coverage + sources-per-proxy distribution."""
+    proxies = rep_data.get("proxies", {})
+    if not proxies:
+        return empty_svg(text="No source data yet")
+
+    source_counts: dict[str, int] = {}
+    depth_counts: dict[int, int] = {}
+    for v in proxies.values():
+        if not isinstance(v, dict):
+            continue
+        srcs = v.get("sources") or []
+        for s in srcs:
+            source_counts[s] = source_counts.get(s, 0) + 1
+        depth_counts[len(srcs)] = depth_counts.get(len(srcs), 0) + 1
+
+    if not source_counts:
+        return empty_svg(text="No source data yet")
+
+    src_items = sorted(source_counts.items(), key=lambda x: -x[1])
+    depth_items = [(str(k), v) for k, v in sorted(depth_counts.items())]
+
+    total_h = 310
+    src_h = MARGIN_T + len(src_items) * 18 + 8
+    gap = 12
+
+    parts = [svg_head(WIDTH, total_h)]
+    max_sv = max(v for _, v in src_items) or 1
+    plot_w = WIDTH - MARGIN_L - MARGIN_R - 46
+
+    parts.append(
+        f'<text class="tt" x="{WIDTH / 2}" y="12">IP source coverage</text>'
+    )
+
+    y_off = 20
+    for i, (label, value) in enumerate(src_items):
+        y0 = y_off + i * 18 + 2
+        bw = max(1.0, value / max_sv * plot_w)
+        parts.append(
+            f'<text class="e" x="{MARGIN_L - 6}" y="{fmt_c(y0 + 9)}">'
+            f"{esc(label)}</text>"
+            f'<rect x="{fmt_c(MARGIN_L)}" y="{fmt_c(y0)}" width="{fmt_c(bw)}" '
+            f'height="10" fill="{COLOR_SOURCE}" rx="1.5"/>'
+            f'<text class="t" x="{fmt_c(MARGIN_L + bw + 4)}" y="{fmt_c(y0 + 9)}">'
+            f"{value}</text>"
+        )
+
+    y_off += len(src_items) * 18 + gap + 6
+    parts.append(
+        f'<text class="tt" x="{WIDTH / 2}" y="{y_off}">Sources per proxy</text>'
+    )
+    y_off += 8
+
+    if depth_items:
+        max_dv = max(v for _, v in depth_items) or 1
+        n = len(depth_items)
+        slot = plot_w / n
+        bar_w = max(14, min(80, slot * 0.55))
+        dp_h = total_h - y_off - MARGIN_B
+
+        for v in nice_ticks(max_dv):
+            yy = y_off + dp_h - v / max_dv * dp_h
+            parts.append(
+                f'<line class="g" x1="{MARGIN_L}" y1="{fmt_c(yy)}" '
+                f'x2="{WIDTH - MARGIN_R}" y2="{fmt_c(yy)}"/>'
+                f'<text class="e" x="{MARGIN_L - 6}" y="{fmt_c(yy + 3)}">'
+                f"{fmt_tick(v)}</text>"
+            )
+        parts.append(
+            f'<line class="a" x1="{MARGIN_L}" y1="{y_off}" x2="{MARGIN_L}" '
+            f'y2="{y_off + dp_h}"/>'
+            f'<line class="a" x1="{MARGIN_L}" y1="{y_off + dp_h}" '
+            f'x2="{WIDTH - MARGIN_R}" y2="{y_off + dp_h}"/>'
+        )
+        for i, (label, value) in enumerate(depth_items):
+            cx = MARGIN_L + (i + 0.5) * slot
+            bh = value / max_dv * dp_h
+            y0 = y_off + dp_h - bh
+            parts.append(
+                f'<rect x="{fmt_c(cx - bar_w / 2)}" y="{fmt_c(y0)}" '
+                f'width="{fmt_c(bar_w)}" height="{fmt_c(bh)}" '
+                f'fill="{COLOR_SOURCE}" rx="1.5"/>'
+                f'<text class="m" x="{fmt_c(cx)}" y="{fmt_c(y0 - 4)}">{value}</text>'
+                f'<text class="m" x="{fmt_c(cx)}" y="{y_off + dp_h + 12}">'
+                f"{esc(label)}</text>"
+            )
+
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
 def build_rep(rep_data: dict) -> str:
     buckets: dict[int, int] = {}
     for v in rep_data.get("proxies", {}).values():
@@ -942,6 +1034,7 @@ def main(argv: list[str] | None = None) -> int:
         "chart_sets.svg": build_sets(meta),
         "chart_cn.svg": build_cn(china_data),
         "chart_family.svg": build_family(family_data),
+        "chart_source_avail.svg": build_source_avail(rep_data),
         "chart_rep.svg": build_rep(rep_data),
     }
     for name, content in charts.items():

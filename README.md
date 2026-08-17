@@ -20,6 +20,7 @@
 ![Sets](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_sets.svg)
 ![Mainland China reachability](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_cn.svg)
 ![Exit IP family](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_family.svg)
+![IP source availability](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_source_avail.svg)
 ![Reputation score](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_rep.svg)
 
 ## 功能特性
