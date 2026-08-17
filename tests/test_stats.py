@@ -89,14 +89,11 @@ class TestBuilders(unittest.TestCase):
 
     def test_all_charts_valid_svg(self):
         builders = {
-            "chart.svg": gs.build_trend(self.HISTORY, self.VALID_HISTORY),
-            "chart_alive_rate.svg": gs.build_alive_rate(self.VALID_HISTORY),
+            "chart_combo.svg": gs.build_combo(self.HISTORY, self.VALID_HISTORY),
             "chart_country.svg": gs.build_country(self.META),
             "chart_port.svg": gs.build_port(self.META),
             "chart_churn.svg": gs.build_churn(self.HISTORY),
-            "chart_combo.svg": gs.build_combo(self.HISTORY, self.VALID_HISTORY),
-            "chart_latency.svg": gs.build_latency(self.META),
-            "chart_speed.svg": gs.build_speed(self.META),
+            "chart_latency_speed.svg": gs.build_latency_speed(self.META),
             "chart_streaming.svg": gs.build_streaming(
                 {"streaming": {"openai": {"ok": 10, "blocked": 2, "error": 1}}}
             ),
@@ -111,9 +108,8 @@ class TestBuilders(unittest.TestCase):
                 svg_ok(svg)
 
     def test_empty_inputs_placeholders(self):
-        self.assertIn("No data", gs.build_trend([], []))
-        self.assertIn("No latency", gs.build_latency({}))
-        self.assertIn("No speed", gs.build_speed({}))
+        self.assertIn("No data", gs.build_combo([], []))
+        self.assertIn("No latency/speed", gs.build_latency_speed({}))
         self.assertIn("No data", gs.build_country({}))
         self.assertIn("No streaming", gs.build_streaming({}))
         self.assertIn("No set data", gs.build_sets({}))
@@ -121,21 +117,15 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("No family data", gs.build_family({}))
         self.assertIn("No reputation data", gs.build_rep({}))
         self.assertIn("No source data", gs.build_source_avail({}))
-        svg_ok(gs.build_alive_rate([]))
 
-    def test_chart_latency_has_bars_and_labels(self):
-        svg = gs.build_latency(self.META)
+    def test_chart_latency_speed_has_bars_and_labels(self):
+        svg = gs.build_latency_speed(self.META)
         svg_ok(svg)
         self.assertIn("0-100", svg)
         self.assertIn("500-1000", svg)
-        self.assertGreaterEqual(svg.count("<rect"), 3)
-
-    def test_chart_speed_has_bars_and_labels(self):
-        svg = gs.build_speed(self.META)
-        svg_ok(svg)
         self.assertIn("0-0.5", svg)
         self.assertIn("2-5", svg)
-        self.assertGreaterEqual(svg.count("<rect"), 3)
+        self.assertGreaterEqual(svg.count("<rect"), 6)
 
     def test_escapes_labels(self):
         svg = gs.build_churn([{"ts": '2026-08-12T00:00:00Z&"<x>', "added": 1, "removed": 0}])
@@ -153,6 +143,7 @@ class TestBuilders(unittest.TestCase):
     def test_legend_shows_latest_value(self):
         svg = gs.build_combo(self.HISTORY, self.VALID_HISTORY)
         self.assertIn("unique 110", svg)
+        self.assertIn("alive rate", svg)
 
     def test_cn_chart_sorted_by_count(self):
         svg = gs.build_cn(self.CN_DATA)
@@ -190,9 +181,9 @@ class TestMain(unittest.TestCase):
             self.assertEqual(badge["label"], "status")
             self.assertIn(badge["color"], ("brightgreen", "red"))
             for f in (
-                "chart.svg", "chart_country.svg", "chart_port.svg",
-                "chart_alive_rate.svg", "chart_churn.svg", "chart_combo.svg",
-                "chart_latency.svg", "chart_speed.svg", "chart_streaming.svg",
+                "chart_combo.svg", "chart_country.svg", "chart_port.svg",
+                "chart_churn.svg", "chart_latency_speed.svg",
+                "chart_streaming.svg",
                 "chart_sets.svg", "chart_cn.svg", "chart_family.svg",
                 "chart_source_avail.svg", "chart_rep.svg",
             ):
