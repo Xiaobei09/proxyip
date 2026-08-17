@@ -39,6 +39,7 @@ from common import (
     ALL_FILE,
     ALL_LTD_FILE,
     COUNTRIES_DIR,
+    DIFF_DIR,
     DOWNLOAD_DIR,
     HISTORY_FILE,
     IPAPI_BATCH_URL,
@@ -93,13 +94,13 @@ SMALL_SETS: dict[str, list[str]] = {
 #   ip    —— 裸 ``ip(#note)?`` 行（无端口，统一按 DEFAULT_EXTRA_PORT）
 #   csv   —— ``IP,port,区域,延迟`` 表（区域为机场码或国家码）
 EXTRA_SOURCES: list[tuple[str, str]] = [
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("csv", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/fdip.txt"),
+    ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/vlid.txt"),
+    ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/yxip.txt"),
+    ("plain", "https://raw.githubusercontent.com/ChatBotPlus/cf-proxyips/main/list.txt"),
+    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"),
+    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy%26country.txt"),
+    ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
 DEFAULT_EXTRA_PORT = "443"
 
