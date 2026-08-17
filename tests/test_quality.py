@@ -1274,5 +1274,76 @@ class TestAnnotateClassify(unittest.TestCase):
         self.assertEqual(result, line)
 
 
+class TestBuildMetaCountryMismatch(unittest.TestCase):
+    def test_country_mismatch_in_meta(self):
+        results = {"a": {"streaming": {}}}
+        ipinfo = {
+            "a": {"ip_type": "DC", "risk": "low", "country_match": True},
+            "b": {"ip_type": "DC", "risk": "low", "country_match": False},
+        }
+        meta = qc.build_meta(results, ipinfo, {}, {}, None)
+        self.assertEqual(meta["country_mismatch"], 1)
+
+    def test_country_mismatch_all_match(self):
+        results = {"a": {}}
+        ipinfo = {"a": {"ip_type": "DC", "risk": "low", "country_match": True}}
+        meta = qc.build_meta(results, ipinfo, {}, {}, None)
+        self.assertEqual(meta["country_mismatch"], 0)
+
+
+class TestReorgCountry(unittest.TestCase):
+    def test_rewrite_cc(self):
+        from reorg_country import rewrite_cc
+        line = "1.2.3.4:443#\U0001F1E6\U0001F1E8CA-10ms"
+        result = rewrite_cc(line, "US")
+        self.assertIn("#\U0001F1FA\U0001F1F8US-", result)
+        self.assertIn("1.2.3.4:443", result)
+
+    def test_rewrite_cc_same_noop(self):
+        from reorg_country import rewrite_cc
+        line = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-10ms"
+        result = rewrite_cc(line, "US")
+        self.assertEqual(result, line)
+
+    def test_reorganize_mismatched_line(self):
+        import json
+        import tempfile
+        from reorg_country import reorganize
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            valid = tmp_path / "data" / "valid"
+            countries = valid / "countries"
+            (countries / "CA").mkdir(parents=True)
+            (countries / "EG").mkdir(parents=True)
+            (countries / "CA" / "all.txt").write_text(
+                "166.1.228.218:443#\U0001F1E6\U0001F1E8CA-10ms\n"
+                "1.2.3.4:443#\U0001F1E6\U0001F1E8CA-20ms\n"
+            )
+            (countries / "EG" / "all.txt").write_text("")
+            ipinfo = {
+                "proxies": {
+                    "166.1.228.218:443#CA": {
+                        "country_code": "EG",
+                        "country_match": False,
+                    },
+                    "1.2.3.4:443#CA": {
+                        "country_code": "CA",
+                        "country_match": True,
+                    },
+                }
+            }
+            ipinfo_path = valid / "ipinfo.json"
+            ipinfo_path.write_text(json.dumps(ipinfo))
+            moved = reorganize(ipinfo_path, tmp_path / "data")
+            self.assertEqual(moved, 1)
+            ca_lines = (countries / "CA" / "all.txt").read_text().strip().splitlines()
+            self.assertEqual(len(ca_lines), 1)
+            self.assertIn("1.2.3.4:443", ca_lines[0])
+            eg_lines = (countries / "EG" / "all.txt").read_text().strip().splitlines()
+            self.assertEqual(len(eg_lines), 1)
+            self.assertIn("166.1.228.218:443", eg_lines[0])
+            self.assertIn("EG", eg_lines[0])
+
+
 if __name__ == "__main__":
     unittest.main()

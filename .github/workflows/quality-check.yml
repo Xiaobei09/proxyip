@@ -38,6 +38,9 @@ jobs:
       - name: Deep quality check
         run: python scripts/quality_check.py --source data/valid/all.txt --time-budget 5400 --rep-cache-ttl 604800
 
+      - name: Reorganize by exit country
+        run: python scripts/reorg_country.py
+
       - name: Generate stats and chart
         run: python scripts/generate_stats.py
 

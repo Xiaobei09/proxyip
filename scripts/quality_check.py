@@ -2,7 +2,8 @@
 """Streaming unlock and exit-IP quality checks for alive proxies.
 
 Runs on a bounded population (default ``data/valid/all_ltd.txt``, the
-per-country fastest survivors) and writes under ``data/valid/``:
+per-country fastest survivors; CI uses ``data/valid/all.txt``) and writes
+under ``data/valid/``:
 
 - ``ipinfo.json``      exit IP / geo / IP type / reputation score + source
                       (per checked proxy)
@@ -314,6 +315,10 @@ def build_meta(
         "50-75": sum(1 for r in reps if 50 <= r < 75),
         "75-100": sum(1 for r in reps if r >= 75),
     }
+    country_mismatch = sum(
+        1 for info in ipinfo.values()
+        if isinstance(info, dict) and info.get("country_match") is False
+    )
     return {
         "ts": now_ts(),
         "total": len(results),
@@ -330,6 +335,7 @@ def build_meta(
         "rep_median": (
             round(sorted(reps)[len(reps) // 2], 1) if reps else None
         ),
+        "country_mismatch": country_mismatch,
     }
 
 
