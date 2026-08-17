@@ -30,6 +30,7 @@ China reachability from the ``-CN`` line note or ``china.json``
 import argparse
 import asyncio
 import json
+import logging
 import re
 import shutil
 import ssl
@@ -48,6 +49,7 @@ from common import (
     VALID_DIR,
     VALID_HISTORY_FILE,
     has_token,
+    now_ts,
     parse_line,
     write_text_if_changed,
 )
@@ -61,7 +63,7 @@ SPEED_PATH = "/ajax/libs/three.js/r128/three.js"
 SPEED_READ_BYTES = 1048576
 SPEED_TIMEOUT = 5
 SPEED_MIN_BYTES = 16384
-SPEED_WORKERS = 10
+SPEED_WORKERS = 30
 TIMEOUT = 5
 READ_CAP = 3
 WORKERS = 500
@@ -87,10 +89,6 @@ SPEED_BUCKETS = [
 _TLS_CTX = ssl.create_default_context()
 _TLS_CTX.check_hostname = False
 _TLS_CTX.verify_mode = ssl.CERT_NONE
-
-
-def now_ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def bucket_latency(latencies: list[float]) -> dict[str, int]:
@@ -659,7 +657,8 @@ async def check_entries(
         nonlocal checked
         try:
             status, method, latency, speed = await check_proxy(ip, port, args, speed_sem)
-        except Exception:
+        except Exception as exc:
+            logging.debug("check_proxy %s:%s: %s", ip, port, exc)
             status, method, latency, speed = "dead", None, None, None
         async with lock:
             checked += 1
@@ -691,7 +690,7 @@ async def check_entries(
         submit()
         try:
             while tasks:
-                wait_ms = min(0.25, max(0.0, deadline - time.monotonic()))
+                wait_ms = min(0.05, max(0.0, deadline - time.monotonic()))
                 await asyncio.wait(tasks, timeout=wait_ms)
                 if time.monotonic() >= deadline:
                     break
