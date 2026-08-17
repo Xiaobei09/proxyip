@@ -37,11 +37,13 @@ from pathlib import Path
 from common import (
     UA,
     VALID_DIR,
+    _SSL_CTX,
     build_request,
     has_token,
     keyed_json,
     line_to_key,
     load_methods,
+    load_sample,
     OUT_DIR,
     parse_headers,
     parse_ltd_line,
@@ -61,8 +63,6 @@ TIMEOUT_DEFAULT = 10
 
 TRACE_HOST = "cloudflare.com"
 TRACE_PATH = "/cdn-cgi/trace"
-
-_SSL_CTX = ssl.create_default_context()
 
 FAMILY_TOKENS = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}
 
@@ -227,20 +227,6 @@ def split_by_family(results: dict) -> tuple[list, list]:
 
 
 # ------------------------------------------------------------ 数据装载与写出
-
-def load_sample(source: Path, limit: int) -> list:
-    lines = [l for l in source.read_text(encoding="utf-8").splitlines() if l.strip()]
-    out = []
-    for line in lines:
-        parsed = parse_ltd_line(line)
-        if not parsed:
-            continue
-        key, ip, port, cc = parsed
-        out.append((line, key, ip, port, cc))
-    if limit and limit > 0:
-        out = out[:limit]
-    return out
-
 
 def load_upstream_meta(path: Path | None = None) -> dict:
     """读入上游 ``all.json`` 生成的元数据表（keyed by ip）。缺失/损坏 → ``{}``。

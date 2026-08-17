@@ -43,6 +43,7 @@ from pathlib import Path
 
 from common import (
     INDEX_FILE,
+    MAX_HISTORY_RECORDS,
     OUT_DIR,
     PER_COUNTRY_LIMIT,
     SPEED_FILE,
@@ -54,8 +55,6 @@ from common import (
     write_text_if_changed,
 )
 from download_proxies import COUNTRY_SETS, SMALL_SETS
-
-MAX_HISTORY_RECORDS = 1000
 
 SPEED_HOST = "cdnjs.cloudflare.com"
 TARGET_SNI = SPEED_HOST

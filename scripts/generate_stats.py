@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import OUT_DIR, now_ts
+from common import OUT_DIR, now_ts, read_json, write_text_if_changed
 
 WIDTH = 800
 HEIGHT = 300
@@ -206,24 +206,6 @@ def load_history(path: Path) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return records
-
-
-def read_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-
-def write_atomic(path: Path, content: str) -> None:
-    if path.exists() and path.read_text(encoding="utf-8") == content:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
 
 
 CSS_STYLE = (
@@ -1078,7 +1060,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     stats_file = args.out / "stats.json"
-    write_atomic(stats_file, json.dumps(stats, ensure_ascii=False, indent=2) + "\n")
+    write_text_if_changed(stats_file, json.dumps(stats, ensure_ascii=False, indent=2) + "\n")
     print(f"Wrote {stats_file}")
 
     badge = {
@@ -1088,7 +1070,7 @@ def main(argv: list[str] | None = None) -> int:
         "color": "red" if stale else "brightgreen",
     }
     badge_file = args.out / "badge.json"
-    write_atomic(badge_file, json.dumps(badge) + "\n")
+    write_text_if_changed(badge_file, json.dumps(badge) + "\n")
     print(f"Wrote {badge_file}")
 
     charts = {
@@ -1107,7 +1089,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     for name, content in charts.items():
         path = args.out / name
-        write_atomic(path, content)
+        write_text_if_changed(path, content)
         print(f"Wrote {path}")
 
     p90 = stats["latency"].get("p90_ms")
