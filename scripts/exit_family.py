@@ -11,12 +11,8 @@
 并在 ``all.txt`` / ``all_ltd.txt`` 对应行追加 ``-V4`` / ``-V6`` / ``-DS`` 备注
 （幂等，与 ``quality_check`` 已有的 ``DS``/``V6`` token 约定一致）。
 
-探测方法按 ``index.json`` 记录的代理方法分流：
-
-- ``tls``（Cloudflare 边缘）：直连 TLS + SNI → ``cloudflare.com/cdn-cgi/trace``，
-  取回显 ``ip=`` 判 v4/v6（这类代理无法 CONNECT 到任意主机）
-- ``connect``（标准 HTTP CONNECT 代理）：经隧道双回显 ``api.ipify.org``(v4) 与
-  ``api6.ipify.org``(v6)，成功者分别判定对应家族
+所有代理均使用 TLS（Cloudflare 边缘）方法：直连 TLS + SNI →
+``cloudflare.com/cdn-cgi/trace``，取回显 ``ip=`` 判 v4/v6。
 
 家族判定：仅 v4 → ``ipv4``；仅 v6 → ``ipv6``；双通 → ``dual``；探测全失败 →
 ``unknown``（不入任何分离清单）。纯标准库，ThreadPoolExecutor 并发。
@@ -29,7 +25,6 @@
 
 import argparse
 import json
-import re
 import socket
 import ssl
 import sys
@@ -67,10 +62,6 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 
 TRACE_HOST = "cloudflare.com"
 TRACE_PATH = "/cdn-cgi/trace"
-
-ECHO_V4_HOST = "api.ipify.org"
-ECHO_V6_HOST = "api6.ipify.org"
-ECHO_PORT = 80
 
 _SSL_CTX = ssl.create_default_context()
 
@@ -151,57 +142,6 @@ def request_tls_sni(ip: str, port: str, host: str, path: str, timeout: float):
                 pass
 
 
-def connect_tunnel(ip: str, port: str, host: str, target_port: int, timeout: float):
-    """建立 CONNECT 隧道，成功返回已就绪的 socket，失败返回 None。"""
-    try:
-        raw = socket.create_connection((ip, int(port)), timeout=timeout)
-    except (OSError, ValueError):
-        return None
-    try:
-        raw.settimeout(timeout)
-        req = (
-            f"CONNECT {host}:{target_port} HTTP/1.1\r\n"
-            f"Host: {host}:{target_port}\r\n"
-            f"User-Agent: {UA}\r\n"
-            "Proxy-Connection: keep-alive\r\n"
-            "\r\n"
-        ).encode("ascii")
-        raw.sendall(req)
-        head = _read_until(raw, b"\r\n\r\n", 8192)
-        status, _headers = parse_headers(head)
-        if status != 200:
-            raw.close()
-            return None
-        return raw
-    except (OSError, socket.timeout):
-        try:
-            raw.close()
-        except OSError:
-            pass
-        return None
-
-
-def connect_echo(ip: str, port: str, host: str, timeout: float) -> str | None:
-    """CONNECT 隧道内 GET ``host/``，返回响应体（出口 IP 文本）或 None。"""
-    sock = connect_tunnel(ip, port, host, ECHO_PORT, timeout)
-    if sock is None:
-        return None
-    try:
-        sock.sendall(build_request("GET", "/", host))
-        status, _headers, body = read_http_response_sync(sock, 2048)
-        if status != 200:
-            return None
-        text = body.decode("utf-8", "replace").strip()
-        return text if re.match(r"^[0-9A-Fa-f:.:]+$", text) else None
-    except (OSError, socket.timeout):
-        return None
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
-
-
 # ------------------------------------------------------------ 解析与判定
 
 def parse_trace(body: bytes) -> dict:
@@ -237,18 +177,6 @@ def tls_exit(ip: str, port: str, timeout: float) -> dict:
     return {"status": "no_ip", "family": "unknown", "ip": None}
 
 
-def connect_exit(ip: str, port: str, timeout: float) -> dict:
-    """CONNECT 代理出口：v4 + v6 双回显。"""
-    v4 = connect_echo(ip, port, ECHO_V4_HOST, timeout)
-    v6 = connect_echo(ip, port, ECHO_V6_HOST, timeout)
-    return {
-        "status": "ok",
-        "family": classify_family(v4, v6),
-        "exit_v4": v4,
-        "exit_v6": v6,
-    }
-
-
 def check_one(item, methods: dict, timeout: float):
     line, key, ip, port, cc = item
     method = methods.get(key, "tls")
@@ -261,20 +189,12 @@ def check_one(item, methods: dict, timeout: float):
         "method": method,
         "ts": ts,
     }
-    if method == "connect":
-        res = connect_exit(ip, port, timeout)
-        base.update(
-            family=res["family"],
-            exit_v4=res["exit_v4"],
-            exit_v6=res["exit_v6"],
-        )
-    else:
-        res = tls_exit(ip, port, timeout)
-        base.update(
-            family=res["family"],
-            exit_v4=res["ip"] if res["family"] == "ipv4" else None,
-            exit_v6=res["ip"] if res["family"] == "ipv6" else None,
-        )
+    res = tls_exit(ip, port, timeout)
+    base.update(
+        family=res["family"],
+        exit_v4=res["ip"] if res["family"] == "ipv4" else None,
+        exit_v6=res["ip"] if res["family"] == "ipv6" else None,
+    )
     return key, base
 
 

@@ -2,15 +2,12 @@
 """Validate proxy reachability and measure latency.
 
 Reads ``data/all.txt`` (``ip:port#country`` lines) and checks each proxy.
-Two checks are performed, in order:
-
-1. HTTP CONNECT tunnel to a target host (works for standard proxies).
-2. TLS handshake to the proxy itself (works for Cloudflare edge proxies,
-   which serve TLS on 443/8443/2053/2083/2087/2096 but reject plain CONNECT).
+A TLS handshake to the proxy itself (works for Cloudflare edge proxies,
+which serve TLS on 443/8443/2053/2083/2087/2096) is performed.
 
 Checks run concurrently with asyncio (default 500 in-flight, kept bounded by
 an in-flight task pool). Each alive proxy also gets a download speed test on
-a freshly-opened connection (CONNECT tunnel or TLS), gated by a semaphore so
+a freshly-opened TLS connection, gated by a semaphore so
 bandwidth stays low-contention. Outputs are written under ``data/valid/``
 mirroring the structure of ``data/``. Non-limited outputs are ordered by
 latency (fastest first); ``*_ltd`` outputs pick the fastest per country by
@@ -18,7 +15,7 @@ measured speed. ``countries/<cc>/`` and ``sets/<name>/`` are per-country and
 per-set directories holding ``all.txt``, ``ltd.txt`` (and, after the quality
 run, ``rep.txt``). Lines use the ``ip:port#<flag><cc>-<latency>ms-<speed>MB/s``
 format (speed omitted when the test failed). Proxies that connect at the TCP
-level but fail both checks are retried once.
+level but fail the check are retried once.
 
 Alongside ``all.txt`` each country/set directory also gets family and
 mainland-China group files: ``v4.txt`` (IPv4-only exit), ``v6.txt``
@@ -52,7 +49,6 @@ from common import (
     VALID_HISTORY_FILE,
     has_token,
     parse_line,
-    try_connect,
     write_text_if_changed,
 )
 from download_proxies import COUNTRY_SETS, SMALL_SETS
@@ -60,8 +56,6 @@ from download_proxies import COUNTRY_SETS, SMALL_SETS
 MAX_HISTORY_RECORDS = 1000
 
 SPEED_HOST = "cdnjs.cloudflare.com"
-TARGET_HOST = SPEED_HOST
-TARGET_PORT = 443
 TARGET_SNI = SPEED_HOST
 SPEED_PATH = "/ajax/libs/three.js/r128/three.js"
 SPEED_READ_BYTES = 1048576
@@ -310,24 +304,6 @@ async def check_proxy(
         async with speed_sem:
             return await speed_probe(ip, port, args, method)
 
-    try:
-        reader, writer = await open_conn(ip, port, args.timeout)
-    except (OSError, asyncio.TimeoutError, ValueError):
-        return "dead", None, None, None
-    try:
-        try:
-            if await try_connect(reader, writer, args.host, args.target_port):
-                connect_latency = elapsed(started)
-                speed = await measure_speed("connect")
-                return "ok", "connect", connect_latency, speed
-        except (ConnectionError, OSError):
-            pass
-    finally:
-        try:
-            writer.close()
-        except OSError:
-            pass
-
     tls_started = time.monotonic()
     try:
         reader, writer = await open_conn(ip, port, args.timeout, ctx=_TLS_CTX, sni=args.sni)
@@ -350,31 +326,11 @@ async def speed_probe(
     args: argparse.Namespace,
     method: str,
 ) -> float | None:
-    """Open a fresh connection through the proxy and measure download speed.
+    """Open a fresh TLS connection through the proxy and measure download speed.
 
-    ``method`` mirrors the alive-check method ("connect" or "tls"). Any failure
-    returns ``None``; the proxy stays alive, it just gets no speed entry.
+    Any failure returns ``None``; the proxy stays alive, it just gets no speed
+    entry.
     """
-    if method == "connect":
-        try:
-            reader, writer = await open_conn(ip, port, args.timeout)
-        except (OSError, asyncio.TimeoutError, ValueError):
-            return None
-        try:
-            if not await try_connect(reader, writer, args.host, args.target_port):
-                return None
-            return await speed_download(
-                reader, writer, args.speed_host, args.speed_path,
-                args.speed_bytes, args.speed_timeout,
-            )
-        except (ConnectionError, OSError):
-            return None
-        finally:
-            try:
-                writer.close()
-            except OSError:
-                pass
-
     try:
         reader, writer = await open_conn(ip, port, args.timeout, ctx=_TLS_CTX, sni=args.sni)
     except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError):
@@ -752,7 +708,7 @@ async def check_entries(
 
     await run_pass(entries, False)
     if retry_pool and time.monotonic() < deadline:
-        print(f"Retrying {len(retry_pool)} connectable-but-unverified proxies ...")
+        print(f"Retrying {len(retry_pool)} TLS-but-unverified proxies ...")
         await asyncio.sleep(RETRY_DELAY)
         await run_pass(retry_pool, True)
 
@@ -839,8 +795,6 @@ async def run(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=OUT_DIR / "all.txt", help="Input proxy list")
-    parser.add_argument("--host", default=TARGET_HOST, help="CONNECT target host")
-    parser.add_argument("--target-port", type=int, default=TARGET_PORT, help="CONNECT target port")
     parser.add_argument("--sni", default=TARGET_SNI, help="TLS SNI used for the handshake check")
     parser.add_argument("--speed-host", default=SPEED_HOST, help="Host used for the speed download")
     parser.add_argument("--speed-path", default=SPEED_PATH, help="Path to download for the speed test")

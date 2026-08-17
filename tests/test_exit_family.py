@@ -56,36 +56,6 @@ class TestTlsExit(unittest.TestCase):
             self.assertEqual(ef.tls_exit("1.2.3.4", "443", 10)["family"], "unknown")
 
 
-class TestConnectExit(unittest.TestCase):
-    def test_dual(self):
-        def echo(ip, port, host, timeout):
-            return V4_IP if host == ef.ECHO_V4_HOST else V6_IP
-
-        with mock.patch.object(ef, "connect_echo", side_effect=echo):
-            res = ef.connect_exit("1.2.3.4", "80", 10)
-        self.assertEqual(res["family"], "dual")
-        self.assertEqual(res["exit_v4"], V4_IP)
-        self.assertEqual(res["exit_v6"], V6_IP)
-
-    def test_v4_only(self):
-        def echo(ip, port, host, timeout):
-            return V4_IP if host == ef.ECHO_V4_HOST else None
-
-        with mock.patch.object(ef, "connect_echo", side_effect=echo):
-            self.assertEqual(ef.connect_exit("1.2.3.4", "80", 10)["family"], "ipv4")
-
-    def test_v6_only(self):
-        def echo(ip, port, host, timeout):
-            return None if host == ef.ECHO_V4_HOST else V6_IP
-
-        with mock.patch.object(ef, "connect_echo", side_effect=echo):
-            self.assertEqual(ef.connect_exit("1.2.3.4", "80", 10)["family"], "ipv6")
-
-    def test_unknown(self):
-        with mock.patch.object(ef, "connect_echo", return_value=None):
-            self.assertEqual(ef.connect_exit("1.2.3.4", "80", 10)["family"], "unknown")
-
-
 class TestCheckOne(unittest.TestCase):
     def test_tls_method(self):
         with mock.patch.object(
@@ -98,17 +68,6 @@ class TestCheckOne(unittest.TestCase):
         self.assertEqual(res["exit_v6"], V6_IP)
         self.assertIsNone(res["exit_v4"])
         self.assertIn("ts", res)
-
-    def test_connect_method(self):
-        with mock.patch.object(
-            ef, "connect_exit",
-            return_value={"status": "ok", "family": "dual", "exit_v4": V4_IP, "exit_v6": V6_IP},
-        ):
-            item = ("5.6.7.8:8080#US", "5.6.7.8:8080#US", "5.6.7.8", "8080", "US")
-            key, res = ef.check_one(item, {"5.6.7.8:8080#US": "connect"}, 10)
-        self.assertEqual(res["method"], "connect")
-        self.assertEqual(res["family"], "dual")
-        self.assertEqual(res["exit_v4"], V4_IP)
 
     def test_default_tls_when_unknown(self):
         with mock.patch.object(
