@@ -73,7 +73,7 @@ data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合�
 data/valid/all_46.txt                      # 全部出口为双栈的代理（根级分组）
 data/valid/ports/443.txt                    # 仅 443 端口的存活代理
 data/valid/speed.json                       # 每存活代理的实测速度（MB/s，按速度降序）
-data/sets/hot.txt                           # 热门国家集合
+data/valid/sets/hot/all.txt                 # 热门国家集合（验证后）
 data/download/all.txt                       # 全量去重清单（未验证）
 ```
 ## 文档
@@ -93,21 +93,21 @@ data/download/all.txt                       # 全量去重清单（未验证）
 
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
-- **触发**：每 4 小时定时（`cron: 23 */4 * * *`）；quality-check 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
+- **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
-- **触发**：每 6 小时定时（`cron: 17 */6 * * *`）；支持 `workflow_dispatch` 手动触发
+- **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ 有变更则自动提交并推送
 - **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流按文件所有权范围提交 `data/`（update-proxies 不触碰 `data/quality/china.json`/`data/valid/all_cn.txt`），与主更新/质量 CI 的并发提交安全共存
 
 `.github/workflows/exit-family.yml`（实际出口家族独立 CI）：
 
-- **触发**：每 6 小时定时（`cron: 31 */6 * * *`，与 china-check 错开）；支持 `workflow_dispatch` 手动触发
+- **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `exit_family.py`（全量存活池按家族分离，并对照 `data/quality/upstream_meta.json` 交叉验证）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
 - **说明**：CF 边缘代理真实出口常为 IPv6（尽管呈现为 v4 地址），分离清单供按家族选路使用；上游交叉验证仅作参照，实时探测仍是判定依据
