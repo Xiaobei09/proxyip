@@ -14,6 +14,7 @@ Reads ``data/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_cn.svg``           mainland-China reachability verdicts (horizontal bars)
 - ``chart_family.svg``       actual exit IP family distribution (horizontal bars)
 - ``chart_source_avail.svg`` IP source coverage + sources-per-proxy (composite)
+- ``chart_source_stats.svg`` per-download-source IP count & overlap (stacked bars)
 - ``chart_rep.svg``          reputation score distribution (vertical bars)
 
 Line charts share a real-time x axis (series lacking usable timestamps fall
@@ -930,6 +931,71 @@ def build_source_avail(rep_data: dict) -> str:
     return "\n".join(parts)
 
 
+def build_source_stats(source_stats: dict) -> str:
+    """Stacked horizontal bar chart: per-download-source unique vs overlap IPs."""
+    sources = source_stats.get("sources", {})
+    if not sources:
+        return empty_svg(text="No source stats yet")
+
+    items = sorted(sources.items(), key=lambda kv: -kv[1].get("total", 0))
+    n = len(items)
+    if n == 0:
+        return empty_svg(text="No source stats yet")
+
+    row_h = 22
+    total_h = MARGIN_T + n * row_h + 12
+    plot_w = WIDTH - MARGIN_L - MARGIN_R - 56
+    max_total = max(v.get("total", 0) for _, v in items) or 1
+
+    parts = [svg_head(WIDTH, total_h)]
+    parts.append(
+        f'<text class="tt" x="{WIDTH / 2}" y="12">'
+        "Download source IP stats</text>"
+    )
+
+    for i, (label, v) in enumerate(items):
+        total = v.get("total", 0)
+        unique = v.get("unique", 0)
+        overlap = v.get("overlap", 0)
+        y0 = MARGIN_T + i * row_h + 2
+        bar_h = row_h - 8
+
+        # Unique segment (green)
+        uw = max(1.0, unique / max_total * plot_w) if unique else 0
+        # Overlap segment (red), stacked after unique
+        ow = max(1.0, overlap / max_total * plot_w) if overlap else 0
+
+        segs = ""
+        x = MARGIN_L
+        if unique:
+            segs += (
+                f'<rect x="{fmt_c(x)}" y="{fmt_c(y0)}" width="{fmt_c(uw)}" '
+                f'height="{fmt_c(bar_h)}" fill="{COLOR_ALIVE}" rx="1.5"/>'
+            )
+            x += uw
+        if overlap:
+            segs += (
+                f'<rect x="{fmt_c(x)}" y="{fmt_c(y0)}" width="{fmt_c(ow)}" '
+                f'height="{fmt_c(bar_h)}" fill="{COLOR_BLOCKED}" rx="1.5"/>'
+            )
+            x += ow
+
+        # Label + count
+        count_text = f"{total}"
+        if overlap:
+            count_text += f" ({overlap} dup)"
+        parts.append(
+            f'<text class="e" x="{MARGIN_L - 6}" y="{fmt_c(y0 + 9)}">'
+            f"{esc(label)}</text>"
+            f"{segs}"
+            f'<text class="t" x="{fmt_c(x + 4)}" y="{fmt_c(y0 + 9)}">'
+            f"{count_text}</text>"
+        )
+
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
 def build_rep(rep_data: dict) -> str:
     buckets: dict[int, int] = {}
     for v in rep_data.get("proxies", {}).values():
@@ -969,6 +1035,7 @@ def main(argv: list[str] | None = None) -> int:
     china_data = read_json(data_dir / "valid" / "china.json")
     family_data = read_json(data_dir / "valid" / "exit_family.json")
     rep_data = read_json(data_dir / "valid" / "reputation.json")
+    source_stats = read_json(data_dir / "source_stats.json")
 
     latest = history[-1] if history else {}
     sets = latest.get("sets", {})
@@ -1035,6 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
         "chart_cn.svg": build_cn(china_data),
         "chart_family.svg": build_family(family_data),
         "chart_source_avail.svg": build_source_avail(rep_data),
+        "chart_source_stats.svg": build_source_stats(source_stats),
         "chart_rep.svg": build_rep(rep_data),
     }
     for name, content in charts.items():

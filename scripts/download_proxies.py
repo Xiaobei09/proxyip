@@ -698,17 +698,22 @@ def enrich_countries(
     return moved
 
 
-def load_extras(sources: list, timeout: int) -> tuple[dict, set[str]]:
+def load_extras(
+    sources: list, timeout: int
+) -> tuple[dict, set[str], dict[str, set[str]]]:
     """Fetch and parse extra proxy sources in parallel; per-source failures are
     non-fatal.
 
-    Returns ``(by_port, extra_all_ips)`` where ``extra_all_ips`` is the set of
-    IPs that arrived without a country tag (candidates for geo enrichment).
+    Returns ``(by_port, extra_all_ips, source_ip_sets)`` where
+    ``extra_all_ips`` is the set of IPs that arrived without a country tag
+    (candidates for geo enrichment) and ``source_ip_sets`` maps each source
+    URL to the set of IPs it contributed.
     """
     by_port: dict = {}
     extra_all_ips: set[str] = set()
+    source_ip_sets: dict[str, set[str]] = {}
     if not sources:
-        return by_port, extra_all_ips
+        return by_port, extra_all_ips, source_ip_sets
 
     def parse_source(kind: str, url: str) -> dict:
         content = fetch(url, timeout=timeout)
@@ -721,6 +726,13 @@ def load_extras(sources: list, timeout: int) -> tuple[dict, set[str]]:
         print(f"Skipping unknown extra source kind {kind!r} ({url})",
               file=sys.stderr)
         return {}
+
+    def collect_ips(by_port_data: dict) -> set[str]:
+        ips: set[str] = set()
+        for countries in by_port_data.values():
+            for country_ips in countries.values():
+                ips.update(country_ips)
+        return ips
 
     print(f"Downloading {len(sources)} extra source(s) ...")
     with concurrent.futures.ThreadPoolExecutor(
@@ -738,13 +750,57 @@ def load_extras(sources: list, timeout: int) -> tuple[dict, set[str]]:
                     continue
                 count = sum(len(v) for c in part.values() for v in c.values())
                 print(f"Extra source {url}: {count} entries")
+                source_ip_sets[url] = collect_ips(part)
                 merge_by_port(by_port, part)
             except Exception as exc:  # noqa: BLE001
                 print(f"Extra source {url} failed ({exc}); skipping",
                       file=sys.stderr)
     for countries in by_port.values():
         extra_all_ips.update(countries.get("ALL", []))
-    return by_port, extra_all_ips
+    return by_port, extra_all_ips, source_ip_sets
+
+
+def _collect_all_ips(by_port: dict) -> set[str]:
+    """Return the set of all IPs across all (port, country) buckets."""
+    ips: set[str] = set()
+    for countries in by_port.values():
+        for country_ips in countries.values():
+            ips.update(country_ips)
+    return ips
+
+
+def _build_source_stats(
+    main_ips: set[str],
+    source_ip_sets: dict[str, set[str]],
+    all_ips: set[str],
+) -> dict:
+    """Compute per-source IP counts, duplicates and availability.
+
+    ``all_ips`` is the final merged IP set (from ``by_port`` after all merges).
+    """
+    all_sets = [main_ips] + list(source_ip_sets.values())
+
+    # Count how many sources each IP appears in
+    ip_count: dict[str, int] = {}
+    for s in all_sets:
+        for ip in s:
+            ip_count[ip] = ip_count.get(ip, 0) + 1
+    overlap_ips = {ip for ip, c in ip_count.items() if c > 1}
+
+    stats: dict[str, dict] = {}
+    stats["main (zip.cm.edu.kg)"] = {
+        "total": len(main_ips),
+        "unique": len(main_ips - overlap_ips),
+        "overlap": len(main_ips & overlap_ips),
+    }
+    for url, ips in source_ip_sets.items():
+        label = url.rsplit("/", 1)[-1].split(".")[0] if "/" in url else url
+        stats[label] = {
+            "total": len(ips),
+            "unique": len(ips - overlap_ips),
+            "overlap": len(ips & overlap_ips),
+        }
+    return stats
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -787,12 +843,29 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         by_port, meta_map = load_source(args.url, timeout=args.timeout)
-        extra, extra_all_ips = load_extras(extra_sources, timeout=args.timeout)
+        main_ips = _collect_all_ips(by_port)
+        extra, extra_all_ips, source_ip_sets = load_extras(
+            extra_sources, timeout=args.timeout
+        )
         if extra:
             merge_by_port(by_port, extra)
             moved = enrich_countries(by_port, extra_all_ips, timeout=args.timeout)
             if moved:
                 print(f"Filled country for {moved} extra-source IPs via ip-api")
+        all_ips = _collect_all_ips(by_port)
+        source_stats = _build_source_stats(main_ips, source_ip_sets, all_ips)
+        src_stats_file = OUT_DIR / "source_stats.json"
+        write_text_if_changed(
+            src_stats_file,
+            json.dumps(
+                {"sources": source_stats},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
+        print(f"Wrote {src_stats_file} ({len(source_stats)} sources)")
         stats, all_entries = write_outputs(by_port, per_country_limit=args.per_country_limit)
         if meta_map is not None:
             write_upstream_meta(meta_map)
