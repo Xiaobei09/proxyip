@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate repository statistics and a set of dependency-free SVG charts.
 
-Reads ``data/history.jsonl`` and ``data/valid/history.jsonl`` plus
-``data/valid/meta.json`` and writes ``data/stats.json`` together with:
+Reads ``data/quality/history.jsonl`` and ``data/valid/history.jsonl`` plus
+``data/valid/meta.json`` and writes ``data/output/stats.json`` together with:
 
 - ``chart_combo.svg``        proxy count & alive rate (dual-axis lines)
 - ``chart_country.svg``      alive proxies per country (horizontal bars, top 15)
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import OUT_DIR, now_ts, read_json, write_text_if_changed
+from common import DATA_DIR, OUTPUT_DIR, SOURCE_STATS_FILE, now_ts, read_json, write_text_if_changed
 
 WIDTH = 800
 HEIGHT = 300
@@ -999,25 +999,25 @@ def build_rep(rep_data: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=OUT_DIR, help="Output directory")
+    parser.add_argument("--out", type=Path, default=OUTPUT_DIR, help="Output directory")
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=OUT_DIR,
-        help="Directory with inputs (history.jsonl, valid/); default: data/",
+        default=DATA_DIR,
+        help="Directory with inputs (quality/, valid/); default: data/",
     )
     args = parser.parse_args(argv)
 
     now = datetime.now(timezone.utc).timestamp()
     data_dir = args.data_dir
-    history = load_history(data_dir / "history.jsonl")
+    history = load_history(data_dir / "quality" / "history.jsonl")
     valid_history = load_history(data_dir / "valid" / "history.jsonl")
     meta = read_json(data_dir / "valid" / "meta.json")
-    quality_meta = read_json(data_dir / "valid" / "quality_meta.json")
-    china_data = read_json(data_dir / "valid" / "china.json")
-    family_data = read_json(data_dir / "valid" / "exit_family.json")
-    rep_data = read_json(data_dir / "valid" / "reputation.json")
-    source_stats = read_json(data_dir / "source_stats.json")
+    quality_meta = read_json(data_dir / "quality" / "quality_meta.json")
+    china_data = read_json(data_dir / "quality" / "china.json")
+    family_data = read_json(data_dir / "quality" / "exit_family.json")
+    rep_data = read_json(data_dir / "quality" / "reputation.json")
+    source_stats = read_json(data_dir / "quality" / "source_stats.json")
 
     latest = history[-1] if history else {}
     sets = latest.get("sets", {})

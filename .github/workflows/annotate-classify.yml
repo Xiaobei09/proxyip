@@ -48,7 +48,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             LAST_SHA=$(git log --oneline --all -1 --grep="suffix filling" --format=%h 2>/dev/null || echo "")
             if [ -n "$LAST_SHA" ] && git diff --quiet "$LAST_SHA" -- \
-                data/valid/streaming.json data/valid/ipinfo.json data/valid/reputation.json; then
+                data/quality/streaming.json data/quality/ipinfo.json data/quality/reputation.json; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "::notice::No quality data changes since last annotation, skipping"
             fi
@@ -90,13 +90,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
-            ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
-            ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' \
-            ':(exclude)data/history.jsonl' \
-            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
-            ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl'
+          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
+            ':(exclude)data/output' ':(exclude)data/diff'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -110,13 +105,8 @@ jobs:
             echo "Push attempt $i failed, reapplying local data on origin/main..."
             git fetch origin main || { sleep 5; continue; }
             git reset --mixed origin/main
-            git add -Af data/ ':(exclude)data/raw' \
-              ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
-              ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
-              ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' \
-              ':(exclude)data/history.jsonl' \
-              ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
-              ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl'
+            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
+              ':(exclude)data/output' ':(exclude)data/diff'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0

@@ -82,7 +82,7 @@ jobs:
           wc -l data/valid/all_ipv6.txt 2>/dev/null || true
           echo "Family distribution:"
           jq -r '[.proxies[].family] | group_by(.) | map({(.[0]): length}) | add // empty' \
-            data/valid/exit_family.json 2>/dev/null || true
+            data/quality/exit_family.json 2>/dev/null || true
 
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true'
@@ -90,18 +90,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
-            ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
-            ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
-            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
-            ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
-            ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' \
-            ':(exclude)data/valid/reputation_cache.json' \
-            ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' \
-            ':(exclude)data/valid/ipinfo.json' \
-            ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt' \
-            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt'
+          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
+            ':(exclude)data/output' ':(exclude)data/diff'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -115,18 +105,8 @@ jobs:
             echo "Push attempt $i failed, reapplying local data on origin/main..."
             git fetch origin main || { sleep 5; continue; }
             git reset --mixed origin/main
-            git add -Af data/ ':(exclude)data/raw' \
-              ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
-              ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
-              ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
-              ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
-              ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
-              ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' \
-              ':(exclude)data/valid/reputation_cache.json' \
-              ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' \
-              ':(exclude)data/valid/ipinfo.json' \
-              ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt' \
-              ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt'
+            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
+              ':(exclude)data/output' ':(exclude)data/diff'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0

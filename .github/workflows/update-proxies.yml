@@ -46,15 +46,15 @@ jobs:
           echo "Files extracted:"
           find data/raw -name '*.txt' | wc -l
           echo "Country files:"
-          find data/countries -name '*.txt' | wc -l
+          find data/download/countries -name '*.txt' | wc -l
           echo "Port files:"
-          find data/ports -name '*.txt' | wc -l
+          find data/download/ports -name '*.txt' | wc -l
           echo "Unique IPs:"
-          wc -l data/all.txt
+          wc -l data/download/all.txt
           echo "Alive proxies:"
           wc -l data/valid/all.txt
           echo "History records:"
-          wc -l data/history.jsonl
+          wc -l data/quality/history.jsonl
           echo "Diff archives:"
           ls data/diff/*.json 2>/dev/null | wc -l
 
@@ -63,12 +63,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt' \
-            ':(exclude)data/valid/exit_family.json' ':(exclude)data/valid/all_ipv4.txt' ':(exclude)data/valid/all_ipv6.txt' \
-            ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' ':(exclude)data/valid/reputation_cache.json' \
-            ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' ':(exclude)data/valid/ipinfo.json' \
-            ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt'
+          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/quality' \
+            ':(exclude)data/output' ':(exclude)data/diff'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -87,12 +83,8 @@ jobs:
             # 必须用 --mixed（而非 --soft）：--soft 只动 HEAD 不动 index，陈旧 checkout
             # 的 index 会连非 data 文件一起带进数据提交，回退他人已推送的代码改动。
             git reset --mixed origin/main
-            git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt' \
-            ':(exclude)data/valid/exit_family.json' ':(exclude)data/valid/all_ipv4.txt' ':(exclude)data/valid/all_ipv6.txt' \
-            ':(exclude)data/valid/streaming.json' ':(exclude)data/valid/reputation.json' ':(exclude)data/valid/reputation_cache.json' \
-            ':(exclude)data/valid/quality_meta.json' ':(exclude)data/valid/abuse.json' ':(exclude)data/valid/ipinfo.json' \
-            ':(exclude)data/valid/all_rep.txt' ':(exclude)data/valid/**/rep.txt'
+            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/quality' \
+              ':(exclude)data/output' ':(exclude)data/diff'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0

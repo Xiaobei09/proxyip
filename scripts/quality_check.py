@@ -3,7 +3,7 @@
 
 Runs on a bounded population (default ``data/valid/all_ltd.txt``, the
 per-country fastest survivors; CI uses ``data/valid/all.txt``) and writes
-under ``data/valid/``:
+under ``data/quality/``:
 
 - ``ipinfo.json``      exit IP / geo / IP type / reputation score + source
                       (per checked proxy)

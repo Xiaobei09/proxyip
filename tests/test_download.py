@@ -73,7 +73,7 @@ class TestExtract(unittest.TestCase):
 class TestWriteOutputs(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(self.__class__.__module__)
-        self.orig = {k: getattr(dp, k) for k in ("RAW_DIR", "COUNTRIES_DIR", "PORTS_DIR", "SETS_DIR", "OUT_DIR")}
+        self.orig = {k: getattr(dp, k) for k in ("RAW_DIR", "COUNTRIES_DIR", "PORTS_DIR", "SETS_DIR", "ALL_FILE", "ALL_LTD_FILE")}
 
     def tearDown(self):
         for k, v in self.orig.items():
@@ -84,8 +84,11 @@ class TestWriteOutputs(unittest.TestCase):
 
         base = Path(tempfile.mkdtemp(prefix="dp_"))
         for k in self.orig:
-            setattr(dp, k, base / k.lower())
-        dp.OUT_DIR.mkdir(parents=True, exist_ok=True)
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
         by_port = {
             "443": {"US": ["1.1.1.1", "2.2.2.2"], "JP": ["3.3.3.3"]},
             "80": {"US": ["9.9.9.9"]},
@@ -100,7 +103,7 @@ class TestWriteOutputs(unittest.TestCase):
         # all.txt ip-sorted
         self.assertEqual(all_entries, ["1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#JP", "9.9.9.9:80#US"])
         # per-country limit ltd
-        ltd = (dp.OUT_DIR / "all_ltd.txt").read_text().splitlines()
+        ltd = (dp.ALL_LTD_FILE).read_text().splitlines()
         self.assertEqual(ltd, ["1.1.1.1:443#US", "3.3.3.3:443#JP"])
 
     def test_no_ltd_when_limit_zero(self):
@@ -108,11 +111,14 @@ class TestWriteOutputs(unittest.TestCase):
 
         base = Path(tempfile.mkdtemp(prefix="dp_"))
         for k in self.orig:
-            setattr(dp, k, base / k.lower())
-        dp.OUT_DIR.mkdir(parents=True, exist_ok=True)
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
         by_port = {"443": {"US": ["1.1.1.1", "2.2.2.2"]}}
         dp.write_outputs(by_port, per_country_limit=0)
-        self.assertFalse((dp.OUT_DIR / "all_ltd.txt").exists())
+        self.assertFalse(dp.ALL_LTD_FILE.exists())
         self.assertFalse((dp.SETS_DIR / "europe_ltd.txt").exists())
 
 
@@ -218,11 +224,12 @@ class TestWriteUpstreamMeta(unittest.TestCase):
         import tempfile
 
         base = Path(tempfile.mkdtemp(prefix="dp_"))
-        with unittest.mock.patch.object(dp, "OUT_DIR", base):
+        meta_file = base / "upstream_meta.json"
+        with unittest.mock.patch.object(dp, "UPSTREAM_META_FILE", meta_file):
             dp.write_upstream_meta({"1.1.1.1": {"family": "ipv6"}})
-        data = json.loads((base / "upstream_meta.json").read_text())
+        data = json.loads(meta_file.read_text())
         self.assertEqual(data["proxies"]["1.1.1.1"]["family"], "ipv6")
-        self.assertFalse((base / "upstream_meta.json.tmp").exists())
+        self.assertFalse(meta_file.with_suffix(".json.tmp").exists())
 
 
 class TestHistoryRecord(unittest.TestCase):
@@ -408,11 +415,14 @@ class TestWriteOutputsAll(unittest.TestCase):
 
         base = Path(tempfile.mkdtemp(prefix="dp_"))
         orig = {k: getattr(dp, k) for k in
-                ("RAW_DIR", "COUNTRIES_DIR", "PORTS_DIR", "SETS_DIR", "OUT_DIR")}
+                ("RAW_DIR", "COUNTRIES_DIR", "PORTS_DIR", "SETS_DIR", "ALL_FILE", "ALL_LTD_FILE")}
         try:
             for k in orig:
-                setattr(dp, k, base / k.lower())
-            dp.OUT_DIR.mkdir(parents=True, exist_ok=True)
+                if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                    setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+                else:
+                    setattr(dp, k, base / k.lower())
+            dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
             by_port = {"443": {"US": ["1.1.1.1"], "ALL": ["2.2.2.2", "9.9.9.9"]}}
             _, all_entries = dp.write_outputs(by_port, per_country_limit=1)
             self.assertIn("1.1.1.1:443#US", all_entries)
@@ -427,7 +437,7 @@ class TestWriteOutputsAll(unittest.TestCase):
                 set((dp.PORTS_DIR / "443.txt").read_text().splitlines()),
                 {"1.1.1.1:443#US", "2.2.2.2:443#ALL", "9.9.9.9:443#ALL"},
             )
-            ltd = (dp.OUT_DIR / "all_ltd.txt").read_text().splitlines()
+            ltd = dp.ALL_LTD_FILE.read_text().splitlines()
             self.assertIn("1.1.1.1:443#US", ltd)
             self.assertIn("2.2.2.2:443#ALL", ltd)
             north_america = (dp.SETS_DIR / "north_america.txt").read_text().splitlines()

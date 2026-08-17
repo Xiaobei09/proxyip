@@ -86,6 +86,10 @@ class TestBuilders(unittest.TestCase):
             "4.4.4.4:80#FR": {"score": 50, "sources": ["ipquery", "ffraud", "ipdata"]},
         }
     }
+    QUALITY_META = {
+        "streaming": {"openai": {"ok": 10, "blocked": 2, "error": 1}},
+        "by_type": {"DC": 50, "RES": 100, "MOB": 30, "PROXY": 25},
+    }
 
     def test_all_charts_valid_svg(self):
         builders = {
@@ -158,7 +162,8 @@ class TestMain(unittest.TestCase):
             base = Path(td)
             data_dir = base / "data"
             (data_dir / "valid").mkdir(parents=True)
-            (data_dir / "history.jsonl").write_text(
+            (data_dir / "quality").mkdir(parents=True)
+            (data_dir / "quality" / "history.jsonl").write_text(
                 "\n".join(json.dumps(r) for r in TestBuilders.HISTORY) + "\n"
             )
             (data_dir / "valid" / "history.jsonl").write_text(
@@ -166,6 +171,21 @@ class TestMain(unittest.TestCase):
             )
             (data_dir / "valid" / "meta.json").write_text(
                 json.dumps(TestBuilders.META)
+            )
+            (data_dir / "quality" / "quality_meta.json").write_text(
+                json.dumps(TestBuilders.QUALITY_META)
+            )
+            (data_dir / "quality" / "china.json").write_text(
+                json.dumps(TestBuilders.CN_DATA)
+            )
+            (data_dir / "quality" / "exit_family.json").write_text(
+                json.dumps(TestBuilders.FAMILY_DATA)
+            )
+            (data_dir / "quality" / "reputation.json").write_text(
+                json.dumps(TestBuilders.REP_DATA)
+            )
+            (data_dir / "quality" / "source_stats.json").write_text(
+                json.dumps({})
             )
             out = base / "out"
             rc = gs.main(["--data-dir", str(data_dir), "--out", str(out)])
