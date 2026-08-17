@@ -56,7 +56,10 @@ async def read_chunked(
 ) -> bytes:
     while len(body) < cap:
         head = await read_until(reader, b"\r\n", 64)
-        size = int(head.split(b";", 1)[0].strip() or b"0", 16)
+        try:
+            size = int(head.split(b";", 1)[0].strip() or b"0", 16)
+        except ValueError:
+            break
         if size == 0:
             await read_until(reader, b"\r\n", 4096)
             break
@@ -87,7 +90,10 @@ async def read_http_response(
         body = await read_chunked(reader, cap, body)
     else:
         clen = headers.get("content-length")
-        want = min(int(clen), cap - len(body)) if clen else cap - len(body)
+        try:
+            want = min(int(clen), cap - len(body)) if clen else cap - len(body)
+        except (ValueError, TypeError):
+            want = cap - len(body)
         while len(body) < want:
             chunk = await asyncio.wait_for(
                 reader.read(65536), timeout=READ_TIMEOUT
@@ -204,6 +210,7 @@ async def tls_get_direct(
     finally:
         try:
             writer.close()
+            await writer.wait_closed()
         except OSError:
             pass
 
@@ -237,7 +244,8 @@ async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
             "ipv6_ok": bool(ipv6.get("ok")),
             "exit_geo": ipv4.get("exit"),
         }
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logging.debug("check_external_api %s:%s failed: %s", ip, port, exc)
         return {"success": False}
 
 

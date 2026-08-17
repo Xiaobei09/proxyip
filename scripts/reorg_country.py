@@ -66,7 +66,10 @@ def load_ipinfo(ipinfo_path: Path) -> dict:
     """Load ipinfo.json → ``{key: {country_code, country_match, …}}``."""
     if not ipinfo_path.exists():
         return {}
-    data = json.loads(ipinfo_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(ipinfo_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
     return data.get("proxies", data)
 
 
@@ -196,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     ipinfo_path = args.ipinfo or (args.data_dir / "valid" / "ipinfo.json")
     moved = reorganize(ipinfo_path, args.data_dir)
-    return 0 if moved >= 0 else 1
+    return 0
 
 
 if __name__ == "__main__":

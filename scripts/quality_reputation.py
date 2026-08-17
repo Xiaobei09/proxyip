@@ -620,7 +620,7 @@ async def batch_sync(
             except Exception as exc:
                 logging.debug("batch_sync: %s failed: %s", ip, exc)
                 res = None
-        if res:
+        if res is not None:
             out[ip] = res
             await asyncio.sleep(delay)
         else:

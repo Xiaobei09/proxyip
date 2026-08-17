@@ -249,7 +249,7 @@ def extract_json(content: bytes) -> tuple[dict, dict]:
         if isinstance(meta, dict):
             trimmed = {k: meta.get(k) for k in META_KEYS}
             client_ip = meta.get("clientIp")
-            trimmed["family"] = "ipv6" if ":" in str(client_ip) else "ipv4"
+            trimmed["family"] = "ipv6" if isinstance(client_ip, str) and ":" in client_ip else "ipv4"
             colo = meta.get("colo")
             trimmed["colo_iata"] = colo.get("iata") if isinstance(colo, dict) else None
             meta_map[ip] = trimmed
@@ -362,7 +362,7 @@ def merge_by_port(base: dict, extra: dict) -> dict:
     return base
 
 
-def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> dict:
+def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> tuple[dict, set]:
     print("[3/3] Writing output files ...")
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     stats: dict[str, int] = {}

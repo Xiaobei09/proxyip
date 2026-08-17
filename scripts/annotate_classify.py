@@ -139,7 +139,7 @@ def fill_and_classify(
 
     # reputation score (only if not already present)
     rep_score = rep_map.get(key)
-    if rep_score:
+    if rep_score is not None:
         score_str = str(rep_score)
         if not has_token(note, score_str) and score_str not in note:
             out += "-" + score_str
