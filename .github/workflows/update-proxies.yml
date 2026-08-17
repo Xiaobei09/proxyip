@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: update-proxies
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update:
