@@ -564,7 +564,7 @@ class TestReputation(unittest.TestCase):
         self.assertTrue(out["is_anonymous"])
         self.assertFalse(out["is_vpn"])
 
-    def test_ncgy_lookup_clean_none(self):
+    def test_ncgy_lookup_clean(self):
         def fake_urlopen(req, timeout=0):
             class FakeResp:
                 def __enter__(self):
@@ -586,9 +586,10 @@ class TestReputation(unittest.TestCase):
         orig = qc.urllib.request.urlopen
         qc.urllib.request.urlopen = fake_urlopen
         try:
-            self.assertIsNone(qc.ncgy_lookup_sync("1.2.3.4"))
+            out = qc.ncgy_lookup_sync("1.2.3.4")
         finally:
             qc.urllib.request.urlopen = orig
+        self.assertEqual(out, {"clean": True})
 
     def test_getipintel_lookup(self):
         def fake_urlopen(req, timeout=0):
