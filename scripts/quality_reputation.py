@@ -123,19 +123,23 @@ WHATISMYIP_FLAG_PENALTIES = {
 }
 STATIC_LIST_SCORES = {
     "abuse_list": 60,   # is_abuse（历史滥用，强信号）
+    "ipsum": 55,        # is_listed（3+ 黑名单交叉确认）
     "dc_asn": 85,       # is_hosting（机房/数据中心）
     "vpn_asn": 70,      # is_vpn
     "resproxy_asn": 75, # is_proxy（住宅代理骨干）
 }
 REPUTATION_WEIGHTS = {
-    "netcoffee": 30,
-    "ncgy": 15,
+    "netcoffee": 20,
+    "ncgy": 10,
     "ip-api": 15,
     "ipquery": 12,
     "ffraud": 12,
+    "blackbox": 10,
+    "otx": 8,
+    "ipsum": 8,
     "ipapi_is": 8,
     "ipdata": 8,
-    "whatismyip": 5,
+    "whatismyip": 3,
     "dc_asn": 5,
     "abuse_list": 5,
     "torlist": 5,
@@ -145,12 +149,15 @@ REPUTATION_WEIGHTS = {
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
+    "blackbox", "otx", "ipsum",
     "ipapi_is", "ipdata", "whatismyip", "dc_asn",
     "abuse_list", "torlist", "vpn_asn", "resproxy_asn",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
     "ncgy": (10, 0.15),
+    "blackbox": (8, 0.2),
+    "otx": (6, 0.3),
     "ipapi_is": (8, 0.2),
     "ipquery": (6, 0.2),
     "ffraud": (6, 0.2),
@@ -435,6 +442,57 @@ def whatismyip_lookup_sync(ip: str) -> dict | None:
     return out
 
 
+BLACKBOX_URL = "https://blackbox.ipinfo.app/api/v3beta/{}"
+BLACKBOX_TIMEOUT = 8
+
+
+def blackbox_lookup_sync(ip: str) -> dict | None:
+    """Blackbox v3beta classification + signal flags."""
+    req = urllib.request.Request(
+        BLACKBOX_URL.format(ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=BLACKBOX_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict) or not data.get("classification"):
+        return None
+    return {
+        "classification": data.get("classification"),
+        "confidence": data.get("confidence"),
+        "suspicious": bool(data.get("suspicious")),
+        "signals": data.get("signals") or {},
+    }
+
+
+OTX_URL = "https://otx.alienvault.com/api/v1/indicators/IPv4/{}/general"
+OTX_TIMEOUT = 8
+
+
+def otx_lookup_sync(ip: str) -> dict | None:
+    """AlienVault OTX reputation score + pulse count."""
+    req = urllib.request.Request(
+        OTX_URL.format(ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=OTX_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    return {
+        "reputation": int(data.get("reputation") or 0),
+        "pulse_count": int((data.get("pulse_info") or {}).get("count") or 0),
+        "validation": data.get("validation") or [],
+    }
+
+
+IPSUM_URL = "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt"
+
+
+async def fetch_ipsum_list() -> set[str]:
+    """IPsum level 3+ blacklist (IPs listed in 3+ blocklists)."""
+    return await fetch_text_list(IPSUM_URL)
+
+
 async def fetch_torlist() -> set[str]:
     """Union of Tor exit IPs from the static free lists."""
     exits: set[str] = set()
@@ -448,8 +506,9 @@ async def fetch_torlist() -> set[str]:
                 ).read().decode("utf-8", errors="replace")
             )
         except Exception as exc:
-            logging.debug("netcoffee fetch %s: %s", ip, exc)
+            logging.debug("torlist fetch %s: %s", url, exc)
             return
+        for line in text.splitlines():
             if "ExitAddress" in line:
                 parts = line.split()
                 if len(parts) >= 2 and ":" not in parts[1]:
@@ -604,11 +663,14 @@ def source_score(name: str, signal) -> int | None:
         return max(0, min(100, 100 - penalty))
     if name == "ip-api":
         penalty = 0
+        bonus = 0
         if signal.get("proxy"):
             penalty += IPAPI_PROXY_PENALTY
         if signal.get("hosting"):
             penalty += IPAPI_HOSTING_PENALTY
-        return 100 - penalty
+        if signal.get("mobile"):
+            bonus += 10
+        return max(0, min(100, 100 - penalty + bonus))
     if name == "ipdata":
         security = signal.get("security") or {}
         penalty = sum(
@@ -671,9 +733,26 @@ def source_score(name: str, signal) -> int | None:
         if not penalty and not signal.get("connection_type"):
             return None
         return max(0, min(100, 100 - penalty))
+    if name == "blackbox":
+        cls = signal.get("classification", "")
+        cls_scores = {
+            "tor": 10, "hosting": 60, "vpn": 55, "privacy_relay": 50,
+            "mobile": 90, "residential": 95, "business": 85,
+            "bogon": 5, "unknown": 50,
+        }
+        score = cls_scores.get(cls, 50)
+        if signal.get("suspicious"):
+            score = max(0, score - 20)
+        return max(0, min(100, score))
+    if name == "otx":
+        rep = int(signal.get("reputation") or 0)
+        pulses = int(signal.get("pulse_count") or 0)
+        penalty = min(rep * 5, 80) + min(pulses * 2, 20)
+        return max(0, min(100, 100 - penalty))
     if name in STATIC_LIST_SCORES:
         flag = {
             "abuse_list": "is_abuse",
+            "ipsum": "is_listed",
             "dc_asn": "is_hosting",
             "vpn_asn": "is_vpn",
             "resproxy_asn": "is_proxy",
@@ -834,16 +913,20 @@ def save_rep_cache(cache: dict) -> None:
 def cached_signal(
     cache: dict, ip: str, source: str, now: float, ttl: int
 ) -> dict | None:
-    """Fresh cached signal for ``ip``/``source``, else ``None``."""
+    """Fresh cached signal for ``ip``/``source``, else ``None``.
+
+    Cache format: ``{ip: {source: {"ts": float, "data": dict}}}``.
+    Each source has its own timestamp for independent TTL tracking.
+    """
     if ttl <= 0:
         return None
-    entry = cache.get(ip)
-    if not entry:
+    entry = cache.get(ip, {})
+    src_entry = entry.get(source)
+    if not isinstance(src_entry, dict):
         return None
-    if (entry.get("ts") or 0) + ttl < now:
+    if (src_entry.get("ts") or 0) + ttl < now:
         return None
-    sig = entry.get("signals", {}).get(source)
-    return sig if isinstance(sig, dict) else None
+    return src_entry.get("data") if isinstance(src_entry.get("data"), dict) else None
 
 
 async def lookup_all_risk(
@@ -885,8 +968,8 @@ async def lookup_all_risk(
         )
         for ip, sig in res.items():
             put(name, ip, sig)
-            entry = cache.setdefault(ip, {"ts": now, "signals": {}})
-            entry["signals"][name] = sig
+            entry = cache.setdefault(ip, {})
+            entry[name] = {"ts": now, "data": sig}
 
     pacing = SOURCE_PACING
     api_tasks = []
@@ -923,6 +1006,12 @@ async def lookup_all_risk(
     if "whatismyip" in sources:
         w, d = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("whatismyip", whatismyip_lookup_sync, workers=w, delay=d))
+    if "blackbox" in sources:
+        w, d = pacing.get("blackbox", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("blackbox", blackbox_lookup_sync, workers=w, delay=d))
+    if "otx" in sources:
+        w, d = pacing.get("otx", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("otx", otx_lookup_sync, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "torlist" in sources:
@@ -930,6 +1019,11 @@ async def lookup_all_risk(
         for ip in uniq:
             if ip in tor:
                 put("torlist", ip, {"is_tor": True})
+    if "ipsum" in sources:
+        ipsum_set = await fetch_ipsum_list()
+        for ip in uniq:
+            if ip in ipsum_set:
+                put("ipsum", ip, {"is_listed": True})
     static = await fetch_static_lists(sources)
     for ip in uniq:
         if ip in static["abuse_list"]:
@@ -944,11 +1038,15 @@ async def lookup_all_risk(
         if asn in static["resproxy_asn"]:
             put("resproxy_asn", ip, {"is_proxy": True, "asn": asn})
     if cache_ttl:
-        pruned = {
-            ip: entry
-            for ip, entry in cache.items()
-            if entry.get("ts", 0) + cache_ttl >= now
-        }
+        pruned = {}
+        for ip, entry in cache.items():
+            fresh = {}
+            for src, src_entry in entry.items():
+                if isinstance(src_entry, dict) and \
+                   (src_entry.get("ts") or 0) + cache_ttl >= now:
+                    fresh[src] = src_entry
+            if fresh:
+                pruned[ip] = fresh
         save_rep_cache(pruned)
     return risk_data
 
