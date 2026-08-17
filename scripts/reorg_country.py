@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reorganize country/set/port files by exit IP country.
 
-Reads ``data/valid/ipinfo.json`` (written by ``quality_check.py``) and moves
+Reads ``data/quality/ipinfo.json`` (written by ``quality_check.py``) and moves
 proxy lines whose exit-IP country differs from the listed country (``#CC``)
 to the exit country directory.  The line format becomes ``#<IC>→<OC>`` where
 IC is the listed country and OC is the exit country; if ``→`` is already
@@ -32,6 +32,7 @@ from pathlib import Path
 
 from common import (
     COUNTRIES_DIR,
+    DATA_DIR,
     IPINFO_FILE,
     VALID_DIR,
     line_to_key,
@@ -187,17 +188,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=VALID_DIR.parent,
+        default=DATA_DIR,
         help="Data root (default: data/)",
     )
     parser.add_argument(
         "--ipinfo",
         type=Path,
         default=None,
-        help="Path to ipinfo.json (default: <data-dir>/valid/ipinfo.json)",
+        help="Path to ipinfo.json (default: <data-dir>/quality/ipinfo.json)",
     )
     args = parser.parse_args(argv)
-    ipinfo_path = args.ipinfo or (args.data_dir / "valid" / "ipinfo.json")
+    ipinfo_path = args.ipinfo or (args.data_dir / "quality" / "ipinfo.json")
     moved = reorganize(ipinfo_path, args.data_dir)
     return 0
 

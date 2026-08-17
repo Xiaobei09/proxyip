@@ -6,7 +6,7 @@
 
 - ``data/valid/all_ipv4.txt``  — 出口为 IPv4 的代理清单（双栈代理同时计入）
 - ``data/valid/all_ipv6.txt``  — 出口为 IPv6 的代理清单（双栈代理同时计入）
-- ``data/valid/exit_family.json`` — 逐条检测明细（keyed，``{"proxies": {...}}``）
+- ``data/quality/exit_family.json`` — 逐条检测明细（keyed，``{"proxies": {...}}``）
 
 并在 ``all.txt`` / ``all_ltd.txt`` 对应行追加 ``-V4`` / ``-V6`` / ``-DS`` 备注
 （幂等，与 ``quality_check`` 已有的 ``DS``/``V6`` token 约定一致）。
@@ -17,7 +17,7 @@
 家族判定：仅 v4 → ``ipv4``；仅 v6 → ``ipv6``；双通 → ``dual``；探测全失败 →
 ``unknown``（不入任何分离清单）。纯标准库，ThreadPoolExecutor 并发。
 
-交叉验证：若 ``data/upstream_meta.json`` 存在（由 ``download_proxies.py`` 从上游
+交叉验证：若 ``data/quality/upstream_meta.json`` 存在（由 ``download_proxies.py`` 从上游
 ``all.json`` 生成），逐条对照上游记录的真实出口 ``clientIp``，在
 ``exit_family.json`` 中写入 ``upstream_client_ip`` / ``upstream_family`` /
 ``upstream_match`` 字段并输出命中统计；文件缺失时静默跳过，不降级实时探测。
@@ -35,8 +35,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
+    EXIT_FAMILY_FILE,
     UA,
-    VALID_DIR,
+    UPSTREAM_META_FILE,
+    VALID_ALL_FILE,
+    VALID_ALL_IPV4_FILE,
+    VALID_ALL_IPV6_FILE,
+    VALID_ALL_LTD_FILE,
     _SSL_CTX,
     build_request,
     has_token,
@@ -44,7 +49,6 @@ from common import (
     line_to_key,
     load_methods,
     load_sample,
-    OUT_DIR,
     parse_headers,
     parse_ltd_line,
     write_json,
@@ -52,11 +56,7 @@ from common import (
     _note,
 )
 
-DEFAULT_SOURCE = VALID_DIR / "all.txt"
-ALL_V4_FILE = VALID_DIR / "all_ipv4.txt"
-ALL_V6_FILE = VALID_DIR / "all_ipv6.txt"
-EXIT_FAMILY_FILE = VALID_DIR / "exit_family.json"
-UPSTREAM_META_FILE = OUT_DIR / "upstream_meta.json"
+DEFAULT_SOURCE = VALID_ALL_FILE
 
 WORKERS_DEFAULT = 16
 TIMEOUT_DEFAULT = 10
@@ -284,8 +284,8 @@ def write_lines(path: Path, lines: list) -> None:
 
 def annotate_source_files(families: dict, source: Path) -> None:
     """给 all.txt / all_ltd.txt 幂等追加家族 token。"""
-    targets = [VALID_DIR / "all.txt", VALID_DIR / "all_ltd.txt"]
-    if source != VALID_DIR / "all.txt" and source != VALID_DIR / "all_ltd.txt":
+    targets = [VALID_ALL_FILE, VALID_ALL_LTD_FILE]
+    if source != VALID_ALL_FILE and source != VALID_ALL_LTD_FILE:
         targets.append(source)
     for path in targets:
         if not path.exists():
@@ -365,8 +365,8 @@ def main(argv=None) -> int:
         for key, res in results.items()
     }
     write_json(EXIT_FAMILY_FILE, keyed_json(entries))
-    write_lines(ALL_V4_FILE, v4_lines)
-    write_lines(ALL_V6_FILE, v6_lines)
+    write_lines(VALID_ALL_IPV4_FILE, v4_lines)
+    write_lines(VALID_ALL_IPV6_FILE, v6_lines)
     annotate_source_files(families, args.source)
 
     from collections import Counter
