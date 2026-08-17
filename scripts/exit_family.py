@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
+    UA,
     VALID_DIR,
     build_request,
     has_token,
@@ -58,8 +59,6 @@ UPSTREAM_META_FILE = OUT_DIR / "upstream_meta.json"
 WORKERS_DEFAULT = 16
 TIMEOUT_DEFAULT = 10
 
-UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-
 TRACE_HOST = "cloudflare.com"
 TRACE_PATH = "/cdn-cgi/trace"
 
@@ -80,7 +79,7 @@ def _read_until(sock: socket.socket, delim: bytes, cap: int) -> bytes:
     return data
 
 
-def read_http_response_sync(sock: socket.socket, cap: int):
+def read_http_response_sync(sock: socket.socket, cap: int) -> tuple[int | None, dict, bytes]:
     """同步版 HTTP 响应读取 → ``(status, headers, body)``。"""
     raw = _read_until(sock, b"\r\n\r\n", 65536)
     if b"\r\n\r\n" not in raw:
@@ -123,7 +122,7 @@ def _read_chunked_sync(sock: socket.socket, cap: int, start: int) -> bytes:
     return body
 
 
-def request_tls_sni(ip: str, port: str, host: str, path: str, timeout: float):
+def request_tls_sni(ip: str, port: str, host: str, path: str, timeout: float) -> tuple[int | None, dict, bytes]:
     """直连 TLS（``host`` 为 SNI）→ 返回 ``(status, headers, body)``。"""
     raw = None
     try:
@@ -177,7 +176,7 @@ def tls_exit(ip: str, port: str, timeout: float) -> dict:
     return {"status": "no_ip", "family": "unknown", "ip": None}
 
 
-def check_one(item, methods: dict, timeout: float):
+def check_one(item, methods: dict, timeout: float) -> dict:
     line, key, ip, port, cc = item
     method = methods.get(key, "tls")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -59,7 +59,7 @@ def now_ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def parse_ltd_line(line: str):
+def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
     """``ip:port#<flag><cc>-...`` -> ``(key, ip, port, cc)`` or ``None``.
 
     The pseudo-country ``ALL`` (unknown entry country, 3 letters) is kept
@@ -89,7 +89,7 @@ def line_to_key(line: str) -> str | None:
     return parsed[0] if parsed else None
 
 
-def parse_line(line: str):
+def parse_line(line: str) -> tuple[str, str, str, str, str] | None:
     """``ip:port#<cc>-<note>`` -> ``(key, ip, port, cc, note)`` or ``None``.
 
     统一解析入口：地址、国家码与备注段一次取齐；``key`` 由

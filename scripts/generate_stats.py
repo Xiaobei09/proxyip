@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import OUT_DIR
+from common import OUT_DIR, now_ts
 
 WIDTH = 800
 HEIGHT = 300
@@ -70,10 +70,6 @@ class Series:
     values: list[float]
     dash: str = ""
     axis: str = "l"
-
-
-def now_ts() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def esc(text: object) -> str:

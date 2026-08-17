@@ -360,7 +360,6 @@ def merge_by_port(base: dict, extra: dict) -> dict:
         if not base[port]["ALL"]:
             del base[port]["ALL"]
     return base
-    return base
 
 
 def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> dict:
