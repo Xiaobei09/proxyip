@@ -1,0 +1,87 @@
+name: Annotate and classify
+
+on:
+  workflow_run:
+    workflows: ["Quality check"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: annotate-classify
+  cancel-in-progress: true
+
+jobs:
+  annotate:
+    name: Suffix filling & node classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Annotate and classify
+        run: python scripts/annotate_classify.py
+
+      - name: Generate stats and chart
+        run: python scripts/generate_stats.py
+
+      - name: Show summary
+        run: |
+          echo "Annotated lines:"
+          wc -l data/valid/all.txt
+          echo "IP type distribution:"
+          grep -oP '(?<=-)(DC|RES|MOB|PROXY)(?=-|$)' data/valid/all_ltd.txt 2>/dev/null | sort | uniq -c | sort -rn || true
+          echo "Speed tier distribution:"
+          grep -oP '(?<=-)(fast|mid|slow)(?=-|$)' data/valid/all_ltd.txt 2>/dev/null | sort | uniq -c | sort -rn || true
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -Af data/ ':(exclude)data/raw' \
+            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' \
+            ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
+            ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' \
+            ':(exclude)data/history.jsonl' \
+            ':(exclude)data/valid/index.json' ':(exclude=data/valid/speed.json)' \
+            ':(exclude=data/valid/meta.json)' ':(exclude=data/valid/history.jsonl)'
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Pushed successfully"
+              exit 0
+            fi
+            echo "Push attempt $i failed, reapplying local data on origin/main..."
+            git fetch origin main || { sleep 5; continue; }
+            git reset --mixed origin/main
+            git add -Af data/ ':(exclude)data/raw' \
+              ':(exclude)data/all.txt' ':(exclude=data/all_ltd.txt' \
+              ':(exclude)data/countries' ':(exclude=data/ports' ':(exclude)data/sets' \
+              ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' \
+              ':(exclude)data/history.jsonl' \
+              ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' \
+              ':(exclude)data/valid/meta.json' ':(exclude=data/valid/history.jsonl)'
+            if git diff --cached --quiet; then
+              echo "No changes to push"
+              exit 0
+            fi
+            git commit -m "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          done
+          echo "Push failed after 5 attempts"
+          exit 1
