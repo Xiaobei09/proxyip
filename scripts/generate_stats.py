@@ -4,19 +4,17 @@
 Reads ``data/history.jsonl`` and ``data/valid/history.jsonl`` plus
 ``data/valid/meta.json`` and writes ``data/stats.json`` together with:
 
-- ``chart.svg``           unique / alive trend (time-aligned lines)
-- ``chart_country.svg``   alive proxies per country (horizontal bars, top 15)
-- ``chart_port.svg``      alive proxies per port (vertical bars)
-- ``chart_alive_rate.svg`` alive rate + dead (dual-axis lines)
-- ``chart_churn.svg``     added / removed per update (grouped bars)
-- ``chart_combo.svg``     dual-axis composite trend (unique/alive + rate)
-- ``chart_latency.svg``   latency distribution (vertical bars)
-- ``chart_speed.svg``     download speed distribution (vertical bars, MB/s)
-- ``chart_streaming.svg`` streaming ok/blocked/error per service (stacked bars)
-- ``chart_sets.svg``      alive proxies per named set (horizontal bars)
-- ``chart_cn.svg``        mainland-China reachability verdicts (horizontal bars)
-- ``chart_family.svg``    actual exit IP family distribution (horizontal bars)
-- ``chart_rep.svg``       reputation score distribution (vertical bars)
+- ``chart_combo.svg``        proxy count & alive rate (dual-axis lines)
+- ``chart_country.svg``      alive proxies per country (horizontal bars, top 15)
+- ``chart_port.svg``         alive proxies per port (vertical bars)
+- ``chart_churn.svg``        added / removed per update (grouped bars)
+- ``chart_latency_speed.svg`` latency & speed distribution (dual-panel bars)
+- ``chart_streaming.svg``    streaming ok/blocked/error per service (stacked bars)
+- ``chart_sets.svg``         alive proxies per named set (horizontal bars)
+- ``chart_cn.svg``           mainland-China reachability verdicts (horizontal bars)
+- ``chart_family.svg``       actual exit IP family distribution (horizontal bars)
+- ``chart_source_avail.svg`` IP source coverage + sources-per-proxy (composite)
+- ``chart_rep.svg``          reputation score distribution (vertical bars)
 
 Line charts share a real-time x axis (series lacking usable timestamps fall
 back to index spacing), zoom each y-axis to its data range so small variations

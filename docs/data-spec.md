@@ -103,8 +103,6 @@ CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅�
 ```bash
 python scripts/validate_proxies.py                    # 验证全部
 python scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
-python scripts/validate_proxies.py                    # 验证全部（默认不设限）
-python scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
 python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ```
 
