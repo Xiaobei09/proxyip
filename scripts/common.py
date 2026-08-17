@@ -78,6 +78,7 @@ UA = (
 
 
 def now_ts() -> str:
+    """Return current UTC timestamp in ISO-8601 format (``YYYY-MM-DDTHH:MM:SSZ``)."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -107,6 +108,7 @@ def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
 
 
 def line_to_key(line: str) -> str | None:
+    """Extract the ``ip:port#CC`` key from a proxy line, or ``None``."""
     parsed = parse_ltd_line(line)
     return parsed[0] if parsed else None
 
@@ -126,7 +128,7 @@ def parse_line(line: str) -> tuple[str, str, str, str, str] | None:
 
 
 def load_methods() -> dict:
-    """``entry`` -> ``"tls"`` from ``index.json``."""
+    """Return ``{key: method}`` mapping from ``index.json`` (e.g. ``"tls"``)."""
     if not INDEX_FILE.exists():
         return {}
     try:
@@ -137,6 +139,7 @@ def load_methods() -> dict:
 
 
 def build_request(method: str, path: str, host: str) -> bytes:
+    """Build a raw HTTP/1.1 request line + headers as bytes."""
     lines = [
         f"{method} {path} HTTP/1.1",
         f"Host: {host}",
@@ -167,6 +170,7 @@ def parse_headers(raw: bytes) -> tuple[int | None, dict]:
 
 
 def write_json(path: Path, data: dict) -> None:
+    """Atomically write ``data`` as compact JSON (skip if content unchanged)."""
     content = json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
     if path.exists() and path.read_text(encoding="utf-8") == content:
         return
@@ -192,6 +196,7 @@ def write_text_if_changed(path: Path, content: str) -> bool:
 
 
 def keyed_json(entries: dict) -> dict:
+    """Wrap proxy entries in ``{"proxies": entries}`` format."""
     return {"proxies": entries}
 
 

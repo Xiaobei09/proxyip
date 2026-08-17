@@ -18,6 +18,7 @@
 ![Mainland China reachability](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_cn.svg)
 ![Exit IP family](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_family.svg)
 ![IP source availability](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_source_avail.svg)
+![IP source stats](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_source_stats.svg)
 ![Reputation score](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/chart_rep.svg)
 
 ## 功能特性
@@ -160,7 +161,7 @@ data/valid/all_ipv6.txt                出口为 IPv6 的代理清单（exit-fam
 data/valid/exit_family.json            实际出口家族明细（keyed，含上游交叉验证，exit-family CI）
 data/upstream_meta.json               上游 all.json 逐 IP 元数据（真实出口 clientIp / ASN / 地理 / colo）
 data/diff/latest.json                  最近一次更新差异（added/removed）
-data/diff/<时间戳>.json                按次归档的差异（最多 500 份）
+data/diff/<时间戳>.json                按次归档的差异（最多 50 份）
 data/stats.json                        统计汇总（供徽章与外部消费）
 data/chart_combo.svg                   代理计数 + 存活率双轴折线图
 data/chart_country.svg                 存活代理按国家 top-15 条形图
