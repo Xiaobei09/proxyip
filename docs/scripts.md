@@ -27,12 +27,11 @@
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--source` | 输入代理列表 | `data/all.txt` |
-| `--host` / `--target-port` | CONNECT 目标 | `cdnjs.cloudflare.com` / `443` |
 | `--sni` | TLS 握手 SNI | `cdnjs.cloudflare.com` |
-| `--speed-host` / `--speed-path` | 测速下载主机 / 路径 | `cdnjs.cloudflare.com` / `/ajax/libs/three.js/r128/three.min.js` |
-| `--speed-bytes` | 测速单次读取字节上限 | 262144 |
+| `--speed-host` / `--speed-path` | 测速下载主机 / 路径 | `cdnjs.cloudflare.com` / `/ajax/libs/three.js/r128/three.js` |
+| `--speed-bytes` | 测速单次读取字节上限 | 1048576 |
 | `--speed-timeout` | 测速单次时长上限（秒） | 5 |
-| `--speed-workers` | 同时进行的下载测速并发上限 | 10 |
+| `--speed-workers` | 同时进行的下载测速并发上限 | 30 |
 | `--no-speed` | 跳过速度测试（`_ltd` 回退按延迟） | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 5 |
 | `-w, --workers` | asyncio 并发上限 | 500 |
@@ -63,6 +62,7 @@
 | `chart_cn.svg` | 大陆连通性 verdict 分布条形图 |
 | `chart_family.svg` | 实际出口 IP 家族分布条形图 |
 | `chart_source_avail.svg` | IP 来源覆盖率 + 每代理源数量分布 |
+| `chart_source_stats.svg` | 每下载来源 IP 数量与重叠分布 |
 | `chart_rep.svg` | 信誉分分布条形图 |
 
 ### `scripts/quality_check.py`
@@ -78,13 +78,13 @@
 | `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 6 |
 | `--read-cap` | 单次响应读取上限（字节） | 524288 |
-| `-w, --workers` | asyncio 并发上限 | 40 |
+| `-w, --workers` | asyncio 并发上限 | 60 |
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 
@@ -92,14 +92,17 @@
 
 | 源 | 权重 | 说明 |
 |---|---|---|
-| `netcoffee` | 30 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
-| `ncgy` | 20 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
+| `netcoffee` | 20 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
+| `ncgy` | 10 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
 | `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10；`countryCode` 存在即计入 |
-| `ipquery` | 10 | `api.ipquery.io/{ip}`，免 key；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
-| `ffraud` | 10 | `api.ffraud.com/public/ip/{ip}`，免 key；`fraud_score` 直用，或 tor/vpn/proxy/hosting/abuser/recent_abuse 罚分（取较大者） |
+| `ipquery` | 12 | `api.ipquery.io/{ip}`，免 key；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
+| `ffraud` | 12 | `api.ffraud.com/public/ip/{ip}`，免 key；`fraud_score` 直用，或 tor/vpn/proxy/hosting/abuser/recent_abuse 罚分（取较大者） |
+| `blackbox` | 10 | `blackbox.ipinfo.app/{ip}`，免 key；`abuse`/`tor`/`vpn`/`proxy`/`datacenter` 标志罚分 |
+| `otx` | 8 | `otx.alienvault.com/api/v1/indicators/IPv4/{ip}/general`，免 key；`reputation` 与 `threat_score` 综合 |
+| `ipsum` | 8 | `ipsum.ai/api/{ip}`，免 key；`abuse Confidence Score` 直用 |
 | `ipapi_is` | 8 | `api.ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
 | `ipdata` | 8 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
-| `whatismyip` | 5 | `whatismyip.ai/api/lookup/{ip}`，免 key；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
+| `whatismyip` | 3 | `whatismyip.ai/api/lookup/{ip}`，免 key；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
 | `dc_asn` | 5 | iplogs `datacenter-asns.csv` 静态机房 ASN 表，出口 `asn` 命中即 -15（fail-open） |
 | `abuse_list` | 5 | FireHOL `firehol_abusers_1d` 静态滥用 IP/CIDR 表，命中即 -40（fail-open） |
 | `torlist` | 5 | 官方 Tor 出口列表（`check.torproject.org/exit-addresses` + `dan.me.uk/torlist`），命中 -25 |
