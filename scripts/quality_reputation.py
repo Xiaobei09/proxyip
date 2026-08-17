@@ -37,12 +37,12 @@ CACHEABLE_SOURCES = frozenset((
     "whatismyip",
 ))
 NETCOFFEE_URL = "https://ip.net.coffee/api/iprisk/{ip}"
-NETCOFFEE_TIMEOUT = 8
+NETCOFFEE_TIMEOUT = 12
 NCGY_URL = "https://ip.nc.gy/json?ip={ip}"
-NCGY_TIMEOUT = 8
+NCGY_TIMEOUT = 12
 IPDATA_URL = "https://ipdata.info/json/{ip}"
 IPDATA_TIMEOUT = 8
-IPDATA_CAP = 50
+IPDATA_CAP = 200
 GETIPINTEL_URL = (
     "https://check.getipintel.net/check.php?ip={ip}"
     "&contact={email}&flags=m"
@@ -148,12 +148,12 @@ DEFAULT_REP_SOURCES = (
     "abuse_list", "torlist", "vpn_asn", "resproxy_asn",
 )
 SOURCE_PACING = {
-    "netcoffee": (6, 0.25),
-    "ncgy": (6, 0.25),
-    "ipapi_is": (6, 0.25),
-    "ipquery": (4, 0.25),
-    "ffraud": (4, 0.25),
-    "whatismyip": (4, 0.25),
+    "netcoffee": (10, 0.15),
+    "ncgy": (10, 0.15),
+    "ipapi_is": (8, 0.2),
+    "ipquery": (6, 0.2),
+    "ffraud": (6, 0.2),
+    "whatismyip": (6, 0.2),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -276,7 +276,7 @@ def ncgy_lookup_sync(ip: str) -> dict | None:
         "is_anonymous": bool(proxy.get("is_anonymous")),
     }
     if not any(out.values()):
-        return None
+        return {"clean": True}
     return out
 
 
@@ -542,6 +542,7 @@ async def batch_sync(
     cap: int = 0,
     workers: int = REP_WORKERS,
     delay: float = REP_DELAY,
+    retries: int = 1,
 ) -> dict:
     """Run ``fn(ip)`` over unique IPs with a concurrency semaphore + pacing."""
     items = list(dict.fromkeys(ips))
@@ -549,6 +550,7 @@ async def batch_sync(
         items = items[:cap]
     sem = asyncio.Semaphore(workers)
     out: dict = {}
+    failed: list[str] = []
 
     async def work(ip: str) -> None:
         async with sem:
@@ -559,8 +561,17 @@ async def batch_sync(
         if res:
             out[ip] = res
             await asyncio.sleep(delay)
+        else:
+            failed.append(ip)
 
     await asyncio.gather(*(work(ip) for ip in items))
+    for _attempt in range(retries):
+        if not failed:
+            break
+        retry_list = list(failed)
+        failed.clear()
+        await asyncio.sleep(1.0)
+        await asyncio.gather(*(work(ip) for ip in retry_list))
     return out
 
 
@@ -875,39 +886,42 @@ async def lookup_all_risk(
             entry["signals"][name] = sig
 
     pacing = SOURCE_PACING
+    api_tasks = []
     if "netcoffee" in sources:
-        workers, delay = pacing.get("netcoffee", (REP_WORKERS, REP_DELAY))
-        await cached_batch("netcoffee", netcoffee_lookup_sync, workers=workers, delay=delay)
+        w, d = pacing.get("netcoffee", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("netcoffee", netcoffee_lookup_sync, workers=w, delay=d))
     if "ncgy" in sources:
-        workers, delay = pacing.get("ncgy", (REP_WORKERS, REP_DELAY))
-        await cached_batch("ncgy", ncgy_lookup_sync, workers=workers, delay=delay)
+        w, d = pacing.get("ncgy", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("ncgy", ncgy_lookup_sync, workers=w, delay=d))
     if "ipdata" in sources:
-        await cached_batch(
+        api_tasks.append(cached_batch(
             "ipdata", ipdata_lookup_sync, cap=IPDATA_CAP, workers=2, delay=0.8
-        )
+        ))
     if "getipintel" in sources:
         if args.getipintel_email:
             fn = lambda ip: getipintel_lookup_sync(ip, args.getipintel_email)
-            await cached_batch(
+            api_tasks.append(cached_batch(
                 "getipintel", fn, cap=GETIPINTEL_CAP, workers=1, delay=4
-            )
+            ))
         else:
             print(
                 "Warning: GETIPINTEL_EMAIL not set; skipping getipintel source",
                 file=sys.stderr,
             )
     if "ipapi_is" in sources:
-        workers, delay = pacing.get("ipapi_is", (REP_WORKERS, REP_DELAY))
-        await cached_batch("ipapi_is", ipapi_is_lookup_sync, workers=workers, delay=delay)
+        w, d = pacing.get("ipapi_is", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("ipapi_is", ipapi_is_lookup_sync, workers=w, delay=d))
     if "ipquery" in sources:
-        workers, delay = pacing.get("ipquery", (REP_WORKERS, REP_DELAY))
-        await cached_batch("ipquery", ipquery_lookup_sync, workers=workers, delay=delay)
+        w, d = pacing.get("ipquery", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("ipquery", ipquery_lookup_sync, workers=w, delay=d))
     if "ffraud" in sources:
-        workers, delay = pacing.get("ffraud", (REP_WORKERS, REP_DELAY))
-        await cached_batch("ffraud", ffraud_lookup_sync, workers=workers, delay=delay)
+        w, d = pacing.get("ffraud", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("ffraud", ffraud_lookup_sync, workers=w, delay=d))
     if "whatismyip" in sources:
-        workers, delay = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
-        await cached_batch("whatismyip", whatismyip_lookup_sync, workers=workers, delay=delay)
+        w, d = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("whatismyip", whatismyip_lookup_sync, workers=w, delay=d))
+    if api_tasks:
+        await asyncio.gather(*api_tasks)
     if "torlist" in sources:
         tor = await fetch_torlist()
         for ip in uniq:
