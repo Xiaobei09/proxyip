@@ -3,7 +3,7 @@ name: Quality check
 on:
   workflow_dispatch:
   schedule:
-    - cron: "23 */12 * * *"
+    - cron: "23 */4 * * *"
   workflow_run:
     workflows: ["Update proxy list"]
     types: [completed]
@@ -36,7 +36,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Deep quality check
-        run: python scripts/quality_check.py --time-budget 1800
+        run: python scripts/quality_check.py --time-budget 3600 --rep-cache-ttl 604800
 
       - name: Generate stats and chart
         run: python scripts/generate_stats.py
