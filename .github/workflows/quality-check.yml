@@ -2,8 +2,6 @@ name: Quality check
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "23 */4 * * *"
   workflow_run:
     workflows: ["Update proxy list"]
     types: [completed]
@@ -27,15 +25,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Skip if superseded
+      - name: Skip if superseded or no data change
         id: gate
         run: |
+          # 1. 竞态检查：有无正在运行/排队的同 workflow run
           LATEST=$(gh run list --workflow="${{ github.workflow }}" \
             --json=databaseId,status \
-            --jq '[.[] | select(.status == "in_progress")] | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
           if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 2. 触发者成功检查
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+            if [ "$CONCLUSION" != "success" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Triggering run concluded: $CONCLUSION, skipping"
+              exit 0
+            fi
+          fi
+          # 3. 数据变更检查：IP 数据无变化则跳过
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            LAST_SHA=$(git log --oneline --all -1 --grep="quality check" --format=%h 2>/dev/null || echo "")
+            if [ -n "$LAST_SHA" ] && git diff --quiet "$LAST_SHA" -- data/valid/all.txt; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::No IP data changes since last quality check, skipping"
+            fi
           fi
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,6 +75,10 @@ jobs:
       - name: Reorganize by exit country
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/reorg_country.py
+
+      - name: Annotate and classify
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/annotate_classify.py
 
       - name: Generate stats and chart
         if: steps.gate.outputs.skip != 'true'
@@ -88,7 +110,7 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "chore(data): streaming & exit IP quality check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git commit -m "chore(data): quality check + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           for i in 1 2 3 4 5; do
             if git push; then
               echo "Pushed successfully"
@@ -96,23 +118,18 @@ jobs:
             fi
             echo "Push attempt $i failed, reapplying local data on origin/main..."
             git fetch origin main || { sleep 5; continue; }
-            # data/ 每次全量重生成，last-writer-wins 安全：reset --mixed 把 HEAD 和
-            # index 对齐到最新远端（工作区保留本次生成的数据），再重新 stage + commit
-            # 为直接子提交，天然避免 -X theirs 无法解决的 modify/delete 等一切冲突。
-            # 必须用 --mixed（而非 --soft）：--soft 只动 HEAD 不动 index，陈旧 checkout
-            # 的 index 会连非 data 文件一起带进数据提交，回退他人已推送的代码改动。
             git reset --mixed origin/main
             git add -Af data/ ':(exclude)data/raw' \
-            ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
-            ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
-            ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
-            ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt' \
-            ':(exclude)data/valid/exit_family.json' ':(exclude)data/valid/all_ipv4.txt' ':(exclude)data/valid/all_ipv6.txt'
+              ':(exclude)data/all.txt' ':(exclude)data/all_ltd.txt' ':(exclude)data/countries' ':(exclude)data/ports' ':(exclude)data/sets' \
+              ':(exclude)data/upstream_meta.json' ':(exclude)data/diff' ':(exclude)data/history.jsonl' \
+              ':(exclude)data/valid/index.json' ':(exclude)data/valid/speed.json' ':(exclude)data/valid/meta.json' ':(exclude)data/valid/history.jsonl' \
+              ':(exclude)data/valid/china.json' ':(exclude)data/valid/all_cn.txt' \
+              ':(exclude)data/valid/exit_family.json' ':(exclude)data/valid/all_ipv4.txt' ':(exclude)data/valid/all_ipv6.txt'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0
             fi
-            git commit -m "chore(data): streaming & exit IP quality check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git commit -m "chore(data): quality check + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           done
           echo "Push failed after 5 attempts"
           exit 1
