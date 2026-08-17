@@ -259,11 +259,14 @@ class TestAnnotations(unittest.TestCase):
 class TestLoadCnPool(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cc_pool_"))
-        self._valid = cc.VALID_DIR
-        cc.VALID_DIR = self.tmp
+        self._all_file = cc.VALID_ALL_FILE
+        self._ltd_file = cc.VALID_ALL_LTD_FILE
+        cc.VALID_ALL_FILE = self.tmp / "all.txt"
+        cc.VALID_ALL_LTD_FILE = self.tmp / "all_ltd.txt"
 
     def tearDown(self):
-        cc.VALID_DIR = self._valid
+        cc.VALID_ALL_FILE = self._all_file
+        cc.VALID_ALL_LTD_FILE = self._ltd_file
 
     def test_prefers_all_txt(self):
         (self.tmp / "all_ltd.txt").write_text("1.0.0.1:80#US-1ms\n", encoding="utf-8")

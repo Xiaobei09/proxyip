@@ -5,7 +5,7 @@ The primary source is the upstream ``all.json`` payload: a JSON array of
 entries shaped ``{"ip", "port": [...], "meta": {clientIp, country, asn, ...}}``.
 Entries are expanded into ``ip:port#country`` lines (e.g. ``1.2.3.4:443#US``)
 and the per-IP metadata (actual exit ``clientIp``, ASN, geo, colo) is persisted
-into ``data/upstream_meta.json`` for downstream consumers (e.g. the exit-family
+into ``data/quality/upstream_meta.json`` for downstream consumers (e.g. the exit-family
 cross-check in ``exit_family.py``).
 
 If ``all.json`` is unreachable, the legacy zip archive of ``<port>/<country>.txt``
@@ -17,7 +17,7 @@ tag get one via a best-effort ``ip-api.com/batch`` lookup (``#ALL`` otherwise).
 Per-source failures are non-fatal and never break a scheduled run.
 
 Each run also archives the added/removed entries versus the previous committed
-list into ``data/diff/`` and records the change counts in ``data/history.jsonl``.
+list into ``data/diff/`` and records the change counts in ``data/quality/history.jsonl``.
 """
 
 import argparse
@@ -36,20 +36,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common import (
+    ALL_FILE,
+    ALL_LTD_FILE,
     COUNTRIES_DIR,
-    DIFF_DIR,
+    DOWNLOAD_DIR,
     HISTORY_FILE,
     IPAPI_BATCH_URL,
     IPAPI_BATCH_SIZE,
     IPAPI_BATCH_DELAY,
     MAX_DIFF_FILES,
     MAX_HISTORY_RECORDS,
-    OUT_DIR,
     PER_COUNTRY_LIMIT,
     PORTS_DIR,
     RAW_DIR,
     ROOT,
     SETS_DIR,
+    SOURCE_STATS_FILE,
+    UPSTREAM_META_FILE,
     write_text_if_changed,
 )
 
@@ -455,7 +458,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         {e for entries in by_country.values() for e in entries} | all_only,
         key=ip_sort_key,
     )
-    write_text_if_changed(OUT_DIR / "all.txt", "\n".join(all_entries) + "\n")
+    write_text_if_changed(ALL_FILE, "\n".join(all_entries) + "\n")
     set_counts["all"] = len(all_entries)
     if per_country_limit > 0:
         all_ltd_entries = {
@@ -465,7 +468,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         }
         all_ltd_entries.update(sorted(all_only, key=ip_sort_key)[:per_country_limit])
         write_text_if_changed(
-            OUT_DIR / "all_ltd.txt", "\n".join(sorted(all_ltd_entries, key=ip_sort_key)) + "\n"
+            ALL_LTD_FILE, "\n".join(sorted(all_ltd_entries, key=ip_sort_key)) + "\n"
         )
         set_counts["all_ltd"] = len(all_ltd_entries)
     stats["__total__"] = total
@@ -492,7 +495,7 @@ def print_stats(stats: dict) -> None:
 def load_previous_all() -> list[str] | None:
     try:
         proc = subprocess.run(
-            ["git", "-C", str(ROOT), "show", "HEAD:data/all.txt"],
+            ["git", "-C", str(ROOT), "show", "HEAD:data/download/all.txt"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -583,7 +586,7 @@ def write_upstream_meta(meta_map: dict) -> None:
     data JSON files).
     """
     write_text_if_changed(
-        OUT_DIR / "upstream_meta.json",
+        UPSTREAM_META_FILE,
         json.dumps(
             {"proxies": meta_map}, ensure_ascii=False, separators=(",", ":"), sort_keys=True
         )
@@ -854,7 +857,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Filled country for {moved} extra-source IPs via ip-api")
         all_ips = _collect_all_ips(by_port)
         source_stats = _build_source_stats(main_ips, source_ip_sets, all_ips)
-        src_stats_file = OUT_DIR / "source_stats.json"
+        src_stats_file = SOURCE_STATS_FILE
         write_text_if_changed(
             src_stats_file,
             json.dumps(

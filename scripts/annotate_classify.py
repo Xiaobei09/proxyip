@@ -2,8 +2,8 @@
 """Fill missing suffixes and add node classification tokens to proxy lines.
 
 Reads JSON data files (ipinfo.json, reputation.json, china.json,
-exit_family.json, streaming.json) and annotates all ``data/valid/*.txt``
-files with missing exit-country markers (→CC) and suffixes
+exit_family.json, streaming.json) from ``data/quality/`` and annotates all
+``data/valid/*.txt`` files with missing exit-country markers (→CC) and suffixes
 (CN, V4/V6, streaming, reputation) and classification tokens (IP type,
 speed tier).
 
@@ -24,6 +24,8 @@ from common import (
     SPEED_RE,
     LATENCY_RE,
     EXIT_REGION_RE,
+    DATA_DIR,
+    QUALITY_DIR,
     VALID_DIR,
     has_token,
     insert_exit_region,
@@ -188,18 +190,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--data-dir",
         type=Path,
-        default=VALID_DIR.parent,
+        default=DATA_DIR,
         help="data/ root (default: repo-root/data)",
     )
     args = ap.parse_args(argv)
     valid_dir = args.data_dir / "valid"
+    quality_dir = args.data_dir / "quality"
 
     # load data
-    ipinfo = read_json(valid_dir / "ipinfo.json")
-    rep_data = read_json(valid_dir / "reputation.json")
-    china_data = read_json(valid_dir / "china.json")
-    family_data = read_json(valid_dir / "exit_family.json")
-    streaming_data = read_json(valid_dir / "streaming.json")
+    ipinfo = read_json(quality_dir / "ipinfo.json")
+    rep_data = read_json(quality_dir / "reputation.json")
+    china_data = read_json(quality_dir / "china.json")
+    family_data = read_json(quality_dir / "exit_family.json")
+    streaming_data = read_json(quality_dir / "streaming.json")
 
     # build maps
     china_set = _build_china_set(china_data)
