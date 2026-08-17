@@ -17,7 +17,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, _SSL_CTX, ...)
+from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...)
+from common import _SSL_CTX  # noqa: F401  (import * skips underscore-prefixed names)
 
 IPAPI_GET_URL = "http://ip-api.com/json/{ip}"
 IPAPI_FIELDS = (
