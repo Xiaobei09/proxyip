@@ -3,8 +3,9 @@
 
 Reads JSON data files (ipinfo.json, reputation.json, china.json,
 exit_family.json, streaming.json) and annotates all ``data/valid/*.txt``
-files with missing suffixes (CN, V4/V6, streaming, reputation) and
-classification tokens (IP type, speed tier).
+files with missing exit-country markers (→CC) and suffixes
+(CN, V4/V6, streaming, reputation) and classification tokens (IP type,
+speed tier).
 
 Output line format:
   ip:port#<flag><CC>[→<exit>]-<latency>ms[-<speed>MB/s][-<note>]-<type>-<tier>
@@ -25,6 +26,7 @@ from common import (
     EXIT_REGION_RE,
     VALID_DIR,
     has_token,
+    insert_exit_region,
     line_to_key,
     parse_line,
     read_json,
@@ -97,6 +99,21 @@ def _build_rep_map(data: dict) -> dict[str, int]:
     }
 
 
+def _build_exit_map(data: dict) -> dict[str, str]:
+    """``ipinfo.json`` → ``{key: exit_cc}`` for proxies where exit country
+    differs from the listed entry country."""
+    result: dict[str, str] = {}
+    for key, info in data.get("proxies", {}).items():
+        if not isinstance(info, dict):
+            continue
+        if info.get("country_match") is not False:
+            continue
+        exit_cc = info.get("country_code")
+        if exit_cc and len(exit_cc) == 2 and exit_cc.isalpha():
+            result[key] = exit_cc.upper()
+    return result
+
+
 def fill_and_classify(
     line: str,
     china_set: set[str],
@@ -104,6 +121,7 @@ def fill_and_classify(
     streaming_map: dict[str, dict],
     rep_map: dict[str, int],
     ip_type_map: dict[str, str],
+    exit_map: dict[str, str] | None = None,
 ) -> str:
     """Fill missing suffixes and append classification tokens."""
     parsed = parse_line(line)
@@ -114,6 +132,12 @@ def fill_and_classify(
     out = line
 
     # --- suffix filling ---
+
+    # exit country marker (→CC) — inserted right after entry CC, idempotent
+    if exit_map:
+        exit_cc = exit_map.get(key)
+        if exit_cc:
+            out = insert_exit_region(out, exit_cc)
 
     # CN token
     if key in china_set and not has_token(note, "CN"):
@@ -183,11 +207,12 @@ def main(argv: list[str] | None = None) -> int:
     streaming_map = _build_streaming_map(streaming_data)
     rep_map = _build_rep_map(rep_data)
     ip_type_map = _build_ip_type_map(ipinfo)
+    exit_map = _build_exit_map(ipinfo)
 
     print(
         f"Maps: cn={len(china_set)} family={len(family_map)} "
         f"streaming={len(streaming_map)} rep={len(rep_map)} "
-        f"ip_type={len(ip_type_map)}"
+        f"ip_type={len(ip_type_map)} exit={len(exit_map)}"
     )
 
     # collect and annotate
@@ -197,7 +222,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     total = annotate_files(
-        files, china_set, family_map, streaming_map, rep_map, ip_type_map
+        files, china_set, family_map, streaming_map, rep_map, ip_type_map,
+        exit_map,
     )
     print(f"Done: {len(files)} files, {total} lines updated")
     return 0

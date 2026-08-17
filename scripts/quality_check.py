@@ -234,18 +234,21 @@ def build_exits(results: dict, ipinfo: dict) -> dict[str, str]:
 
 
 def annotate_text(
-    text: str, annotations: dict, exits: dict | None = None
+    text: str, annotations: dict,
 ) -> tuple[str, bool]:
+    """Append ``-annotation`` tokens to proxy lines (streaming + reputation).
+
+    Exit-country markers (→CC) are filled by ``annotate_classify.py``
+    from ``ipinfo.json`` and are **not** handled here.
+    """
     out = []
     changed = False
-    exits = exits or {}
     for line in text.splitlines():
         if not line:
             continue
         key = line_to_key(line)
         ann = annotations.get(key) if key else None
-        exit_region = exits.get(key) if key else None
-        out_line = insert_exit_region(line, exit_region) if exit_region else line
+        out_line = line
         if ann and not out_line.rstrip().endswith("-" + ann):
             out_line = out_line + "-" + ann
         if out_line != line:
@@ -254,7 +257,8 @@ def annotate_text(
     return "\n".join(out) + "\n", changed
 
 
-def annotate_valid_files(annotations: dict, exits: dict | None = None) -> None:
+def annotate_valid_files(annotations: dict) -> None:
+    """Annotate ``all.txt``/``all_ltd.txt`` and sub-file trees with tokens."""
     files: list[Path] = [VALID_DIR / "all.txt", VALID_DIR / "all_ltd.txt"]
     for sub in ("countries", "sets"):
         files.extend(sorted((VALID_DIR / sub).glob("*/all.txt")))
@@ -264,7 +268,7 @@ def annotate_valid_files(annotations: dict, exits: dict | None = None) -> None:
         if not path.exists():
             continue
         text, changed = annotate_text(
-            path.read_text(encoding="utf-8"), annotations, exits
+            path.read_text(encoding="utf-8"), annotations,
         )
         if changed:
             tmp = path.with_suffix(path.suffix + ".tmp")
@@ -402,7 +406,7 @@ async def run(args: argparse.Namespace) -> int:
         write_json(ABUSE_FILE, keyed_json(abuse_map))
     meta = build_meta(results, ipinfo, streaming, abuse_map, rep_map)
     write_json(QUALITY_META_FILE, meta)
-    annotate_valid_files(annotations, build_exits(results, ipinfo))
+    annotate_valid_files(annotations)
 
     print(
         f"streaming_ok={meta['streaming_ok']} "
