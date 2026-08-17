@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import ipaddress
 import json
+import logging
 import re
 import sys
 import time
@@ -128,10 +129,10 @@ STATIC_LIST_SCORES = {
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 30,
-    "ncgy": 20,
+    "ncgy": 15,
     "ip-api": 15,
-    "ipquery": 10,
-    "ffraud": 10,
+    "ipquery": 12,
+    "ffraud": 12,
     "ipapi_is": 8,
     "ipdata": 8,
     "whatismyip": 5,
@@ -446,9 +447,9 @@ async def fetch_torlist() -> set[str]:
                     timeout=NETCOFFEE_TIMEOUT,
                 ).read().decode("utf-8", errors="replace")
             )
-        except Exception:
+        except Exception as exc:
+            logging.debug("netcoffee fetch %s: %s", ip, exc)
             return
-        for line in text.splitlines():
             if "ExitAddress" in line:
                 parts = line.split()
                 if len(parts) >= 2 and ":" not in parts[1]:
@@ -471,7 +472,8 @@ async def fetch_text_list(url: str) -> set[str]:
                 timeout=STATIC_LIST_TIMEOUT,
             ).read().decode("utf-8", errors="replace")
         )
-    except Exception:
+    except Exception as exc:
+        logging.debug("fetch_text_list %s: %s", url, exc)
         return out
     for line in text.splitlines():
         line = line.strip()
@@ -556,7 +558,8 @@ async def batch_sync(
         async with sem:
             try:
                 res = await asyncio.to_thread(fn, ip)
-            except Exception:
+            except Exception as exc:
+                logging.debug("batch_sync: %s failed: %s", ip, exc)
                 res = None
         if res:
             out[ip] = res
@@ -801,8 +804,8 @@ async def run_abuse(
             by_ip[ip] = await asyncio.to_thread(
                 abuse_lookup_sync, ip, args.abuse_service, args.abuse_key
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("abuse lookup %s: %s", ip, exc)
         await asyncio.sleep(0.3)
     abuse_map: dict[str, dict] = {}
     for key, info in ipinfo.items():
