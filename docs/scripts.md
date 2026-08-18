@@ -147,9 +147,9 @@
 
 ### `scripts/exit_family.py`
 
-实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条探测真实出口家族（统一 TLS trace）：
+实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
 
-- 直连 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判 v4/v6
+- 分别以 `socket.AF_INET`（IPv4）和 `socket.AF_INET6`（IPv6）各发起一次 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判定出口家族；两次均失败则尝试通用连接兜底
 
 家族判定：仅 v4 → `ipv4`；仅 v6 → `ipv6`；双通 → `dual`；探测全失败 → `unknown`。结果写入：
 

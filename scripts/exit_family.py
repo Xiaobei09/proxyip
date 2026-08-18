@@ -11,8 +11,10 @@
 并在 ``all.txt`` / ``all_ltd.txt`` 对应行追加 ``-V4`` / ``-V6`` / ``-DS`` 备注
 （幂等，与 ``quality_check`` 已有的 ``DS``/``V6`` token 约定一致）。
 
-所有代理均使用 TLS（Cloudflare 边缘）方法：直连 TLS + SNI →
-``cloudflare.com/cdn-cgi/trace``，取回显 ``ip=`` 判 v4/v6。
+所有代理使用 TLS（Cloudflare 边缘）方法，逐条做 **双栈探测**：
+分别以 ``socket.AF_INET``（IPv4）和 ``socket.AF_INET6``（IPv6）各发起一次
+TLS + SNI → ``cloudflare.com/cdn-cgi/trace``，取回显 ``ip=`` 判定出口家族。
+若两次均失败，尝试通用（不限地址族）连接兜底。
 
 家族判定：仅 v4 → ``ipv4``；仅 v6 → ``ipv6``；双通 → ``dual``；探测全失败 →
 ``unknown``（不入任何分离清单）。纯标准库，ThreadPoolExecutor 并发。
@@ -128,11 +130,22 @@ def _read_chunked_sync(sock: socket.socket, cap: int, start: int) -> bytes:
     return body
 
 
-def request_tls_sni(ip: str, port: str, host: str, path: str, timeout: float) -> tuple[int | None, dict, bytes]:
-    """直连 TLS（``host`` 为 SNI）→ 返回 ``(status, headers, body)``。"""
+def request_tls_sni(
+    ip: str, port: str, host: str, path: str, timeout: float,
+    family: int | None = None,
+) -> tuple[int | None, dict, bytes]:
+    """直连 TLS（``host`` 为 SNI）→ 返回 ``(status, headers, body)``。
+
+    *family* 可指定 ``socket.AF_INET`` / ``socket.AF_INET6`` 强制走对应栈。
+    """
     raw = None
     try:
-        raw = socket.create_connection((ip, int(port)), timeout=timeout)
+        if family is not None:
+            raw = socket.socket(family, socket.SOCK_STREAM)
+            raw.settimeout(timeout)
+            raw.connect((ip, int(port)))
+        else:
+            raw = socket.create_connection((ip, int(port)), timeout=timeout)
         with _SSL_CTX.wrap_socket(raw, server_hostname=host) as sock:
             sock.settimeout(timeout)
             sock.sendall(build_request("GET", path, host))
@@ -182,6 +195,16 @@ def tls_exit(ip: str, port: str, timeout: float) -> dict:
     return {"status": "no_ip", "family": "unknown", "ip": None}
 
 
+def _probe_one(ip: str, port: str, host: str, path: str, timeout: float,
+               family: int | None = None) -> str | None:
+    """单次探测：返回退出 IP 字符串，失败返回 ``None``。"""
+    status, _headers, body = request_tls_sni(ip, port, host, path, timeout, family)
+    if status != 200 or not body:
+        return None
+    exit_ip = parse_trace(body).get("ip") or ""
+    return exit_ip or None
+
+
 def check_one(item, methods: dict, timeout: float) -> dict:
     line, key, ip, port, cc = item
     method = methods.get(key, "tls")
@@ -194,11 +217,22 @@ def check_one(item, methods: dict, timeout: float) -> dict:
         "method": method,
         "ts": ts,
     }
-    res = tls_exit(ip, port, timeout)
+    # --- dual-stack probe: try v4 and v6 separately ---
+    exit_v4 = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout, socket.AF_INET)
+    exit_v6 = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout, socket.AF_INET6)
+    # Fallback: if neither specific probe succeeded, try generic
+    if not exit_v4 and not exit_v6:
+        generic = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout)
+        if generic:
+            if ":" in generic:
+                exit_v6 = generic
+            else:
+                exit_v4 = generic
+    family = classify_family(exit_v4, exit_v6)
     base.update(
-        family=res["family"],
-        exit_v4=res["ip"] if res["family"] == "ipv4" else None,
-        exit_v6=res["ip"] if res["family"] == "ipv6" else None,
+        family=family,
+        exit_v4=exit_v4,
+        exit_v6=exit_v6,
     )
     return key, base
 
