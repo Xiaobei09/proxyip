@@ -27,16 +27,6 @@ REP_RISK_MEDIUM = 75
 
 REP_WORKERS = 10
 REP_DELAY = 0.15
-CACHEABLE_SOURCES = frozenset((
-    "netcoffee",
-    "ncgy",
-    "ipdata",
-    "getipintel",
-    "ipapi_is",
-    "ipquery",
-    "ffraud",
-    "whatismyip",
-))
 NETCOFFEE_URL = "https://ip.net.coffee/api/iprisk/{ip}"
 NETCOFFEE_TIMEOUT = 12
 NCGY_URL = "https://ip.nc.gy/json?ip={ip}"
@@ -171,6 +161,7 @@ SOURCE_PACING = {
     "ffraud": (6, 0.2),
     "whatismyip": (6, 0.2),
     "proxycheck": (8, 0.2),
+    "ip2location": (6, 0.2),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -522,14 +513,16 @@ def proxycheck_lookup_sync(ip: str) -> dict | None:
     info = data.get(ip) or {}
     if not isinstance(info, dict):
         return None
+    detections = info.get("detections") or {}
+    network = info.get("network") or {}
     return {
-        "is_proxy": bool(info.get("proxy")),
-        "is_vpn": bool(info.get("vpn")),
-        "is_tor": bool(info.get("tor")),
-        "is_hosting": bool(info.get("hosting")),
-        "is_scraper": bool(info.get("scraper")),
-        "risk": int(info.get("risk") or 0),
-        "type": info.get("type"),
+        "is_proxy": bool(detections.get("proxy")),
+        "is_vpn": bool(detections.get("vpn")),
+        "is_tor": bool(detections.get("tor")),
+        "is_hosting": bool(detections.get("hosting")),
+        "is_scraper": bool(detections.get("scraper")),
+        "risk": int(detections.get("risk") or 0),
+        "type": network.get("type"),
     }
 
 
