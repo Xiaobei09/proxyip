@@ -106,6 +106,8 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 | ipdata | 8 | 标志罚分 + `threat_score`：tor -45 / proxy -30 / vpn -25 / anonymous -10 |
 | whatismyip | 3 | `security.score` 直用或标志罚分（取较大者）：vpn -30 / proxy -25 / tor -45 / hosting -15 / blacklisted -30 |
 | getipintel | 5 | `100 - probability×100`（opt-in，需邮箱） |
+| proxycheck | 12 | `risk` score 直用或标志罚分（取较大者）：proxy -45 / vpn -45 / tor -45 / hosting -30 / scraper -20 |
+| ip2location | 5 | `is_proxy` 标志 -30 |
 
 #### 静态列表源（每 run 重拉）
 
@@ -115,7 +117,6 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 | dc_asn | 5 | 85（机房/数据中心 ASN） |
 | vpn_asn | 3 | 70（VPN 服务商 ASN） |
 | resproxy_asn | 2 | 75（住宅代理骨干 ASN） |
-| torlist | 5 | 25（Tor 出口节点） |
 
 未命中 → 该项不计入合分（不误判满分）。
 

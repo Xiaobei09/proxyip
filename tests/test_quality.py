@@ -418,8 +418,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(
             qc.source_score(
                 "ipdata", {"security": {"tor": True}, "threat_score": 30}), 25)
-        self.assertEqual(qc.source_score("torlist", {"is_tor": True}), 25)
-        self.assertIsNone(qc.source_score("torlist", {"is_tor": False}))
         self.assertEqual(
             qc.source_score("getipintel", {"probability": 0.3}), 70)
         self.assertIsNone(qc.source_score("getipintel", {"probability": -3}))

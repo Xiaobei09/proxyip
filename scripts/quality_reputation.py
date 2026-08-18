@@ -2,7 +2,7 @@
 """Multi-source IP reputation / risk scoring (extracted from quality_check.py).
 
 Each source yields a 0-100 cleanliness signal merged by ``REPUTATION_WEIGHTS``
-into a single reputation score; static lists (torlist / FireHOL abuse / iplogs
+into a single reputation score; static lists (FireHOL abuse / iplogs
 ASN lists) are re-fetched every run, per-IP API signals are cached in
 ``reputation_cache.json`` with a TTL. Imported by ``quality_check``.
 """
@@ -68,10 +68,6 @@ RESPROXY_ASN_URL = "https://iplogs.com/data/residential-proxy-backbones.csv"
 STATIC_LIST_TIMEOUT = 15
 ABUSER_SCORE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 ABUSER_SCORE_THRESHOLD = 0.1
-TORLIST_URLS = (
-    "https://check.torproject.org/exit-addresses",
-    "https://www.dan.me.uk/torlist/",
-)
 IPAPI_PROXY_PENALTY = 25
 IPAPI_HOSTING_PENALTY = 10
 NETCOFFEE_FLAG_PENALTIES = {
@@ -92,6 +88,16 @@ IPDATA_FLAG_PENALTIES = {
     "proxy": 30,
     "vpn": 25,
     "anonymous": 10,
+}
+PROXYCHECK_FLAG_PENALTIES = {
+    "is_proxy": 45,
+    "is_vpn": 45,
+    "is_tor": 45,
+    "is_hosting": 30,
+    "is_scraper": 20,
+}
+IP2LOCATION_FLAG_PENALTIES = {
+    "is_proxy": 30,
 }
 IPAPI_IS_FLAG_PENALTIES = {
     "is_tor": 45,
@@ -142,8 +148,9 @@ REPUTATION_WEIGHTS = {
     "whatismyip": 3,
     "dc_asn": 5,
     "abuse_list": 5,
-    "torlist": 5,
     "getipintel": 5,
+    "proxycheck": 12,
+    "ip2location": 5,
     "vpn_asn": 3,
     "resproxy_asn": 2,
 }
@@ -151,7 +158,8 @@ DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
     "blackbox", "otx", "ipsum",
     "ipapi_is", "ipdata", "whatismyip", "dc_asn",
-    "abuse_list", "torlist", "vpn_asn", "resproxy_asn",
+    "abuse_list", "vpn_asn", "resproxy_asn",
+    "proxycheck", "ip2location",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -162,6 +170,7 @@ SOURCE_PACING = {
     "ipquery": (6, 0.2),
     "ffraud": (6, 0.2),
     "whatismyip": (6, 0.2),
+    "proxycheck": (8, 0.2),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -496,32 +505,51 @@ async def fetch_ipsum_list() -> set[str]:
     return await fetch_text_list(IPSUM_URL)
 
 
-async def fetch_torlist() -> set[str]:
-    """Union of Tor exit IPs from the static free lists."""
-    exits: set[str] = set()
+PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
+PROXYCHECK_TIMEOUT = 8
 
-    async def fetch_one(url: str) -> None:
-        try:
-            text = await asyncio.to_thread(
-                lambda: urllib.request.urlopen(
-                    urllib.request.Request(url, headers={"User-Agent": UA}),
-                    timeout=STATIC_LIST_TIMEOUT,
-                ).read().decode("utf-8", errors="replace")
-            )
-        except Exception as exc:
-            logging.debug("torlist fetch %s: %s", url, exc)
-            return
-        for line in text.splitlines():
-            if "ExitAddress" in line:
-                parts = line.split()
-                if len(parts) >= 2 and ":" not in parts[1]:
-                    exits.add(parts[1])
-            elif line.count(".") == 3 and not line.startswith(("#", "Exit")):
-                if len(line) <= 15 and all(c.isdigit() or c == "." for c in line):
-                    exits.add(line.strip())
 
-    await asyncio.gather(*(fetch_one(u) for u in TORLIST_URLS))
-    return exits
+def proxycheck_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``proxycheck.io/v3/{ip}`` proxy/VPN/tor/hosting/scraper detection."""
+    req = urllib.request.Request(
+        PROXYCHECK_URL.format(ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=PROXYCHECK_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict) or data.get("status") != "ok":
+        return None
+    info = data.get(ip) or {}
+    if not isinstance(info, dict):
+        return None
+    return {
+        "is_proxy": bool(info.get("proxy")),
+        "is_vpn": bool(info.get("vpn")),
+        "is_tor": bool(info.get("tor")),
+        "is_hosting": bool(info.get("hosting")),
+        "is_scraper": bool(info.get("scraper")),
+        "risk": int(info.get("risk") or 0),
+        "type": info.get("type"),
+    }
+
+
+IP2LOCATION_URL = "https://api.ip2location.io/?ip={}"
+IP2LOCATION_TIMEOUT = 8
+
+
+def ip2location_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``api.ip2location.io`` is_proxy flag."""
+    req = urllib.request.Request(
+        IP2LOCATION_URL.format(ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=IP2LOCATION_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    if "is_proxy" not in data:
+        return None
+    return {"is_proxy": bool(data.get("is_proxy"))}
 
 
 async def fetch_text_list(url: str) -> set[str]:
@@ -682,8 +710,6 @@ def source_score(name: str, signal) -> int | None:
         )
         penalty += int(signal.get("threat_score") or 0)
         return max(0, min(100, 100 - penalty))
-    if name == "torlist":
-        return 25 if signal.get("is_tor") else None
     if name == "getipintel":
         prob = signal.get("probability")
         if not isinstance(prob, (int, float)) or prob < 0:
@@ -751,6 +777,23 @@ def source_score(name: str, signal) -> int | None:
         rep = int(signal.get("reputation") or 0)
         pulses = int(signal.get("pulse_count") or 0)
         penalty = min(rep * 5, 80) + min(pulses * 2, 20)
+        return max(0, min(100, 100 - penalty))
+    if name == "proxycheck":
+        penalty = sum(
+            amt for flag, amt in PROXYCHECK_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        raw = signal.get("risk")
+        if isinstance(raw, (int, float)):
+            penalty = max(penalty, round(raw))
+        return max(0, min(100, 100 - penalty))
+    if name == "ip2location":
+        penalty = sum(
+            amt for flag, amt in IP2LOCATION_FLAG_PENALTIES.items()
+            if signal.get(flag)
+        )
+        if not penalty:
+            return None
         return max(0, min(100, 100 - penalty))
     if name in STATIC_LIST_SCORES:
         flag = {
@@ -939,7 +982,7 @@ async def lookup_all_risk(
 
     Per-IP API source signals are served from ``REP_CACHE_FILE`` when still
     fresh (``--rep-cache-ttl``); only missing/expired IPs are re-queried.
-    Static-list signals (torlist/abuse/ASN lists) are re-computed every run.
+    Static-list signals (abuse/ASN lists) are re-computed every run.
     """
     sources = args.reputation_sources
     if not sources:
@@ -1015,13 +1058,14 @@ async def lookup_all_risk(
     if "otx" in sources:
         w, d = pacing.get("otx", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("otx", otx_lookup_sync, workers=w, delay=d))
+    if "proxycheck" in sources:
+        w, d = pacing.get("proxycheck", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("proxycheck", proxycheck_lookup_sync, workers=w, delay=d))
+    if "ip2location" in sources:
+        w, d = pacing.get("ip2location", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("ip2location", ip2location_lookup_sync, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
-    if "torlist" in sources:
-        tor = await fetch_torlist()
-        for ip in uniq:
-            if ip in tor:
-                put("torlist", ip, {"is_tor": True})
     if "ipsum" in sources:
         ipsum_set = await fetch_ipsum_list()
         for ip in uniq:
