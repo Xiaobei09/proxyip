@@ -9,7 +9,7 @@ under ``data/quality/``:
 - ``streaming.json``   per-service unlock results (incl. native Netflix)
 - ``abuse.json``       optional abuse-score results (key-gated)
 - ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
-                      net.coffee / ip.nc.gy / ip-api / ipdata / Tor exit lists,
+                      net.coffee / ip.nc.gy / ip-api / ipdata / proxycheck,
                       optionally GetIPIntel + ipapi.is), keyed by ``ip:port#CC``
 - ``all_rep.txt``      ``all.txt`` lines re-sorted by reputation desc
 - ``countries/<cc>/rep.txt``, ``sets/<name>/rep.txt``

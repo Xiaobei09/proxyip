@@ -78,7 +78,7 @@
 | `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
@@ -94,12 +94,12 @@
 |---|---|---|
 | `netcoffee` | 20 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
 | `ncgy` | 10 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
-| `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10；`countryCode` 存在即计入 |
+| `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10 / mobile +10；`countryCode` 存在即计入 |
 | `ipquery` | 12 | `api.ipquery.io/{ip}`，免 key；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
 | `ffraud` | 12 | `api.ffraud.com/public/ip/{ip}`，免 key；`fraud_score` 直用，或 tor/vpn/proxy/hosting/abuser/recent_abuse 罚分（取较大者） |
-| `blackbox` | 10 | `blackbox.ipinfo.app/{ip}`，免 key；`abuse`/`tor`/`vpn`/`proxy`/`datacenter` 标志罚分 |
-| `otx` | 8 | `otx.alienvault.com/api/v1/indicators/IPv4/{ip}/general`，免 key；`reputation` 与 `threat_score` 综合 |
-| `ipsum` | 8 | `ipsum.ai/api/{ip}`，免 key；`abuse Confidence Score` 直用 |
+| `blackbox` | 10 | `blackbox.ipinfo.app/api/v3beta/{ip}`，免 key；分类评分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10；suspicious -20 |
+| `otx` | 8 | `otx.alienvault.com/api/v1/indicators/IPv4/{ip}/general`，免 key；`100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
+| `ipsum` | 8 | GitHub 静态 IP 列表（stamparm/ipsum levels/3+），命中 3+ 黑名单 → 55 分 |
 | `ipapi_is` | 8 | `api.ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
 | `ipdata` | 8 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
 | `whatismyip` | 3 | `whatismyip.ai/api/lookup/{ip}`，免 key；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
@@ -110,7 +110,7 @@
 | `proxycheck` | 12 | `proxycheck.io/v3/{ip}`，免 key（100/天）；proxy/vpn/tor/hosting/scraper 标志罚分 + risk score |
 | `ip2location` | 5 | `api.ip2location.io/?ip={ip}`，免 key（1000/天）；`is_proxy` 标志 -30 |
 
-可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（ipquery/ffraud/whatismyip：4 worker、0.25s；netcoffee/ncgy/ipapi_is：6 worker、0.25s）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。单源响应时直接取该源分数。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
+可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（netcoffee/ncgy：10 worker、0.15s；blackbox/proxycheck：8 worker、0.2s；ipapi_is：8 worker、0.2s；otx：6 worker、0.3s；ipquery/ffraud/whatismyip/ip2location：6 worker、0.2s）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。单源响应时直接取该源分数。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），分数也追加进 `#` 备注末尾。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/reorg_country.py`
 

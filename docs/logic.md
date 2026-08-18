@@ -99,9 +99,8 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 | ip-api | 15 | 本地批量地理：proxy -25 / hosting -10 / mobile +10；有 `countryCode` 即计入 |
 | ipquery | 12 | `risk_score` 直用或标志罚分（取较大者）：tor -45 / vpn -30 / proxy -25 / datacenter -15 |
 | ffraud | 12 | `fraud_score` 直用或标志罚分（取较大者）：tor -45 / vpn -30 / proxy -25 / hosting -15 / abuser -20 / recent_abuse -15 |
-| blackbox | 10 | 按分类给分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10；suspicious -20 |
-| otx | 8 | `100 - (reputation×5 + pulse_count×2)`，上限 80 |
-| ipsum | 8 | 命中黑名单 → 55 分，未命中 → None |
+| blackbox | 10 | 按分类给分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10 / bogon 5 / unknown 50；suspicious -20 |
+| otx | 8 | `100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
 | ipapi_is | 8 | 标志罚分：tor -45 / vpn -30 / proxy -25 / datacenter -15 / abuser -20，机房 ASN/公司类型 -15，abuser_score≥0.1 -20 |
 | ipdata | 8 | 标志罚分 + `threat_score`：tor -45 / proxy -30 / vpn -25 / anonymous -10 |
 | whatismyip | 3 | `security.score` 直用或标志罚分（取较大者）：vpn -30 / proxy -25 / tor -45 / hosting -15 / blacklisted -30 |
@@ -113,6 +112,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 | 源 | 权重 | 命中时分数 |
 |---|---|---|
+| ipsum | 8 | 55（命中 3+ 黑名单） |
 | abuse_list | 5 | 60（历史滥用） |
 | dc_asn | 5 | 85（机房/数据中心 ASN） |
 | vpn_asn | 3 | 70（VPN 服务商 ASN） |

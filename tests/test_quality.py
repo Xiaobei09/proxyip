@@ -425,6 +425,24 @@ class TestReputation(unittest.TestCase):
             qc.source_score("ipapi_is", {"is_tor": True, "is_vpn": True}), 25)
         self.assertIsNone(qc.source_score("bogus", {}))
 
+    def test_source_score_proxycheck(self):
+        self.assertEqual(
+            qc.source_score("proxycheck", {"is_proxy": True, "risk": 50}), 50)
+        self.assertEqual(
+            qc.source_score("proxycheck", {"is_proxy": False, "is_vpn": True}), 55)
+        self.assertEqual(
+            qc.source_score("proxycheck", {"is_proxy": False, "risk": 20}), 80)
+        self.assertEqual(
+            qc.source_score("proxycheck", {"is_proxy": False, "is_hosting": True}), 70)
+        self.assertEqual(
+            qc.source_score("proxycheck", {}), 100)
+
+    def test_source_score_ip2location(self):
+        self.assertEqual(
+            qc.source_score("ip2location", {"is_proxy": True}), 70)
+        self.assertIsNone(
+            qc.source_score("ip2location", {"is_proxy": False}))
+
     def test_weighted_merge(self):
         signals = {"netcoffee": {"trust_score": 80},
                    "ncgy": {"is_vpn": True}}
@@ -853,7 +871,8 @@ class TestReputation(unittest.TestCase):
 
     def test_static_sources_in_defaults(self):
         for name in ("ipquery", "ffraud", "whatismyip", "ipapi_is",
-                     "dc_asn", "abuse_list", "vpn_asn", "resproxy_asn"):
+                     "dc_asn", "abuse_list", "vpn_asn", "resproxy_asn",
+                     "proxycheck", "ip2location"):
             self.assertIn(name, qc.DEFAULT_REP_SOURCES)
             self.assertGreater(qc.REPUTATION_WEIGHTS.get(name, 0), 0)
 
