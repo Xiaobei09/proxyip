@@ -488,7 +488,7 @@ class TestReputation(unittest.TestCase):
             },
         }
         risk_data = {"5.6.7.8": {"netcoffee": {"trust_score": 70}}}
-        rep = qc.build_reputation_map(results, {}, risk_data, self.W)
+        rep = qc.build_reputation_map(results, risk_data, self.W)
         self.assertNotIn("1.2.3.4:443#US", rep)
         self.assertEqual(rep["5.6.7.8:8443#JP"]["score"], 70)
         self.assertEqual(rep["5.6.7.8:8443#JP"]["source"], "netcoffee")
@@ -869,12 +869,11 @@ class TestReputation(unittest.TestCase):
         )
         self.assertNotIn("ip-api", signals)
 
-    def test_static_sources_in_defaults(self):
-        for name in ("ipquery", "ffraud", "whatismyip", "ipapi_is",
-                     "dc_asn", "abuse_list", "vpn_asn", "resproxy_asn",
-                     "proxycheck", "ip2location"):
-            self.assertIn(name, qc.DEFAULT_REP_SOURCES)
-            self.assertGreater(qc.REPUTATION_WEIGHTS.get(name, 0), 0)
+    def test_all_rep_sources_have_weights(self):
+        """All default reputation sources must have positive weights."""
+        for name in qc.DEFAULT_REP_SOURCES:
+            self.assertIn(name, qc.REPUTATION_WEIGHTS)
+            self.assertGreater(qc.REPUTATION_WEIGHTS[name], 0)
 
 
 class TestIpSet(unittest.TestCase):

@@ -44,6 +44,7 @@ from pathlib import Path
 from common import (
     ALL_FILE,
     CHINA_FILE,
+    EXIT_FAMILY_FILE,
     INDEX_FILE,
     MAX_HISTORY_RECORDS,
     PER_COUNTRY_LIMIT,
@@ -169,7 +170,7 @@ def load_family_map(path: Path | None = None) -> dict:
 
     ``key`` 为 ``ip:port#cc``，``family`` 取 ``ipv4``/``ipv6``/``dual``。
     """
-    path = path or VALID_DIR / "exit_family.json"
+    path = path or EXIT_FAMILY_FILE
     if not path.exists():
         return {}
     try:

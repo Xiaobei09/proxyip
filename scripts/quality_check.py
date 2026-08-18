@@ -9,8 +9,11 @@ under ``data/quality/``:
 - ``streaming.json``   per-service unlock results (incl. native Netflix)
 - ``abuse.json``       optional abuse-score results (key-gated)
 - ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
-                      net.coffee / ip.nc.gy / ip-api / ipdata / proxycheck,
-                      optionally GetIPIntel + ipapi.is), keyed by ``ip:port#CC``
+                      netcoffee / ncgy / ip-api / ipquery / ffraud / blackbox
+                      / otx / ipsum / ipapi_is / ipdata / whatismyip
+                      / proxycheck / ip2location / dc_asn / abuse_list
+                      / vpn_asn / resproxy_asn, plus opt-in getipintel),
+                      keyed by ``ip:port#CC``
 - ``all_rep.txt``      ``all.txt`` lines re-sorted by reputation desc
 - ``countries/<cc>/rep.txt``, ``sets/<name>/rep.txt``
                       per-country / per-set ``all.txt`` re-sorted by reputation
@@ -127,8 +130,10 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
+_STREAMING_TOKENS = r"NF\([^)]*\)|D\+|YT|MX|PV|GPT"
+_TYPE_TOKENS = r"CF|V4|V6|DS|DC"
 _QC_SUFFIX_RE = re.compile(
-    r"(?:-(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d+))+$"
+    rf"(?:[- ](?:{_STREAMING_TOKENS}|{_TYPE_TOKENS}|\d+))+$"
 )
 
 
@@ -144,7 +149,6 @@ def strip_qc_annotations(line: str) -> str:
 
 def build_reputation_map(
     results: dict,
-    ipinfo: dict,
     risk_data: dict,
     weights: dict,
 ) -> dict[str, dict]:
@@ -263,7 +267,7 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
     write_json(REPUTATION_FILE, keyed_json(entries))
 
 
-def build_annotations(results: dict, ipinfo: dict, rep_map: dict) -> dict[str, str]:
+def build_annotations(results: dict, rep_map: dict) -> dict[str, str]:
     annotations: dict[str, str] = {}
     for res in results.values():
         stream_toks = streaming_tokens(res["streaming"])
@@ -433,11 +437,11 @@ async def run(args: argparse.Namespace) -> int:
         results, geo, abuse_map, risk_data, args.reputation_weights
     )
     rep_map = build_reputation_map(
-        results, ipinfo, risk_data, args.reputation_weights
+        results, risk_data, args.reputation_weights
     )
 
     streaming = finalize_streaming(results, ipinfo)
-    annotations = build_annotations(results, ipinfo, rep_map)
+    annotations = build_annotations(results, rep_map)
     source_text = args.source.read_text(encoding="utf-8")
     if rep_map:
         write_reputation_files(source_text, annotations, rep_map)
