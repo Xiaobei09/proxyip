@@ -470,9 +470,9 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     - 仅 1 个方法确认（非多节点源）→ uncertain（单点不可靠）
     - 多节点源（ping.pe / itdog）单独确认 → reachable（已有多节点交叉）
     - check_host 与 xxapi 均失败 → unreachable
-    - 多节点源（ping.pe / itdog）失败且另有单节点源失败 → unreachable
-    - itdog 失败且另有单节点源失败 → unreachable
-    - 仅单方失败 → uncertain
+    - 多节点源（ping.pe / itdog）失败且所有单节点源也失败 → unreachable
+    - itdog 失败且所有单节点源也失败 → unreachable
+    - 有确认源但也有失败源（冲突）→ uncertain（保守）
     - 全部为错误/跳过 → skipped（不误判）
     - CF 启发式不再自动判可达，仅作为 basis 标注
     """
