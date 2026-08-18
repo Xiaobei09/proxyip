@@ -86,6 +86,13 @@ class TestBuilders(unittest.TestCase):
             "4.4.4.4:80#FR": {"score": 50, "sources": ["ipquery", "ffraud", "ipdata"]},
         }
     }
+    SOURCE_STATS = {
+        "sources": {
+            "cm": {"total": 500, "unique": 300, "overlap": 200},
+            "sp": {"total": 400, "unique": 250, "overlap": 150},
+            "kr": {"total": 200, "unique": 150, "overlap": 50},
+        }
+    }
     QUALITY_META = {
         "streaming": {"openai": {"ok": 10, "blocked": 2, "error": 1}},
         "by_type": {"DC": 50, "RES": 100, "MOB": 30, "PROXY": 25},
@@ -106,6 +113,7 @@ class TestBuilders(unittest.TestCase):
             "chart_family.svg": gs.build_family(self.FAMILY_DATA),
             "chart_source_avail.svg": gs.build_source_avail(self.REP_DATA),
             "chart_rep.svg": gs.build_rep(self.REP_DATA),
+            "chart_source_stats.svg": gs.build_source_stats(self.SOURCE_STATS),
         }
         for name, svg in builders.items():
             with self.subTest(name=name):
@@ -121,6 +129,7 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("No family data", gs.build_family({}))
         self.assertIn("No reputation data", gs.build_rep({}))
         self.assertIn("No source data", gs.build_source_avail({}))
+        self.assertIn("No source stats yet", gs.build_source_stats({}))
 
     def test_chart_latency_speed_has_bars_and_labels(self):
         svg = gs.build_latency_speed(self.META)
@@ -206,6 +215,7 @@ class TestMain(unittest.TestCase):
                 "chart_streaming.svg",
                 "chart_sets.svg", "chart_cn.svg", "chart_family.svg",
                 "chart_source_avail.svg", "chart_rep.svg",
+                "chart_source_stats.svg",
             ):
                 self.assertTrue((out / f).exists(), f)
                 svg_ok((out / f).read_text())
