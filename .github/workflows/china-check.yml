@@ -79,6 +79,10 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/annotate_classify.py
 
+      - name: Generate stats and chart
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/generate_stats.py
+
       - name: Show summary
         if: steps.gate.outputs.skip != 'true'
         run: |
@@ -95,7 +99,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
-            ':(exclude)data/output' ':(exclude)data/diff'
+            ':(exclude)data/diff'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -110,7 +114,7 @@ jobs:
             git fetch origin main || { sleep 5; continue; }
             git reset --mixed origin/main
             git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
-              ':(exclude)data/output' ':(exclude)data/diff'
+              ':(exclude)data/diff'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0
