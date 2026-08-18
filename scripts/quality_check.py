@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Streaming unlock and exit-IP quality checks for alive proxies.
 
-Runs on a bounded population (default ``data/valid/all_ltd.txt``, the
-per-country fastest survivors; CI uses ``data/valid/all.txt``) and writes
+Runs on the full alive pool (default ``data/valid/all.txt``) and writes
 under ``data/quality/``:
 
 - ``ipinfo.json``      exit IP / geo / IP type / reputation score + source
@@ -12,7 +11,7 @@ under ``data/quality/``:
 - ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
                       net.coffee / ip.nc.gy / ip-api / ipdata / Tor exit lists,
                       optionally GetIPIntel + ipapi.is), keyed by ``ip:port#CC``
-- ``all_rep.txt``      ``all_ltd.txt`` lines re-sorted by reputation desc
+- ``all_rep.txt``      ``all.txt`` lines re-sorted by reputation desc
 - ``countries/<cc>/rep.txt``, ``sets/<name>/rep.txt``
                       per-country / per-set ``all.txt`` re-sorted by reputation
 - ``quality_meta.json`` aggregated summary for stats and charts
@@ -420,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source", type=Path, default=DEFAULT_SOURCE,
-        help="Input proxy list (default: data/valid/all_ltd.txt)",
+        help="Input proxy list (default: data/valid/all.txt)",
     )
     parser.add_argument(
         "--services", nargs="*", default=None,

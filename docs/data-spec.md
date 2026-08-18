@@ -192,7 +192,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/all_rep.txt`
 
-与 `all_ltd.txt` 同源（每国最快存活集）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
+与 `all.txt` 同源（全量存活池）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
 
 ### `data/valid/china.json`（china-check CI 输出）
 
