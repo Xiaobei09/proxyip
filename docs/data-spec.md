@@ -8,7 +8,7 @@
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
-- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…），CONNECT 代理为出口 IP 的国家代号（ISO2）。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
+- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…）。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
 - **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→NRT-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）
@@ -59,29 +59,25 @@
 
 CI 每次更新后对 `data/all.txt` 做连通性检查，输出镜像 `data/` 结构的存活列表到 `data/valid/`。非限量清单**按延迟升序**（最快在前），`_ltd` 限量清单**按实测下载速度降序**。
 
-### 双重检测算法
+### TLS 握手检测
 
-对每个代理依次尝试两种方法，任一成功即判定存活：
-
-1. **HTTP CONNECT 隧道**：向代理发送 `CONNECT cdnjs.cloudflare.com:443 HTTP/1.1`，响应 `200` 即通
-2. **TLS 握手兜底**：对代理自身做 TLS 握手（SNI=`cdnjs.cloudflare.com`），用于 Cloudflare 边缘代理——这类代理在 443/8443/2053/2083/2087/2096 提供 TLS 服务但拒绝纯 CONNECT
+对每个代理做 TLS 握手（SNI=`cdnjs.cloudflare.com`），成功即判定存活：
 
 ### 速度测试
 
 每个存活代理在判活连接上继续做真实下载测速：发送 `GET /ajax/libs/three.js/r128/three.min.js`（约 530 KB），
 最多读取 `--speed-bytes`（默认 256 KB）字节或持续 `--speed-timeout`（默认 5s）秒，得到吞吐速度（MB/s，两位小数）。
-CONNECT 隧道与 TLS 连接共用同一目标主机与路径；测速失败仅使速度置空，不影响存活判定。速度仅供排序与统计，
-不做二次筛选。
+测速失败仅使速度置空，不影响存活判定。速度仅供排序与统计，不做二次筛选。
 
-下载测速受独立并发上限 `--speed-workers`（默认 10）约束——判活（TCP/TLS/CONNECT）仍以 `--workers`（默认 500）
-高并发进行，但同一时刻最多 10 个测速下载在飞，避免 CI 出口带宽被打满导致测速值拉平、区分度下降。并发越低
-测速越准确，但全量测速耗时越长（并发 10 时约 30-40 分钟）。
+下载测速受独立并发上限 `--speed-workers`（默认 30）约束——判活（TCP/TLS）仍以 `--workers`（默认 500）
+高并发进行，但同一时刻最多 30 个测速下载在飞，避免 CI 出口带宽被打满导致测速值拉平、区分度下降。并发越低
+测速越准确，但全量测速耗时越长（并发 30 时约 30-40 分钟）。
 
 ### 并发与容错
 
 - **asyncio 并发**：默认 500 个在飞任务（`-w` 可调），有界任务池实现严格限时
-- **超时**：单代理 5s（`-t`）；CONNECT 响应读取独立 3s 上限
-- **自动重试**：TCP 能连通但两项检测均超时的代理，短暂间隔后重试一次，降低单次丢包误杀
+- **超时**：单代理 5s（`-t`）
+- **自动重试**：TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降低单次丢包误杀
 - **时间预算**：`--time-budget N` 到时立即停止，到期只取消少量在飞任务；CI 默认不设置（`0` = 跑完全部存活代理）
 
 ### 输出
@@ -144,7 +140,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 |---|---|
 | `total` / `checked` / `alive` / `dead` | 总条目 / 实际检测数（含重试）/ 存活 / 失效 |
 | `elapsed_s` / `checked_per_s` | 耗时（秒）/ 吞吐（条/秒） |
-| `by_method` | 各判定方法（connect/tls）的存活数 |
+| `by_method` | 各判定方法（tls）的存活数 |
 | `latency` | 延迟统计（avg/median/p90/max） |
 | `latency_dist` | 延迟分桶直方图（毫秒） |
 | `speed` | 测速统计（avg/median/p90/max，MB/s） |
@@ -157,7 +153,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 单行 JSON 结构化索引，键为 `ip:port#国家`，值为 `[延迟ms, 检测方法]`，按延迟升序：
 
 ```json
-{"proxies": {"1.2.3.4:443#US": [640.1, "tls"], "5.6.7.8:8443#JP": [80.1, "connect"]}}
+{"proxies": {"1.2.3.4:443#US": [640.1, "tls"], "5.6.7.8:8443#JP": [80.1, "tls"]}}
 ```
 
 ### `data/valid/speed.json`
