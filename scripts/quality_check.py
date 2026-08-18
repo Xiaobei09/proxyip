@@ -22,7 +22,7 @@ under ``data/quality/``:
 
 All proxies use the TLS (Cloudflare edge) method: direct TLS connections with
 SNI routing. Only Cloudflare-fronted hosts are reachable. The exit is the edge
-itself and is tagged ``CF``. Standard proxies use CONNECT tunnels instead.
+itself and is tagged ``CF``.
 
 Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
 lines as ``-<streaming>-<type>-<rep>``, e.g.

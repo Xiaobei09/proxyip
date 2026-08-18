@@ -67,10 +67,10 @@
 
 ### `scripts/quality_check.py`
 
-流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all_ltd.txt`（每国最快存活集）检测，按 `index.json` 记录的方法分流：
+流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all_ltd.txt`（每国最快存活集）检测，所有代理使用统一的 TLS 直连方法：
 
-- **connect 方法**（标准 HTTP CONNECT 代理）：出口 IP 回显（`api.ipify.org`/`api6.ipify.org` 双栈）→ 本地 `ip-api.com/batch` 批量查地理/ASN/IP 类型 → 各流媒体服务经 CONNECT + TLS 隧道逐项检测
-- **tls 方法**（Cloudflare 边缘）：仅能按 SNI 路由到 CF 托管域名，只做 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`；`loc` 机场码同时写入行备注的 `→` 出口地区段
+- 对每个代理建立 TLS 直连（SNI=服务域名），检测 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`；`loc` 机场码同时写入行备注的 `→` 出口地区段
+- 批量查出口 IP 地理（`ip-api.com/batch`）与 ASN/IP 类型
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
@@ -147,10 +147,9 @@
 
 ### `scripts/exit_family.py`
 
-实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条探测真实出口家族，按方法分流：
+实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条探测真实出口家族（统一 TLS trace）：
 
-- **tls 方法**（Cloudflare 边缘）：直连 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判 v4/v6（这类代理无法 CONNECT 到任意主机，只能经 CF 边缘回显）
-- **connect 方法**（标准 HTTP CONNECT 代理）：经隧道双回显 `api.ipify.org`(v4) 与 `api6.ipify.org`(v6)，成功者分别判定对应家族
+- 直连 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判 v4/v6
 
 家族判定：仅 v4 → `ipv4`；仅 v6 → `ipv6`；双通 → `dual`；探测全失败 → `unknown`。结果写入：
 

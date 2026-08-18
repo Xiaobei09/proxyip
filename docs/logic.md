@@ -21,12 +21,9 @@ download_proxies.py → validate_proxies.py → quality_check.py
 
 ## 2. 可用性验证（validate_proxies.py）
 
-### 2.1 双重检测算法
+### 2.1 TLS 握手检测
 
-对每个代理依次尝试两种方法，**任一成功即判定存活**：
-
-1. **HTTP CONNECT 隧道**：向代理发送 `CONNECT cdnjs.cloudflare.com:443 HTTP/1.1`，响应 `200` 即通
-2. **TLS 握手兜底**：对代理自身做 TLS 握手（SNI=`cdnjs.cloudflare.com`），用于 Cloudflare 边缘代理——这类代理在 443/8443/2053/2083/2087/2096 提供 TLS 服务但拒绝纯 CONNECT
+对每个代理做 TLS 握手（SNI=`cdnjs.cloudflare.com`），成功即判定存活。Cloudflare 边缘代理在 443/8443/2053/2083/2087/2096 端口提供 TLS 服务，握手成功即说明代理可用。
 
 ### 2.2 速度测试
 
@@ -35,14 +32,14 @@ download_proxies.py → validate_proxies.py → quality_check.py
 - 目标：`GET /ajax/libs/three.js/r128/three.min.js`（约 530 KB）
 - 读取上限：256 KB
 - 超时：5s
-- 并发上限：10（独立于判活的 500 并发）
+- 并发上限：30（独立于判活的 500 并发）
 - 最小有效字节：16384（低于此值视为测速失败，速度置空）
 
 速度仅用于排序与统计，不做二次筛选。
 
 ### 2.3 自动重试
 
-TCP 能连通但两项检测均超时的代理，短暂间隔后重试一次，降低单次丢包误杀。
+TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降低单次丢包误杀。
 
 ## 3. 流媒体解锁检测（quality_streaming.py）
 
@@ -185,10 +182,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 ### 6.1 检测方法
 
-按代理类型分流：
-
-- **tls 方法**（CF 边缘）：直连 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判 v4/v6
-- **connect 方法**（标准代理）：经隧道双回显 `api.ipify.org`(v4) + `api6.ipify.org`(v6)
+所有代理使用统一的 TLS trace 方法：直连 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判 v4/v6。
 
 ### 6.2 家族判定
 

@@ -24,7 +24,7 @@
 ## 功能特性
 
 - **自动抓取整理**：下载上游 `all.json`（失败自动回退 zip）→ 按端口/国家/常用集合/全量多维度汇总，去重合并；并把上游真实出口 IP、ASN、地理等元数据落盘为 `data/quality/upstream_meta.json` 供下游消费
-- **可用性验证**：TLS 双重检测，asyncio 高并发测活，并在判活连接内**真实下载测速**（MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
+- **可用性验证**：TLS 握手检测，asyncio 高并发测活，并在判活连接内**真实下载测速**（MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
 - **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对每国最快的限量存活集做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
 - **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），保守判定（≥2 方法确认才标 reachable）+ itdog.cn 批量 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细与 `data/valid/all_cn.txt` 全量大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `data/quality/upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`data/quality/exit_family.json` 记录 `upstream_match`）
@@ -136,7 +136,7 @@ scripts/quality_streaming.py             流媒体解锁模块（quality_check �
 scripts/reorg_country.py                 按出口国家重组 country/set/port 文件
 scripts/china_check.py                   大陆连通性检测（CF 启发式 + check-host + xxapi + ping.pe）
 scripts/china_itdog.py                   itdog.cn 批量探活模块（china_check 拆分）
-scripts/exit_family.py                   实际出口 IP 家族检测与分离（tls trace + connect 双回显）
+scripts/exit_family.py                   实际出口 IP 家族检测与分离（TLS trace 回显）
 scripts/generate_fingerprint.py          浏览器指纹生成
 scripts/annotate_classify.py             后缀填充 + 节点分类（CI 自动运行）
 scripts/common.py                        共享常量与助手（data 布局、HTTP/JSON 探测）

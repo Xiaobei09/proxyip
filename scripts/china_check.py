@@ -80,7 +80,7 @@ CHECKHOST_URL = "https://api.check-host.cc/tcp"
 CHECKHOST_REPORT_URL = "https://api.check-host.cc/report/{uuid}"
 CHECKHOST_NODE = "CN-HOH-Alibaba"
 CH_WINDOW_SEC = 10.0
-CH_PER_WINDOW = 5  # 匿名限速 6/10s，留余量
+CH_PER_WINDOW = 5  # 匿名限速 5/10s
 CH_HOUR_CAP = 250
 
 # xxapi.cn —— 北京服务器（免 key）
