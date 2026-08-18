@@ -141,6 +141,7 @@
 | `--api-key` | check-host.cc key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | tcpping.cn token（读 `TCPPING_CN_TOKEN`） | 空 |
 | `--skip-pingpe` | 跳过 ping.pe 复核（本地快速冒烟） | 关 |
+| `--skip-itdog` | 跳过 itdog.cn 批量探测 | 关 |
 | `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
 
 结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，含历史已判可达者；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等）。

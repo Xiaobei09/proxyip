@@ -152,9 +152,10 @@ def load_methods() -> dict:
         return {}
     try:
         data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, OSError):
         return {}
-    return {k: v[1] for k, v in data.get("proxies", {}).items()}
+    return {k: v[1] for k, v in data.get("proxies", {}).items()
+            if isinstance(v, (list, tuple)) and len(v) > 1}
 
 
 def build_request(method: str, path: str, host: str) -> bytes:
@@ -234,7 +235,10 @@ def read_json(path: Path) -> dict:
 
 def load_sample(source: Path, limit: int) -> list:
     """Return ``[(line, key, ip, port, cc), ...]`` truncated to ``limit``."""
-    lines = [l for l in source.read_text(encoding="utf-8").splitlines() if l.strip()]
+    try:
+        lines = [l for l in source.read_text(encoding="utf-8").splitlines() if l.strip()]
+    except (OSError, UnicodeDecodeError):
+        return []
     out = []
     for line in lines:
         parsed = parse_ltd_line(line)
@@ -377,7 +381,7 @@ def _note(line: str) -> str:
     i = 0
     while i < len(rest) and not ("A" <= rest[i] <= "Z"):
         i += 1
-    cc = "ALL" if rest[i:].startswith("ALL-") else rest[i : i + 2]
+    cc = "ALL" if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-")) else rest[i : i + 2]
     return rest[i + len(cc):]
 
 

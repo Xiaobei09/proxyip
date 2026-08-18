@@ -20,7 +20,7 @@ from pathlib import Path
 from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...)
 from common import _SSL_CTX  # noqa: F401  (import * skips underscore-prefixed names)
 
-IPAPI_GET_URL = "[REDACTED_PRIVATE_RESOURCE]"
+IPAPI_GET_URL = "http://ip-api.com/json/{ip}"
 IPAPI_FIELDS = (
     "status,message,country,countryCode,regionName,city,"
     "as,asn,org,isp,proxy,hosting,mobile"
@@ -254,11 +254,15 @@ async def check_one(entry: tuple, method: str, args: argparse.Namespace) -> dict
     """Run the checks for a single proxy entry."""
     key, ip, port, cc = entry
     base = {"key": key, "ip": ip, "port": port, "cc": cc, "method": "tls", "tls": True}
-    status, headers, body, _err = await tls_get_direct(
-        ip, port, SERVICES["openai"]["host"], SERVICES["openai"]["path"],
-        args.timeout, args.read_cap,
-    )
-    base["streaming"] = {"openai": parse_openai(status, headers, body)}
+    streaming: dict = {}
+    for svc in args.services:
+        cfg = SERVICES[svc]
+        status, headers, body, _err = await tls_get_direct(
+            ip, port, cfg["host"], cfg["path"],
+            args.timeout, args.read_cap,
+        )
+        streaming[svc] = PARSERS[svc](status, headers, body)
+    base["streaming"] = streaming
     base["external_check"] = await check_external_api(ip, port, timeout=30)
     return base
 

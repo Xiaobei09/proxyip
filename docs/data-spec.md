@@ -8,14 +8,14 @@
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
-- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s`）。出口地区含义：tls 方法（Cloudflare 边缘）为 CF 边缘 `loc` 机场码（`NRT`/`LAX`/`HKG`…）。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
-- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→NRT-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
+- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→JP-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）
 
 ### 备注段（note）与 token 规范
 
-统一解析（`common.parse_line`）：`ip:port#<cc><note>` 中，`key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它，例如 `1.2.3.4:443#🇺🇸US→LAX-120ms-GPT-CF-63` 的 note 为 `→LAX-120ms-GPT-CF-63`）。
+统一解析（`common.parse_line`）：`ip:port#<cc><note>` 中，`key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它，例如 `1.2.3.4:443#🇺🇸US→US-120ms-GPT-CF-63` 的 note 为 `→US-120ms-GPT-CF-63`）。
 
 - token 是 note 中以**段首或 `-` 为界**的独立子串（`common.has_token(note, token)`，等价 `(?:^|-)TOKEN(?:$|-)`）。如 `-CF-63` 含 token `CF`、`63`；`-120ms-CN-V4` 含 token `CN`、`V4`，不含 `CF`。
 - 单一职责：`is_cf_heuristic`（CF 边缘）、`exit_family.has_family_note`（`V4`/`V6`/`DS`）、`china_check.has_cn_note`（`CN`）均基于 `has_token` 实现，新增/判断 token 不得另写正则。

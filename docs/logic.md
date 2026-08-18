@@ -214,7 +214,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 ### 7.2 行格式示例
 
 ```
-1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-CF-72-V4-DC-fast
+1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-NF(US) D+ YT GPT-CF-72-V4-DC-fast
 ```
 
 ## 8. 并发与容错
@@ -225,8 +225,8 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 1. `update-proxies.yml`（每 30 分钟）→ download + validate
 2. `quality-check.yml`（触发于 1）→ streaming + reputation + reorg
-3. `china-check.yml`（触发于 1）→ 大陆连通性
-4. `exit-family.yml`（触发于 1）→ 出口家族
+3. `china-check.yml`（触发于 2）→ 大陆连通性
+4. `exit-family.yml`（触发于 2）→ 出口家族
 5. `annotate-classify.yml`（触发于 2）→ 后缀填充 + 分类
 
 ### 8.2 取消机制
