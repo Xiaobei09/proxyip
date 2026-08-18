@@ -182,7 +182,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 ### 6.1 检测方法
 
-所有代理使用统一的 TLS trace 方法：直连 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判 v4/v6。
+所有代理使用 **双栈探测** 方法：分别以 `socket.AF_INET`（IPv4）和 `socket.AF_INET6`（IPv6）各发起一次 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判定出口家族。若两次均失败，尝试通用（不限地址族）连接兜底。
 
 ### 6.2 家族判定
 

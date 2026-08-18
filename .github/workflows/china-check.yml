@@ -3,7 +3,7 @@ name: China check
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: ["Update proxy list"]
+    workflows: ["Quality check"]
     types: [completed]
 
 permissions:
@@ -49,12 +49,12 @@ jobs:
           fi
           # 3. 数据变更检查：上游有新提交但本工作流尚未处理则运行
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            LAST_UPSTREAM=$(git log --oneline -1 --grep="update proxy list" --format=%H 2>/dev/null || echo "")
+            LAST_UPSTREAM=$(git log --oneline -1 --fixed-strings --grep="chore(data): quality check" --format=%H 2>/dev/null || echo "")
             LAST_DOWNSTREAM=$(git log --oneline -1 --fixed-strings --grep="chore(data): reachability check" --format=%H 2>/dev/null || echo "")
             if [ -n "$LAST_UPSTREAM" ] && [ -n "$LAST_DOWNSTREAM" ]; then
               if git merge-base --is-ancestor "$LAST_UPSTREAM" "$LAST_DOWNSTREAM" 2>/dev/null; then
                 echo "skip=true" >> "$GITHUB_OUTPUT"
-                echo "::notice::No new upstream data since last reachability check, skipping"
+                echo "::notice::No new quality data since last reachability check, skipping"
               fi
             fi
           fi

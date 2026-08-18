@@ -57,10 +57,13 @@ class TestTlsExit(unittest.TestCase):
 
 
 class TestCheckOne(unittest.TestCase):
-    def test_tls_method(self):
-        with mock.patch.object(
-            ef, "tls_exit", return_value={"status": "ok", "family": "ipv6", "ip": V6_IP}
-        ):
+    def test_tls_method_v6(self):
+        trace_v4 = b""
+        trace_v6 = f"ip={V6_IP}\nloc=AT\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (None, {}, b""),            # v4 probe fails
+            (200, {}, trace_v6),        # v6 probe succeeds
+        ]):
             item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
             key, res = ef.check_one(item, {"1.2.3.4:443#US": "tls"}, 10)
         self.assertEqual(res["method"], "tls")
@@ -69,14 +72,43 @@ class TestCheckOne(unittest.TestCase):
         self.assertIsNone(res["exit_v4"])
         self.assertIn("ts", res)
 
-    def test_default_tls_when_unknown(self):
-        with mock.patch.object(
-            ef, "tls_exit", return_value={"status": "ok", "family": "ipv4", "ip": V4_IP}
-        ):
+    def test_tls_method_v4(self):
+        trace_v4 = f"ip={V4_IP}\n".encode()
+        trace_v6 = b""
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, trace_v4),        # v4 probe succeeds
+            (None, {}, b""),            # v6 probe fails
+        ]):
             item = ("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")
             key, res = ef.check_one(item, {}, 10)
         self.assertEqual(res["method"], "tls")
         self.assertEqual(res["family"], "ipv4")
+        self.assertEqual(res["exit_v4"], V4_IP)
+
+    def test_dual_stack(self):
+        trace_v4 = f"ip={V4_IP}\n".encode()
+        trace_v6 = f"ip={V6_IP}\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, trace_v4),        # v4 probe succeeds
+            (200, {}, trace_v6),        # v6 probe succeeds
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "dual")
+        self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["exit_v6"], V6_IP)
+
+    def test_fallback_generic(self):
+        trace_generic = f"ip={V4_IP}\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (None, {}, b""),            # v4 probe fails
+            (None, {}, b""),            # v6 probe fails
+            (200, {}, trace_generic),   # generic fallback succeeds
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "ipv4")
+        self.assertEqual(res["exit_v4"], V4_IP)
 
 
 class TestNotes(unittest.TestCase):
