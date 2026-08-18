@@ -38,9 +38,6 @@ jobs:
       - name: Validate proxies
         run: python scripts/validate_proxies.py --time-budget 3600
 
-      - name: Generate stats and chart
-        run: python scripts/generate_stats.py
-
       - name: Show stats
         run: |
           echo "Files extracted:"

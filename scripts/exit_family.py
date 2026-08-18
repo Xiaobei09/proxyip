@@ -173,12 +173,14 @@ def parse_trace(body: bytes) -> dict:
 
 
 def classify_family(v4: str | None, v6: str | None) -> str:
-    if v4 and v6:
+    has_v4 = (v4 and ":" not in v4) or (v6 and ":" not in v6)
+    has_v6 = (v4 and ":" in v4) or (v6 and ":" in v6)
+    if has_v4 and has_v6:
         return "dual"
-    if v4:
-        return "ipv4"
-    if v6:
+    if has_v6:
         return "ipv6"
+    if has_v4:
+        return "ipv4"
     return "unknown"
 
 
