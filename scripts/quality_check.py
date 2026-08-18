@@ -199,16 +199,55 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
     return [line for _rep, _key, line in scored] + unscored
 
 
+REP_GROUP_NAMES = ("v4", "v6", "46", "cn", "cn4", "cn6", "cn46")
+
+
+def _build_ranked_map(source_text: str, annotations: dict, rep_map: dict) -> list[str]:
+    """从文本构建声誉排序列表。"""
+    return build_ranked(source_text, annotations, rep_map)
+
+
 def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
     ranked = build_ranked(source_text, annotations, rep_map)
     write_text_if_changed(REP_RANK_FILE, "\n".join(ranked) + "\n")
     valid_root = REP_RANK_FILE.parent
+
+    # --- 顶层 cross-product rep 文件 (all_cn_rep.txt, all_cn4_rep_ltd.txt 等) ---
+    for g in REP_GROUP_NAMES:
+        src = valid_root / f"all_{g}.txt"
+        if src.exists():
+            r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
+            write_text_if_changed(valid_root / f"all_{g}_rep.txt", "\n".join(r) + "\n")
+        ltd_src = valid_root / f"all_{g}_ltd.txt"
+        if ltd_src.exists():
+            r = build_ranked(ltd_src.read_text(encoding="utf-8"), annotations, rep_map)
+            write_text_if_changed(
+                valid_root / f"all_{g}_rep_ltd.txt", "\n".join(r) + "\n"
+            )
+
+    # --- 每个 set/country 子目录: rep.txt + cross-product rep 文件 ---
     for sub in ("countries", "sets"):
         for src in sorted((valid_root / sub).glob("*/all.txt")):
             ranked = build_ranked(
                 src.read_text(encoding="utf-8"), annotations, rep_map
             )
             write_text_if_changed(src.with_name("rep.txt"), "\n".join(ranked) + "\n")
+        for g in REP_GROUP_NAMES:
+            for src in sorted((valid_root / sub).glob(f"*/{g}.txt")):
+                ranked = build_ranked(
+                    src.read_text(encoding="utf-8"), annotations, rep_map
+                )
+                write_text_if_changed(
+                    src.with_name(f"{g}_rep.txt"), "\n".join(ranked) + "\n"
+                )
+            for src in sorted((valid_root / sub).glob(f"*/{g}_ltd.txt")):
+                ranked = build_ranked(
+                    src.read_text(encoding="utf-8"), annotations, rep_map
+                )
+                write_text_if_changed(
+                    src.with_name(f"{g}_rep_ltd.txt"), "\n".join(ranked) + "\n"
+                )
+
     entries = {
         key: {
             "score": rep["score"],
