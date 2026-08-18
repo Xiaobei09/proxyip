@@ -148,13 +148,14 @@ class TestWriteIndex(unittest.TestCase):
 class TestWriteValidOutputs(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="vp_"))
-        self.orig = (vp.VALID_DIR, vp.INDEX_FILE, vp.SPEED_FILE)
+        self.orig = (vp.VALID_DIR, vp.CHINA_FILE, vp.INDEX_FILE, vp.SPEED_FILE)
         vp.VALID_DIR = self.tmp
+        vp.CHINA_FILE = self.tmp / "china.json"
         vp.INDEX_FILE = self.tmp / "index.json"
         vp.SPEED_FILE = self.tmp / "speed.json"
 
     def tearDown(self):
-        vp.VALID_DIR, vp.INDEX_FILE, vp.SPEED_FILE = self.orig
+        vp.VALID_DIR, vp.CHINA_FILE, vp.INDEX_FILE, vp.SPEED_FILE = self.orig
 
     def test_outputs_ordered_by_latency(self):
         alive = {
@@ -464,7 +465,7 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertFalse((vp.VALID_DIR / "all_46_ltd.txt").exists())
 
     def test_cn_fallback_via_china_json(self):
-        (vp.VALID_DIR / "china.json").write_text(
+        vp.CHINA_FILE.write_text(
             json.dumps({"proxies": {"1.0.0.1:443#US": {"verdict": "reachable"}}}),
             encoding="utf-8",
         )

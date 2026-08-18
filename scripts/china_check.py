@@ -47,6 +47,7 @@ from common import (
     VALID_ALL_CN_FILE,
     VALID_ALL_FILE,
     VALID_ALL_LTD_FILE,
+    VALID_DIR,
     has_token,
     is_cf_heuristic,
     keyed_json,
@@ -69,21 +70,21 @@ POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
 
 # check-host.cc —— 呼和浩特（阿里云 AS37963），每目标仅 1 大陆节点
-CHECKHOST_URL = "[REDACTED_PRIVATE_RESOURCE]"
-CHECKHOST_REPORT_URL = "[REDACTED_PRIVATE_RESOURCE]"
+CHECKHOST_URL = "https://api.check-host.cc/tcp"
+CHECKHOST_REPORT_URL = "https://api.check-host.cc/report/{uuid}"
 CHECKHOST_NODE = "CN-HOH-Alibaba"
 CH_WINDOW_SEC = 10.0
 CH_PER_WINDOW = 5  # 匿名限速 6/10s，留余量
 CH_HOUR_CAP = 250
 
 # xxapi.cn —— 北京服务器（免 key）
-XXAPI_URL = "[REDACTED_PRIVATE_RESOURCE]/api/tcping"
+XXAPI_URL = "https://v2.xxapi.cn/api/tcping"
 
 # ping.pe —— 约 13 个大陆节点，需走 antiflood + start_token 流程
-PINGPE_URL = "[REDACTED_PRIVATE_RESOURCE]/{host}"
-PINGPE_START_URL = "[REDACTED_PRIVATE_RESOURCE]/ajax_startTask_v1.php"
-PINGPE_RESULTS_URL = "[REDACTED_PRIVATE_RESOURCE]/ajax_getPingResults_v2.php"
-PINGPE_ORIGIN = "[REDACTED_PRIVATE_RESOURCE]"
+PINGPE_URL = "https://tcp.ping.pe/{host}"
+PINGPE_START_URL = "https://tcp.ping.pe/ajax_startTask_v1.php"
+PINGPE_RESULTS_URL = "https://tcp.ping.pe/ajax_getPingResults_v2.php"
+PINGPE_ORIGIN = "https://tcp.ping.pe"
 PINGPE_CN_MAJORITY = 7  # ≥7/13 大陆节点可达即判可达
 PINGPE_MIN_REPORTED = 5  # 报告节点不足 → inconclusive，避免误判
 
