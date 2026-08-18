@@ -387,7 +387,7 @@ def has_token(note: str, token: str) -> bool:
 
 
 def is_cf_heuristic(line: str) -> bool:
-    """行备注已带 ``-CF``（Cloudflare 边缘）即判定大陆可达（零网络）。"""
+    """行备注是否带 ``-CF``（Cloudflare 边缘标记，用于检测时记录 heuristic 源）。"""
     return has_token(_note(line), "CF")
 
 
