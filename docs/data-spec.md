@@ -176,7 +176,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/quality_meta.json`
 
-质量检测汇总（供 stats 消费）：`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
+质量检测汇总（供 stats 消费）：`ts`（生成时间戳 ISO-8601）、`total`（代理总数）、`tls`（TLS 方法代理数）、`services`（检测服务列表）、`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
 
 ### `data/quality/abuse.json`
 

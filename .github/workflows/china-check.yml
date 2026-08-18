@@ -93,7 +93,7 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-            git commit -m "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git commit -m "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           for i in 1 2 3 4 5; do
             if git push; then
               echo "Pushed successfully"
@@ -108,7 +108,7 @@ jobs:
               echo "No changes to push"
               exit 0
             fi
-          git commit -m "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git commit -m "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
           done
           echo "Push failed after 5 attempts"
           exit 1
