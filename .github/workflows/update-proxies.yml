@@ -63,8 +63,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/quality' \
-            ':(exclude)data/output' ':(exclude)data/diff'
+          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/diff' \
+            ':(exclude)data/quality/quality_meta.json' \
+            ':(exclude)data/quality/china.json' \
+            ':(exclude)data/quality/exit_family.json' \
+            ':(exclude)data/quality/reputation.json' \
+            ':(exclude)data/quality/streaming.json'
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -83,8 +87,12 @@ jobs:
             # 必须用 --mixed（而非 --soft）：--soft 只动 HEAD 不动 index，陈旧 checkout
             # 的 index 会连非 data 文件一起带进数据提交，回退他人已推送的代码改动。
             git reset --mixed origin/main
-            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/quality' \
-              ':(exclude)data/output' ':(exclude)data/diff'
+            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/diff' \
+              ':(exclude)data/quality/quality_meta.json' \
+              ':(exclude)data/quality/china.json' \
+              ':(exclude)data/quality/exit_family.json' \
+              ':(exclude)data/quality/reputation.json' \
+              ':(exclude)data/quality/streaming.json'
             if git diff --cached --quiet; then
               echo "No changes to push"
               exit 0

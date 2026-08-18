@@ -101,7 +101,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `generate_stats.py`（更新图表含 CN 数据）→ 有变更则自动提交并推送
 - **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流按文件所有权范围提交 `data/`（update-proxies 不触碰 `data/quality/china.json`/`data/valid/all_cn.txt`），与主更新/质量 CI 的并发提交安全共存
 
