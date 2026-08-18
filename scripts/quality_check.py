@@ -127,6 +127,37 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
+_QC_TOK_RE = re.compile(
+    r"(?:^|-)(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d+)(?:-|$)"
+)
+
+
+def strip_qc_annotations(line: str) -> str:
+    """Remove stale streaming / CF / reputation-score tokens from *line*.
+
+    Preserves other workflow tokens (CN, V4, V6, DS, DC, …) while stripping
+    the QC-specific suffix so ``annotate_text`` can re-append a fresh one
+    without accumulating duplicates across consecutive CI runs.
+    """
+    m = LATENCY_RE.search(line)
+    if not m:
+        return line
+    base_end = m.end()
+    base = line[:base_end]
+    suffix = line[base_end:]
+    if not suffix:
+        return line
+    parts = suffix.split("-")
+    kept: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if _QC_TOK_RE.match("-" + part):
+            continue
+        kept.append(part)
+    return base + ("-" + "-".join(kept) if kept else "")
+
+
 def build_reputation_map(
     results: dict,
     ipinfo: dict,
@@ -166,7 +197,7 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
         key = line_to_key(line)
         ann = annotations.get(key) if key else None
         if ann and not line.rstrip().endswith("-" + ann):
-            out = line + "-" + ann
+            out = strip_qc_annotations(line) + "-" + ann
         else:
             out = line
         rep = rep_map.get(key)
@@ -249,7 +280,7 @@ def annotate_text(
         ann = annotations.get(key) if key else None
         out_line = line
         if ann and not out_line.rstrip().endswith("-" + ann):
-            out_line = out_line + "-" + ann
+            out_line = strip_qc_annotations(out_line) + "-" + ann
         if out_line != line:
             changed = True
         out.append(out_line)
