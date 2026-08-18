@@ -24,19 +24,19 @@
 
 ### 处理流程
 
-压缩包结构为 `<port>/<country>.txt`，每个文件内每行一个 IP。脚本依次：
+主要来源为 `all.json`（JSON 数组，含逐 IP 元数据），zip 归档作为回退。脚本依次：
 
 1. 下载 zip 归档（默认来源 `zip.cm.edu.kg`，可 `-u` 指定）
 2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`；`raw/` 为可重建中间产物，git 不入库，仅下载侧在 CI 运行期生成）
 3. 并行拉取并合并 CF 反代补充来源（见下方「CF 反代补充来源」；`--no-extra-sources` 跳过），无国家标签的条目经 `ip-api.com/batch` 尽力补齐国家码（失败保留 `#ALL`）；合并时同端口已有国家标注的重复 `#ALL` 条目会被剔除
-4. 按国家汇总为 `data/countries/<country>.txt`（跨端口去重，不含 ALL）
-5. 按端口汇总为 `data/ports/<port>.txt`（跨国家去重；`#ALL` 条目亦计入）
-6. 按常用集合汇总为 `data/sets/<集合>.txt`（见下方集合表）
-7. 去重合并为 `data/all.txt`（含 `#ALL` 条目）
+4. 按国家汇总为 `data/download/countries/<country>.txt`（跨端口去重，不含 ALL）
+5. 按端口汇总为 `data/download/ports/<port>.txt`（跨国家去重；`#ALL` 条目亦计入）
+6. 按常用集合汇总为 `data/download/sets/<集合>.txt`（见下方集合表）
+7. 去重合并为 `data/download/all.txt`（含 `#ALL` 条目）
 
 ### 限量版 `_ltd`
 
-- 下载侧 `data/sets/<集合>_ltd.txt`、`data/all_ltd.txt`：每国最多取前 `--per-country-limit` 条（默认 20，按 IP 序）；`#ALL` 条目在 `all_ltd` 中单独取前 `--per-country-limit` 条
+- 下载侧 `data/download/sets/<集合>_ltd.txt`、`data/download/all_ltd.txt`：每国最多取前 `--per-country-limit` 条（默认 20，按 IP 序）；`#ALL` 条目在 `all_ltd` 中单独取前 `--per-country-limit` 条
 - 验证侧 `data/valid/*_ltd.txt` 及各国家/集合目录内 `ltd.txt`：每国取**实测下载速度最快**的 20 条（速度并列/无速度时按延迟兜底），集合内与 `all_ltd` 全局按速度降序
 - `--per-country-limit 0` 时不生成限量文件
 
@@ -57,7 +57,7 @@
 
 ## 可用性验证
 
-CI 每次更新后对 `data/all.txt` 做连通性检查，输出镜像 `data/` 结构的存活列表到 `data/valid/`。非限量清单**按延迟升序**（最快在前），`_ltd` 限量清单**按实测下载速度降序**。
+CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 `data/` 结构的存活列表到 `data/valid/`。非限量清单**按延迟升序**（最快在前），`_ltd` 限量清单**按实测下载速度降序**。
 
 ### TLS 握手检测
 
@@ -65,8 +65,8 @@ CI 每次更新后对 `data/all.txt` 做连通性检查，输出镜像 `data/` �
 
 ### 速度测试
 
-每个存活代理在判活连接上继续做真实下载测速：发送 `GET /ajax/libs/three.js/r128/three.min.js`（约 530 KB），
-最多读取 `--speed-bytes`（默认 256 KB）字节或持续 `--speed-timeout`（默认 5s）秒，得到吞吐速度（MB/s，两位小数）。
+每个存活代理在判活连接上继续做真实下载测速：发送 `GET /ajax/libs/three.js/r128/three.js`（约 530 KB），
+最多读取 `--speed-bytes`（默认 1 MB）字节或持续 `--speed-timeout`（默认 5s）秒，得到吞吐速度（MB/s，两位小数）。
 测速失败仅使速度置空，不影响存活判定。速度仅供排序与统计，不做二次筛选。
 
 下载测速受独立并发上限 `--speed-workers`（默认 30）约束——判活（TCP/TLS）仍以 `--workers`（默认 500）
@@ -104,15 +104,15 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ## 更新差异
 
-每次更新对比上一版（`git show HEAD:data/all.txt`）生成差异：
+每次更新对比上一版（`git show HEAD:data/download/all.txt`）生成差异：
 
 - `data/diff/latest.json`：最近一次 `added`/`removed` 列表
 - `data/diff/<时间戳>.json`：有变化时按次归档，最多保留最近 500 份
-- `data/history.jsonl`：每条记录含 `added`/`removed` 计数
+- `data/quality/history.jsonl`：每条记录含 `added`/`removed` 计数
 
 ## 数据文件参考
 
-### `data/stats.json`
+### `data/output/stats.json`
 
 统计汇总（供徽章与外部消费），字段：
 
@@ -166,27 +166,27 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 数据未变化时文件不变（避免无意义提交）。运行时间见 `meta.json` 的 `ts`。
 
-### `data/valid/ipinfo.json`（质量 CI 输出）
+### `data/quality/ipinfo.json`（质量 CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`family`（ipv4/ipv6/dual）、`dual_stack`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/torlist/vpn_asn/resproxy_asn/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/torlist/vpn_asn/resproxy_asn/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件。
 
-### `data/valid/streaming.json`
+### `data/quality/streaming.json`
 
 单行 JSON，键为 `ip:port#国家`，值为各服务检测结果：`{netflix: {status, region, native}, disney: {...}, youtube: {...}, max: {...}, prime: {...}, openai: {...}}`。`status` ∈ `ok`/`blocked`/`error`；Netflix 的 `native` 表示解锁区域与出口地理一致（原生 IP）。
 
-### `data/valid/quality_meta.json`
+### `data/quality/quality_meta.json`
 
 质量检测汇总（供 stats 消费）：`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`family`/`dual_stack`（地址族分布）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
 
-### `data/valid/abuse.json`
+### `data/quality/abuse.json`
 
 提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。
 
-### `data/valid/reputation.json`
+### `data/quality/reputation.json`
 
 单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`torlist`/`vpn_asn`/`resproxy_asn`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表。按分数降序、同分按键序排列。
 
-### `data/valid/reputation_cache.json`
+### `data/quality/reputation_cache.json`
 
 单行 JSON，按 IP 缓存各按 IP 信誉 API 源的原始信号，键为出口 IP，值为 `{ts, signals: {source: signal}}`：`ts` 为查询时间戳（epoch 秒），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP 发起外部查询；静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存。
 
@@ -194,7 +194,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 与 `all.txt` 同源（全量存活池）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
 
-### `data/valid/china.json`（china-check CI 输出）
+### `data/quality/china.json`（china-check CI 输出）
 
 单行 JSON，键为 `ip:port#国家`，值为大陆连通性逐条检测明细：`ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable）、`ms`（可达延迟）、`sources`（各源原始结果）、`ts`（检测时间）。
 
@@ -206,7 +206,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 **根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。
 
-### `data/history.jsonl`（每行一条）
+### `data/quality/history.jsonl`（每行一条）
 
 `ts`、`total`、`unique`、`countries`、`ports`、`sets`、`added`、`removed`。数据未变化时跳过，最多保留最近 1000 条。
 
@@ -214,6 +214,6 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 `ts`、`total`、`checked`、`alive`、`dead`。与上一条完全相同则跳过，最多 1000 条。
 
-### `data/upstream_meta.json`
+### `data/quality/upstream_meta.json`
 
 上游 `all.json` 导出的逐 IP 元数据（keyed by 代理 IP），由 `download_proxies.py` 生成，供下游（如 exit-family 交叉验证）消费。每个值含 `clientIp`（该代理的真实出口 IP，Cloudflare 视角）、`family`（由 `clientIp` 派生，ipv4/ipv6）、`asn`、`asOrganization`、`country`、`city`、`region`、`continent`、`colo_iata`。使用旧版 zip 回退源时本文件不更新。

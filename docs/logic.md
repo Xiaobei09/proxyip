@@ -29,8 +29,8 @@ download_proxies.py → validate_proxies.py → quality_check.py
 
 每个存活代理在判活连接上继续做真实下载测速：
 
-- 目标：`GET /ajax/libs/three.js/r128/three.min.js`（约 530 KB）
-- 读取上限：256 KB
+- 目标：`GET /ajax/libs/three.js/r128/three.js`（约 530 KB）
+- 读取上限：1 MB
 - 超时：5s
 - 并发上限：30（独立于判活的 500 并发）
 - 最小有效字节：16384（低于此值视为测速失败，速度置空）

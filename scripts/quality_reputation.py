@@ -62,15 +62,15 @@ FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
 )
-DC_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
-VPN_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
-RESPROXY_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
+DC_ASN_URL = "https://iplogs.com/data/datacenter-asns.csv"
+VPN_ASN_URL = "https://iplogs.com/data/vpn-providers.csv"
+RESPROXY_ASN_URL = "https://iplogs.com/data/residential-proxy-backbones.csv"
 STATIC_LIST_TIMEOUT = 15
 ABUSER_SCORE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 ABUSER_SCORE_THRESHOLD = 0.1
 TORLIST_URLS = (
-    "[REDACTED_PRIVATE_RESOURCE]",
-    "[REDACTED_PRIVATE_RESOURCE]/",
+    "https://check.torproject.org/exit-addresses",
+    "https://www.dan.me.uk/torlist/",
 )
 IPAPI_PROXY_PENALTY = 25
 IPAPI_HOSTING_PENALTY = 10
@@ -215,7 +215,9 @@ class IpSet:
         if addr in self._ips:
             return True
         idx = bisect_right(self._starts, int(addr)) - 1
-        for j in range(idx, max(-1, idx - 8), -1):
+        for j in range(idx, -1, -1):
+            if int(self._nets[j].network_address) > int(addr):
+                break
             if addr in self._nets[j]:
                 return True
         return False
@@ -485,7 +487,7 @@ def otx_lookup_sync(ip: str) -> dict | None:
     }
 
 
-IPSUM_URL = "[REDACTED_PRIVATE_RESOURCE]"
+IPSUM_URL = "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt"
 
 
 async def fetch_ipsum_list() -> set[str]:
@@ -830,7 +832,7 @@ def derive_risk(
 def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
     if service == "abuseipdb":
         url = (
-            "[REDACTED_PRIVATE_RESOURCE]"
+            "https://api.abuseipdb.com/api/v2/check"
             f"?ipAddress={ip}&maxAgeInDays=90"
         )
         req = urllib.request.Request(
@@ -851,7 +853,7 @@ def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
             "is_hosting": data.get("isHosting"),
             "country_code": data.get("countryCode"),
         }
-    url = f"[REDACTED_PRIVATE_RESOURCE]"
+    url = f"https://ipqualityscore.com/api/json/ip/{key}/{ip}"
     req = urllib.request.Request(
         url, headers={"User-Agent": "proxyip/quality 1.0"}
     )
