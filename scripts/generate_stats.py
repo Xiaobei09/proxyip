@@ -1019,7 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
     rep_data = read_json(data_dir / "quality" / "reputation.json")
     source_stats = read_json(data_dir / "quality" / "source_stats.json")
 
-    latest = history[-1] if history else {}
+    latest = history[-1] if history else (valid_history[-1] if valid_history else {})
     sets = latest.get("sets", {})
     alive_sets = meta.get("sets", {})
     alive = meta.get("alive", 0)
@@ -1029,13 +1029,14 @@ def main(argv: list[str] | None = None) -> int:
     age_s = (now - updated_epoch) if updated_epoch is not None else None
     stale = age_s is not None and age_s > STALE_AFTER_S
 
+    unique = latest.get("unique") or latest.get("total", 0)
     stats = {
         "ts": now_ts(),
         "updated_at": latest.get("ts"),
         "age_s": age_s,
         "updated_ago": fmt_ago(age_s) if age_s is not None else "-",
         "stale": bool(stale),
-        "unique": latest.get("unique", 0),
+        "unique": unique,
         "total": latest.get("total", 0),
         "countries": latest.get("countries", 0),
         "ports": latest.get("ports", 0),
