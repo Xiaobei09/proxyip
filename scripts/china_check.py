@@ -460,11 +460,15 @@ def tcpping_check(ip: str, port: str, token: str, timeout: float) -> dict:
 def merge_verdict(sources: dict, cf: bool) -> dict:
     """跨源合成大陆可达性判定。
 
-    - 任一来源成功 → reachable（cf 启发式时 basis 标注 heuristic）
+    - 至少 2 个独立方法确认 → reachable
+    - 仅 1 个方法确认（非多节点源）→ uncertain（单点不可靠）
+    - 多节点源（ping.pe / itdog）单独确认 → reachable（已有多节点交叉）
     - check_host 与 xxapi 均失败 → unreachable
     - 多节点源（ping.pe / itdog）失败且另有单节点源失败 → unreachable
+    - itdog 失败且另有单节点源失败 → unreachable
     - 仅单方失败 → uncertain
     - 全部为错误/跳过 → skipped（不误判）
+    - CF 启发式不再自动判可达，仅作为 basis 标注
     """
     ok_sources = [name for name, r in sources.items() if r.get("ok")]
     fail_sources = [name for name, r in sources.items() if r["status"] == "fail"]
@@ -474,12 +478,24 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     ]
     ms = round(min(ms_values), 1) if ms_values else None
 
+    multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
+
+    if len(multi_ok) >= 1:
+        basis = ok_sources[:]
+        if cf:
+            basis.append("heuristic")
+        return {"verdict": "reachable", "basis": basis, "ms": ms}
+    if len(single_ok) >= 2:
+        basis = ok_sources[:]
+        if cf:
+            basis.append("heuristic")
+        return {"verdict": "reachable", "basis": basis, "ms": ms}
     if ok_sources:
-        if not any(name.startswith("heuristic") for name in ok_sources):
-            return {"verdict": "reachable", "basis": ok_sources, "ms": ms}
-        return {"verdict": "reachable", "basis": ok_sources + ["heuristic"], "ms": ms}
-    if cf:
-        return {"verdict": "reachable", "basis": ["heuristic"], "ms": None}
+        basis = ok_sources[:]
+        if cf:
+            basis.append("heuristic")
+        return {"verdict": "uncertain", "basis": basis, "ms": ms}
     if "check_host" in fail_sources and "xxapi" in fail_sources:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
     if "pingpe" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "itdog")):
@@ -488,7 +504,10 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
     if fail_sources:
         return {"verdict": "uncertain", "basis": fail_sources, "ms": None}
-    return {"verdict": "skipped", "basis": [], "ms": None}
+    basis = []
+    if cf:
+        basis.append("heuristic")
+    return {"verdict": "skipped", "basis": basis, "ms": None}
 
 
 def has_cn_note(line: str) -> bool:
@@ -654,7 +673,7 @@ def main(argv=None) -> int:
     parser.add_argument("--tcpping-token", default="",
                         help="tcpping.cn token（默认读 TCPPING_CN_TOKEN，缺则跳过）")
     parser.add_argument("--itdog-nodes", type=int, default=ITDOG_NODES_PER_ISP,
-                        help=f"itdog 每大陆运营商取前 N 节点（默认 {ITDOG_NODES_PER_ISP} → 共 3）")
+                        help=f"itdog 每大陆运营商取前 N 节点（默认 {ITDOG_NODES_PER_ISP} → 共 6）")
     parser.add_argument("--itdog-batch-size", type=int, default=ITDOG_BATCH_SIZE,
                         help=f"itdog 每任务目标数（上限 {ITDOG_BATCH_SIZE}；默认 {ITDOG_BATCH_SIZE}）")
     parser.add_argument("--itdog-concurrency", type=int, default=ITDOG_CONCURRENCY,
