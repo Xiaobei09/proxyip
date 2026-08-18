@@ -215,7 +215,9 @@ class IpSet:
         if addr in self._ips:
             return True
         idx = bisect_right(self._starts, int(addr)) - 1
-        for j in range(idx, max(-1, idx - 8), -1):
+        for j in range(idx, -1, -1):
+            if int(self._nets[j].network_address) > int(addr):
+                break
             if addr in self._nets[j]:
                 return True
         return False
