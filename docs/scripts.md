@@ -67,14 +67,14 @@
 
 ### `scripts/quality_check.py`
 
-流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all_ltd.txt`（每国最快存活集）检测，所有代理使用统一的 TLS 直连方法：
+流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）检测，所有代理使用统一的 TLS 直连方法：
 
 - 对每个代理建立 TLS 直连（SNI=服务域名），检测 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`；`loc` 机场码同时写入行备注的 `→` 出口地区段
 - 批量查出口 IP 地理（`ip-api.com/batch`）与 ASN/IP 类型
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `--source` | 输入代理列表 | `data/valid/all_ltd.txt` |
+| `--source` | 输入代理列表 | `data/valid/all.txt` |
 | `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
