@@ -64,7 +64,19 @@ from common import (
     write_text_if_changed,
     _note,
 )
-from china_itdog import *
+from china_itdog import (
+    ITDOG_BATCH_SIZE,
+    ITDOG_CONCURRENCY,
+    ITDOG_NODES_PER_ISP,
+    ITDOG_PACING,
+    ITDOG_TASK_TIMEOUT,
+    itdog_batch_run,
+    itdog_md5_16,
+    itdog_parse_nodes,
+    itdog_parse_submit,
+    itdog_rec_ok,
+    itdog_aggregate,
+)
 
 FALLBACK_SOURCE = DEFAULT_SOURCE
 
@@ -116,12 +128,17 @@ class RateLimiter:
         self._lock = threading.Lock()
         self._times: list[float] = []
         self._hour_count = 0
+        self._hour_start: float = 0.0
 
     def acquire(self) -> None:
         while True:
             with self._lock:
                 now = time.monotonic()
                 self._times = [t for t in self._times if now - t < self.window]
+                hour_ago = now - 3600
+                if self._hour_start < hour_ago:
+                    self._hour_count = 0
+                    self._hour_start = now
                 if self.hour_cap and self._hour_count >= self.hour_cap:
                     raise RateLimited("hourly cap reached")
                 if len(self._times) < self.per_window:
@@ -247,8 +264,15 @@ def parse_tcpping(payload) -> dict:
             return obj
         if isinstance(obj, dict):
             for key in ("nodes", "results", "data", "list"):
-                if isinstance(obj.get(key), (list, dict)):
-                    return find_nodes(obj[key])
+                v = obj.get(key)
+                if isinstance(v, list):
+                    return v
+            for key in ("nodes", "results", "data", "list"):
+                v = obj.get(key)
+                if isinstance(v, dict):
+                    result = find_nodes(v)
+                    if result:
+                        return result
         return []
 
     nodes = find_nodes(payload)
@@ -616,11 +640,15 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     def l2(item):
         _, key, ip, port, _ = item
-        sources = {
-            "check_host": check_host_check(ip, port, ch_limiter, args.timeout, args.api_key),
-            "xxapi": xxapi_check(ip, port, args.timeout),
-        }
-        return key, sources
+        try:
+            sources = {
+                "check_host": check_host_check(ip, port, ch_limiter, args.timeout, args.api_key),
+                "xxapi": xxapi_check(ip, port, args.timeout),
+            }
+            return key, sources
+        except Exception as exc:
+            logging.debug("l2 check failed for %s: %s", key, exc)
+            return key, {"_error": {"status": "error", "ok": False, "ms": None}}
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(l2, item) for item in sample]

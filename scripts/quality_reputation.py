@@ -216,9 +216,10 @@ class IpSet:
             return True
         idx = bisect_right(self._starts, int(addr)) - 1
         for j in range(idx, -1, -1):
-            if int(self._nets[j].network_address) > int(addr):
+            net = self._nets[j]
+            if int(net.network_address) + net.num_addresses <= int(addr):
                 break
-            if addr in self._nets[j]:
+            if addr in net:
                 return True
         return False
 
@@ -504,7 +505,7 @@ async def fetch_torlist() -> set[str]:
             text = await asyncio.to_thread(
                 lambda: urllib.request.urlopen(
                     urllib.request.Request(url, headers={"User-Agent": UA}),
-                    timeout=NETCOFFEE_TIMEOUT,
+                    timeout=STATIC_LIST_TIMEOUT,
                 ).read().decode("utf-8", errors="replace")
             )
         except Exception as exc:
@@ -622,11 +623,11 @@ async def batch_sync(
             except Exception as exc:
                 logging.debug("batch_sync: %s failed: %s", ip, exc)
                 res = None
-        if res is not None:
-            out[ip] = res
-            await asyncio.sleep(delay)
-        else:
-            failed.append(ip)
+            if res is not None:
+                out[ip] = res
+                await asyncio.sleep(delay)
+            else:
+                failed.append(ip)
 
     await asyncio.gather(*(work(ip) for ip in items))
     for _attempt in range(retries):

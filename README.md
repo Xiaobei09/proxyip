@@ -88,26 +88,26 @@ data/download/all.txt                       # 全量去重清单（未验证）
 
 - **触发**：每 30 分钟定时（`cron: */30 * * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
 - **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip，产出 `data/quality/upstream_meta.json`）→ 验证与测速（默认不设时间限制，跑完为止）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
-- **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
+- **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：四个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`data/output/badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
 - **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
-- **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
+- **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ 有变更则自动提交并推送
 - **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流按文件所有权范围提交 `data/`（update-proxies 不触碰 `data/quality/china.json`/`data/valid/all_cn.txt`），与主更新/质量 CI 的并发提交安全共存
 
 `.github/workflows/exit-family.yml`（实际出口家族独立 CI）：
 
-- **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
+- **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `exit_family.py`（全量存活池按家族分离，并对照 `data/quality/upstream_meta.json` 交叉验证）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
 - **说明**：CF 边缘代理真实出口常为 IPv6（尽管呈现为 v4 地址），分离清单供按家族选路使用；上游交叉验证仅作参照，实时探测仍是判定依据
@@ -115,7 +115,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/annotate-classify.yml`（后缀填充 + 节点分类）：
 
 - **触发**：quality-check 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `annotate_classify.py`（读取 5 个 JSON 数据源，填充缺失后缀 + 追加分类 token）→ `generate_stats.py` → 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `annotate_classify.py`（读取 5 个 JSON 数据源，填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送
 - **细节**：作业超时 30 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
 - **说明**：分类维度：IP 类型（DC/RES/MOB/PROXY，来自 ipinfo.json）+ 速度等级（fast≥5MB/s / mid 1-5 / slow<1，来自行内 speed 解析）。行格式：`...-DC-fast`
 

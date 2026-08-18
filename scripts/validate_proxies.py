@@ -291,7 +291,6 @@ async def check_proxy(
     connection while waiting). Speed is ``None`` when the measurement failed
     (the proxy stays alive).
     """
-    started = time.monotonic()
 
     def elapsed(since: float) -> float:
         return round((time.monotonic() - since) * 1000, 1)
@@ -305,14 +304,17 @@ async def check_proxy(
     tls_started = time.monotonic()
     try:
         reader, writer = await open_conn(ip, port, args.timeout, ctx=_TLS_CTX, sni=args.sni)
-    except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError):
+    except ssl.SSLError:
         return "retry", None, None, None
+    except (OSError, asyncio.TimeoutError, ValueError):
+        return "dead", None, None, None
     tls_latency = elapsed(tls_started)
     try:
         speed = await measure_speed("tls")
     finally:
         try:
             writer.close()
+            await writer.wait_closed()
         except OSError:
             pass
     return "ok", "tls", tls_latency, speed
@@ -343,9 +345,9 @@ async def speed_probe(
     finally:
         try:
             writer.close()
+            await writer.wait_closed()
         except OSError:
             pass
-
 
 async def speed_download(
     reader: asyncio.StreamReader,
@@ -690,8 +692,8 @@ async def check_entries(
         submit()
         try:
             while tasks:
-                wait_ms = min(0.05, max(0.0, deadline - time.monotonic()))
-                await asyncio.wait(tasks, timeout=wait_ms)
+                wait_s = min(0.05, max(0.0, deadline - time.monotonic()))
+                await asyncio.wait(tasks, timeout=wait_s)
                 if time.monotonic() >= deadline:
                     break
                 submit()
@@ -741,20 +743,22 @@ async def run(args: argparse.Namespace) -> int:
     lat_stats = {}
     if latencies:
         latencies_sorted = sorted(latencies)
+        idx = min(int(len(latencies_sorted) * 0.9), len(latencies_sorted) - 1)
         lat_stats = {
             "avg_ms": round(statistics.mean(latencies), 1),
             "median_ms": round(statistics.median(latencies), 1),
-            "p90_ms": round(latencies_sorted[int(len(latencies_sorted) * 0.9) - 1], 1),
+            "p90_ms": round(latencies_sorted[idx], 1),
             "max_ms": latencies_sorted[-1],
         }
 
     speed_stats = {}
     if speeds:
         speeds_sorted = sorted(speeds)
+        idx = min(int(len(speeds_sorted) * 0.9), len(speeds_sorted) - 1)
         speed_stats = {
             "avg_mbps": round(statistics.mean(speeds), 2),
             "median_mbps": round(statistics.median(speeds), 2),
-            "p90_mbps": round(speeds_sorted[int(len(speeds_sorted) * 0.9) - 1], 2),
+            "p90_mbps": round(speeds_sorted[idx], 2),
             "max_mbps": speeds_sorted[-1],
         }
 

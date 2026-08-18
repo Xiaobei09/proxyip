@@ -97,7 +97,7 @@ def _build_rep_map(data: dict) -> dict[str, int]:
     return {
         k: v.get("score", 0)
         for k, v in data.get("proxies", {}).items()
-        if v.get("score")
+        if v.get("score") is not None
     }
 
 

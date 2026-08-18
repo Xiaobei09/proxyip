@@ -127,8 +127,8 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
-_QC_TOK_RE = re.compile(
-    r"(?:^|-)(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d+)(?:-|$)"
+_QC_SUFFIX_RE = re.compile(
+    r"(?:-(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d+))+$"
 )
 
 
@@ -139,23 +139,7 @@ def strip_qc_annotations(line: str) -> str:
     the QC-specific suffix so ``annotate_text`` can re-append a fresh one
     without accumulating duplicates across consecutive CI runs.
     """
-    m = LATENCY_RE.search(line)
-    if not m:
-        return line
-    base_end = m.end()
-    base = line[:base_end]
-    suffix = line[base_end:]
-    if not suffix:
-        return line
-    parts = suffix.split("-")
-    kept: list[str] = []
-    for part in parts:
-        if not part:
-            continue
-        if _QC_TOK_RE.match("-" + part):
-            continue
-        kept.append(part)
-    return base + ("-" + "-".join(kept) if kept else "")
+    return _QC_SUFFIX_RE.sub("", line)
 
 
 def build_reputation_map(
@@ -169,8 +153,7 @@ def build_reputation_map(
         signals = collect_signals(
             res["ip"], {}, risk_data, weights, include_ipapi=False
         )
-        score = compute_reputation(signals, None, weights)
-        _score, sources = weighted_reputation(signals, weights)
+        score, sources = weighted_reputation(signals, weights)
         source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
         if score is None:
             continue
@@ -360,7 +343,9 @@ def build_meta(
         "rep_dist": rep_dist,
         "rep_avg": (round(sum(reps) / len(reps), 1) if reps else None),
         "rep_median": (
-            round(sorted(reps)[len(reps) // 2], 1) if reps else None
+            round(
+                (sorted(reps)[n // 2 - 1] + sorted(reps)[n // 2]) / 2, 1
+            ) if (n := len(reps)) else None
         ),
         "country_mismatch": country_mismatch,
         "ext_check_total": ext_total,
@@ -471,8 +456,8 @@ def main(argv: list[str] | None = None) -> int:
         "--reputation-sources",
         default=None,
         help="Comma list of sources for --reputation-provider multi "
-        "(default: netcoffee,ncgy,ip-api,ipquery,ffraud,ipapi_is,ipdata,"
-        "whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn)",
+        "(default: netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,"
+        "ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,torlist,vpn_asn,resproxy_asn)",
     )
     parser.add_argument(
         "--reputation-weights",

@@ -254,11 +254,15 @@ async def check_one(entry: tuple, method: str, args: argparse.Namespace) -> dict
     """Run the checks for a single proxy entry."""
     key, ip, port, cc = entry
     base = {"key": key, "ip": ip, "port": port, "cc": cc, "method": "tls", "tls": True}
-    status, headers, body, _err = await tls_get_direct(
-        ip, port, SERVICES["openai"]["host"], SERVICES["openai"]["path"],
-        args.timeout, args.read_cap,
-    )
-    base["streaming"] = {"openai": parse_openai(status, headers, body)}
+    streaming: dict = {}
+    for svc in args.services:
+        cfg = SERVICES[svc]
+        status, headers, body, _err = await tls_get_direct(
+            ip, port, cfg["host"], cfg["path"],
+            args.timeout, args.read_cap,
+        )
+        streaming[svc] = PARSERS[svc](status, headers, body)
+    base["streaming"] = streaming
     base["external_check"] = await check_external_api(ip, port, timeout=30)
     return base
 
