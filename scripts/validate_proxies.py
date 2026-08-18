@@ -43,6 +43,7 @@ from pathlib import Path
 
 from common import (
     ALL_FILE,
+    CHINA_FILE,
     INDEX_FILE,
     MAX_HISTORY_RECORDS,
     PER_COUNTRY_LIMIT,
@@ -193,7 +194,7 @@ def load_cn_reachable(path: Path | None = None) -> set[str]:
     与 ``all_cn.txt``（``reachable OR has_cn_note``）的 reachable 侧语义对齐，
     供 cn 分组兜底：行内 ``-CN`` 备注缺失时仍可归入 cn 组。
     """
-    path = path or VALID_DIR / "china.json"
+    path = path or CHINA_FILE
     if not path.exists():
         return set()
     try:

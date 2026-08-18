@@ -47,6 +47,7 @@ from common import (
     VALID_ALL_CN_FILE,
     VALID_ALL_FILE,
     VALID_ALL_LTD_FILE,
+    VALID_DIR,
     has_token,
     is_cf_heuristic,
     keyed_json,
