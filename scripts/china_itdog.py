@@ -22,11 +22,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 from common import UA, is_cf_heuristic, request_follow
 
-ITDOG_BATCH_URL = "[REDACTED_PRIVATE_RESOURCE]"
-ITDOG_WS_BASE = "[REDACTED_PRIVATE_RESOURCE]"
+ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
+ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
 ITDOG_TOKEN = "What this is is no longer important."
 ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
-ITDOG_NODES_PER_ISP = 1  # 电信/联通/移动各取前 N 节点（默认 1 → 共 3）
+ITDOG_NODES_PER_ISP = 2  # 电信/联通/移动各取前 N 节点（默认 2 → 共 6）
 ITDOG_CONCURRENCY = 8
 ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
 ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
@@ -87,7 +87,7 @@ def itdog_submit_task(targets: list[str], node_ids: list[str]) -> tuple[str | No
     hdrs = {
         "User-Agent": UA,
         "Origin": "https://www.itdog.cn",
-        "Referer": "[REDACTED_PRIVATE_RESOURCE]",
+        "Referer": "https://www.itdog.cn/batch_http/",
         "Content-Type": "application/x-www-form-urlencoded",
     }
     try:

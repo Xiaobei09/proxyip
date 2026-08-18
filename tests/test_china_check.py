@@ -180,11 +180,19 @@ class TestMergeVerdict(unittest.TestCase):
     def test_any_ok_reachable(self):
         sources = {
             "check_host": {"status": "ok", "ok": True, "ms": 180},
-            "xxapi": {"status": "error", "ok": False, "ms": None},
+            "xxapi": {"status": "ok", "ok": True, "ms": 120},
         }
         merged = cc.merge_verdict(sources, cf=False)
         self.assertEqual(merged["verdict"], "reachable")
-        self.assertEqual(merged["ms"], 180.0)
+        self.assertEqual(merged["ms"], 120.0)
+
+    def test_single_ok_uncertain(self):
+        sources = {
+            "check_host": {"status": "ok", "ok": True, "ms": 180},
+            "xxapi": {"status": "error", "ok": False, "ms": None},
+        }
+        merged = cc.merge_verdict(sources, cf=False)
+        self.assertEqual(merged["verdict"], "uncertain")
 
     def test_both_l2_fail_unreachable(self):
         sources = {
@@ -199,7 +207,7 @@ class TestMergeVerdict(unittest.TestCase):
             "xxapi": {"status": "ok", "ok": True, "ms": 90},
             "pingpe": {"status": "fail", "ok": False, "ms": None},
         }
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
 
     def test_single_fail_uncertain(self):
         sources = {
@@ -215,13 +223,13 @@ class TestMergeVerdict(unittest.TestCase):
         }
         self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "skipped")
 
-    def test_heuristic_only_reachable(self):
+    def test_heuristic_only_uncertain(self):
         sources = {
             "check_host": {"status": "error", "ok": False, "ms": None},
             "xxapi": {"status": "error", "ok": False, "ms": None},
         }
         merged = cc.merge_verdict(sources, cf=True)
-        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["verdict"], "skipped")
         self.assertIn("heuristic", merged["basis"])
 
 
@@ -331,7 +339,10 @@ class TestLoadSample(unittest.TestCase):
 class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):
         item = ("1.2.3.4:2087#US", "1.2.3.4:2087#US", "1.2.3.4", "2087", "US")
-        entry = cc.build_entry(item, {"check_host": {"status": "ok", "ok": True, "ms": 100}})
+        entry = cc.build_entry(item, {
+            "check_host": {"status": "ok", "ok": True, "ms": 100},
+            "xxapi": {"status": "ok", "ok": True, "ms": 80},
+        })
         self.assertEqual(entry["verdict"], "reachable")
         self.assertEqual(entry["ip"], "1.2.3.4")
         self.assertIn("ts", entry)
