@@ -200,7 +200,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/china.json`（china-check CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为大陆连通性逐条检测明细：`ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`pingpe`/`heuristic`）、`ms`（可达延迟）、`sources`（各源原始结果）、`ts`（检测时间）。
+单行 JSON，键为 `ip:port#国家`，值为大陆连通性逐条检测明细：`ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable）、`ms`（可达延迟）、`sources`（各源原始结果）、`ts`（检测时间）。
 
 ### `data/valid/all_cn.txt`
 

@@ -12,14 +12,20 @@
 
 检测分层（均为无账号/免登录）：
 
-- L1 启发式（零网络）：行备注已带 ``CF``（Cloudflare 边缘 tls 代理）即视为大陆可达，
-  这类代理走 CF 边缘节点，不依赖源站回程。
-- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 3 节点
-  （电信/联通/移动各 1），经 WebSocket 收结果，TCP 连通即判可达。
+- L1 启发式（零网络）：行备注已带 ``CF``（Cloudflare 边缘 tls 代理）记录 heuristic 源，
+  但不自动判 reachable——CF 启发式仅作为 basis 标注，需其他源确认。
+- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 6 节点
+  （电信/联通/移动各 2），经 WebSocket 收结果，TCP 连通即判可达。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+ `xxapi.cn`
-  （北京节点，免 key）。二者均判失败 → unreachable；任一成功 → reachable；单方失败 → uncertain。
-- L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，多数可达即判可达）；
+  （北京节点，免 key）。
+- L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   可选 `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
+
+保守判定逻辑（merge_verdict）：
+  多节点源（pingpe/itdog/tcpping）任一 ok → reachable；
+  单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  check_host + xxapi 均 fail → unreachable；
+  pingpe/itdog fail + 任一其他源 fail → unreachable。
 
 纯标准库（urllib / json / threading / concurrent.futures）。运行时告警不计入
 判定，仅记录 ``skipped``；单源失败不误判。

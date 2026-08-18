@@ -73,10 +73,10 @@ MAX_HISTORY_RECORDS = 1000
 MAX_DIFF_FILES = 50
 PER_COUNTRY_LIMIT = 20
 
-EXTERNAL_CHECK_URL = "[REDACTED_PRIVATE_RESOURCE]"
+EXTERNAL_CHECK_URL = "https://api.090227.xyz/check"
 
 # ---------------------------------------------------------------- ip-api 共享常量
-IPAPI_BATCH_URL = "[REDACTED_PRIVATE_RESOURCE]"
+IPAPI_BATCH_URL = "http://ip-api.com/batch"
 IPAPI_BATCH_SIZE = 100
 IPAPI_BATCH_DELAY = 1.2
 
@@ -387,7 +387,7 @@ def has_token(note: str, token: str) -> bool:
 
 
 def is_cf_heuristic(line: str) -> bool:
-    """行备注已带 ``-CF``（Cloudflare 边缘）即判定大陆可达（零网络）。"""
+    """行备注是否带 ``-CF``（Cloudflare 边缘标记，用于检测时记录 heuristic 源）。"""
     return has_token(_note(line), "CF")
 
 
