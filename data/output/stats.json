@@ -1,110 +1,133 @@
 {
-  "ts": "2026-08-19T00:12:09Z",
-  "updated_at": "2026-08-18T04:04:15Z",
-  "age_s": 72473.84753108025,
-  "updated_ago": "20h 7m ago",
-  "stale": true,
-  "unique": 20488,
-  "total": 20488,
-  "countries": 0,
-  "ports": 0,
-  "sets": {},
-  "alive": 19468,
-  "alive_checked": 21543,
-  "alive_rate": 0.9037,
-  "alive_countries": 74,
-  "alive_sets": {
-    "europe": 14568,
+  "ts": "2026-08-19T03:34:34Z",
+  "updated_at": "2026-08-19T00:43:42Z",
+  "age_s": 10251.972564935684,
+  "updated_ago": "2h 50m ago",
+  "stale": false,
+  "unique": 20412,
+  "total": 20412,
+  "countries": 73,
+  "ports": 6,
+  "sets": {
+    "europe": 14815,
     "europe_ltd": 517,
-    "asia": 2449,
-    "asia_ltd": 256,
-    "north_america": 2348,
-    "north_america_ltd": 49,
-    "south_america": 19,
-    "south_america_ltd": 19,
-    "oceania": 47,
+    "asia": 3115,
+    "asia_ltd": 260,
+    "north_america": 2373,
+    "north_america_ltd": 50,
+    "south_america": 24,
+    "south_america_ltd": 24,
+    "oceania": 49,
     "oceania_ltd": 20,
     "africa": 12,
     "africa_ltd": 12,
-    "middle_east": 177,
-    "middle_east_ltd": 53,
-    "hot": 15476,
+    "middle_east": 184,
+    "middle_east_ltd": 56,
+    "hot": 16397,
     "hot_ltd": 260,
-    "cn_common": 15476,
+    "cn_common": 16397,
     "cn_common_ltd": 260,
-    "hk_us_jp_sg_tw_kr": 4340,
+    "hk_us_jp_sg_tw_kr": 5019,
     "hk_us_jp_sg_tw_kr_ltd": 120,
-    "all": 19468,
-    "all_ltd": 898
+    "all": 20412,
+    "all_ltd": 907
+  },
+  "alive": 19129,
+  "alive_checked": 20394,
+  "alive_rate": 0.938,
+  "alive_countries": 73,
+  "alive_sets": {
+    "europe": 14352,
+    "europe_ltd": 513,
+    "asia": 2379,
+    "asia_ltd": 251,
+    "north_america": 2300,
+    "north_america_ltd": 49,
+    "south_america": 19,
+    "south_america_ltd": 19,
+    "oceania": 43,
+    "oceania_ltd": 20,
+    "africa": 12,
+    "africa_ltd": 12,
+    "middle_east": 170,
+    "middle_east_ltd": 53,
+    "hot": 15220,
+    "hot_ltd": 260,
+    "cn_common": 15220,
+    "cn_common_ltd": 260,
+    "hk_us_jp_sg_tw_kr": 4244,
+    "hk_us_jp_sg_tw_kr_ltd": 120,
+    "all": 19129,
+    "all_ltd": 888
   },
   "latency": {
-    "avg_ms": 317.4,
-    "median_ms": 298.2,
-    "p90_ms": 399.7,
-    "max_ms": 4859.1
+    "avg_ms": 254.7,
+    "median_ms": 204.1,
+    "p90_ms": 416.0,
+    "max_ms": 4995.2
   },
   "latency_dist": {
-    "0-100": 1664,
-    "100-200": 524,
-    "200-300": 7833,
-    "300-500": 8428,
-    "500-1000": 617,
-    "1000+": 402
+    "0-100": 465,
+    "100-200": 8412,
+    "200-300": 6494,
+    "300-500": 2976,
+    "500-1000": 426,
+    "1000+": 356
   },
   "speed": {
-    "avg_mbps": 1.16,
-    "median_mbps": 0.78,
-    "p90_mbps": 1.13,
-    "max_mbps": 10.39
+    "avg_mbps": 1.23,
+    "median_mbps": 1.17,
+    "p90_mbps": 1.53,
+    "max_mbps": 13.77
   },
   "speed_dist": {
-    "0-0.5": 936,
-    "0.5-1": 15814,
-    "1-2": 921,
-    "2-5": 509,
-    "5+": 997
+    "0-0.5": 950,
+    "0.5-1": 4203,
+    "1-2": 13099,
+    "2-5": 272,
+    "5+": 248
   },
   "streaming": {
     "netflix": {
       "ok": 0,
-      "blocked": 0,
-      "error": 0
+      "blocked": 4,
+      "error": 19124
     },
     "disney": {
-      "ok": 0,
-      "blocked": 0,
+      "ok": 324,
+      "blocked": 18804,
       "error": 0
     },
     "youtube": {
       "ok": 0,
-      "blocked": 0,
-      "error": 0
+      "blocked": 19057,
+      "error": 71
     },
     "max": {
-      "ok": 0,
-      "blocked": 0,
+      "ok": 334,
+      "blocked": 18794,
       "error": 0
     },
     "prime": {
-      "ok": 0,
-      "blocked": 0,
+      "ok": 10,
+      "blocked": 19118,
       "error": 0
     },
     "openai": {
-      "ok": 19202,
-      "blocked": 41,
-      "error": 222
+      "ok": 18777,
+      "blocked": 51,
+      "error": 300
     }
   },
-  "streaming_ok": 19202,
+  "streaming_ok": 18777,
   "ip_type": {
-    "DC": 3545,
-    "PROXY": 69,
-    "RES": 15851
+    "DC": 6276,
+    "PROXY": 119,
+    "RES": 12733
   },
   "family": {},
   "dual_stack": 0,
-  "country_mismatch": 81,
-  "history_records": 0,
-  "alive_history_records": 137
+  "country_mismatch": 468,
+  "history_records": 1,
+  "alive_history_records": 138
 }
