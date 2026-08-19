@@ -2,7 +2,7 @@ name: Update proxy list
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 */2 * * *"
   workflow_dispatch:
   push:
     paths:
