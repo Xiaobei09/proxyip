@@ -45,6 +45,7 @@ from common import (
     IPAPI_BATCH_URL,
     IPAPI_BATCH_SIZE,
     IPAPI_BATCH_DELAY,
+    IP_SOURCES_FILE,
     MAX_DIFF_FILES,
     MAX_HISTORY_RECORDS,
     PER_COUNTRY_LIMIT,
@@ -561,16 +562,6 @@ def append_history(record: dict) -> bool:
     lines: list[str] = []
     if HISTORY_FILE.exists():
         lines = HISTORY_FILE.read_text(encoding="utf-8").splitlines()
-    if lines:
-        try:
-            last = json.loads(lines[-1])
-            last.pop("ts", None)
-            current = {k: v for k, v in record.items() if k != "ts"}
-            if last == current:
-                print("No data change; skipping history record")
-                return False
-        except (json.JSONDecodeError, KeyError):
-            pass
     lines.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
     lines = lines[-MAX_HISTORY_RECORDS:]
     tmp = HISTORY_FILE.with_suffix(".tmp")
@@ -594,6 +585,54 @@ def write_upstream_meta(meta_map: dict) -> None:
         + "\n",
     )
     print(f"Wrote upstream metadata for {len(meta_map)} IPs")
+
+
+def write_source_attribution(
+    by_port: dict,
+    main_ips: set[str],
+    source_ip_sets: dict[str, set[str]],
+) -> None:
+    """Persist per-IP download source attribution.
+
+    Builds a ``{ip:port#CC: source_label}`` mapping from the final merged
+    ``by_port`` structure and the per-source IP sets, then writes it to
+    :data:`IP_SOURCES_FILE`.
+
+    Source labels: ``"main"`` for the primary upstream, or the extra-source
+    filename stem (e.g. ``"fdip"``, ``"proxy"``).  IPs appearing in multiple
+    extra sources are labelled ``"multi"``.
+    """
+    # Map bare IP → list of extra source labels that contributed it
+    ip_extra_labels: dict[str, list[str]] = {}
+    for url, ips in source_ip_sets.items():
+        label = url.rsplit("/", 1)[-1].split(".")[0] if "/" in url else url
+        for ip in ips:
+            ip_extra_labels.setdefault(ip, []).append(label)
+
+    ip_source_map: dict[str, str] = {}
+    for port, countries in by_port.items():
+        for country, ips in countries.items():
+            for ip in ips:
+                key = f"{ip}:{port}#{country}"
+                if ip in main_ips:
+                    ip_source_map[key] = "main"
+                elif ip in ip_extra_labels:
+                    labels = ip_extra_labels[ip]
+                    ip_source_map[key] = labels[0] if len(labels) == 1 else "multi"
+                else:
+                    ip_source_map[key] = "unknown"
+
+    write_text_if_changed(
+        IP_SOURCES_FILE,
+        json.dumps(
+            {"sources": ip_source_map},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    print(f"Wrote source attribution for {len(ip_source_map)} entries")
 
 
 def load_source(url: str, timeout: int) -> tuple[dict, dict | None]:
@@ -871,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Wrote {src_stats_file} ({len(source_stats)} sources)")
         stats, all_entries = write_outputs(by_port, per_country_limit=args.per_country_limit)
+        write_source_attribution(by_port, main_ips, source_ip_sets)
         if meta_map is not None:
             write_upstream_meta(meta_map)
         previous = load_previous_all()

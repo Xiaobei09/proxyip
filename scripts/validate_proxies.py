@@ -41,10 +41,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+import urllib.error
+import urllib.request
+
 from common import (
     ALL_FILE,
     CHINA_FILE,
     EXIT_FAMILY_FILE,
+    EXT_API_SOURCES,
+    EXT_CHECK_FILE,
     INDEX_FILE,
     MAX_HISTORY_RECORDS,
     PER_COUNTRY_LIMIT,
@@ -52,8 +57,11 @@ from common import (
     VALID_DIR,
     VALID_HISTORY_FILE,
     has_token,
+    insert_exit_region,
+    keyed_json,
     now_ts,
     parse_line,
+    write_json,
     write_text_if_changed,
 )
 from download_proxies import COUNTRY_SETS, SMALL_SETS
@@ -69,6 +77,8 @@ TIMEOUT = 5
 READ_CAP = 3
 WORKERS = 500
 RETRY_DELAY = 0.2
+EXT_TIMEOUT = 10
+EXT_WORKERS = 10
 
 LATENCY_BUCKETS = [
     (0, 100),
@@ -90,6 +100,164 @@ SPEED_BUCKETS = [
 _TLS_CTX = ssl.create_default_context()
 _TLS_CTX.check_hostname = False
 _TLS_CTX.verify_mode = ssl.CERT_NONE
+
+
+# ---------------------------------------------------------------- 外部 API 多源检测
+
+
+def _normalize_ext_response(source: dict, data: dict) -> dict:
+    """Normalize raw API response to standard format."""
+    name = source["name"]
+
+    if name in ("090227", "cmliu"):
+        ipv4 = data.get("probe_results", {}).get("ipv4", {})
+        ipv6 = data.get("probe_results", {}).get("ipv6", {})
+        return {
+            "name": name,
+            "ok": bool(data.get("success")),
+            "response_ms": data.get("responseTime"),
+            "colo": data.get("colo"),
+            "ipv4_ok": bool(ipv4.get("ok")),
+            "ipv6_ok": bool(ipv6.get("ok")),
+            "dual_stack": data.get("dual_stack", False),
+            "inferred_stack": data.get("inferred_stack"),
+            "exit_geo": ipv4.get("exit"),
+        }
+
+    if name == "toicf":
+        return {
+            "name": name,
+            "ok": bool(data.get("ok")),
+            "response_ms": None,
+            "colo": None,
+            "ipv4_ok": bool(data.get("supports_ipv4")),
+            "ipv6_ok": bool(data.get("supports_ipv6")),
+            "dual_stack": bool(data.get("dual_stack")),
+            "inferred_stack": data.get("inferred_stack"),
+            "exit_geo": _extract_toicf_exit_geo(data),
+        }
+
+    return {"name": name, "ok": False}
+
+
+def _extract_toicf_exit_geo(data: dict) -> dict | None:
+    """Extract exit_geo from ToiCF probe_results format."""
+    for probe in data.get("probe_results", []):
+        if probe.get("ok") and probe.get("exit_ip"):
+            return {
+                "country": probe.get("exit_country"),
+                "countryCode": probe.get("exit_country"),
+                "city": probe.get("exit_city"),
+                "asn": probe.get("exit_asn"),
+                "org": probe.get("exit_org"),
+            }
+    return None
+
+
+async def check_one_ext_api(
+    source: dict, ip: str, port: str, timeout: int,
+) -> dict:
+    """Call one external API source and return a normalized result dict."""
+    param = source["param_key"]
+    url = f"{source['url']}?{param}={ip}:{port}"
+
+    def _fetch() -> dict:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "proxyip-checker/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+    try:
+        data = await asyncio.to_thread(_fetch)
+        return _normalize_ext_response(source, data)
+    except Exception as exc:  # noqa: BLE001
+        logging.debug("ext_api %s %s:%s failed: %s", source["name"], ip, port, exc)
+        return {"name": source["name"], "ok": False, "error": str(exc)}
+
+
+async def check_all_ext_apis(
+    ip: str, port: str, ext_timeout: int,
+) -> list[dict]:
+    """Call all external API sources concurrently and return normalized results."""
+    tasks = [
+        check_one_ext_api(src, ip, port, ext_timeout or src["timeout"])
+        for src in EXT_API_SOURCES
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out = []
+    for r in results:
+        if isinstance(r, Exception):
+            out.append({"name": "unknown", "ok": False, "error": str(r)})
+        elif isinstance(r, dict):
+            out.append(r)
+    return out
+
+
+def merge_ext_verdict(results: list[dict]) -> dict:
+    """Multi-source consensus for proxy availability.
+
+    Rules (following china_check.py merge_verdict pattern):
+    - 2+ sources ok -> alive
+    - 1 source ok -> uncertain
+    - 0 sources ok, 2+ failed -> dead
+    - all errors -> skipped
+    """
+    ok = [r for r in results if r.get("ok")]
+    fail = [r for r in results if not r.get("ok") and r.get("error")]
+
+    if len(ok) >= 2:
+        return {
+            "alive": True,
+            "basis": [r["name"] for r in ok],
+            "merged": merge_geo(ok),
+        }
+    if len(ok) == 1:
+        return {
+            "alive": "uncertain",
+            "basis": [r["name"] for r in ok],
+            "merged": ok[0],
+        }
+    if len(fail) >= 2:
+        return {"alive": False, "basis": [], "merged": None}
+    return {"alive": "skipped", "basis": [], "merged": None}
+
+
+def merge_geo(ok_results: list[dict]) -> dict:
+    """Merge exit geo and metadata from multiple ok sources."""
+    merged: dict = {
+        "response_ms": None,
+        "colo": None,
+        "ipv4_ok": False,
+        "ipv6_ok": False,
+        "dual_stack": False,
+        "inferred_stack": None,
+        "exit_geo": None,
+        "geo_mismatch": False,
+    }
+    geo_countries: list[str] = []
+    for r in ok_results:
+        if r.get("response_ms") is not None:
+            if merged["response_ms"] is None or r["response_ms"] < merged["response_ms"]:
+                merged["response_ms"] = r["response_ms"]
+        if r.get("colo") and not merged["colo"]:
+            merged["colo"] = r["colo"]
+        merged["ipv4_ok"] = merged["ipv4_ok"] or r.get("ipv4_ok", False)
+        merged["ipv6_ok"] = merged["ipv6_ok"] or r.get("ipv6_ok", False)
+        merged["dual_stack"] = merged["dual_stack"] or r.get("dual_stack", False)
+        if r.get("inferred_stack") and not merged["inferred_stack"]:
+            merged["inferred_stack"] = r["inferred_stack"]
+        geo = r.get("exit_geo")
+        if geo:
+            cc = geo.get("countryCode") or geo.get("country")
+            if cc:
+                geo_countries.append(cc)
+            if not merged["exit_geo"]:
+                merged["exit_geo"] = geo
+    if len(set(geo_countries)) > 1:
+        merged["geo_mismatch"] = True
+    return merged
 
 
 def bucket_latency(latencies: list[float]) -> dict[str, int]:
@@ -141,24 +309,22 @@ def fmt_entry(
 
 
 def merge_old_note(base_line: str, old_note: str) -> str:
-    """把旧行备注里的静态 token 接回重生成的基础行。
+    """把旧行备注里的出口区域和附注 token 接回重生成的基础行。
 
-    ``old_note`` 形如 ``→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72-V4-CN``：
-    延迟与测速会被本次重新计算，故剥离；可选的出口区域（``→XXX``）插回
-    延迟横线之前，其余静态 token 追加到行尾。存活 key 跨 update 周期保留
-    注解，使 quality/china/exit 标注不再被基础重生成抹平。
+    ``old_note`` 形如 ``→LAX-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72-V4-CN``。
+    从 old_note 中提取出口区域（``→XXX``）以及剥离延迟/测速后的附注 token
+    （CN、streaming、reputation、speed tier、IP type 等），拼接到重生成的
+    基础行之后，使跨 update 周期的附注不丢失。
     """
-    match = re.match(r"^(→[A-Z0-9]+)?", old_note)
-    region = match.group(1) or ""
-    rest = old_note[len(region):]
-    rest = re.sub(r"^-[0-9]+(?:\.[0-9]+)?ms", "", rest)
-    rest = re.sub(r"^-[0-9]+(?:\.[0-9]+)?MB/s", "", rest)
-    if not region and not rest:
+    m = re.match(r"^(→[A-Z]{2,5})?(-\d+(?:\.\d+)?ms)?(-\d+(?:\.\d+)?MB/s)?(.*)", old_note)
+    region = m.group(1) or ""
+    trailing = (m.group(4) or "").rstrip()
+    if not region and not trailing:
         return base_line
     head, sep, tail = base_line.partition("-")
     if not sep:
-        return base_line + rest
-    return head + region + sep + tail + rest
+        return base_line
+    return head + region + sep + tail + trailing
 
 
 GROUP_NAMES = ("v4", "v6", "46", "cn", "cn4", "cn6", "cn46")
@@ -284,8 +450,8 @@ async def check_proxy(
     port: str,
     args: argparse.Namespace,
     speed_sem: asyncio.Semaphore | None,
-) -> tuple[str, str | None, float | None, float | None]:
-    """Return ``(status, method, latency_ms, speed_mbps)``.
+) -> tuple[str, str | None, float | None, float | None, dict | None]:
+    """Return ``(status, method, latency_ms, speed_mbps, ext_data)``.
 
     Alive proxies additionally get a download speed test on a freshly-opened
     connection (gated by ``speed_sem``, so the semaphore-queued probes hold no
@@ -306,9 +472,9 @@ async def check_proxy(
     try:
         reader, writer = await open_conn(ip, port, args.timeout, ctx=_TLS_CTX, sni=args.sni)
     except ssl.SSLError:
-        return "retry", None, None, None
+        return "retry", None, None, None, None
     except (OSError, asyncio.TimeoutError, ValueError):
-        return "dead", None, None, None
+        return "dead", None, None, None, None
     tls_latency = elapsed(tls_started)
     try:
         speed = await measure_speed("tls")
@@ -318,7 +484,7 @@ async def check_proxy(
             await writer.wait_closed()
         except OSError:
             pass
-    return "ok", "tls", tls_latency, speed
+    return "ok", "tls", tls_latency, speed, None
 
 
 async def speed_probe(
@@ -418,8 +584,32 @@ def write_speed(alive: dict) -> None:
     write_text_if_changed(SPEED_FILE, content)
 
 
+def write_ext_check(alive: dict) -> None:
+    """Write ``ext_check.json``: per-proxy external API enrichment data.
+
+    Only includes proxies that have ext_data (ext_check was enabled).
+    Skipped when byte-identical.
+    """
+    proxies = {}
+    for entry, tpl in alive.items():
+        ext_data = tpl[6] if len(tpl) > 6 else None
+        if ext_data:
+            proxies[entry] = ext_data
+    if not proxies:
+        return
+    content = (
+        json.dumps(
+            {"proxies": proxies},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
+    write_text_if_changed(EXT_CHECK_FILE, content)
+
+
 def write_valid_outputs(
-    alive: dict[str, tuple[str, str, str, str, float, float | None]],
+    alive: dict[str, tuple[str, str, str, str, float, float | None, dict | None]],
     per_country_limit: int,
     families: dict | None = None,
     cn_reachable: set[str] | None = None,
@@ -446,8 +636,18 @@ def write_valid_outputs(
     def line(entry: str) -> str:
         if entry in line_cache:
             return line_cache[entry]
-        ip, port, cc, _m, latency, speed = alive[entry]
+        ip, port, cc, _m, latency, speed, ext_data = alive[entry]
         base = fmt_entry(ip, port, cc, latency, speed)
+        exit_region = ""
+        if ext_data:
+            colo = ext_data.get("colo")
+            if colo:
+                exit_region = f"→{colo}"
+            elif ext_data.get("exit_geo"):
+                eg = ext_data["exit_geo"]
+                exit_region = f"→{eg.get('city', '') or eg.get('countryCode', '')}"
+        if exit_region:
+            base = insert_exit_region(base, exit_region)
         old = old_notes.get(entry)
         text = merge_old_note(base, old) if old else base
         line_cache[entry] = text
@@ -503,7 +703,7 @@ def write_valid_outputs(
     by_country: dict[str, list[str]] = defaultdict(list)
     by_port: dict[str, list[str]] = defaultdict(list)
     for entry in ordered:
-        _ip, port, country, _m, _lat, _sp = alive[entry]
+        _ip, port, country, _m, _lat, _sp, _ext = alive[entry]
         by_country[country].append(entry)
         by_port[port].append(entry)
 
@@ -647,27 +847,106 @@ def write_valid_outputs(
 async def check_entries(
     entries: list[tuple[str, str, str]], args: argparse.Namespace
 ) -> tuple[dict, dict[str, int], int, float]:
-    results: dict[str, tuple[str, str, str, str, float, float | None]] = {}
+    results: dict[str, tuple[str, str, str, str, float, float | None, dict | None]] = {}
     by_method: dict[str, int] = {}
     retry_pool: list[tuple[str, str, str]] = []
+    ext_pending: list[tuple[str, str, str, str, float, float | None]] = []
     lock = asyncio.Lock()
     speed_sem = asyncio.Semaphore(args.speed_workers)
+    ext_sem = asyncio.Semaphore(args.ext_workers) if args.ext_check else None
     checked = 0
+    ext_ok = 0
+    ext_uncertain = 0
+    ext_dead = 0
+    ext_response_ms_sum = 0.0
+    ext_response_ms_count = 0
     started = time.monotonic()
     deadline = started + args.time_budget if args.time_budget else float("inf")
+
+    async def enrich_with_ext(
+        ip: str, port: str, cc: str,
+        method: str, latency: float, speed: float | None,
+    ) -> None:
+        """Call external APIs for an alive proxy and merge geo metadata."""
+        nonlocal ext_ok, ext_response_ms_sum, ext_response_ms_count
+        async with ext_sem:
+            ext_results = await check_all_ext_apis(ip, port, args.ext_timeout)
+        verdict = merge_ext_verdict(ext_results)
+        merged = verdict.get("merged") or {}
+        ext_data = {
+            "sources": verdict["basis"],
+            "alive": verdict["alive"],
+            "response_ms": merged.get("response_ms"),
+            "colo": merged.get("colo"),
+            "ipv4_ok": merged.get("ipv4_ok", False),
+            "ipv6_ok": merged.get("ipv6_ok", False),
+            "dual_stack": merged.get("dual_stack", False),
+            "inferred_stack": merged.get("inferred_stack"),
+            "exit_geo": merged.get("exit_geo"),
+        }
+        async with lock:
+            key = f"{ip}:{port}#{cc}"
+            if key in results:
+                old = results[key]
+                results[key] = (old[0], old[1], old[2], old[3], old[4], old[5], ext_data)
+            ext_ok += 1
+            if merged.get("response_ms") is not None:
+                ext_response_ms_sum += merged["response_ms"]
+                ext_response_ms_count += 1
+
+    async def recheck_with_ext(
+        ip: str, port: str, cc: str,
+    ) -> None:
+        """Use external APIs as secondary check for TLS-failed proxies."""
+        nonlocal ext_ok, ext_uncertain, ext_dead
+        nonlocal ext_response_ms_sum, ext_response_ms_count
+        async with ext_sem:
+            ext_results = await check_all_ext_apis(ip, port, args.ext_timeout)
+        verdict = merge_ext_verdict(ext_results)
+        merged = verdict.get("merged") or {}
+        ext_data = {
+            "sources": verdict["basis"],
+            "alive": verdict["alive"],
+            "response_ms": merged.get("response_ms"),
+            "colo": merged.get("colo"),
+            "ipv4_ok": merged.get("ipv4_ok", False),
+            "ipv6_ok": merged.get("ipv6_ok", False),
+            "dual_stack": merged.get("dual_stack", False),
+            "inferred_stack": merged.get("inferred_stack"),
+            "exit_geo": merged.get("exit_geo"),
+        }
+        async with lock:
+            if verdict["alive"] is True:
+                latency = merged.get("response_ms") or 0.0
+                results[f"{ip}:{port}#{cc}"] = (
+                    ip, port, cc, "ext", latency, None, ext_data,
+                )
+                by_method["ext"] = by_method.get("ext", 0) + 1
+                ext_ok += 1
+                if merged.get("response_ms") is not None:
+                    ext_response_ms_sum += merged["response_ms"]
+                    ext_response_ms_count += 1
+            elif verdict["alive"] == "uncertain":
+                ext_uncertain += 1
+            else:
+                ext_dead += 1
 
     async def worker(ip: str, port: str, cc: str, is_retry: bool) -> None:
         nonlocal checked
         try:
-            status, method, latency, speed = await check_proxy(ip, port, args, speed_sem)
+            status, method, latency, speed, _ext = await check_proxy(ip, port, args, speed_sem)
         except Exception as exc:
             logging.debug("check_proxy %s:%s: %s", ip, port, exc)
             status, method, latency, speed = "dead", None, None, None
         async with lock:
             checked += 1
             if status == "ok":
-                results[f"{ip}:{port}#{cc}"] = (ip, port, cc, method, latency, speed)
+                results[f"{ip}:{port}#{cc}"] = (
+                    ip, port, cc, method, latency, speed, None,
+                )
                 by_method[method] = by_method.get(method, 0) + 1
+                if args.ext_check:
+                    ext_pending.append((ip, port, cc, method, latency, speed))
             elif status == "retry" and not is_retry:
                 retry_pool.append((ip, port, cc))
 
@@ -709,13 +988,43 @@ async def check_entries(
             await asyncio.gather(*tasks, return_exceptions=True)
 
     await run_pass(entries, False)
-    if retry_pool and time.monotonic() < deadline:
+
+    # External API enrichment for alive proxies + recheck for failed ones
+    if args.ext_check and ext_sem is not None:
+        ext_tasks: list[asyncio.Task] = []
+        for ip, port, cc, method, latency, speed in ext_pending:
+            ext_tasks.append(
+                asyncio.create_task(enrich_with_ext(ip, port, cc, method, latency, speed))
+            )
+        recheck_pool = [
+            (ip, port, cc) for ip, port, cc in retry_pool
+            if f"{ip}:{port}#{cc}" not in results
+        ]
+        for ip, port, cc in recheck_pool:
+            ext_tasks.append(asyncio.create_task(recheck_with_ext(ip, port, cc)))
+        if ext_tasks:
+            done, pending = await asyncio.wait(ext_tasks, timeout=args.ext_timeout + 5)
+            for t in pending:
+                t.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+    elif retry_pool and time.monotonic() < deadline:
         print(f"Retrying {len(retry_pool)} TLS-but-unverified proxies ...")
         await asyncio.sleep(RETRY_DELAY)
         await run_pass(retry_pool, True)
 
     elapsed = time.monotonic() - started
-    return results, by_method, checked, elapsed
+    ext_stats = {
+        "ext_check_total": ext_ok + ext_uncertain + ext_dead,
+        "ext_check_ok": ext_ok,
+        "ext_check_uncertain": ext_uncertain,
+        "ext_check_dead": ext_dead,
+        "ext_avg_response_ms": (
+            round(ext_response_ms_sum / ext_response_ms_count, 1)
+            if ext_response_ms_count else 0
+        ),
+    }
+    return results, by_method, checked, elapsed, ext_stats
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -729,17 +1038,28 @@ async def run(args: argparse.Namespace) -> int:
     total = len(entries)
     print(f"Checking {total} proxies (timeout={args.timeout}s, workers={args.workers}) ...")
 
-    results, by_method, checked, elapsed = await check_entries(entries, args)
+    results, by_method, checked, elapsed, ext_stats = await check_entries(entries, args)
 
     dead = checked - len(results)
-    latencies = [lat for _, _, _, _, lat, _ in results.values()]
-    speeds = [sp for _, _, _, _, _, sp in results.values() if sp is not None]
+    latencies = [lat for _, _, _, _, lat, _, _ in results.values()]
+    speeds = [sp for _, _, _, _, _, sp, _ in results.values() if sp is not None]
     print(
         f"Checked {checked}/{total} in {elapsed:.1f}s: alive={len(results)}, dead={dead}"
         f" ({dict(by_method)})"
     )
 
+    if ext_stats["ext_check_total"] > 0:
+        print(
+            f"Ext API: total={ext_stats['ext_check_total']}, "
+            f"ok={ext_stats['ext_check_ok']}, "
+            f"uncertain={ext_stats['ext_check_uncertain']}, "
+            f"dead={ext_stats['ext_check_dead']}"
+        )
+
     stats = write_valid_outputs(results, args.per_country_limit)
+
+    if args.ext_check:
+        write_ext_check(results)
 
     lat_stats = {}
     if latencies:
@@ -765,7 +1085,7 @@ async def run(args: argparse.Namespace) -> int:
 
     per_country: dict[str, int] = {}
     per_port: dict[str, int] = {}
-    for _, (_, port, cc, _, _, _) in results.items():
+    for _, (_, port, cc, _, _, _, _) in results.items():
         per_country[cc] = per_country.get(cc, 0) + 1
         per_port[port] = per_port.get(port, 0) + 1
 
@@ -786,6 +1106,8 @@ async def run(args: argparse.Namespace) -> int:
         "per_port": {p: per_port[p] for p in sorted(per_port, key=int)},
         "sets": stats["__sets__"],
     }
+    if ext_stats["ext_check_total"] > 0:
+        meta["ext_check"] = ext_stats
     meta_file = VALID_DIR / "meta.json"
     write_text_if_changed(
         meta_file, json.dumps(meta, ensure_ascii=False, indent=2) + "\n"
@@ -811,7 +1133,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0, help="Max proxies to check (0 = all)")
     parser.add_argument("--time-budget", type=int, default=0, help="Stop after this many seconds (0 = unlimited)")
     parser.add_argument("--per-country-limit", type=int, default=PER_COUNTRY_LIMIT, help="Limit for _ltd outputs")
+    parser.add_argument("--ext-check", action="store_true", help="Enable external API multi-source validation")
+    parser.add_argument("--no-ext-check", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--ext-timeout", type=int, default=EXT_TIMEOUT, help="Per-source timeout for external API (seconds)")
+    parser.add_argument("--ext-workers", type=int, default=EXT_WORKERS, help="Max concurrent external API calls")
     args = parser.parse_args(argv)
+    if args.no_ext_check:
+        args.ext_check = False
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:
@@ -823,19 +1151,6 @@ def append_history(meta: dict) -> None:
     lines: list[str] = []
     if VALID_HISTORY_FILE.exists():
         lines = VALID_HISTORY_FILE.read_text(encoding="utf-8").splitlines()
-    if lines:
-        try:
-            last = json.loads(lines[-1])
-            last.pop("ts", None)
-            current = {
-                k: v
-                for k, v in meta.items()
-                if k in ("total", "checked", "alive", "dead")
-            }
-            if last == current:
-                return
-        except (json.JSONDecodeError, KeyError):
-            pass
     record = {k: meta[k] for k in ("ts", "total", "checked", "alive", "dead")}
     lines.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
     lines = lines[-MAX_HISTORY_RECORDS:]

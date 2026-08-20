@@ -38,6 +38,9 @@
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 | `--per-country-limit` | `_ltd` 输出每国条数 | 20 |
+| `--ext-check` | 启用外部 API 多源验证（出口地理 + 双栈标注 + TLS 失败兜底） | 关 |
+| `--ext-timeout` | 外部 API 单源超时（秒） | 10 |
+| `--ext-workers` | 外部 API 并发上限 | 10 |
 
 除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（缺失时回退行内 `-V4`/`-V6`/`-DS`），大陆可达取自行内 `-CN`；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
 
@@ -235,4 +238,21 @@ After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-GPT-CF-77-DC-fast
 ```bash
 python scripts/annotate_classify.py
 python scripts/annotate_classify.py --data-dir /path/to/data
+```
+
+### `scripts/analyze_sources.py`
+
+分析各下载源的质量。读取 `ip_sources.json`（逐 IP 来源归属）并与验证/信誉/流媒体/大陆可达性数据交叉引用，产出每个源的存活率、延迟、速度、信誉分、流媒体解锁率、大陆可达率等指标。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--data-dir` | 数据根目录 | `data/` |
+
+输出文件：
+- `data/quality/source_quality.json`：逐源质量指标 JSON
+- `data/output/source_quality_report.txt`：人类可读汇总表
+
+```bash
+python scripts/analyze_sources.py
+python scripts/analyze_sources.py --data-dir /path/to/data
 ```

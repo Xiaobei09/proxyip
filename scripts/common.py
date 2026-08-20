@@ -43,6 +43,7 @@ ALL_FILE = DOWNLOAD_DIR / "all.txt"
 ALL_LTD_FILE = DOWNLOAD_DIR / "all_ltd.txt"
 UPSTREAM_META_FILE = QUALITY_DIR / "upstream_meta.json"
 SOURCE_STATS_FILE = QUALITY_DIR / "source_stats.json"
+IP_SOURCES_FILE = QUALITY_DIR / "ip_sources.json"
 HISTORY_FILE = QUALITY_DIR / "history.jsonl"
 
 IPINFO_FILE = QUALITY_DIR / "ipinfo.json"
@@ -74,6 +75,29 @@ MAX_DIFF_FILES = 50
 PER_COUNTRY_LIMIT = 20
 
 EXTERNAL_CHECK_URL = "https://api.090227.xyz/check"
+EXT_CHECK_FILE = VALID_DIR / "ext_check.json"
+
+# ---------------------------------------------------------------- 外部 API 多源配置
+EXT_API_SOURCES = [
+    {
+        "name": "090227",
+        "url": "https://api.090227.xyz/check",
+        "param_key": "proxyip",
+        "timeout": 10,
+    },
+    {
+        "name": "cmliu",
+        "url": "https://Check.ProxyIP.CMLiussss.net/check",
+        "param_key": "proxyip",
+        "timeout": 10,
+    },
+    {
+        "name": "toicf",
+        "url": "https://pr-apis.ekt.me/probe",
+        "param_key": "candidate",
+        "timeout": 15,
+    },
+]
 
 # ---------------------------------------------------------------- ip-api 共享常量
 IPAPI_BATCH_URL = "http://ip-api.com/batch"
