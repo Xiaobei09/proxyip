@@ -125,12 +125,17 @@ def fill_and_classify(
     ip_type_map: dict[str, str],
     exit_map: dict[str, str] | None = None,
 ) -> str:
-    """Fill missing suffixes and append classification tokens."""
+    """Fill missing suffixes and append classification tokens.
+
+    All ``has_token`` checks use ``out`` (the evolving line) rather than the
+    original ``note``, so tokens appended during the same call are detected
+    and duplicates are prevented.
+    """
     parsed = parse_line(line)
     if not parsed:
         return line
 
-    key, _ip, _port, _cc, note = parsed
+    key, _ip, _port, _cc, _note = parsed
     out = line
 
     # --- suffix filling ---
@@ -142,15 +147,15 @@ def fill_and_classify(
             out = insert_exit_region(out, exit_cc)
 
     # CN token
-    if key in china_set and not has_token(note, "CN"):
+    if key in china_set and not has_token(out, "CN"):
         out += "-CN"
 
     # V4 / V6 / DS
     family = family_map.get(key, "")
     if family:
         fam_token = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}.get(family, "")
-        if fam_token and not has_token(note, fam_token) and not any(
-            has_token(note, t) for t in FAMILY_TOKENS
+        if fam_token and not has_token(out, fam_token) and not any(
+            has_token(out, t) for t in FAMILY_TOKENS
         ):
             out += "-" + fam_token
 
@@ -160,26 +165,26 @@ def fill_and_classify(
         stoks = streaming_tokens(st)
         if stoks:
             for tok in stoks.split():
-                if not has_token(note, tok):
+                if not has_token(out, tok):
                     out += "-" + tok
 
     # reputation score (only if not already present)
     rep_score = rep_map.get(key)
     if rep_score is not None:
         score_str = str(rep_score)
-        if not has_token(note, score_str) and score_str not in note:
+        if not has_token(out, score_str) and score_str not in out:
             out += "-" + score_str
 
     # --- classification tokens ---
 
     # IP type
     ip_type = ip_type_map.get(key, "")
-    if ip_type and ip_type in IP_TYPES and not has_token(note, ip_type):
+    if ip_type and ip_type in IP_TYPES and not has_token(out, ip_type):
         out += "-" + ip_type
 
     # speed tier
-    tier = speed_tier(note)
-    if tier != "unknown" and not has_token(note, tier):
+    tier = speed_tier(out)
+    if tier != "unknown" and not has_token(out, tier):
         out += "-" + tier
 
     return out

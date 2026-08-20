@@ -479,5 +479,67 @@ class TestLoadExtras(unittest.TestCase):
         self.assertNotIn("http://bad/cf.txt", source_ip_sets)
 
 
+class TestWriteSourceAttribution(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.base = Path(tempfile.mkdtemp(prefix="dp_src_"))
+        self.orig_ip_sources_file = dp.IP_SOURCES_FILE
+        dp.IP_SOURCES_FILE = self.base / "ip_sources.json"
+
+    def tearDown(self):
+        dp.IP_SOURCES_FILE = self.orig_ip_sources_file
+
+    def test_main_and_extra_sources(self):
+        by_port = {
+            "443": {"US": ["1.1.1.1", "2.2.2.2"], "JP": ["3.3.3.3"]},
+            "8443": {"US": ["1.1.1.1"]},
+        }
+        main_ips = {"1.1.1.1", "3.3.3.3"}
+        source_ip_sets = {
+            "http://x/fdip.txt": {"2.2.2.2"},
+        }
+        dp.write_source_attribution(by_port, main_ips, source_ip_sets)
+        data = json.loads(dp.IP_SOURCES_FILE.read_text())
+        sources = data["sources"]
+        self.assertEqual(sources["1.1.1.1:443#US"], "main")
+        self.assertEqual(sources["2.2.2.2:443#US"], "fdip")
+        self.assertEqual(sources["3.3.3.3:443#JP"], "main")
+        self.assertEqual(sources["1.1.1.1:8443#US"], "main")
+
+    def test_multi_source_label(self):
+        by_port = {"443": {"US": ["1.1.1.1"]}}
+        main_ips: set[str] = set()
+        source_ip_sets = {
+            "http://x/a.txt": {"1.1.1.1"},
+            "http://x/b.txt": {"1.1.1.1"},
+        }
+        dp.write_source_attribution(by_port, main_ips, source_ip_sets)
+        data = json.loads(dp.IP_SOURCES_FILE.read_text())
+        self.assertEqual(data["sources"]["1.1.1.1:443#US"], "multi")
+
+    def test_unknown_source(self):
+        by_port = {"443": {"US": ["1.1.1.1"]}}
+        main_ips: set[str] = set()
+        source_ip_sets: dict[str, set[str]] = {}
+        dp.write_source_attribution(by_port, main_ips, source_ip_sets)
+        data = json.loads(dp.IP_SOURCES_FILE.read_text())
+        self.assertEqual(data["sources"]["1.1.1.1:443#US"], "unknown")
+
+    def test_empty_by_port(self):
+        dp.write_source_attribution({}, set(), {})
+        data = json.loads(dp.IP_SOURCES_FILE.read_text())
+        self.assertEqual(data["sources"], {})
+
+    def test_label_from_url_stem(self):
+        by_port = {"443": {"US": ["1.1.1.1"]}}
+        main_ips: set[str] = set()
+        source_ip_sets = {
+            "https://raw.githubusercontent.com/x/BestProxy/proxy.txt": {"1.1.1.1"},
+        }
+        dp.write_source_attribution(by_port, main_ips, source_ip_sets)
+        data = json.loads(dp.IP_SOURCES_FILE.read_text())
+        self.assertEqual(data["sources"]["1.1.1.1:443#US"], "proxy")
+
+
 if __name__ == "__main__":
     unittest.main()

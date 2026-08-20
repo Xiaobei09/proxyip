@@ -130,21 +130,75 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
-_STREAMING_TOKENS = r"NF\([^)]*\)|D\+|YT|MX|PV|GPT"
-_TYPE_TOKENS = r"CF|V4|V6|DS|DC"
-_QC_SUFFIX_RE = re.compile(
-    rf"(?:[- ](?:{_STREAMING_TOKENS}|{_TYPE_TOKENS}|\d+))+$"
+_QC_STREAMING_BASE = {"D+", "YT", "MX", "PV", "GPT"}
+_QC_TYPE = {"CF"}
+_QC_KNOWN = _QC_STREAMING_BASE | _QC_TYPE
+
+
+def _is_rep_score(tok: str) -> bool:
+    """Check if *tok* is a reputation score (1-3 digit integer)."""
+    return tok.isdigit() and 1 <= len(tok) <= 3
+
+
+def _is_qc_token(tok: str) -> bool:
+    """Check if *tok* is a QC-produced token (streaming / CF / score)."""
+    if tok in _QC_KNOWN:
+        return True
+    if tok.startswith("NF(") and tok.endswith(")"):
+        return True
+    return _is_rep_score(tok)
+
+
+_QC_TOKEN_RE = re.compile(
+    r"(?:^|(?<=-))(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d{1,3})(?=$|-)"
 )
 
 
-def strip_qc_annotations(line: str) -> str:
-    """Remove stale streaming / CF / reputation-score tokens from *line*.
+def _strip_qc_match(m: re.Match) -> str:
+    """Collapse matched QC token into a single ``-`` delimiter (or ``""`` at
+    string boundaries) so adjacent delimiters merge cleanly."""
+    s = m.group(0)
+    if s.startswith("-") and s.endswith("-"):
+        return "-"
+    return ""
 
-    Preserves other workflow tokens (CN, V4, V6, DS, DC, …) while stripping
-    the QC-specific suffix so ``annotate_text`` can re-append a fresh one
-    without accumulating duplicates across consecutive CI runs.
+
+def strip_qc_annotations(line: str) -> str:
+    """Remove ALL QC-produced tokens from *line* to prevent suffix duplication.
+
+    Strips streaming tokens (NF(..), D+, YT, MX, PV, GPT), CF, and reputation
+    scores — but preserves other workflow tokens (CN, V4, V6, DS, DC, speed
+    tier, exit region →CC). This lets ``annotate_text`` re-append a clean
+    annotation without accumulating stale duplicates across CI runs.
     """
-    return _QC_SUFFIX_RE.sub("", line)
+    idx = line.find("#")
+    if idx < 0:
+        return line
+    base = line[:idx]
+    rest = line[idx + 1:]
+    i = 0
+    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
+        i += 1
+    if rest[i:].startswith("ALL") and rest[i + 3:i + 4] in ("", "-"):
+        cc_end = i + 3
+    else:
+        cc_end = i + 2
+    note = rest[cc_end:]
+    if not note:
+        return line
+    # Split off leading → exit-region so it is never consumed by the regex
+    prefix = ""
+    if note.startswith("→"):
+        dash_pos = note.find("-", 1)
+        if dash_pos > 0:
+            prefix = note[:dash_pos]
+            note = note[dash_pos:]
+        else:
+            return line  # note is just "→XX", nothing to strip
+    cleaned = _QC_TOKEN_RE.sub(_strip_qc_match, note)
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
+    cleaned = cleaned.strip("-")
+    return base + "#" + rest[:cc_end] + prefix + ("-" + cleaned if cleaned else "")
 
 
 def build_reputation_map(

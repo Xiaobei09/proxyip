@@ -147,6 +147,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `speed_dist` | 速度分桶直方图（MB/s） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
 | `sets` | 各集合存活条数 |
+| `ext_check` | 外部 API 检测汇总（仅 `--ext-check` 时出现）：`ext_check_total`/`ext_check_ok`/`ext_check_uncertain`/`ext_check_dead`/`ext_avg_response_ms` |
 
 ### `data/valid/index.json`
 
@@ -165,6 +166,37 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ```
 
 数据未变化时文件不变（避免无意义提交）。运行时间见 `meta.json` 的 `ts`。
+
+### `data/valid/ext_check.json`
+
+外部 API 多源验证逐条结果（仅 `--ext-check` 时生成），单行 JSON，键为 `ip:port#国家`，值为：
+
+```json
+{
+  "sources": ["090227", "cmliu"],
+  "alive": true,
+  "response_ms": 120.5,
+  "colo": "LAX",
+  "ipv4_ok": true,
+  "ipv6_ok": false,
+  "dual_stack": false,
+  "inferred_stack": "ipv4",
+  "exit_geo": {"countryCode": "US", "city": "Los Angeles", "asn": 13335, "org": "Cloudflare"}
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `sources` | 确认存活的 API 源列表（至少 2 个） |
+| `alive` | 共识结果：`true`/`"uncertain"`（仅 1 源确认）/`false` |
+| `response_ms` | 最快 API 响应时间（毫秒） |
+| `colo` | Cloudflare datacenter IATA（仅 090227/cmliu 源） |
+| `ipv4_ok` / `ipv6_ok` | IPv4/IPv6 出口可达 |
+| `dual_stack` | 双栈出口 |
+| `inferred_stack` | 推断出口栈类型：`ipv4`/`ipv6`/`dual` |
+| `exit_geo` | 出口地理信息（`countryCode`、`city`、`asn`、`org`） |
+
+数据未变化时文件不变（避免无意义提交）。
 
 ### `data/quality/ipinfo.json`（质量 CI 输出）
 
@@ -217,3 +249,11 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ### `data/quality/upstream_meta.json`
 
 上游 `all.json` 导出的逐 IP 元数据（keyed by 代理 IP），由 `download_proxies.py` 生成，供下游（如 exit-family 交叉验证）消费。每个值含 `clientIp`（该代理的真实出口 IP，Cloudflare 视角）、`family`（由 `clientIp` 派生，ipv4/ipv6）、`asn`、`asOrganization`、`country`、`city`、`region`、`continent`、`colo_iata`。使用旧版 zip 回退源时本文件不更新。
+
+### `data/quality/ip_sources.json`
+
+逐 IP 下载源归属（由 `download_proxies.py` 生成）。键为 `ip:port#CC`，值为来源标签：`"main"`（主源 zip.cm.edu.kg）、补充源文件名 stem（`fdip`/`vlid`/`yxip`/`list`/`proxy`/`bestproxy&country`/`proxyip`）、`"multi"`（多源重叠）或 `"unknown"`。供 `analyze_sources.py` 消费。
+
+### `data/quality/source_quality.json`
+
+各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`streaming_ok_rate`（流媒体解锁率）、`china_reachable_rate`（大陆可达率）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。

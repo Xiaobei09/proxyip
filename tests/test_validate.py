@@ -126,8 +126,8 @@ class TestWriteIndex(unittest.TestCase):
 
     def test_writes_ordered_compact(self):
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44),
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 80.1, 1.2),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44, None),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 80.1, 1.2, None),
         }
         vp.write_index(["2.0.0.1:8443#JP", "1.0.0.1:443#US"], alive)
         data = json.loads(vp.INDEX_FILE.read_text())
@@ -137,7 +137,7 @@ class TestWriteIndex(unittest.TestCase):
         )
 
     def test_skips_rewrite_when_unchanged(self):
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.5, 0.44, None)}
         vp.write_index(["1.0.0.1:443#US"], alive)
         m1 = vp.INDEX_FILE.stat().st_mtime_ns
         vp.write_index(["1.0.0.1:443#US"], alive)
@@ -159,9 +159,9 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_outputs_ordered_by_latency(self):
         alive = {
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 300.0, 0.5),
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.0),
-            "3.0.0.1:80#US": ("3.0.0.1", "80", "US", "tls", 50.0, 0.3),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 300.0, 0.5, None),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.0, None),
+            "3.0.0.1:80#US": ("3.0.0.1", "80", "US", "tls", 50.0, 0.3, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
         lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
@@ -188,10 +188,10 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_all_ltd_per_country_cap(self):
         alive = {
-            f"{i}.0.0.1:443#US": (f"{i}.0.0.1", "443", "US", "tls", float(i), None)
+            f"{i}.0.0.1:443#US": (f"{i}.0.0.1", "443", "US", "tls", float(i), None, None)
             for i in range(1, 6)
         }
-        alive["9.0.0.1:443#JP"] = ("9.0.0.1", "443", "JP", "tls", 1.0, None)
+        alive["9.0.0.1:443#JP"] = ("9.0.0.1", "443", "JP", "tls", 1.0, None, None)
         vp.write_valid_outputs(alive, per_country_limit=2)
         ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
         self.assertEqual(len(ltd), 3)
@@ -200,8 +200,8 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_ltd_ordered_by_speed(self):
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 10.0, 0.2),
-            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 5.0),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 10.0, 0.2, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 5.0, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=2)
         ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
@@ -211,8 +211,8 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_ltd_omits_speed_when_none(self):
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, None),
-            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 90.0, 1.0),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, None, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 90.0, 1.0, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=2)
         ltd = (vp.VALID_DIR / "all_ltd.txt").read_text().splitlines()
@@ -223,8 +223,8 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_all_cc_kept_in_all_but_not_countries(self):
         alive = {
-            "1.0.0.1:443#ALL": ("1.0.0.1", "443", "ALL", "tls", 100.0, 0.5),
-            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 80.0, 1.0),
+            "1.0.0.1:443#ALL": ("1.0.0.1", "443", "ALL", "tls", 100.0, 0.5, None),
+            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 80.0, 1.0, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
         self.assertFalse((vp.VALID_DIR / "countries" / "ALL").exists())
@@ -236,8 +236,8 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_sets_written_as_directories(self):
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5),
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 80.0, 1.0),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5, None),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 80.0, 1.0, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
         hot = vp.VALID_DIR / "sets" / "hot"
@@ -267,7 +267,7 @@ class TestWriteValidOutputs(unittest.TestCase):
         stale_set = vp.VALID_DIR / "sets" / "old"
         stale_set.mkdir()
         (stale_set / "all.txt").write_text("stale\n")
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5, None)}
         vp.write_valid_outputs(alive, per_country_limit=1)
         self.assertFalse((vp.VALID_DIR / "countries" / "US.txt").exists())
         self.assertFalse(stale_dir.exists())
@@ -277,9 +277,9 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_speed_json(self):
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, 0.2),
-            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 90.0, 5.0),
-            "3.0.0.1:443#DE": ("3.0.0.1", "443", "DE", "tls", 70.0, None),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 80.0, 0.2, None),
+            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 90.0, 5.0, None),
+            "3.0.0.1:443#DE": ("3.0.0.1", "443", "DE", "tls", 70.0, None, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=0)
         data = json.loads(vp.SPEED_FILE.read_text())
@@ -297,9 +297,9 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 90.0, 1.0),
-            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 70.0, None),
-            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 50.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 90.0, 1.0, None),
+            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 70.0, None, None),
+            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 50.0, 0.5, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
         lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
@@ -331,10 +331,10 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
-            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 100.0, 0.5),
-            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 80.0, 0.5),
-            "4.0.0.1:443#DE": ("4.0.0.1", "443", "DE", "tls", 90.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None),
+            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 100.0, 0.5, None),
+            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 80.0, 0.5, None),
+            "4.0.0.1:443#DE": ("4.0.0.1", "443", "DE", "tls", 90.0, 0.5, None),
         }
         families = {
             "1.0.0.1:443#US": "ipv4",
@@ -364,9 +364,9 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.2),
-            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 5.0),
-            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 80.0, 1.0),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.2, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 5.0, None),
+            "3.0.0.1:443#US": ("3.0.0.1", "443", "US", "tls", 80.0, 1.0, None),
         }
         families = {k: "ipv4" for k in alive}
         vp.write_valid_outputs(alive, per_country_limit=2, families=families)
@@ -381,8 +381,8 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
-            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 100.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None),
+            "2.0.0.1:8443#JP": ("2.0.0.1", "8443", "JP", "tls", 100.0, 0.5, None),
         }
         families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:8443#JP": "ipv6"}
         vp.write_valid_outputs(alive, per_country_limit=1, families=families)
@@ -400,9 +400,9 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
-            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 80.0, 2.0),
-            "3.0.0.1:443#DE": ("3.0.0.1", "443", "DE", "tls", 90.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 80.0, 2.0, None),
+            "3.0.0.1:443#DE": ("3.0.0.1", "443", "DE", "tls", 90.0, 0.5, None),
         }
         families = {
             "1.0.0.1:443#US": "ipv4",
@@ -425,8 +425,8 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
-            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 100.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None),
+            "2.0.0.1:8443#US": ("2.0.0.1", "8443", "US", "tls", 100.0, 0.5, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
         us = vp.VALID_DIR / "countries" / "US"
@@ -440,7 +440,7 @@ class TestWriteValidOutputs(unittest.TestCase):
             "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-V4\n",
             encoding="utf-8",
         )
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None)}
         vp.write_valid_outputs(alive, per_country_limit=1, families={"1.0.0.1:443#US": "ipv4"})
         us = vp.VALID_DIR / "countries" / "US"
         self.assertTrue((us / "v4.txt").exists())
@@ -454,7 +454,7 @@ class TestWriteValidOutputs(unittest.TestCase):
             "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4\n",
             encoding="utf-8",
         )
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None)}
         families = {"1.0.0.1:443#US": "ipv4"}
         vp.write_valid_outputs(alive, per_country_limit=1, families=families)
         us = vp.VALID_DIR / "countries" / "US"
@@ -470,8 +470,8 @@ class TestWriteValidOutputs(unittest.TestCase):
             encoding="utf-8",
         )
         alive = {
-            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5),
-            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 0.5),
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 100.0, 0.5, None),
         }
         families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#US": "ipv4"}
         vp.write_valid_outputs(alive, per_country_limit=1, families=families)
@@ -481,7 +481,7 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertFalse((us / "v6.txt").exists())
 
     def test_cn_reachable_arg_override(self):
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None)}
         families = {"1.0.0.1:443#US": "ipv4"}
         vp.write_valid_outputs(
             alive,
@@ -504,7 +504,7 @@ class TestWriteValidOutputs(unittest.TestCase):
             "1.0.0.1:443#ALL-120ms-CN-DS\n",
             encoding="utf-8",
         )
-        alive = {"1.0.0.1:443#ALL": ("1.0.0.1", "443", "ALL", "tls", 120.0, 0.5)}
+        alive = {"1.0.0.1:443#ALL": ("1.0.0.1", "443", "ALL", "tls", 120.0, 0.5, None)}
         families = {"1.0.0.1:443#ALL": "dual"}
         vp.write_valid_outputs(alive, per_country_limit=1, families=families)
         self.assertEqual(self._keys(vp.VALID_DIR / "all_46.txt"), ["1.0.0.1:443"])
@@ -518,7 +518,7 @@ class TestWriteValidOutputs(unittest.TestCase):
             "1.0.0.1:443#\U0001F1FA\U0001F1F8US-120ms-CN-V4-DC-72\n",
             encoding="utf-8",
         )
-        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5)}
+        alive = {"1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 120.0, 0.5, None)}
         vp.write_valid_outputs(alive, per_country_limit=1)
         us = vp.VALID_DIR / "countries" / "US"
         for name in ("v4.txt", "cn.txt", "cn4.txt"):
@@ -710,5 +710,267 @@ class TestParseLineAndToken(unittest.TestCase):
         self.assertFalse(self.cmn.has_token("-1ms", "CF"))
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestNormalizeExtResponse(unittest.TestCase):
+    def test_090227_format(self):
+        source = {"name": "090227"}
+        data = {
+            "success": True,
+            "responseTime": 123.4,
+            "colo": "LAX",
+            "probe_results": {
+                "ipv4": {"ok": True, "exit": {"countryCode": "US"}},
+                "ipv6": {"ok": False},
+            },
+            "dual_stack": False,
+            "inferred_stack": "ipv4",
+        }
+        result = vp._normalize_ext_response(source, data)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["response_ms"], 123.4)
+        self.assertEqual(result["colo"], "LAX")
+        self.assertTrue(result["ipv4_ok"])
+        self.assertFalse(result["ipv6_ok"])
+        self.assertEqual(result["exit_geo"]["countryCode"], "US")
+
+    def test_cmliu_format(self):
+        source = {"name": "cmliu"}
+        data = {
+            "success": True,
+            "responseTime": 200.0,
+            "colo": "NRT",
+            "probe_results": {
+                "ipv4": {"ok": True, "exit": {"countryCode": "JP"}},
+                "ipv6": {"ok": True},
+            },
+            "dual_stack": True,
+            "inferred_stack": "dual",
+        }
+        result = vp._normalize_ext_response(source, data)
+        self.assertTrue(result["dual_stack"])
+        self.assertTrue(result["ipv6_ok"])
+
+    def test_toicf_format(self):
+        source = {"name": "toicf"}
+        data = {
+            "ok": True,
+            "supports_ipv4": True,
+            "supports_ipv6": False,
+            "dual_stack": False,
+            "inferred_stack": "ipv4",
+            "probe_results": [
+                {
+                    "ok": True,
+                    "exit_ip": True,
+                    "exit_country": "US",
+                    "exit_city": "Los Angeles",
+                    "exit_asn": 13335,
+                    "exit_org": "Cloudflare",
+                }
+            ],
+        }
+        result = vp._normalize_ext_response(source, data)
+        self.assertTrue(result["ok"])
+        self.assertIsNone(result["response_ms"])
+        self.assertIsNone(result["colo"])
+        self.assertEqual(result["exit_geo"]["country"], "US")
+        self.assertEqual(result["exit_geo"]["city"], "Los Angeles")
+
+    def test_unknown_source(self):
+        result = vp._normalize_ext_response({"name": "unknown"}, {})
+        self.assertFalse(result["ok"])
+
+
+class TestMergeExtVerdict(unittest.TestCase):
+    def test_two_ok_sources_consensus(self):
+        results = [
+            {"name": "090227", "ok": True, "response_ms": 100, "colo": "LAX",
+             "ipv4_ok": True, "ipv6_ok": False, "dual_stack": False,
+             "inferred_stack": "ipv4", "exit_geo": {"countryCode": "US"}},
+            {"name": "cmliu", "ok": True, "response_ms": 150, "colo": "LAX",
+             "ipv4_ok": True, "ipv6_ok": False, "dual_stack": False,
+             "inferred_stack": "ipv4", "exit_geo": {"countryCode": "US"}},
+        ]
+        verdict = vp.merge_ext_verdict(results)
+        self.assertTrue(verdict["alive"])
+        self.assertEqual(set(verdict["basis"]), {"090227", "cmliu"})
+        self.assertEqual(verdict["merged"]["colo"], "LAX")
+
+    def test_single_ok_uncertain(self):
+        results = [
+            {"name": "090227", "ok": True, "response_ms": 100, "colo": "LAX",
+             "ipv4_ok": True, "ipv6_ok": False, "dual_stack": False,
+             "inferred_stack": "ipv4", "exit_geo": None},
+            {"name": "cmliu", "ok": False, "error": "timeout"},
+            {"name": "toicf", "ok": False, "error": "timeout"},
+        ]
+        verdict = vp.merge_ext_verdict(results)
+        self.assertEqual(verdict["alive"], "uncertain")
+        self.assertEqual(verdict["basis"], ["090227"])
+
+    def test_all_fail_dead(self):
+        results = [
+            {"name": "090227", "ok": False, "error": "timeout"},
+            {"name": "cmliu", "ok": False, "error": "timeout"},
+            {"name": "toicf", "ok": False, "error": "timeout"},
+        ]
+        verdict = vp.merge_ext_verdict(results)
+        self.assertFalse(verdict["alive"])
+
+    def test_skipped_when_no_errors(self):
+        results = [
+            {"name": "090227", "ok": False},
+            {"name": "cmliu", "ok": False},
+        ]
+        verdict = vp.merge_ext_verdict(results)
+        self.assertEqual(verdict["alive"], "skipped")
+
+
+class TestMergeGeo(unittest.TestCase):
+    def test_geo_mismatch_detection(self):
+        ok = [
+            {"response_ms": 100, "colo": "LAX", "ipv4_ok": True, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": "ipv4",
+             "exit_geo": {"countryCode": "US"}},
+            {"response_ms": 150, "colo": "NRT", "ipv4_ok": True, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": "ipv4",
+             "exit_geo": {"countryCode": "JP"}},
+        ]
+        merged = vp.merge_geo(ok)
+        self.assertTrue(merged["geo_mismatch"])
+
+    def test_geo_match_no_mismatch(self):
+        ok = [
+            {"response_ms": 100, "colo": "LAX", "ipv4_ok": True, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": "ipv4",
+             "exit_geo": {"countryCode": "US"}},
+            {"response_ms": 150, "colo": "LAX", "ipv4_ok": True, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": "ipv4",
+             "exit_geo": {"countryCode": "US"}},
+        ]
+        merged = vp.merge_geo(ok)
+        self.assertFalse(merged["geo_mismatch"])
+
+    def test_min_response_ms(self):
+        ok = [
+            {"response_ms": 200, "colo": None, "ipv4_ok": False, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": None, "exit_geo": None},
+            {"response_ms": 100, "colo": None, "ipv4_ok": False, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": None, "exit_geo": None},
+        ]
+        merged = vp.merge_geo(ok)
+        self.assertEqual(merged["response_ms"], 100)
+
+    def test_dual_stack_union(self):
+        ok = [
+            {"response_ms": None, "colo": None, "ipv4_ok": True, "ipv6_ok": False,
+             "dual_stack": False, "inferred_stack": "ipv4", "exit_geo": None},
+            {"response_ms": None, "colo": None, "ipv4_ok": False, "ipv6_ok": True,
+             "dual_stack": True, "inferred_stack": "ipv6", "exit_geo": None},
+        ]
+        merged = vp.merge_geo(ok)
+        self.assertTrue(merged["ipv4_ok"])
+        self.assertTrue(merged["ipv6_ok"])
+        self.assertTrue(merged["dual_stack"])
+
+
+class TestWriteExtCheck(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="vp_ext_"))
+        self.orig_ext = vp.EXT_CHECK_FILE
+        vp.EXT_CHECK_FILE = self.tmp / "ext_check.json"
+
+    def tearDown(self):
+        vp.EXT_CHECK_FILE = self.orig_ext
+
+    def test_writes_ext_data(self):
+        alive = {
+            "1.0.0.1:443#US": (
+                "1.0.0.1", "443", "US", "tls", 100.0, 1.0,
+                {"sources": ["090227", "cmliu"], "alive": True,
+                 "response_ms": 120, "colo": "LAX"},
+            ),
+        }
+        vp.write_ext_check(alive)
+        data = json.loads(vp.EXT_CHECK_FILE.read_text())
+        self.assertIn("1.0.0.1:443#US", data["proxies"])
+        self.assertEqual(data["proxies"]["1.0.0.1:443#US"]["colo"], "LAX")
+
+    def test_skips_when_no_ext_data(self):
+        alive = {
+            "1.0.0.1:443#US": (
+                "1.0.0.1", "443", "US", "tls", 100.0, 1.0, None,
+            ),
+        }
+        vp.write_ext_check(alive)
+        self.assertFalse(vp.EXT_CHECK_FILE.exists())
+
+    def test_idempotent(self):
+        alive = {
+            "1.0.0.1:443#US": (
+                "1.0.0.1", "443", "US", "tls", 100.0, 1.0,
+                {"sources": ["090227"], "alive": True},
+            ),
+        }
+        vp.write_ext_check(alive)
+        m1 = vp.EXT_CHECK_FILE.stat().st_mtime_ns
+        vp.write_ext_check(alive)
+        m2 = vp.EXT_CHECK_FILE.stat().st_mtime_ns
+        self.assertEqual(m1, m2)
+
+
+class TestWriteValidOutputsExtRegion(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="vp_region_"))
+        self.orig = (vp.VALID_DIR, vp.CHINA_FILE, vp.INDEX_FILE, vp.SPEED_FILE)
+        vp.VALID_DIR = self.tmp
+        vp.CHINA_FILE = self.tmp / "china.json"
+        vp.INDEX_FILE = self.tmp / "index.json"
+        vp.SPEED_FILE = self.tmp / "speed.json"
+
+    def tearDown(self):
+        vp.VALID_DIR, vp.CHINA_FILE, vp.INDEX_FILE, vp.SPEED_FILE = self.orig
+
+    def test_exit_region_inserted_from_ext_data(self):
+        alive = {
+            "1.0.0.1:443#US": (
+                "1.0.0.1", "443", "US", "tls", 100.0, 1.0,
+                {"sources": ["090227"], "alive": True,
+                 "response_ms": 100, "colo": "LAX",
+                 "exit_geo": {"countryCode": "US"}},
+            ),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=0)
+        lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
+        self.assertIn("→LAX", lines[0])
+
+    def test_no_ext_data_no_region(self):
+        alive = {
+            "1.0.0.1:443#US": (
+                "1.0.0.1", "443", "US", "tls", 100.0, 1.0, None,
+            ),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=0)
+        lines = (vp.VALID_DIR / "all.txt").read_text().splitlines()
+        self.assertNotIn("→", lines[0])
+
+
+class TestMainCLIArgs(unittest.TestCase):
+    def test_ext_check_flag(self):
+        parser = vp.argparse.ArgumentParser(description="test")
+        parser.add_argument("--ext-check", action="store_true")
+        parser.add_argument("--no-ext-check", action="store_true")
+        parser.add_argument("--ext-timeout", type=int, default=10)
+        parser.add_argument("--ext-workers", type=int, default=10)
+        args = parser.parse_args(["--ext-check", "--ext-timeout", "5", "--ext-workers", "20"])
+        self.assertTrue(args.ext_check)
+        self.assertEqual(args.ext_timeout, 5)
+        self.assertEqual(args.ext_workers, 20)
+
+    def test_no_ext_check_overrides(self):
+        parser = vp.argparse.ArgumentParser(description="test")
+        parser.add_argument("--ext-check", action="store_true")
+        parser.add_argument("--no-ext-check", action="store_true")
+        args = parser.parse_args(["--ext-check", "--no-ext-check"])
+        if args.no_ext_check:
+            args.ext_check = False
+        self.assertFalse(args.ext_check)
