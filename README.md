@@ -26,7 +26,7 @@
 - **自动抓取整理**：下载上游 `all.json`（失败自动回退 zip）→ 按端口/国家/常用集合/全量多维度汇总，去重合并；并把上游真实出口 IP、ASN、地理等元数据落盘为 `data/quality/upstream_meta.json` 供下游消费
 - **可用性验证**：TLS 握手检测，asyncio 高并发测活，并在判活连接内做**稳态下载测速**（丢弃慢启动爬坡、仅对稳态窗口计时，MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
 - **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对全量存活池做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
-- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性），保守判定（≥2 方法确认才标 reachable）+ itdog.cn 批量 + check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细与 `data/valid/all_cn.txt` 全量大陆可达清单，并在 `data/valid/*.txt` 追加 `-CN` 备注
+- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性 + itdog 应用层确认），保守判定（≥2 方法确认才标 reachable）+ 证据分级（`level`：http/tcp）+ 跨轮稳定计数（`streak`），itdog.cn 批量（9 节点跨省采样）+ check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细、`data/valid/all_cn.txt` 全量清单及 `all_cn_http.txt`/`all_cn_stable.txt` 可靠性子集，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `data/quality/upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`data/quality/exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `data/output/stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量、双轴复合图、集合规模、大陆可达性、出口家族与信誉分分布
@@ -82,7 +82,9 @@ data/download/all.txt                       # 全量去重清单（未验证）
 
 ## 中国大陆使用建议
 
-- **优先消费**：`data/valid/all_cn.txt`（大陆可达，按**大陆实测延迟升序**）、
+- **优先消费**：`data/valid/all_cn_stable.txt`（连续 ≥2 轮大陆可达，抗误判/churn）、
+  `data/valid/all_cn_http.txt`（应用层 HTTP 确认，过滤"TCP 通但被干扰"）、
+  `data/valid/all_cn.txt`（全量大陆可达，按**大陆实测延迟升序**）、
   `data/valid/all_good.txt`（综合最优：CN 可达 + 信誉≥80 + 非高风险；延迟分优先采用大陆实测值）、
   `data/valid/countries/<CC>/cn4.txt`（该国大陆可达且 IPv4 出口）
 - **可靠性叠加**：代理池 churn 快（检测时活着、使用时可能已死），且"TLS 握手存活"≠"能用"。
@@ -90,9 +92,8 @@ data/download/all.txt                       # 全量去重清单（未验证）
   - `*_verified` — **全链路验证**：本轮测速成功 = TLS + HTTP 2xx + 真实下载全部通过，
     过滤"能握手但不吐数据"的半死代理
   - `*_stable` — **连续两轮存活**：上一轮与本轮存活的交集，对抗快速 churn
-  - 推荐组合：`all_cn_verified.txt` > `all_cn_stable.txt` > `all_cn.txt`
-- **行内备注**：`-CN` = 大陆可达；`-V4/-V6/-DS` = 实际出口家族（CF 边缘代理入口是 v4，
-  实际出口常为 v6）；`→XXX` = 出口地区
+- **行内备注**：`-CN` = 大陆可达；`-CNH` = 大陆可达且应用层（HTTP）确认；
+  `-V4/-V6/-DS` = 实际出口家族（CF 边缘代理入口是 v4，实际出口常为 v6）；`→XXX` = 出口地区
 - **本地运行**：脚本访问 `raw.githubusercontent.com` 失败时自动回退 gh-proxy.com /
   jsDelivr / gitmirror 镜像，大陆网络无需自备代理即可拉取源与黑名单
 

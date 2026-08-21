@@ -142,9 +142,10 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 **itdog.cn 批量 HTTP 探活**：
 
-- 每任务 5 个目标 × 每 ISP 2 个节点（电信/联通/移动共 6 节点）
+- 每任务 5 个目标 × 每 ISP 3 个节点（电信/联通/移动共 9 节点，跨省等距采样）
 - 通过 WebSocket 收集结果
-- TCP 连通即判可达
+- TCP 连通即判可达；节点返回 `http_code>0` 时另计**应用层确认**（`level=http`），
+  仅 TCP 连通记为 `level=tcp`
 - 限速：8 并发任务，0.5s 间隔
 - 熔断：连续 8 次失败后停止
 
@@ -158,10 +159,13 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
 - `tcpping.cn`：多运营商，需 token，缺则跳过
 
+已评估并放弃的补充源：`api.hostmonit.com/check_port`（已 404）、`ping.chinaz.com`
+（表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）。
+
 ### 5.2 合成判定逻辑（merge_verdict）
 
 ```
-输入：sources = {check_host: {status, ok, ms}, xxapi: {...}, itdog: {...}, pingpe: {...}, ...}
+输入：sources = {check_host: {status, ok, ms, level}, xxapi: {...}, itdog: {...}, pingpe: {...}, ...}
       cf = True/False（是否 CF 边缘代理）
 
 规则：
@@ -174,12 +178,28 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 7. 仅部分源 fail → uncertain
 8. 全部 error/skip → skipped（不误判）
 9. CF 启发式仅记录在 basis 中，不改变判定
+
+证据分级 level：
+- 任一成功源给出应用层（HTTP）确认 → "http"
+- 有成功源但全部仅传输层（TCP）→ "tcp"
+- 无成功源 → None
 ```
 
-### 5.3 输出
+### 5.3 跨轮稳定性
 
-- `data/quality/china.json`：逐条明细，含各源 status/ms 与合成 verdict
-- `data/valid/all_cn.txt`：全量大陆可达清单（本次 reachable + 历史 -CN）
+写 `china.json` 前读取上一轮结果：
+
+- **streak**：per-key 连续可达轮数（reachable 且上轮也 reachable → 累加；否则清零/置 1）
+- **uncertain 优先复检**：上一轮 uncertain 的键在本轮采样中稳定排序置顶
+  （limit 截断时优先覆盖）
+
+### 5.4 输出
+
+- `data/quality/china.json`：逐条明细，含各源 status/ms/level 与合成 verdict/basis/ms/level/streak
+- `data/valid/all_cn.txt`：全量大陆可达清单（本次 reachable + 历史 -CN），按大陆实测延迟升序；
+  应用层确认行追加 `-CNH` 备注
+- `data/valid/all_cn_http.txt`：应用层确认子集（本轮 level=http 或历史已带 `-CNH`）
+- `data/valid/all_cn_stable.txt`：跨轮稳定子集（连续 ≥2 轮 reachable，不含历史兜底）
 - `data/valid/*.txt`：可达者追加 `-CN` 备注
 
 ## 6. 出口 IP 家族检测（exit_family.py）

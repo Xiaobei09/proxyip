@@ -5,27 +5,40 @@
 ``--source data/valid/all.txt --limit 0``）做大陆连通性检测，产出一致结论后写回：
 （本地缺省仍走 ``all_rep.txt`` 按信誉降序取前 250 的小样本）
 
-- ``data/quality/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``）
+- ``data/quality/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``；
+  含合成 verdict、证据分级 ``level`` 与连续可达轮数 ``streak``）
 - ``data/valid/all_cn.txt``  — 全量大陆可达清单（源为 ``data/valid/all.txt`` 全量存活池，
-  仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt；按大陆实测延迟升序）
+  仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt；按大陆实测延迟升序；
+  应用层确认行追加 ``-CNH``）
+- ``data/valid/all_cn_http.txt`` — 应用层（HTTP）确认子集：本轮 level=http 或历史
+  已带 ``-CNH`` 的行
+- ``data/valid/all_cn_stable.txt`` — 跨轮稳定子集：连续 ≥2 轮判 reachable 的行
+  （strict，不含历史兜底）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
 
 检测分层（均为无账号/免登录）：
 
 - L1 启发式（零网络）：行备注已带 ``CF``（Cloudflare 边缘 tls 代理）记录 heuristic 源，
   但不自动判 reachable——CF 启发式仅作为 basis 标注，需其他源确认。
-- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 6 节点
-  （电信/联通/移动各 2），经 WebSocket 收结果，TCP 连通即判可达。
+- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 9 节点
+  （电信/联通/移动各 3，跨省等距采样），经 WebSocket 收结果，TCP 连通即判可达，
+  HTTP 响应另计应用层确认（level=http）。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+ `xxapi.cn`
   （北京节点，免 key）。
 - L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   可选 `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
+- 已评估并放弃：`api.hostmonit.com/check_port`（已 404）；`ping.chinaz.com`
+  （表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）。
 
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/tcpping）任一 ok → reachable；
   单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   check_host + xxapi 均 fail → unreachable；
   pingpe/itdog fail + 任一其他源 fail → unreachable。
+  证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"。
+
+跨轮稳定性：写 china.json 前读取上一轮结果，per-key 维护连续可达轮数
+``streak``；上一轮 uncertain 的键在本轮采样置顶优先复检。
 
 纯标准库（urllib / json / threading / concurrent.futures）。运行时告警不计入
 判定，仅记录 ``skipped``；单源失败不误判。
@@ -51,6 +64,8 @@ from common import (
     REP_RANK_FILE,
     UA,
     VALID_ALL_CN_FILE,
+    VALID_ALL_CN_HTTP_FILE,
+    VALID_ALL_CN_STABLE_FILE,
     VALID_ALL_FILE,
     VALID_ALL_LTD_FILE,
     VALID_DIR,
@@ -59,6 +74,7 @@ from common import (
     keyed_json,
     line_to_key,
     parse_ltd_line,
+    read_json,
     request_follow,
     write_json,
     write_text_if_changed,
@@ -499,6 +515,8 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     - 有确认源但也有失败源（冲突）→ uncertain（保守）
     - 全部为错误/跳过 → skipped（不误判）
     - CF 启发式不再自动判可达，仅作为 basis 标注
+    - ``level``：证据分级——任一成功源给出应用层（HTTP）确认 → "http"，
+      仅传输层（TCP）确认 → "tcp"，无成功源 → None
     """
     ok_sources = [name for name, r in sources.items() if r.get("ok")]
     fail_sources = [name for name, r in sources.items() if r["status"] == "fail"]
@@ -507,6 +525,13 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         if r.get("ok") and isinstance(r.get("ms"), (int, float)) and r["ms"] > 0
     ]
     ms = round(min(ms_values), 1) if ms_values else None
+    # 证据分级：任一成功源给出应用层确认 → "http"；仅传输层 → "tcp"
+    if any(sources[s].get("level") == "http" for s in ok_sources):
+        level = "http"
+    elif ok_sources:
+        level = "tcp"
+    else:
+        level = None
 
     multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
@@ -515,29 +540,29 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         basis = ok_sources[:]
         if cf:
             basis.append("heuristic")
-        return {"verdict": "reachable", "basis": basis, "ms": ms}
+        return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
     if len(single_ok) >= 2:
         basis = ok_sources[:]
         if cf:
             basis.append("heuristic")
-        return {"verdict": "reachable", "basis": basis, "ms": ms}
+        return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
     if ok_sources:
         basis = ok_sources[:]
         if cf:
             basis.append("heuristic")
-        return {"verdict": "uncertain", "basis": basis, "ms": ms}
+        return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     if "check_host" in fail_sources and "xxapi" in fail_sources:
-        return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
+        return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if "pingpe" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "itdog")):
-        return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
+        return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if "itdog" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "pingpe")):
-        return {"verdict": "unreachable", "basis": fail_sources, "ms": None}
+        return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
-        return {"verdict": "uncertain", "basis": fail_sources, "ms": None}
+        return {"verdict": "uncertain", "basis": fail_sources, "ms": None, "level": None}
     basis = []
     if cf:
         basis.append("heuristic")
-    return {"verdict": "skipped", "basis": basis, "ms": None}
+    return {"verdict": "skipped", "basis": basis, "ms": None, "level": None}
 
 
 def has_cn_note(line: str) -> bool:
@@ -580,6 +605,7 @@ def build_entry(item, sources: dict) -> dict:
         "verdict": merged["verdict"],
         "basis": merged["basis"],
         "ms": merged["ms"],
+        "level": merged.get("level"),
         "sources": sources,
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
@@ -593,14 +619,65 @@ def load_cn_pool() -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def annotate_cnh(line: str) -> str:
+    """给行追加 ``-CNH``（应用层 HTTP 确认），幂等。"""
+    if has_token(_note(line), "CNH"):
+        return line
+    return line + "-CNH"
+
+
+def apply_streak(entries: dict, prev_entries: dict) -> None:
+    """就地写入连续可达轮数 ``streak``。
+
+    reachable 且上一轮也 reachable → 上一轮 streak+1（上轮值缺失按 1 计，
+    因其确实可达）；仅本轮 reachable → 1；其余 → 0。用于生成
+    ``all_cn_stable.txt``，对抗单轮误判与快速 churn。
+    """
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
+        prev = prev_entries.get(key) if isinstance(prev_entries, dict) else None
+        prev_reachable = (
+            isinstance(prev, dict) and prev.get("verdict") == "reachable"
+        )
+        if entry.get("verdict") == "reachable":
+            base = 0
+            if prev_reachable:
+                ps = prev.get("streak")
+                base = ps if isinstance(ps, int) and ps > 0 else 1
+            entry["streak"] = base + 1
+        else:
+            entry["streak"] = 0
+
+
+def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
+    """``cn_ms`` 提供时按大陆延迟升序稳定排序；缺失排最后。"""
+    if not cn_ms:
+        return lines
+    indexed = list(enumerate(lines))
+    indexed.sort(
+        key=lambda item: (
+            cn_ms.get(line_to_key(item[1]), float("inf")),
+            item[0],
+        )
+    )
+    return [line for _i, line in indexed]
+
+
 def generate_all_cn(
-    pool_text: str, reachable_keys: set, cn_ms: dict | None = None
+    pool_text: str,
+    reachable_keys: set,
+    cn_ms: dict | None = None,
+    http_keys: set | None = None,
+    strict: bool = False,
 ) -> tuple[str, int]:
     """大陆可达清单：本次判可达或历史已带 ``-CN`` 的行（源为全量池文本）。
 
-    ``cn_ms``（``key -> 大陆实测毫秒``）提供时按大陆延迟升序输出——对大陆
-    使用者这比海外 TLS 延迟更有参考意义；未测到延迟的行排在最后，同延迟
-    保持原池顺序。缺省 ``None`` 时保持原池顺序。
+    - ``http_keys``：应用层（HTTP）确认的 key 集合，对应行追加 ``-CNH``
+    - ``strict=True``：仅收当前集合，跳过历史 ``-CN`` 兜底（供 stable 清单）
+    - ``cn_ms``（``key -> 大陆实测毫秒``）提供时按大陆延迟升序输出——对大陆
+      使用者这比海外 TLS 延迟更有参考意义；未测到延迟的行排在最后，同延迟
+      保持原池顺序。缺省 ``None`` 时保持原池顺序。
     """
     lines = []
     for line in pool_text.splitlines():
@@ -609,17 +686,34 @@ def generate_all_cn(
         key = line_to_key(line)
         if not key:
             continue
-        if key in reachable_keys or has_cn_note(line):
-            lines.append(annotate_cn(line))
-    if cn_ms:
-        indexed = list(enumerate(lines))
-        indexed.sort(
-            key=lambda item: (
-                cn_ms.get(line_to_key(item[1]), float("inf")),
-                item[0],
-            )
-        )
-        lines = [line for _i, line in indexed]
+        if key in reachable_keys or (not strict and has_cn_note(line)):
+            out = annotate_cn(line)
+            if http_keys and key in http_keys:
+                out = annotate_cnh(out)
+            lines.append(out)
+    lines = _sort_by_ms(lines, cn_ms)
+    return "\n".join(lines) + ("\n" if lines else ""), len(lines)
+
+
+def generate_cn_subset(
+    pool_text: str,
+    keep,
+    cn_ms: dict | None = None,
+) -> tuple[str, int]:
+    """按谓词过滤全量池文本，保持行原文；``keep(key, line)`` 为真则保留。
+
+    排序规则同 :func:`generate_all_cn`（``cn_ms`` 升序，缺失垫底）。
+    """
+    lines = []
+    for line in pool_text.splitlines():
+        if not line.strip():
+            continue
+        key = line_to_key(line)
+        if not key:
+            continue
+        if keep(key, line):
+            lines.append(line)
+    lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
 
 
@@ -696,6 +790,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         entries[key]["verdict"] = merged["verdict"]
         entries[key]["basis"] = merged["basis"]
         entries[key]["ms"] = merged["ms"]
+        entries[key]["level"] = merged.get("level")
         if merged["verdict"] == "reachable":
             reachable.add(key)
         elif merged["verdict"] == "uncertain":
@@ -723,7 +818,7 @@ def main(argv=None) -> int:
     parser.add_argument("--tcpping-token", default="",
                         help="tcpping.cn token（默认读 TCPPING_CN_TOKEN，缺则跳过）")
     parser.add_argument("--itdog-nodes", type=int, default=ITDOG_NODES_PER_ISP,
-                        help=f"itdog 每大陆运营商取前 N 节点（默认 {ITDOG_NODES_PER_ISP} → 共 6）")
+                        help=f"itdog 每大陆运营商取 N 节点（跨省等距采样；默认 {ITDOG_NODES_PER_ISP} → 共 {ITDOG_NODES_PER_ISP * 3}）")
     parser.add_argument("--itdog-batch-size", type=int, default=ITDOG_BATCH_SIZE,
                         help=f"itdog 每任务目标数（上限 {ITDOG_BATCH_SIZE}；默认 {ITDOG_BATCH_SIZE}）")
     parser.add_argument("--itdog-concurrency", type=int, default=ITDOG_CONCURRENCY,
@@ -745,10 +840,25 @@ def main(argv=None) -> int:
     args.api_key = api_key
     args.tcpping_token = tcpping_token
 
+    # 上一轮结果须在 write_json 覆盖 china.json 之前读取：
+    # 用于 streak 连续可达计数与 uncertain 键优先复检
+    prev_data = read_json(CHINA_FILE)
+    prev_entries = (
+        prev_data.get("proxies", prev_data)
+        if isinstance(prev_data, dict) else {}
+    )
+    if not isinstance(prev_entries, dict):
+        prev_entries = {}
+
     sample, used = load_sample(args.source, args.limit)
     if not sample:
         print(f"no sample lines from {used} (limit={args.limit})", file=sys.stderr)
         return 2
+    # 上一轮 uncertain 的键稳定排序置顶（组内保持信誉降序），优先复检
+    def _was_uncertain(item) -> int:
+        prev = prev_entries.get(item[1])
+        return 0 if isinstance(prev, dict) and prev.get("verdict") == "uncertain" else 1
+    sample.sort(key=_was_uncertain)
     print(f"sample: {len(sample)} from {used}", file=sys.stderr)
     cf_count = sum(1 for item in sample if is_cf_heuristic(item[0]))
     print(f"cf heuristic: {cf_count}", file=sys.stderr)
@@ -762,7 +872,20 @@ def main(argv=None) -> int:
 
     entries, reachable, uncertain = run_measurements(sample, args)
 
-    print(f"reachable: {len(reachable)} uncertain: {len(uncertain)}", file=sys.stderr)
+    apply_streak(entries, prev_entries)
+    stable_keys = {
+        k for k, e in entries.items()
+        if isinstance(e, dict) and e.get("streak", 0) >= 2
+    }
+    http_keys = {
+        k for k, e in entries.items()
+        if isinstance(e, dict) and e.get("level") == "http"
+    }
+    print(
+        f"reachable: {len(reachable)} uncertain: {len(uncertain)} "
+        f"http-verified: {len(http_keys)} stable(>=2 runs): {len(stable_keys)}",
+        file=sys.stderr,
+    )
     write_json(CHINA_FILE, keyed_json(entries))
 
     all_pool_text = load_cn_pool()
@@ -771,11 +894,29 @@ def main(argv=None) -> int:
         for key, entry in entries.items()
         if isinstance(entry, dict) and isinstance(entry.get("ms"), (int, float))
     }
-    cn_text, cn_count = generate_all_cn(all_pool_text, reachable, cn_ms)
+    cn_text, cn_count = generate_all_cn(all_pool_text, reachable, cn_ms, http_keys=http_keys)
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
+    http_text, http_count = generate_cn_subset(
+        all_pool_text,
+        lambda k, l: k in http_keys or has_token(_note(l), "CNH"),
+        cn_ms,
+    )
+    if http_text:
+        write_text_if_changed(VALID_ALL_CN_HTTP_FILE, http_text)
+    stable_text, stable_count = generate_cn_subset(
+        all_pool_text,
+        lambda k, l: k in stable_keys,
+        cn_ms,
+    )
+    if stable_text:
+        write_text_if_changed(VALID_ALL_CN_STABLE_FILE, stable_text)
     annotate_cn_files(reachable)
-    print(f"all_cn.txt: {cn_count} lines; china.json: {len(entries)} entries", file=sys.stderr)
+    print(
+        f"all_cn.txt: {cn_count} lines; all_cn_http.txt: {http_count}; "
+        f"all_cn_stable.txt: {stable_count}; china.json: {len(entries)} entries",
+        file=sys.stderr,
+    )
     return 0
 
 

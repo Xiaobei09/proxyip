@@ -26,7 +26,7 @@ ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
 ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
 ITDOG_TOKEN = "What this is is no longer important."
 ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
-ITDOG_NODES_PER_ISP = 2  # 电信/联通/移动各取前 N 节点（默认 2 → 共 6）
+ITDOG_NODES_PER_ISP = 3  # 电信/联通/移动各取 N 节点（默认 3 → 共 9，跨省等距采样）
 ITDOG_CONCURRENCY = 8
 ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
 ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
@@ -39,14 +39,19 @@ def itdog_md5_16(s: str) -> str:
 
 
 def itdog_parse_nodes(html: str, per_isp: int) -> list[str]:
-    """从 batch_http 页面 optgroup 提取各大陆运营商节点 id（每组前 ``per_isp`` 个）。"""
+    """从 batch_http 页面 optgroup 提取各大陆运营商节点 id。
+
+    每组按等距 stride 采样 ``per_isp`` 个（节点列表大致按省份排序，
+    等距取样可覆盖南北方而非只取列表头部），不足则全取。
+    """
     ids: list[str] = []
     for label in ITDOG_ISP_GROUPS:
         m = re.search(r'<optgroup label="%s">(.*?)</optgroup>' % label, html, re.S)
         if not m:
             continue
         opts = re.findall(r'<option[^>]*value="([^"]+)"', m.group(1))
-        ids.extend(opts[:per_isp])
+        stride = max(1, len(opts) // per_isp) if per_isp > 0 else 1
+        ids.extend(opts[::stride][:per_isp])
     return ids
 
 
@@ -275,47 +280,56 @@ def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
     return records
 
 
-def itdog_rec_ok(rec: dict) -> tuple[bool | None, float | None]:
-    """单节点记录 → ``(可达, ms)``。
+def itdog_rec_ok(rec: dict) -> tuple[bool | None, float | None, str | None]:
+    """单节点记录 → ``(可达, ms, level)``。
 
-    - http_code>0 → 可达
-    - connect_time 介于 5ms 与 9s → TCP 连通但非 HTTP 端口，仍判可达
+    - http_code>0 → 可达，level="http"（应用层确认）
+    - connect_time 介于 5ms 与 9s → TCP 连通但非 HTTP 端口，仍判可达，
+      level="tcp"（仅传输层）
     - connect_time≈0（拒绝）或 ≈10s（超时）→ 不可达
-    - node_error / 无字段 → None（不确定）
+    - node_error / 无字段 → (None, None, None)（不确定）
     """
     if rec.get("type") == "node_error":
-        return None, None
+        return None, None, None
     try:
         ct = float(rec.get("connect_time") or 0)
     except (TypeError, ValueError):
         ct = 0.0
     code = rec.get("http_code")
     if isinstance(code, (int, float)) and code > 0:
-        return True, (ct * 1000 if 0.005 < ct < 9.0 else None)
+        return True, (ct * 1000 if 0.005 < ct < 9.0 else None), "http"
     if 0.005 < ct < 9.0:
-        return True, ct * 1000
-    return False, None
+        return True, ct * 1000, "tcp"
+    return False, None, None
 
 
 def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
-    """按 task_num 聚合节点结果 → ``{task_num: source_result}``。"""
+    """按 task_num 聚合节点结果 → ``{task_num: source_result}``。
+
+    ``level`` 反映证据强度：任一成功节点拿到 http_code → ``"http"``，
+    仅 TCP 连通 → ``"tcp"``。
+    """
     out: dict = {}
     for tn in range(1, n_targets + 1):
         recs = [r for r in records if r.get("task_num") == tn]
         real = [r for r in recs if r.get("type") != "node_error"]
         if not real:
             out[tn] = {"status": "error", "ok": False, "ms": None,
-                       "error": "no records" if not recs else "node_error"}
+                       "error": "no records" if not recs else "node_error",
+                       "level": None}
             continue
         oks = [(r, itdog_rec_ok(r)) for r in real]
         good = [(r, ok) for r, ok in oks if ok[0] is True]
         if good:
-            mss = [ms for _, (_, ms) in good if ms]
+            mss = [ms for _, (_, ms, _lv) in good if ms]
+            level = "http" if any(lv == "http" for _, (_o, _m, lv) in good) else "tcp"
             out[tn] = {"status": "ok", "ok": True,
-                       "ms": round(min(mss), 1) if mss else None, "error": ""}
+                       "ms": round(min(mss), 1) if mss else None, "error": "",
+                       "level": level}
         else:
             out[tn] = {"status": "fail", "ok": False, "ms": None,
-                       "error": f"unreachable ({len(real)} nodes)"}
+                       "error": f"unreachable ({len(real)} nodes)",
+                       "level": None}
     return out
 
 
