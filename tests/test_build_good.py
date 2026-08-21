@@ -1,5 +1,6 @@
 """Tests for build_good.py scoring, filtering and output layout."""
 
+import json
 import sys
 import tempfile
 import unittest
@@ -210,6 +211,47 @@ class TestWriteGoodFiles(unittest.TestCase):
             self.assertEqual(len(good.splitlines()), 2)
             self.assertTrue((valid / "countries" / "US" / "good.txt").exists())
             self.assertTrue((valid / "sets" / "hot" / "good.txt").exists())
+
+    def test_verified_stable_variants(self):
+        import common
+
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            (valid / "all.txt").write_text(self.POOL, encoding="utf-8")
+            orig = common.SPEED_FILE, common.CHINA_FILE
+            common.SPEED_FILE = Path(tmp) / "speed.json"
+            common.CHINA_FILE = Path(tmp) / "china.json"
+            try:
+                common.SPEED_FILE.write_text(
+                    json.dumps({"proxies": {"1.1.1.1:443#US": {}}}),
+                    encoding="utf-8",
+                )
+                common.CHINA_FILE.write_text(
+                    json.dumps(
+                        {
+                            "proxies": {
+                                "2.2.2.2:443#US": {
+                                    "verdict": "reachable",
+                                    "streak": 2,
+                                }
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                bg.write_good_files(valid, self.CHINA, self.REP)
+            finally:
+                common.SPEED_FILE, common.CHINA_FILE = orig
+
+            ver = (valid / "all_good_verified.txt").read_text(encoding="utf-8")
+            self.assertEqual(
+                [l.split("#")[0] for l in ver.splitlines()], ["1.1.1.1:443"]
+            )
+            sta = (valid / "all_good_stable.txt").read_text(encoding="utf-8")
+            self.assertEqual(
+                [l.split("#")[0] for l in sta.splitlines()], ["2.2.2.2:443"]
+            )
 
     def test_idempotent_rewrite(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1265,6 +1265,33 @@ class TestVerifiedStableOutputs(unittest.TestCase):
         self.assertEqual(sets["all_verified"], 2)
         self.assertEqual(sets["all_stable"], 2)
 
+    def test_ltd_verified_stable_variants(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 200.0, None, None),
+            "3.0.0.1:443#JP": ("3.0.0.1", "443", "JP", "tls", 150.0, 0.8, None),
+        }
+        stats = vp.write_valid_outputs(
+            alive,
+            per_country_limit=2,
+            prev_keys={"1.0.0.1:443#US", "2.0.0.1:443#US"},
+        )
+        root_ver = (vp.VALID_DIR / "all_ltd_verified.txt").read_text().splitlines()
+        self.assertEqual(
+            sorted(l.split("#")[0] for l in root_ver),
+            ["1.0.0.1:443", "3.0.0.1:443"],
+        )
+        us_dir = vp.VALID_DIR / "countries" / "US"
+        ltd_ver = (us_dir / "ltd_verified.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in ltd_ver], ["1.0.0.1:443"])
+        ltd_sta = (us_dir / "ltd_stable.txt").read_text().splitlines()
+        self.assertEqual(
+            [l.split("#")[0] for l in ltd_sta], ["1.0.0.1:443", "2.0.0.1:443"]
+        )
+        sets = stats["__sets__"]
+        self.assertIn("all_ltd_verified", sets)
+        self.assertIn("all_ltd_stable", sets)
+
     def test_group_verified_stable_variants(self):
         alive = {
             "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.5, None),

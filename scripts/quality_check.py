@@ -266,8 +266,30 @@ def _build_ranked_map(source_text: str, annotations: dict, rep_map: dict) -> lis
 
 
 def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:
+    """写声誉排序清单及其 ``_verified`` / ``_stable`` 可靠性变体。
+
+    变体过滤信号（与 validate/build_good 共用）：
+    - ``_verified``: speed.json（本轮全链路验证通过）
+    - ``_stable``:  china.json streak≥2（连续两轮大陆可达）
+    根级 all_rep / all_{g}_rep / all_{g}_rep_ltd 与子目录 rep.txt 全覆盖；
+    子目录分组 rep 保持单维度以控制文件数量。
+    """
+    speed_keys = load_speed_keys()
+    stable_keys = load_china_stable_keys()
+
+    def emit(base: Path, lines: list[str]) -> None:
+        """写清单本体 + verified/stable 变体（空变体清理旧文件）。"""
+        write_text_if_changed(base, "\n".join(lines) + "\n")
+        for suffix, keys in (("_verified", speed_keys), ("_stable", stable_keys)):
+            vpath = base.with_name(f"{base.stem}{suffix}.txt")
+            vlines = [ln for ln in lines if (k := line_to_key(ln)) and k in keys]
+            if vlines:
+                write_text_if_changed(vpath, "\n".join(vlines) + "\n")
+            elif vpath.exists():
+                vpath.unlink()
+
     ranked = build_ranked(source_text, annotations, rep_map)
-    write_text_if_changed(REP_RANK_FILE, "\n".join(ranked) + "\n")
+    emit(REP_RANK_FILE, ranked)
     valid_root = REP_RANK_FILE.parent
 
     # --- 顶层 cross-product rep 文件 (all_cn_rep.txt, all_cn4_rep_ltd.txt 等) ---
@@ -275,35 +297,29 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
         src = valid_root / f"all_{g}.txt"
         if src.exists():
             r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
-            write_text_if_changed(valid_root / f"all_{g}_rep.txt", "\n".join(r) + "\n")
+            emit(valid_root / f"all_{g}_rep.txt", r)
         ltd_src = valid_root / f"all_{g}_ltd.txt"
         if ltd_src.exists():
             r = build_ranked(ltd_src.read_text(encoding="utf-8"), annotations, rep_map)
-            write_text_if_changed(
-                valid_root / f"all_{g}_rep_ltd.txt", "\n".join(r) + "\n"
-            )
+            emit(valid_root / f"all_{g}_rep_ltd.txt", r)
 
     # --- 每个 set/country 子目录: rep.txt + cross-product rep 文件 ---
     for sub in ("countries", "sets"):
         for src in sorted((valid_root / sub).glob("*/all.txt")):
-            ranked = build_ranked(
-                src.read_text(encoding="utf-8"), annotations, rep_map
+            emit(
+                src.with_name("rep.txt"),
+                build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map),
             )
-            write_text_if_changed(src.with_name("rep.txt"), "\n".join(ranked) + "\n")
         for g in REP_GROUP_NAMES:
             for src in sorted((valid_root / sub).glob(f"*/{g}.txt")):
-                ranked = build_ranked(
-                    src.read_text(encoding="utf-8"), annotations, rep_map
-                )
+                r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
                 write_text_if_changed(
-                    src.with_name(f"{g}_rep.txt"), "\n".join(ranked) + "\n"
+                    src.with_name(f"{g}_rep.txt"), "\n".join(r) + "\n"
                 )
             for src in sorted((valid_root / sub).glob(f"*/{g}_ltd.txt")):
-                ranked = build_ranked(
-                    src.read_text(encoding="utf-8"), annotations, rep_map
-                )
+                r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
                 write_text_if_changed(
-                    src.with_name(f"{g}_rep_ltd.txt"), "\n".join(ranked) + "\n"
+                    src.with_name(f"{g}_rep_ltd.txt"), "\n".join(r) + "\n"
                 )
 
     entries = {
