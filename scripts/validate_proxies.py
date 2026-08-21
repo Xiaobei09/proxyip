@@ -64,6 +64,7 @@ from common import (
     insert_exit_region,
     keyed_json,
     now_ts,
+    parse_headers,
     parse_line,
     write_json,
     write_text_if_changed,
@@ -77,6 +78,7 @@ SPEED_READ_BYTES = 1048576
 SPEED_TIMEOUT = 5
 SPEED_MIN_BYTES = 16384
 SPEED_WARMUP_BYTES = 256 * 1024
+SPEED_HEAD_CAP = 32 * 1024
 SPEED_WORKERS = 30
 ADAPTIVE_SPEED_RTT_FACTOR = 30
 ADAPTIVE_SPEED_MIN_BYTES = 5 * 1024 * 1024
@@ -570,13 +572,16 @@ async def speed_download(
 ) -> float | None:
     """Steady-state download of ``path``, returning MB/s.
 
-    Reads up to ``cap_bytes`` within ``cap_sec``.  The first ``warmup_bytes``
-    cover the TCP slow-start / TLS+HTTP ramp-up and are excluded from timing;
-    throughput is measured only over the remaining steady-state window, so a
-    slow ramp no longer drags the reported speed down.  When no usable
-    steady-state sample exists (early EOF or timeout inside the warm-up), the
-    result falls back to the whole-transfer average so coverage stays on par
-    with the previous behaviour.
+    Reads up to ``cap_bytes`` within ``cap_sec``.  The response head is read
+    first and only ``2xx`` answers are measured — anything else (403 pages,
+    non-HTTP garbage) fails the test instead of polluting speed data.  The
+    first ``warmup_bytes`` of body cover the TCP slow-start / TLS+HTTP
+    ramp-up and are excluded from timing; throughput is measured only over
+    the remaining steady-state window, so a slow ramp no longer drags the
+    reported speed down.  When no usable steady-state sample exists (early
+    EOF or timeout inside the warm-up), the result falls back to the
+    whole-transfer average so coverage stays on par with the previous
+    behaviour.
     """
     req = (
         f"GET {path} HTTP/1.1\r\n"
@@ -590,10 +595,43 @@ async def speed_download(
         await writer.drain()
     except (ConnectionError, OSError):
         return None
+
+    def feed(chunk: bytes) -> None:
+        nonlocal total, timed_bytes, timed_start
+        if not chunk:
+            return
+        total += len(chunk)
+        if timed_start is None:
+            if total >= warmup_bytes:
+                timed_start = clock()
+        else:
+            timed_bytes += len(chunk)
+
     start = clock()
     total = 0
     timed_bytes = 0
     timed_start: float | None = start if warmup_bytes <= 0 else None
+
+    # Read + validate the response head before counting anything.
+    head = b""
+    while b"\r\n\r\n" not in head:
+        remain = cap_sec - (clock() - start)
+        if remain <= 0:
+            return None
+        try:
+            chunk = await asyncio.wait_for(reader.read(65536), min(READ_CAP, remain))
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            return None
+        if not chunk:
+            return None
+        head += chunk
+        if b"\r\n\r\n" not in head and len(head) > SPEED_HEAD_CAP:
+            return None
+    head_block, _, body = head.partition(b"\r\n\r\n")
+    status, _headers = parse_headers(head_block)
+    if status is None or not 200 <= status < 300:
+        return None
+    feed(body)
     while total < cap_bytes:
         remain = cap_sec - (clock() - start)
         if remain <= 0:
@@ -604,12 +642,7 @@ async def speed_download(
             break
         if not chunk:
             break
-        total += len(chunk)
-        if timed_start is None:
-            if total >= warmup_bytes:
-                timed_start = clock()
-        else:
-            timed_bytes += len(chunk)
+        feed(chunk)
     if timed_start is not None and timed_bytes >= SPEED_MIN_BYTES:
         return compute_speed(timed_bytes, clock() - timed_start)
     return compute_speed(total, clock() - start)
