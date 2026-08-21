@@ -416,6 +416,26 @@ class TestItdogParseNodes(unittest.TestCase):
         self.assertEqual(cc.itdog_parse_nodes(html, 1), ["aaa", "ccc", "ddd"])
         self.assertEqual(cc.itdog_parse_nodes(html, 2), ["aaa", "bbb", "ccc", "ddd"])
 
+    def test_stride_sampling_spreads_across_group(self):
+        html = (
+            '<optgroup label="中国电信">'
+            '<option value="n1">北京 - 电信</option>'
+            '<option value="n2">山东 - 电信</option>'
+            '<option value="n3">上海 - 电信</option>'
+            '<option value="n4">广东 - 电信</option>'
+            "</optgroup>"
+        )
+        # 4 取 3：stride=1 → 前 3；8 取 3：stride=2 → 1/3/5 号位
+        html8 = (
+            '<optgroup label="中国电信">'
+            + "".join(f'<option value="m{i}">x</option>' for i in range(1, 9))
+            + "</optgroup>"
+        )
+        self.assertEqual(cc.itdog_parse_nodes(html, 3), ["n1", "n2", "n3"])
+        self.assertEqual(cc.itdog_parse_nodes(html8, 3), ["m1", "m3", "m5"])
+        # per_isp 超过组内数量 → 全取
+        self.assertEqual(cc.itdog_parse_nodes(html, 9), ["n1", "n2", "n3", "n4"])
+
     def test_missing_group_skipped(self):
         html = '<optgroup label="中国电信"><option value="aaa">x</option></optgroup>'
         self.assertEqual(cc.itdog_parse_nodes(html, 1), ["aaa"])
@@ -441,26 +461,30 @@ class TestItdogParseSubmit(unittest.TestCase):
 
 class TestItdogRecOk(unittest.TestCase):
     def test_http_ok(self):
-        ok, ms = cc.itdog_rec_ok({"http_code": 200, "connect_time": 0.02, "all_time": 0.05})
+        ok, ms, level = cc.itdog_rec_ok({"http_code": 200, "connect_time": 0.02, "all_time": 0.05})
         self.assertIs(ok, True)
         self.assertEqual(ms, 20.0)
+        self.assertEqual(level, "http")
 
     def test_tcp_only_port(self):
-        ok, ms = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.013, "all_time": 10.0})
+        ok, ms, level = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.013, "all_time": 10.0})
         self.assertIs(ok, True)
         self.assertEqual(ms, 13.0)
+        self.assertEqual(level, "tcp")
 
     def test_connect_refused(self):
-        ok, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.001, "all_time": 10.0})
+        ok, _, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.001, "all_time": 10.0})
         self.assertIs(ok, False)
 
     def test_connect_timeout(self):
-        ok, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 10.0, "all_time": 10.0})
+        ok, _, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 10.0, "all_time": 10.0})
         self.assertIs(ok, False)
 
     def test_node_error_inconclusive(self):
-        ok, _ = cc.itdog_rec_ok({"type": "node_error", "task_num": 1})
+        ok, ms, level = cc.itdog_rec_ok({"type": "node_error", "task_num": 1})
         self.assertIsNone(ok)
+        self.assertIsNone(ms)
+        self.assertIsNone(level)
 
 
 class TestItdogAggregate(unittest.TestCase):
@@ -472,13 +496,26 @@ class TestItdogAggregate(unittest.TestCase):
         agg = cc.itdog_aggregate(records, 1)
         self.assertEqual(agg[1]["status"], "ok")
         self.assertEqual(agg[1]["ms"], 20.0)
+        self.assertEqual(agg[1]["level"], "tcp")
 
-    def test_all_fail(self):
+    def test_http_level_wins_over_tcp(self):
+        records = [
+            {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.020},
+            {"task_num": 1, "node_id": "b", "http_code": 200, "connect_time": 0.030},
+        ]
+        agg = cc.itdog_aggregate(records, 1)
+        self.assertEqual(agg[1]["level"], "http")
+        # ms 取所有成功节点最小值（含 tcp 节点）
+        self.assertEqual(agg[1]["ms"], 20.0)
+
+    def test_all_fail_level_none(self):
         records = [
             {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.001},
             {"task_num": 1, "node_id": "b", "http_code": 0, "connect_time": 10.0},
         ]
-        self.assertEqual(cc.itdog_aggregate(records, 1)[1]["status"], "fail")
+        agg = cc.itdog_aggregate(records, 1)
+        self.assertEqual(agg[1]["status"], "fail")
+        self.assertIsNone(agg[1]["level"])
 
     def test_no_records_error(self):
         self.assertEqual(cc.itdog_aggregate([], 2)[2]["status"], "error")
@@ -513,6 +550,123 @@ class TestItdogMergeVerdict(unittest.TestCase):
         sources = {"itdog": {"status": "rate_limited", "ok": False, "ms": None},
                    "check_host": {"status": "error", "ok": False, "ms": None}}
         self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "skipped")
+
+
+class TestMergeVerdictLevel(unittest.TestCase):
+    def _src(self, status, level=None, ms=12.0):
+        return {"status": status, "ok": status == "ok", "ms": ms if status == "ok" else None,
+                "level": level}
+
+    def test_http_level_propagates(self):
+        sources = {
+            "itdog": self._src("ok", "http"),
+            "check_host": self._src("error"),
+        }
+        merged = cc.merge_verdict(sources, cf=False)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["level"], "http")
+
+    def test_tcp_only_level(self):
+        sources = {"itdog": self._src("ok", "tcp")}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["level"], "tcp")
+
+    def test_no_ok_sources_level_none(self):
+        sources = {"check_host": self._src("fail"), "xxapi": self._src("fail")}
+        merged = cc.merge_verdict(sources, cf=False)
+        self.assertEqual(merged["verdict"], "unreachable")
+        self.assertIsNone(merged["level"])
+
+    def test_sources_without_level_field(self):
+        # 旧格式源（无 level 字段）不报错，按 tcp 计
+        sources = {"itdog": {"status": "ok", "ok": True, "ms": 10}}
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["level"], "tcp")
+
+
+class TestApplyStreak(unittest.TestCase):
+    def test_consecutive_reachable_accumulates(self):
+        entries = {"a": {"verdict": "reachable"}, "b": {"verdict": "unreachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": 3},
+                "b": {"verdict": "reachable", "streak": 5}}
+        cc.apply_streak(entries, prev)
+        self.assertEqual(entries["a"]["streak"], 4)
+        self.assertEqual(entries["b"]["streak"], 0)
+
+    def test_first_reachable_and_missing_prev_streak(self):
+        entries = {"a": {"verdict": "reachable"}, "b": {"verdict": "reachable"},
+                   "c": {"verdict": "uncertain"}}
+        prev = {"a": {"verdict": "reachable"},  # 无 streak 字段（旧格式）
+                "c": {"verdict": "reachable", "streak": 7}}
+        cc.apply_streak(entries, prev)
+        self.assertEqual(entries["a"]["streak"], 2)   # 上轮可达但无计数 → 按 1 起算
+        self.assertEqual(entries["b"]["streak"], 1)   # 首次可达
+        self.assertEqual(entries["c"]["streak"], 0)   # 本轮非 reachable 清零
+
+    def test_empty_prev(self):
+        entries = {"a": {"verdict": "reachable"}}
+        cc.apply_streak(entries, {})
+        self.assertEqual(entries["a"]["streak"], 1)
+
+
+class TestAnnotateCnh(unittest.TestCase):
+    def test_appends_token(self):
+        line = "1.1.1.1:443#US-50ms-CN"
+        out = cc.annotate_cnh(line)
+        self.assertTrue(out.endswith("-CN-CNH"))
+
+    def test_idempotent(self):
+        line = "1.1.1.1:443#US-50ms-CN-CNH"
+        self.assertEqual(cc.annotate_cnh(line), line)
+
+
+class TestGenerateAllCnHttpStrict(unittest.TestCase):
+    POOL = (
+        "1.1.1.1:443#US-100ms-5MB/s\n"
+        "2.2.2.2:443#US-200ms-1MB/s-CN\n"      # 历史 -CN
+        "3.3.3.3:443#JP-50ms-2MB/s\n"
+    )
+
+    def test_http_keys_annotated_cnh(self):
+        text, n = cc.generate_all_cn(
+            self.POOL, {"1.1.1.1:443#US"}, http_keys={"1.1.1.1:443#US"})
+        self.assertEqual(n, 2)
+        self.assertIn("1.1.1.1:443#US-100ms-5MB/s-CN-CNH", text)
+        self.assertIn("2.2.2.2:443#US-200ms-1MB/s-CN", text)
+
+    def test_strict_skips_historical_cn(self):
+        text, n = cc.generate_all_cn(self.POOL, set(), strict=True)
+        self.assertEqual(n, 0)
+        # strict 只影响收录（历史 -CN 不兜底），当前可达行照常标注 -CN
+        text, n = cc.generate_all_cn(self.POOL, {"3.3.3.3:443#JP"}, strict=True)
+        lines = text.strip().splitlines()
+        self.assertEqual(n, 1)
+        self.assertEqual(lines[0].split("#")[0], "3.3.3.3:443")
+        self.assertTrue(lines[0].endswith("-CN"))
+
+    def test_non_strict_keeps_historical_cn(self):
+        _, n = cc.generate_all_cn(self.POOL, set(), strict=False)
+        self.assertEqual(n, 1)
+
+
+class TestGenerateCnSubset(unittest.TestCase):
+    POOL = (
+        "1.1.1.1:443#US-100ms-5MB/s-CN\n"
+        "2.2.2.2:443#US-200ms-1MB/s-CN\n"
+        "3.3.3.3:443#JP-50ms-2MB/s\n"
+    )
+
+    def test_predicate_filter_keeps_verbatim(self):
+        text, n = cc.generate_cn_subset(
+            self.POOL, lambda k, l: k == "1.1.1.1:443#US")
+        self.assertEqual(n, 1)
+        self.assertEqual(text.strip(), "1.1.1.1:443#US-100ms-5MB/s-CN")
+
+    def test_sorted_by_ms(self):
+        text, n = cc.generate_cn_subset(
+            self.POOL, lambda k, l: k != "3.3.3.3:443#JP",
+            cn_ms={"1.1.1.1:443#US": 300, "2.2.2.2:443#US": 80})
+        lines = text.strip().splitlines()
+        self.assertEqual(n, 2)
+        self.assertEqual(lines[0].split("#")[0], "2.2.2.2:443")
 
 
 if __name__ == "__main__":

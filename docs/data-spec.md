@@ -11,7 +11,7 @@
 - **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
 - **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→JP-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
-- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
+- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序（`all_cn*.txt` 按**大陆实测延迟**升序），`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
 
 ### 备注段（note）与 token 规范
 
@@ -253,11 +253,20 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/china.json`（china-check CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为大陆连通性逐条检测明细：`ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable）、`ms`（可达延迟）、`sources`（各源原始结果）、`ts`（检测时间）。
+单行 JSON，键为 `ip:port#国家`，值为大陆连通性逐条检测明细：`ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`）、`ts`（检测时间）。
 
 ### `data/valid/all_cn.txt`
 
-**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 或历史已带 `-CN` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注；顺序沿用源文件（全量池按延迟升序）。逐条检测明细见 `china.json`。
+**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 或历史已带 `-CN` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。逐条检测明细见 `china.json`。
+
+### `data/valid/all_cn_http.txt` / `data/valid/all_cn_stable.txt`
+
+china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序）：
+
+- `all_cn_http.txt` — **应用层确认**子集：本轮任一成功源给出 HTTP 级确认（`level=http`）或历史已带 `-CNH` 的行。TCP 通但应用层被干扰的代理不会进入此清单
+- `all_cn_stable.txt` — **跨轮稳定**子集：连续 ≥2 轮判 `reachable` 的行（strict，不含历史 `-CN` 兜底），对抗单轮误判与快速 churn
+
+推荐消费顺序：`all_cn_stable.txt` > `all_cn_http.txt` > `all_cn.txt`。
 
 ### `data/valid/all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`
 
