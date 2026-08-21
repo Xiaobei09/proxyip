@@ -103,6 +103,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
      - `*_verified` — **全链路验证**子集：本轮测速成功 = TLS 握手 + HTTP 2xx 响应 + 真实下载全部通过，过滤"能握手但不吐数据"的半死代理
      - `*_stable` — **连续两轮存活**交集：上一轮 `index.json` 与本轮存活的交集，对抗代理池快速 churn（首轮无上一轮数据时不生成）
      - 空清单不落盘（并清理上轮残留）；数量计入 `meta.json` 的 `sets.all_verified` / `sets.all_stable`
+     - **跨家族联动**：`ltd` / `rep` / `good` 家族同样派生变体——验证 CI 写 `ltd_verified.txt`、根级 `all_ltd_verified.txt` 等；质量 CI 为 rep/good 清单补齐（如 `all_cn46_rep_ltd_verified.txt`、`countries/US/rep_stable.txt`、`all_good_verified.txt`）。质量侧 `_stable` 信号为 china.json streak≥2（连续两轮大陆可达），与验证侧"两轮存活"语义互补
 
 - `data/valid/meta.json`：本次验证汇总（字段见下）
 - `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）

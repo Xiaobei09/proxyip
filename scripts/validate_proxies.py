@@ -872,6 +872,8 @@ def write_valid_outputs(
             write_text_if_changed(
                 cdir / "ltd.txt", "\n".join(line(e) for e in entries) + "\n"
             )
+            write_variant(cdir, "ltd_verified", [e for e in entries if is_verified(e)])
+            write_variant(cdir, "ltd_stable", [e for e in entries if is_stable(e)])
     expected_countries = {c for c in by_country if c != "ALL"}
     for stale in countries_dir.iterdir():
         if stale.is_dir():
@@ -926,6 +928,8 @@ def write_valid_outputs(
             write_text_if_changed(
                 sdir / "ltd.txt", "\n".join(line(e) for e in ltd) + "\n"
             )
+            write_variant(sdir, "ltd_verified", [e for e in ltd if is_verified(e)])
+            write_variant(sdir, "ltd_stable", [e for e in ltd if is_stable(e)])
             set_counts[f"{name}_ltd"] = len(ltd)
     expected_sets = set({**COUNTRY_SETS, **SMALL_SETS})
     for stale in sets_dir.iterdir():
@@ -957,6 +961,12 @@ def write_valid_outputs(
             VALID_DIR / "all_ltd.txt", "\n".join(line(e) for e in ltd_all) + "\n"
         )
         set_counts["all_ltd"] = len(ltd_all)
+        ltd_ver = [e for e in ltd_all if is_verified(e)]
+        ltd_sta = [e for e in ltd_all if is_stable(e)]
+        write_variant(VALID_DIR, "all_ltd_verified", ltd_ver)
+        write_variant(VALID_DIR, "all_ltd_stable", ltd_sta)
+        set_counts["all_ltd_verified"] = len(ltd_ver)
+        set_counts["all_ltd_stable"] = len(ltd_sta)
     root_grouped = group_map(ordered)
     for name in ROOT_GROUP_FILES:
         g = name[len("all_"):]

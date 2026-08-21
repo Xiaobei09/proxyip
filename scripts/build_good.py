@@ -40,9 +40,12 @@ from common import (
     DATA_DIR,
     LATENCY_RE,
     REPUTATION_FILE,
+    SPEED_FILE,
     SPEED_RE,
     has_token,
     line_to_key,
+    load_china_stable_keys,
+    load_speed_keys,
     read_json,
     write_text_if_changed,
 )
@@ -180,12 +183,29 @@ def write_good_files(
     rep_map: dict[str, dict],
     cn_ms: dict[str, float] | None = None,
 ) -> dict[str, int]:
-    """Write all_good.txt + per-country/set good.txt; return per-file counts."""
+    """Write all_good.txt + per-country/set good.txt; return per-file counts.
+
+    每份 good 清单同步产出 ``_verified``（speed.json 全链路验证）与
+    ``_stable``（china.json streak≥2 跨轮稳定）可靠性变体。
+    """
     stats: dict[str, int] = {}
+    speed_keys = load_speed_keys()
+    stable_keys = load_china_stable_keys()
+
+    def emit(base: Path, lines: list[str]) -> int:
+        n = write_good_file(base, lines)
+        for suffix, keys in (("_verified", speed_keys), ("_stable", stable_keys)):
+            vpath = base.with_name(f"{base.stem}{suffix}.txt")
+            vlines = [ln for ln in lines if (k := line_to_key(ln)) and k in keys]
+            if vlines:
+                write_text_if_changed(vpath, "\n".join(vlines) + "\n")
+            elif vpath.exists():
+                vpath.unlink()
+        return n
 
     all_pool = valid_dir / "all.txt"
     if all_pool.exists():
-        stats["all_good"] = write_good_file(
+        stats["all_good"] = emit(
             valid_dir / "all_good.txt",
             filter_rank(
                 all_pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
@@ -201,7 +221,7 @@ def write_good_files(
             if not pool.exists():
                 continue
             name = f"{sub}/{group_dir.name}"
-            stats[name] = write_good_file(
+            stats[name] = emit(
                 group_dir / "good.txt",
                 filter_rank(
                     pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms

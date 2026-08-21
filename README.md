@@ -92,6 +92,8 @@ data/download/all.txt                       # 全量去重清单（未验证）
   - `*_verified` — **全链路验证**：本轮测速成功 = TLS + HTTP 2xx + 真实下载全部通过，
     过滤"能握手但不吐数据"的半死代理
   - `*_stable` — **连续两轮存活**：上一轮与本轮存活的交集，对抗快速 churn
+  - **跨家族联动**：`ltd`/`rep`/`good` 家族同样派生（`all_cn46_rep_ltd_verified.txt`、
+    `all_good_stable.txt` 等）；质量侧 `_stable` = 连续两轮大陆可达（china.json streak≥2）
 - **行内备注**：`-CN` = 大陆可达；`-CNH` = 大陆可达且应用层（HTTP）确认；
   `-V4/-V6/-DS` = 实际出口家族（CF 边缘代理入口是 v4，实际出口常为 v6）；`→XXX` = 出口地区
 - **本地运行**：脚本访问 `raw.githubusercontent.com` 失败时自动回退 gh-proxy.com /

@@ -259,6 +259,33 @@ def read_json(path: Path) -> dict:
         return {}
 
 
+def load_speed_keys(path: Path | None = None) -> set[str]:
+    """speed.json 的 key 集合（本轮全链路验证通过的代理）。"""
+    proxies = read_json(path or SPEED_FILE).get("proxies", {})
+    return (
+        {k for k in proxies if isinstance(k, str)}
+        if isinstance(proxies, dict)
+        else set()
+    )
+
+
+def load_china_stable_keys(path: Path | None = None) -> set[str]:
+    """china.json 中连续 ≥2 轮 reachable 的 key 集合（跨轮大陆稳定）。"""
+    proxies = read_json(path or CHINA_FILE).get("proxies", {})
+    out: set[str] = set()
+    if isinstance(proxies, dict):
+        for k, v in proxies.items():
+            if (
+                isinstance(k, str)
+                and isinstance(v, dict)
+                and v.get("verdict") == "reachable"
+                and isinstance(v.get("streak"), int)
+                and v["streak"] >= 2
+            ):
+                out.add(k)
+    return out
+
+
 def load_sample(source: Path, limit: int) -> list:
     """Return ``[(line, key, ip, port, cc), ...]`` truncated to ``limit``."""
     try:

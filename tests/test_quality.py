@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import quality_check as qc
+import common
 import quality_reputation as qr
 
 
@@ -966,10 +967,14 @@ class TestReputationFiles(unittest.TestCase):
         )
         qc.REPUTATION_FILE = self.tmp / "reputation.json"
         qc.REP_RANK_FILE = self.tmp / "all_rep.txt"
+        self._speed, self._china = common.SPEED_FILE, common.CHINA_FILE
+        common.SPEED_FILE = self.tmp / "speed.json"
+        common.CHINA_FILE = self.tmp / "china.json"
 
     def tearDown(self):
         qc.REPUTATION_FILE = self._rep_file
         qc.REP_RANK_FILE = self._rank_file
+        common.SPEED_FILE, common.CHINA_FILE = self._speed, self._china
 
     def test_write_reputation_files_sorted(self):
         text = (
@@ -997,6 +1002,44 @@ class TestReputationFiles(unittest.TestCase):
         self.assertEqual(keys[0], "1.2.3.4:443#US")
         self.assertEqual(keys[1], "9.9.9.9:443#US")
         self.assertEqual(data["proxies"]["5.6.7.8:8443#JP"]["score"], 40)
+
+    def test_write_reputation_files_variants(self):
+        text = (
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms-1.00MB/s\n"
+            "5.6.7.8:8443#\U0001F1F5JP-50ms-2.00MB/s\n"
+        )
+        cdir = self.tmp / "countries" / "US"
+        cdir.mkdir(parents=True)
+        (cdir / "all.txt").write_text(text, encoding="utf-8")
+        common.SPEED_FILE.write_text(
+            json.dumps({"proxies": {"1.2.3.4:443#US": {}}}), encoding="utf-8"
+        )
+        common.CHINA_FILE.write_text(
+            json.dumps(
+                {
+                    "proxies": {
+                        "5.6.7.8:8443#JP": {"verdict": "reachable", "streak": 3}
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        annotations = {"1.2.3.4:443#US": "DC-90", "5.6.7.8:8443#JP": "DC-40"}
+        rep_map = {
+            "1.2.3.4:443#US": {"score": 90, "risk": "low", "source": "netcoffee"},
+            "5.6.7.8:8443#JP": {"score": 40, "risk": "medium",
+                                "source": "ip-api"},
+        }
+        qc.write_reputation_files(text, annotations, rep_map)
+        ver = (self.tmp / "all_rep_verified.txt").read_text(encoding="utf-8")
+        self.assertEqual([l.split("#")[0] for l in ver.splitlines()],
+                         ["1.2.3.4:443"])
+        sta = (self.tmp / "all_rep_stable.txt").read_text(encoding="utf-8")
+        self.assertEqual([l.split("#")[0] for l in sta.splitlines()],
+                         ["5.6.7.8:8443"])
+        cver = (cdir / "rep_verified.txt").read_text(encoding="utf-8")
+        self.assertEqual([l.split("#")[0] for l in cver.splitlines()],
+                         ["1.2.3.4:443"])
 
     def test_write_reputation_files_unscored_last(self):
         text = (
