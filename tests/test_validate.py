@@ -1,5 +1,8 @@
 """Tests for validate_proxies.py pure functions."""
 
+import asyncio
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -1042,3 +1045,126 @@ class TestAdaptiveSpeedParams(unittest.TestCase):
         for rtt_ms, expected_timeout in cases:
             _, cap_sec = vp.adaptive_speed_params(rtt_ms, 1048576, 5)
             self.assertEqual(cap_sec, expected_timeout, f"RTT={rtt_ms}ms")
+
+
+KB = 1024
+
+
+class FakeWriter:
+    def __init__(self):
+        self.written = b""
+
+    def write(self, data):
+        self.written += data
+
+    async def drain(self):
+        pass
+
+
+class FakeReader:
+    """Delivers scripted chunks then EOF (or raises a scripted exception)."""
+
+    def __init__(self, chunks, error=None):
+        self.chunks = list(chunks)
+        self.error = error
+
+    async def read(self, n=-1):
+        if self.chunks:
+            return self.chunks.pop(0)
+        if self.error is not None:
+            raise self.error
+        return b""
+
+
+class FakeClock:
+    """Scripted monotonic clock: consumes values in order, last one sticks."""
+
+    def __init__(self, *values):
+        self.values = list(values)
+
+    def __call__(self) -> float:
+        if len(self.values) > 1:
+            return self.values.pop(0)
+        return self.values[0]
+
+
+class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
+    """Steady-state measurement: warm-up bytes are excluded from timing."""
+
+    async def test_steady_state_excludes_warmup(self):
+        # 12 x 64KB; first 256KB ramp slowly (0.4s), steady part is fast.
+        chunks = [b"x" * (64 * KB)] * 12
+        reader = FakeReader(chunks)
+        clock = FakeClock(
+            0.0,                                  # start
+            0.1, 0.2, 0.3, 0.4,                   # remain checks during warm-up
+            0.9,                                  # warm-up crossed -> timed_start
+            0.91, 0.92, 0.93, 0.94,               # remain checks, measured iters
+            0.95, 0.96, 0.97, 0.98,
+            0.99,                                 # remain check before EOF
+            1.0,                                  # final elapsed sample
+        )
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        # timed window: 512KB after the warm-up over 0.1s -> ~5 MB/s.
+        # Whole-transfer average would be 768KB / 1.0s = 0.75 MB/s.
+        self.assertAlmostEqual(speed, 5.0, delta=0.75)
+
+    async def test_eof_inside_warmup_falls_back_to_whole_transfer(self):
+        reader = FakeReader([b"x" * (128 * KB)] * 2)
+        clock = FakeClock(0.0, 0.1, 0.2, 0.35, 0.4, 0.5)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        # No usable steady-state sample -> whole-transfer average:
+        # 256KB over 0.5s -> 0.5 MB/s (instead of None).
+        self.assertEqual(speed, 0.5)
+
+    async def test_timeout_inside_warmup_falls_back_to_whole_transfer(self):
+        reader = FakeReader([b"x" * (100 * KB)], error=asyncio.TimeoutError())
+        clock = FakeClock(0.0, 0.1, 0.2, 1.4)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        # 100KB over 1.4s -> 0.07 MB/s fallback instead of None.
+        self.assertEqual(speed, 0.07)
+
+    async def test_zero_warmup_times_everything(self):
+        reader = FakeReader([b"x" * (128 * KB)] * 3)
+        clock = FakeClock(0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=0, clock=clock,
+        )
+        # Legacy behaviour: all 384KB over 0.5s -> 0.75 MB/s.
+        self.assertEqual(speed, 0.75)
+
+    async def test_tiny_transfer_returns_none(self):
+        reader = FakeReader([b"x" * KB])
+        clock = FakeClock(0.0, 0.1, 0.2, 0.3)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        self.assertIsNone(speed)
+
+
+class TestSpeedWarmupFlag(unittest.TestCase):
+    def test_default_constant(self):
+        self.assertEqual(vp.SPEED_WARMUP_BYTES, 256 * KB)
+
+    def test_help_lists_flag(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit):
+                vp.main(["--help"])
+        self.assertIn("--speed-warmup-bytes", buf.getvalue())
