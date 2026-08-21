@@ -1088,12 +1088,26 @@ class FakeClock:
         return self.values[0]
 
 
+HTTP_OK_HEAD = (
+    b"HTTP/1.1 200 OK\r\n"
+    b"Content-Type: application/octet-stream\r\n"
+    b"Content-Length: 99999999\r\n\r\n"
+)
+
+
+def http_stream(*body_chunks):
+    """Scripted reader chunks: a 200 OK head merged into the first body chunk."""
+    if not body_chunks:
+        return [HTTP_OK_HEAD]
+    return [HTTP_OK_HEAD + body_chunks[0], *body_chunks[1:]]
+
+
 class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
     """Steady-state measurement: warm-up bytes are excluded from timing."""
 
     async def test_steady_state_excludes_warmup(self):
         # 12 x 64KB; first 256KB ramp slowly (0.4s), steady part is fast.
-        chunks = [b"x" * (64 * KB)] * 12
+        chunks = http_stream(*([b"x" * (64 * KB)] * 12))
         reader = FakeReader(chunks)
         clock = FakeClock(
             0.0,                                  # start
@@ -1114,7 +1128,7 @@ class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(speed, 5.0, delta=0.75)
 
     async def test_eof_inside_warmup_falls_back_to_whole_transfer(self):
-        reader = FakeReader([b"x" * (128 * KB)] * 2)
+        reader = FakeReader(http_stream(*([b"x" * (128 * KB)] * 2)))
         clock = FakeClock(0.0, 0.1, 0.2, 0.35, 0.4, 0.5)
         speed = await vp.speed_download(
             reader, FakeWriter(), "h", "/p",
@@ -1126,7 +1140,7 @@ class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(speed, 0.5)
 
     async def test_timeout_inside_warmup_falls_back_to_whole_transfer(self):
-        reader = FakeReader([b"x" * (100 * KB)], error=asyncio.TimeoutError())
+        reader = FakeReader(http_stream(b"x" * (100 * KB)), error=asyncio.TimeoutError())
         clock = FakeClock(0.0, 0.1, 0.2, 1.4)
         speed = await vp.speed_download(
             reader, FakeWriter(), "h", "/p",
@@ -1137,7 +1151,7 @@ class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(speed, 0.07)
 
     async def test_zero_warmup_times_everything(self):
-        reader = FakeReader([b"x" * (128 * KB)] * 3)
+        reader = FakeReader(http_stream(*([b"x" * (128 * KB)] * 3)))
         clock = FakeClock(0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
         speed = await vp.speed_download(
             reader, FakeWriter(), "h", "/p",
@@ -1148,7 +1162,7 @@ class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(speed, 0.75)
 
     async def test_tiny_transfer_returns_none(self):
-        reader = FakeReader([b"x" * KB])
+        reader = FakeReader(http_stream(b"x" * KB))
         clock = FakeClock(0.0, 0.1, 0.2, 0.3)
         speed = await vp.speed_download(
             reader, FakeWriter(), "h", "/p",
@@ -1156,6 +1170,45 @@ class TestSpeedDownload(unittest.IsolatedAsyncioTestCase):
             warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
         )
         self.assertIsNone(speed)
+
+    async def test_non_200_rejected(self):
+        body = b"error page" * 10000
+        reader = FakeReader(
+            [b"HTTP/1.1 403 Forbidden\r\nContent-Length: 5\r\n\r\n" + body]
+        )
+        clock = FakeClock(0.0, 0.1)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        # An error page must fail the test instead of counting as speed.
+        self.assertIsNone(speed)
+
+    async def test_garbage_without_http_head_rejected(self):
+        reader = FakeReader([b"\x16\x03\x01not-http-at-all"])
+        clock = FakeClock(0.0, 0.1, 0.2)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        self.assertIsNone(speed)
+
+    async def test_header_split_across_reads(self):
+        head_part = b"HTTP/1.1 200 OK\r\nX-Edge: a\r\n"
+        body = b"x" * (300 * KB)
+        reader = FakeReader([head_part, b"\r\n" + body])
+        clock = FakeClock(0.0, 0.1, 0.2, 0.35, 0.4, 0.5)
+        speed = await vp.speed_download(
+            reader, FakeWriter(), "h", "/p",
+            cap_bytes=10 * KB * KB, cap_sec=30,
+            warmup_bytes=vp.SPEED_WARMUP_BYTES, clock=clock,
+        )
+        # Body crosses the warm-up boundary inside feed(); steady-state
+        # sample is empty -> whole-transfer fallback over the body only.
+        expected_total = len(head_part) + 2 + len(body)
+        self.assertEqual(speed, vp.compute_speed(expected_total, 0.5))
 
 
 class TestSpeedWarmupFlag(unittest.TestCase):
