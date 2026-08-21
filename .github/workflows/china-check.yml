@@ -68,6 +68,10 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/annotate_classify.py
 
+      - name: Build good lists
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/build_good.py
+
       - name: Generate stats and chart
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/generate_stats.py
