@@ -32,6 +32,7 @@
 | `--speed-bytes` | 测速单次读取字节上限 | 1048576 |
 | `--speed-timeout` | 测速单次时长上限（秒） | 5 |
 | `--speed-workers` | 同时进行的下载测速并发上限 | 30 |
+| `--speed-warmup-bytes` | 稳态测速预丢弃字节数（TCP 慢启动爬坡，不计入计时；0 = 从首字节起算） | 262144 |
 | `--no-speed` | 跳过速度测试（`_ltd` 回退按延迟） | 关 |
 | `--no-adaptive-speed` | 关闭 RTT 自适应下载窗口（固定 5s / 1MB） | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 5 |

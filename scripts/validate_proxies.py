@@ -8,7 +8,10 @@ which serve TLS on 443/8443/2053/2083/2087/2096) is performed.
 Checks run concurrently with asyncio (default 500 in-flight, kept bounded by
 an in-flight task pool). Each alive proxy also gets a download speed test on
 a freshly-opened TLS connection, gated by a semaphore so
-bandwidth stays low-contention. Outputs are written under ``data/valid/``
+bandwidth stays low-contention. The speed test is steady-state: the first
+``--speed-warmup-bytes`` (default 256 KiB) covering TCP slow-start ramp-up
+are excluded from timing and only the remaining window is measured.
+Outputs are written under ``data/valid/``
 mirroring the structure of ``data/``. Non-limited outputs are ordered by
 latency (fastest first); ``*_ltd`` outputs pick the fastest per country by
 measured speed. ``countries/<cc>/`` and ``sets/<name>/`` are per-country and
@@ -38,6 +41,7 @@ import statistics
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,6 +76,7 @@ SPEED_PATH = "/ajax/libs/three.js/r128/three.js"
 SPEED_READ_BYTES = 1048576
 SPEED_TIMEOUT = 5
 SPEED_MIN_BYTES = 16384
+SPEED_WARMUP_BYTES = 256 * 1024
 SPEED_WORKERS = 30
 ADAPTIVE_SPEED_RTT_FACTOR = 30
 ADAPTIVE_SPEED_MIN_BYTES = 5 * 1024 * 1024
@@ -542,6 +547,7 @@ async def speed_probe(
         return await speed_download(
             reader, writer, args.speed_host, args.speed_path,
             cap_bytes, cap_sec,
+            warmup_bytes=getattr(args, "speed_warmup_bytes", SPEED_WARMUP_BYTES),
         )
     except (ConnectionError, OSError):
         return None
@@ -559,8 +565,19 @@ async def speed_download(
     path: str,
     cap_bytes: int,
     cap_sec: int,
+    warmup_bytes: int = SPEED_WARMUP_BYTES,
+    clock: Callable[[], float] = time.monotonic,
 ) -> float | None:
-    """Download ``cap_bytes`` (or up to ``cap_sec``) of ``path`` and return MB/s."""
+    """Steady-state download of ``path``, returning MB/s.
+
+    Reads up to ``cap_bytes`` within ``cap_sec``.  The first ``warmup_bytes``
+    cover the TCP slow-start / TLS+HTTP ramp-up and are excluded from timing;
+    throughput is measured only over the remaining steady-state window, so a
+    slow ramp no longer drags the reported speed down.  When no usable
+    steady-state sample exists (early EOF or timeout inside the warm-up), the
+    result falls back to the whole-transfer average so coverage stays on par
+    with the previous behaviour.
+    """
     req = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
@@ -573,10 +590,12 @@ async def speed_download(
         await writer.drain()
     except (ConnectionError, OSError):
         return None
-    start = time.monotonic()
-    buf = b""
-    while len(buf) < cap_bytes:
-        remain = cap_sec - (time.monotonic() - start)
+    start = clock()
+    total = 0
+    timed_bytes = 0
+    timed_start: float | None = start if warmup_bytes <= 0 else None
+    while total < cap_bytes:
+        remain = cap_sec - (clock() - start)
         if remain <= 0:
             break
         try:
@@ -585,8 +604,15 @@ async def speed_download(
             break
         if not chunk:
             break
-        buf += chunk
-    return compute_speed(len(buf), time.monotonic() - start)
+        total += len(chunk)
+        if timed_start is None:
+            if total >= warmup_bytes:
+                timed_start = clock()
+        else:
+            timed_bytes += len(chunk)
+    if timed_start is not None and timed_bytes >= SPEED_MIN_BYTES:
+        return compute_speed(timed_bytes, clock() - timed_start)
+    return compute_speed(total, clock() - start)
 
 
 def write_index(ordered: list[str], alive: dict) -> None:
@@ -1163,6 +1189,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--speed-bytes", type=int, default=SPEED_READ_BYTES, help="Max bytes to read during a speed test")
     parser.add_argument("--speed-timeout", type=int, default=SPEED_TIMEOUT, help="Max seconds per speed test")
     parser.add_argument("--speed-workers", type=int, default=SPEED_WORKERS, help="Max concurrent speed downloads")
+    parser.add_argument("--speed-warmup-bytes", type=int, default=SPEED_WARMUP_BYTES, help="Bytes discarded before the steady-state speed window (0 = time from first byte)")
     parser.add_argument("--no-speed", action="store_true", help="Skip speed measurement")
     parser.add_argument("--adaptive-speed", action="store_true", default=True, help="Adapt download window to RTT (default: on)")
     parser.add_argument("--no-adaptive-speed", action="store_true", help=argparse.SUPPRESS)
