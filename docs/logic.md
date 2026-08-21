@@ -27,10 +27,13 @@ download_proxies.py → validate_proxies.py → quality_check.py
 
 ### 2.2 速度测试
 
-每个存活代理在判活连接上继续做真实下载测速：
+每个存活代理在新建 TLS 连接上做真实下载测速：
 
-- 目标：`GET /ajax/libs/three.js/r128/three.js`（约 530 KB）
-- 读取上限：1 MB
+- 目标：`GET /ajax/libs/three.js/r128/three.js`（约 530 KB），**稳态测量**
+- 响应门控：先读响应头，仅接受 HTTP 2xx；403 错误页 / 非 HTTP 垃圾数据 → 测速失败
+- 稳态窗口：前 `--speed-warmup-bytes`（默认 256 KB）为预热段，覆盖 TCP 慢启动爬坡，
+  不计入计时；速度 = 稳态窗口字节量 ÷ 耗时；预热段内即 EOF/超时时回退全程平均
+- 读取上限：`--speed-bytes`（默认 1 MB）
 - 超时：5s
 - 并发上限：30（独立于判活的 500 并发）
 - 最小有效字节：16384（低于此值视为测速失败，速度置空）
