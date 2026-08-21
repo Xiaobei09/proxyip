@@ -262,6 +262,46 @@ class TestAnnotations(unittest.TestCase):
         cn_text, count = cc.generate_all_cn(text, reachable)
         self.assertEqual(count, 29)
         self.assertIn("10.25.0.25:80#US-25ms-CN", cn_text)
+    def test_generate_all_cn_sorted_by_cn_ms(self):
+        text = (
+            "1.1.1.1:443#US-9ms-CN\n"
+            "2.2.2.2:443#US-5ms-CN\n"
+            "3.3.3.3:443#US-1ms-CN\n"
+        )
+        reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#US"}
+        cn_ms = {"1.1.1.1:443#US": 300, "2.2.2.2:443#US": 80, "3.3.3.3:443#US": 500}
+        cn_text, count = cc.generate_all_cn(text, reachable, cn_ms)
+        self.assertEqual(count, 3)
+        lines = cn_text.strip().splitlines()
+        # 大陆实测延迟升序：80ms < 300ms < 500ms（海外延迟顺序被覆盖）
+        self.assertEqual(
+            [l.split("#")[0] for l in lines],
+            ["2.2.2.2:443", "1.1.1.1:443", "3.3.3.3:443"],
+        )
+
+    def test_generate_all_cn_missing_ms_last_stable(self):
+        text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n3.3.3.3:443#US-1ms-CN\n"
+        reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
+        cn_ms = {"1.1.1.1:443#US": 120}
+        cn_text, _ = cc.generate_all_cn(text, reachable, cn_ms)
+        lines = cn_text.strip().splitlines()
+        # 有大陆延迟的排最前；缺失的按原序稳定垫底
+        # （3.3.3.3 带历史 -CN 也入池，与 2.2.2.2 同缺 ms，按原序在其后）
+        self.assertEqual(lines[0].split("#")[0], "1.1.1.1:443")
+        self.assertEqual(
+            [l.split("#")[0] for l in lines[1:]],
+            ["2.2.2.2:443", "3.3.3.3:443"],
+        )
+
+    def test_generate_all_cn_no_map_keeps_pool_order(self):
+        text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n"
+        reachable = set()
+        cn_text, count = cc.generate_all_cn(text, reachable)
+        self.assertEqual(count, 2)
+        self.assertEqual(
+            [l.split("#")[0] for l in cn_text.strip().splitlines()],
+            ["1.1.1.1:443", "2.2.2.2:443"],
+        )
 
 
 class TestLoadCnPool(unittest.TestCase):

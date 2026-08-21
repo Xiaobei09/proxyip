@@ -362,6 +362,53 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+RAW_GITHUB_PREFIX = "https://raw.githubusercontent.com/"
+
+
+def mirror_urls(url: str) -> list[str]:
+    """Candidate mainland-reachable mirrors for a raw.githubusercontent.com URL.
+
+    raw.githubusercontent.com is blocked from mainland China, so local runs
+    there cannot fetch sources without a proxy.  Returns equivalent mirror
+    URLs (gh-proxy.com prefix proxy, jsDelivr CDN, gitmirror) in try order;
+    non-GitHub-raw URLs have no mirrors and yield ``[]``.
+    """
+    if not url.startswith(RAW_GITHUB_PREFIX):
+        return []
+    path = url[len(RAW_GITHUB_PREFIX):]
+    parts = path.split("/", 3)
+    out = ["https://gh-proxy.com/" + url]
+    if len(parts) == 4:
+        user, repo, branch, rest = parts
+        out.append(f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{rest}")
+    out.append("https://raw.gitmirror.com/" + path)
+    return out
+
+
+def fetch_with_mirror(
+    url: str,
+    timeout: float,
+    headers: dict | None = None,
+) -> bytes:
+    """Fetch bytes trying ``url`` first, then its mirrors; last error re-raised.
+
+    Mirrors only exist for raw.githubusercontent.com URLs, so elsewhere this
+    is a plain single-attempt fetch with identical error behaviour.
+    """
+    candidates = [url] + mirror_urls(url)
+    last_exc: Exception = RuntimeError(f"no fetch candidates for {url}")
+    for candidate in candidates:
+        req = urllib.request.Request(
+            candidate, headers=headers or {"User-Agent": UA}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+    raise last_exc
+
+
 def request_follow(
     url: str,
     headers: dict,
