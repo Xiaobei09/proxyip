@@ -73,6 +73,9 @@ SPEED_READ_BYTES = 1048576
 SPEED_TIMEOUT = 5
 SPEED_MIN_BYTES = 16384
 SPEED_WORKERS = 30
+ADAPTIVE_SPEED_RTT_FACTOR = 30
+ADAPTIVE_SPEED_MIN_BYTES = 5 * 1024 * 1024
+ADAPTIVE_SPEED_MIN_TIMEOUT = 5
 TIMEOUT = 5
 READ_CAP = 3
 WORKERS = 500
@@ -291,6 +294,32 @@ def compute_speed(bytes_read: int, elapsed: float) -> float | None:
     return round(bytes_read / 1024 / 1024 / elapsed, 2)
 
 
+def adaptive_speed_params(
+    tls_latency_ms: float,
+    base_bytes: int,
+    base_timeout: int,
+) -> tuple[int, int]:
+    """Compute (cap_bytes, cap_sec) adapted to the measured RTT.
+
+    TCP slow start needs ~4-5 RTTs to reach full speed.  We allow
+    ``ADAPTIVE_SPEED_RTT_FACTOR`` round trips and a minimum download
+    volume so that high-latency connections reach steady state.
+    """
+    import math
+
+    rtt_sec = tls_latency_ms / 1000
+    adaptive_timeout = max(
+        ADAPTIVE_SPEED_MIN_TIMEOUT,
+        math.ceil(rtt_sec * ADAPTIVE_SPEED_RTT_FACTOR),
+    )
+    adaptive_bytes = max(
+        ADAPTIVE_SPEED_MIN_BYTES,
+        base_bytes,
+        int(adaptive_timeout * 1024 * 1024),
+    )
+    return adaptive_bytes, adaptive_timeout
+
+
 def flag_of(cc: str) -> str:
     """Regional-indicator emoji flag for an ISO country code (``US`` -> ``🇺🇸``)."""
     if len(cc) != 2 or not cc.isalpha():
@@ -466,7 +495,7 @@ async def check_proxy(
         if args.no_speed or speed_sem is None:
             return None
         async with speed_sem:
-            return await speed_probe(ip, port, args, method)
+            return await speed_probe(ip, port, args, method, tls_latency)
 
     tls_started = time.monotonic()
     try:
@@ -492,6 +521,7 @@ async def speed_probe(
     port: str,
     args: argparse.Namespace,
     method: str,
+    tls_latency_ms: float = 0.0,
 ) -> float | None:
     """Open a fresh TLS connection through the proxy and measure download speed.
 
@@ -503,9 +533,15 @@ async def speed_probe(
     except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError):
         return None
     try:
+        if args.adaptive_speed:
+            cap_bytes, cap_sec = adaptive_speed_params(
+                tls_latency_ms, args.speed_bytes, args.speed_timeout,
+            )
+        else:
+            cap_bytes, cap_sec = args.speed_bytes, args.speed_timeout
         return await speed_download(
             reader, writer, args.speed_host, args.speed_path,
-            args.speed_bytes, args.speed_timeout,
+            cap_bytes, cap_sec,
         )
     except (ConnectionError, OSError):
         return None
@@ -1128,6 +1164,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--speed-timeout", type=int, default=SPEED_TIMEOUT, help="Max seconds per speed test")
     parser.add_argument("--speed-workers", type=int, default=SPEED_WORKERS, help="Max concurrent speed downloads")
     parser.add_argument("--no-speed", action="store_true", help="Skip speed measurement")
+    parser.add_argument("--adaptive-speed", action="store_true", default=True, help="Adapt download window to RTT (default: on)")
+    parser.add_argument("--no-adaptive-speed", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("-t", "--timeout", type=int, default=TIMEOUT, help="Per-proxy timeout (seconds)")
     parser.add_argument("-w", "--workers", type=int, default=WORKERS, help="Max concurrent checks")
     parser.add_argument("--limit", type=int, default=0, help="Max proxies to check (0 = all)")
@@ -1140,6 +1178,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.no_ext_check:
         args.ext_check = False
+    if args.no_adaptive_speed:
+        args.adaptive_speed = False
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:

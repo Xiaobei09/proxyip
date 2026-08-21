@@ -974,3 +974,71 @@ class TestMainCLIArgs(unittest.TestCase):
         if args.no_ext_check:
             args.ext_check = False
         self.assertFalse(args.ext_check)
+
+
+class TestAdaptiveSpeedParams(unittest.TestCase):
+    def test_low_rtt_no_change(self):
+        cap_bytes, cap_sec = vp.adaptive_speed_params(
+            tls_latency_ms=50,
+            base_bytes=1048576,
+            base_timeout=5,
+        )
+        self.assertEqual(cap_sec, 5)
+        self.assertEqual(cap_bytes, 5 * 1024 * 1024)
+
+    def test_medium_rtt_increases(self):
+        cap_bytes, cap_sec = vp.adaptive_speed_params(
+            tls_latency_ms=300,
+            base_bytes=1048576,
+            base_timeout=5,
+        )
+        self.assertEqual(cap_sec, 9)
+        self.assertEqual(cap_bytes, 9 * 1024 * 1024)
+
+    def test_high_rtt_larger_window(self):
+        cap_bytes, cap_sec = vp.adaptive_speed_params(
+            tls_latency_ms=500,
+            base_bytes=1048576,
+            base_timeout=5,
+        )
+        self.assertEqual(cap_sec, 15)
+        self.assertEqual(cap_bytes, 15 * 1024 * 1024)
+
+    def test_very_high_rtt(self):
+        cap_bytes, cap_sec = vp.adaptive_speed_params(
+            tls_latency_ms=1000,
+            base_bytes=1048576,
+            base_timeout=5,
+        )
+        self.assertEqual(cap_sec, 30)
+        self.assertEqual(cap_bytes, 30 * 1024 * 1024)
+
+    def test_min_timeout_floor(self):
+        cap_bytes, cap_sec = vp.adaptive_speed_params(
+            tls_latency_ms=10,
+            base_bytes=1048576,
+            base_timeout=5,
+        )
+        self.assertEqual(cap_sec, 5)
+
+    def test_base_bytes_larger_than_adaptive(self):
+        cap_bytes, cap_sec = vp.adaptive_speed_params(
+            tls_latency_ms=50,
+            base_bytes=10 * 1024 * 1024,
+            base_timeout=5,
+        )
+        self.assertEqual(cap_bytes, 10 * 1024 * 1024)
+        self.assertEqual(cap_sec, 5)
+
+    def test_progressive_scaling(self):
+        cases = [
+            (50, 5),
+            (100, 5),
+            (200, 6),
+            (300, 9),
+            (500, 15),
+            (1000, 30),
+        ]
+        for rtt_ms, expected_timeout in cases:
+            _, cap_sec = vp.adaptive_speed_params(rtt_ms, 1048576, 5)
+            self.assertEqual(cap_sec, expected_timeout, f"RTT={rtt_ms}ms")
