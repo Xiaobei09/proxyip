@@ -55,6 +55,7 @@ from common import (
     SETS_DIR,
     SOURCE_STATS_FILE,
     UPSTREAM_META_FILE,
+    fetch_with_mirror,
     write_text_if_changed,
 )
 
@@ -140,11 +141,10 @@ AIRPORT_COUNTRY_MAP: dict[str, str] = {
 
 
 def fetch(url: str, timeout: int) -> bytes:
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "proxyip-updater/1.0"}
+    """Fetch bytes; raw.githubusercontent.com URLs fall back to CN mirrors."""
+    return fetch_with_mirror(
+        url, timeout, headers={"User-Agent": "proxyip-updater/1.0"}
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
 
 
 def download(url: str, timeout: int = 60) -> bytes:

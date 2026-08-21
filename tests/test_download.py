@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import common
 import download_proxies as dp
 
 
@@ -543,3 +544,57 @@ class TestWriteSourceAttribution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMirrorUrls(unittest.TestCase):
+    def test_raw_url_yields_ordered_mirrors(self):
+        url = "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"
+        mirrors = common.mirror_urls(url)
+        self.assertEqual(mirrors, [
+            "https://gh-proxy.com/" + url,
+            "https://cdn.jsdelivr.net/gh/ymyuuu/IPDB@master/BestProxy/proxy.txt",
+            "https://raw.gitmirror.com/ymyuuu/IPDB/master/BestProxy/proxy.txt",
+        ])
+
+    def test_non_raw_url_has_no_mirrors(self):
+        self.assertEqual(common.mirror_urls("https://zip.cm.edu.kg/all.json"), [])
+        self.assertEqual(common.mirror_urls("https://example.com/raw.githubusercontent.com/x"), [])
+
+    def test_fetch_with_mirror_falls_back(self):
+        calls = []
+
+        class FakeResp:
+            def read(self):
+                return b"mirror-data"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req.full_url)
+            if len(calls) == 1:
+                raise OSError("blocked")
+            return FakeResp()
+
+        with unittest.mock.patch.object(common.urllib.request, "urlopen", fake_urlopen):
+            data = common.fetch_with_mirror(
+                "https://raw.githubusercontent.com/u/r/main/f.txt", timeout=5
+            )
+        self.assertEqual(data, b"mirror-data")
+        self.assertEqual(calls[0], "https://raw.githubusercontent.com/u/r/main/f.txt")
+        self.assertTrue(calls[1].startswith("https://gh-proxy.com/"))
+
+    def test_fetch_with_mirror_reraises_last_error(self):
+        import common as _c
+
+        def always_fail(req, timeout=None):
+            raise OSError("down")
+
+        with unittest.mock.patch.object(_c.urllib.request, "urlopen", always_fail):
+            with self.assertRaises(OSError):
+                _c.fetch_with_mirror(
+                    "https://raw.githubusercontent.com/u/r/main/f.txt", timeout=5
+                )

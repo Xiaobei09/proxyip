@@ -550,10 +550,9 @@ async def fetch_text_list(url: str) -> set[str]:
     out: set[str] = set()
     try:
         text = await asyncio.to_thread(
-            lambda: urllib.request.urlopen(
-                urllib.request.Request(url, headers={"User-Agent": UA}),
-                timeout=STATIC_LIST_TIMEOUT,
-            ).read().decode("utf-8", errors="replace")
+            lambda: fetch_with_mirror(
+                url, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA}
+            ).decode("utf-8", errors="replace")
         )
     except Exception as exc:
         logging.debug("fetch_text_list %s: %s", url, exc)

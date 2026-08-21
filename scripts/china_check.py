@@ -7,7 +7,7 @@
 
 - ``data/quality/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``）
 - ``data/valid/all_cn.txt``  — 全量大陆可达清单（源为 ``data/valid/all.txt`` 全量存活池，
-  仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt）
+  仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt；按大陆实测延迟升序）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
 
 检测分层（均为无账号/免登录）：
@@ -593,8 +593,15 @@ def load_cn_pool() -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
-def generate_all_cn(pool_text: str, reachable_keys: set) -> tuple[str, int]:
-    """大陆可达清单：本次判可达或历史已带 ``-CN`` 的行（源为全量池文本）。"""
+def generate_all_cn(
+    pool_text: str, reachable_keys: set, cn_ms: dict | None = None
+) -> tuple[str, int]:
+    """大陆可达清单：本次判可达或历史已带 ``-CN`` 的行（源为全量池文本）。
+
+    ``cn_ms``（``key -> 大陆实测毫秒``）提供时按大陆延迟升序输出——对大陆
+    使用者这比海外 TLS 延迟更有参考意义；未测到延迟的行排在最后，同延迟
+    保持原池顺序。缺省 ``None`` 时保持原池顺序。
+    """
     lines = []
     for line in pool_text.splitlines():
         if not line.strip():
@@ -604,6 +611,15 @@ def generate_all_cn(pool_text: str, reachable_keys: set) -> tuple[str, int]:
             continue
         if key in reachable_keys or has_cn_note(line):
             lines.append(annotate_cn(line))
+    if cn_ms:
+        indexed = list(enumerate(lines))
+        indexed.sort(
+            key=lambda item: (
+                cn_ms.get(line_to_key(item[1]), float("inf")),
+                item[0],
+            )
+        )
+        lines = [line for _i, line in indexed]
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
 
 
@@ -750,7 +766,12 @@ def main(argv=None) -> int:
     write_json(CHINA_FILE, keyed_json(entries))
 
     all_pool_text = load_cn_pool()
-    cn_text, cn_count = generate_all_cn(all_pool_text, reachable)
+    cn_ms = {
+        key: entry["ms"]
+        for key, entry in entries.items()
+        if isinstance(entry, dict) and isinstance(entry.get("ms"), (int, float))
+    }
+    cn_text, cn_count = generate_all_cn(all_pool_text, reachable, cn_ms)
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
     annotate_cn_files(reachable)

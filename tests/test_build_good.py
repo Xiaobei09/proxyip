@@ -156,6 +156,24 @@ class TestFilterRank(unittest.TestCase):
     def test_empty_inputs(self):
         self.assertEqual(bg.filter_rank("", set(), {}), [])
 
+    def test_cn_ms_overrides_inline_latency(self):
+        lines = (
+            "1.0.0.1:443#US-50ms-5.00MB/s-CN-90\n"    # 海外快，大陆慢
+            "2.0.0.2:443#US-900ms-5.00MB/s-CN-90\n"   # 海外慢，大陆快
+        )
+        china = {"1.0.0.1:443#US", "2.0.0.2:443#US"}
+        rep = {
+            "1.0.0.1:443#US": {"score": 90, "risk": "low"},
+            "2.0.0.2:443#US": {"score": 90, "risk": "low"},
+        }
+        # 无 cn_ms：按行内海外延迟排序，1.0.0.1 在前
+        out = bg.filter_rank(lines, china, rep)
+        self.assertEqual([l.split(":")[0] for l in out], ["1.0.0.1", "2.0.0.2"])
+        # 有 cn_ms：大陆实测延迟参与评分，2.0.0.2 反超
+        cn_ms = {"1.0.0.1:443#US": 800.0, "2.0.0.2:443#US": 60.0}
+        out = bg.filter_rank(lines, china, rep, cn_ms)
+        self.assertEqual([l.split(":")[0] for l in out], ["2.0.0.2", "1.0.0.1"])
+
 
 class TestWriteGoodFiles(unittest.TestCase):
     POOL = (

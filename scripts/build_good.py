@@ -18,6 +18,10 @@ where ``latency_score`` maps <=100ms to 100 and >=1500ms to 0 linearly
 (missing latency counts 0), and ``speed_score = min(MB/s / 5, 1) * 100``
 (missing speed counts 0). Ties break by latency asc then key asc.
 
+Latency prefers the mainland-measured value from ``china.json`` (``ms``,
+what a mainland user actually experiences); the overseas TLS latency from
+the line notes is only the fallback when no CN measurement exists.
+
 Outputs keep the annotated source lines verbatim:
 
 - ``data/valid/all_good.txt``            (global policy group)
@@ -113,6 +117,15 @@ def build_china_set(data: dict) -> set[str]:
     return result
 
 
+def build_cn_ms_map(data: dict) -> dict[str, float]:
+    """``china.json`` -> ``{key: mainland-measured ms}`` (numeric only)."""
+    result: dict[str, float] = {}
+    for key, entry in data.get("proxies", {}).items():
+        if isinstance(entry, dict) and isinstance(entry.get("ms"), (int, float)):
+            result[key] = entry["ms"]
+    return result
+
+
 def is_cn_reachable(key: str | None, line: str, china_set: set[str]) -> bool:
     """CN-reachable per repo convention: judged ``reachable`` this run, or
     carrying a historical ``-CN`` annotation (same rule as ``all_cn.txt``).
@@ -121,12 +134,17 @@ def is_cn_reachable(key: str | None, line: str, china_set: set[str]) -> bool:
 
 
 def filter_rank(
-    text: str, china_set: set[str], rep_map: dict[str, dict]
+    text: str,
+    china_set: set[str],
+    rep_map: dict[str, dict],
+    cn_ms: dict[str, float] | None = None,
 ) -> list[str]:
     """Filter pool lines by entry criteria and rank by composite score.
 
     Lines failing the criteria are dropped; survivors keep their annotated
     form verbatim, ordered by ``(score desc, latency asc, key asc)``.
+    Latency uses the mainland-measured ``cn_ms`` value when available and
+    falls back to the overseas TLS latency parsed from the line.
     """
     ranked: list[tuple[int, int, str, str]] = []
     for line in text.splitlines():
@@ -138,7 +156,12 @@ def filter_rank(
         rep = rep_map.get(key)
         if not rep or rep["risk"] == "high" or rep["score"] < MIN_REP_SCORE:
             continue
-        ms, mbps = parse_metrics(line)
+        overseas_ms, mbps = parse_metrics(line)
+        ms = (
+            round(cn_ms[key])
+            if cn_ms and key in cn_ms
+            else overseas_ms
+        )
         score = composite_score(rep["score"], ms, mbps)
         ranked.append((score, ms if ms is not None else LATENCY_WORST_MS, key, line))
     ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
@@ -152,7 +175,10 @@ def write_good_file(path: Path, lines: list[str]) -> int:
 
 
 def write_good_files(
-    valid_dir: Path, china_set: set[str], rep_map: dict[str, dict]
+    valid_dir: Path,
+    china_set: set[str],
+    rep_map: dict[str, dict],
+    cn_ms: dict[str, float] | None = None,
 ) -> dict[str, int]:
     """Write all_good.txt + per-country/set good.txt; return per-file counts."""
     stats: dict[str, int] = {}
@@ -161,7 +187,9 @@ def write_good_files(
     if all_pool.exists():
         stats["all_good"] = write_good_file(
             valid_dir / "all_good.txt",
-            filter_rank(all_pool.read_text(encoding="utf-8"), china_set, rep_map),
+            filter_rank(
+                all_pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
+            ),
         )
 
     for sub in ("countries", "sets"):
@@ -175,7 +203,9 @@ def write_good_files(
             name = f"{sub}/{group_dir.name}"
             stats[name] = write_good_file(
                 group_dir / "good.txt",
-                filter_rank(pool.read_text(encoding="utf-8"), china_set, rep_map),
+                filter_rank(
+                    pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
+                ),
             )
     return stats
 
@@ -193,10 +223,11 @@ def main(argv: list[str] | None = None) -> int:
     quality_dir = args.data_dir / "quality"
 
     china_set = build_china_set(read_json(quality_dir / CHINA_FILE.name))
+    cn_ms = build_cn_ms_map(read_json(quality_dir / CHINA_FILE.name))
     rep_map = build_rep_map(read_json(quality_dir / REPUTATION_FILE.name))
-    print(f"Maps: cn={len(china_set)} rep={len(rep_map)}")
+    print(f"Maps: cn={len(china_set)} cn_ms={len(cn_ms)} rep={len(rep_map)}")
 
-    stats = write_good_files(valid_dir, china_set, rep_map)
+    stats = write_good_files(valid_dir, china_set, rep_map, cn_ms)
     total = sum(stats.values())
     for name in sorted(stats):
         print(f"  {name}.txt: {stats[name]}")
