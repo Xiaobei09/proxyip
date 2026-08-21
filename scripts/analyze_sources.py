@@ -13,47 +13,30 @@ import argparse
 import json
 import statistics
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import (
-    CHINA_FILE,
-    EXIT_FAMILY_FILE,
-    IP_SOURCES_FILE,
-    OUTPUT_DIR,
+    LATENCY_RE,
     QUALITY_DIR,
-    REPUTATION_FILE,
-    SPEED_FILE,
-    STREAMING_FILE,
-    VALID_ALL_FILE,
+    SPEED_RE,
+    read_json,
     write_text_if_changed,
 )
 
 SOURCE_QUALITY_FILE = QUALITY_DIR / "source_quality.json"
 
-# Lazy import to avoid circular dependency at module level
-def _read_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
 def _parse_latency(line: str) -> float | None:
     """Extract latency in ms from a proxy line (e.g. ``-120ms``)."""
-    import re
-    m = re.search(r"-(\d+)ms", line)
+    m = LATENCY_RE.search(line)
     return float(m.group(1)) if m else None
 
 
 def _parse_speed(line: str) -> float | None:
     """Extract speed in MB/s from a proxy line (e.g. ``-0.44MB/s``)."""
-    import re
-    m = re.search(r"(\d+(?:\.\d+)?)MB/s", line)
+    m = SPEED_RE.search(line)
     return float(m.group(1)) if m else None
 
 
@@ -273,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     data_dir = args.data_dir
 
-    ip_sources_raw = _read_json(data_dir / "quality" / "ip_sources.json")
+    ip_sources_raw = read_json(data_dir / "quality" / "ip_sources.json")
     ip_sources = ip_sources_raw.get("sources", ip_sources_raw)
     if not ip_sources:
         print("No ip_sources.json found or empty. Run download_proxies.py first.",
@@ -287,19 +270,19 @@ def main(argv: list[str] | None = None) -> int:
         else []
     )
 
-    rep_data = _read_json(data_dir / "quality" / "reputation.json")
+    rep_data = read_json(data_dir / "quality" / "reputation.json")
     rep_proxies = rep_data.get("proxies", rep_data)
 
-    streaming_data = _read_json(data_dir / "quality" / "streaming.json")
+    streaming_data = read_json(data_dir / "quality" / "streaming.json")
     streaming_proxies = streaming_data.get("proxies", streaming_data)
 
-    china_data = _read_json(data_dir / "quality" / "china.json")
+    china_data = read_json(data_dir / "quality" / "china.json")
     china_proxies = china_data.get("proxies", china_data)
 
-    family_data = _read_json(data_dir / "quality" / "exit_family.json")
+    family_data = read_json(data_dir / "quality" / "exit_family.json")
     family_proxies = family_data.get("proxies", family_data)
 
-    speed_data = _read_json(data_dir / "valid" / "speed.json")
+    speed_data = read_json(data_dir / "valid" / "speed.json")
     speed_proxies = speed_data.get("proxies", speed_data)
 
     result = analyze(

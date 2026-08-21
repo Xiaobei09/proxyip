@@ -48,7 +48,6 @@ import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 
 import urllib.error
@@ -68,11 +67,9 @@ from common import (
     VALID_HISTORY_FILE,
     has_token,
     insert_exit_region,
-    keyed_json,
     now_ts,
     parse_headers,
     parse_line,
-    write_json,
     write_text_if_changed,
 )
 from download_proxies import COUNTRY_SETS, SMALL_SETS

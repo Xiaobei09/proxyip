@@ -130,25 +130,6 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
-_QC_STREAMING_BASE = {"D+", "YT", "MX", "PV", "GPT"}
-_QC_TYPE = {"CF"}
-_QC_KNOWN = _QC_STREAMING_BASE | _QC_TYPE
-
-
-def _is_rep_score(tok: str) -> bool:
-    """Check if *tok* is a reputation score (1-3 digit integer)."""
-    return tok.isdigit() and 1 <= len(tok) <= 3
-
-
-def _is_qc_token(tok: str) -> bool:
-    """Check if *tok* is a QC-produced token (streaming / CF / score)."""
-    if tok in _QC_KNOWN:
-        return True
-    if tok.startswith("NF(") and tok.endswith(")"):
-        return True
-    return _is_rep_score(tok)
-
-
 _QC_TOKEN_RE = re.compile(
     r"(?:^|(?<=-))(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d{1,3})(?=$|-)"
 )
@@ -258,11 +239,6 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
 
 
 REP_GROUP_NAMES = ("v4", "v6", "46", "cn", "cn4", "cn6", "cn46")
-
-
-def _build_ranked_map(source_text: str, annotations: dict, rep_map: dict) -> list[str]:
-    """从文本构建声誉排序列表。"""
-    return build_ranked(source_text, annotations, rep_map)
 
 
 def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -> None:

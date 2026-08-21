@@ -18,7 +18,6 @@ import time
 import urllib.parse
 import urllib.request
 from bisect import bisect_right
-from pathlib import Path
 
 from common import *  # noqa: F401,F403  (paths, UA, write_json, keyed_json, ...)
 
@@ -259,11 +258,6 @@ def netcoffee_lookup_sync(ip: str) -> dict | None:
     ):
         return None
     return out
-
-
-async def batch_netcoffee(ips: list) -> dict:
-    """Concurrent net.coffee lookups; ``{ip: flags}`` (fails become ``None``)."""
-    return await batch_sync(ips, netcoffee_lookup_sync)
 
 
 def ncgy_lookup_sync(ip: str) -> dict | None:

@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import china_check as cc
+import china_itdog as ci
 
 
 CN_LINE = "1.2.3.4:2087#\U0001F1FA\U0001F1F8US-10ms-20.07MB/s-GPT-CF"
@@ -393,7 +394,7 @@ class TestItdogMd5(unittest.TestCase):
     def test_md5_16_length_and_slice(self):
         s = "abc"
         self.assertEqual(
-            cc.itdog_md5_16(s), hashlib.md5(s.encode()).hexdigest()[8:24]
+            ci.itdog_md5_16(s), hashlib.md5(s.encode()).hexdigest()[8:24]
         )
 
 
@@ -413,8 +414,8 @@ class TestItdogParseNodes(unittest.TestCase):
             "</optgroup>"
             "</select>"
         )
-        self.assertEqual(cc.itdog_parse_nodes(html, 1), ["aaa", "ccc", "ddd"])
-        self.assertEqual(cc.itdog_parse_nodes(html, 2), ["aaa", "bbb", "ccc", "ddd"])
+        self.assertEqual(ci.itdog_parse_nodes(html, 1), ["aaa", "ccc", "ddd"])
+        self.assertEqual(ci.itdog_parse_nodes(html, 2), ["aaa", "bbb", "ccc", "ddd"])
 
     def test_stride_sampling_spreads_across_group(self):
         html = (
@@ -431,64 +432,64 @@ class TestItdogParseNodes(unittest.TestCase):
             + "".join(f'<option value="m{i}">x</option>' for i in range(1, 9))
             + "</optgroup>"
         )
-        self.assertEqual(cc.itdog_parse_nodes(html, 3), ["n1", "n2", "n3"])
-        self.assertEqual(cc.itdog_parse_nodes(html8, 3), ["m1", "m3", "m5"])
+        self.assertEqual(ci.itdog_parse_nodes(html, 3), ["n1", "n2", "n3"])
+        self.assertEqual(ci.itdog_parse_nodes(html8, 3), ["m1", "m3", "m5"])
         # per_isp 超过组内数量 → 全取
-        self.assertEqual(cc.itdog_parse_nodes(html, 9), ["n1", "n2", "n3", "n4"])
+        self.assertEqual(ci.itdog_parse_nodes(html, 9), ["n1", "n2", "n3", "n4"])
 
     def test_missing_group_skipped(self):
         html = '<optgroup label="中国电信"><option value="aaa">x</option></optgroup>'
-        self.assertEqual(cc.itdog_parse_nodes(html, 1), ["aaa"])
+        self.assertEqual(ci.itdog_parse_nodes(html, 1), ["aaa"])
 
 
 class TestItdogParseSubmit(unittest.TestCase):
     def test_task_id(self):
         html = "var task_id='20260816105915300ivbsnctru1ylah0';"
-        tid, err = cc.itdog_parse_submit(html)
+        tid, err = ci.itdog_parse_submit(html)
         self.assertEqual(tid, "20260816105915300ivbsnctru1ylah0")
         self.assertEqual(err, "")
 
     def test_captcha_page(self):
-        tid, err = cc.itdog_parse_submit('<div class="clicaptcha"></div>')
+        tid, err = ci.itdog_parse_submit('<div class="clicaptcha"></div>')
         self.assertIsNone(tid)
         self.assertEqual(err, "captcha")
 
     def test_no_task(self):
-        tid, err = cc.itdog_parse_submit("<html>nothing</html>")
+        tid, err = ci.itdog_parse_submit("<html>nothing</html>")
         self.assertIsNone(tid)
         self.assertEqual(err, "no task_id")
 
 
 class TestItdogRecOk(unittest.TestCase):
     def test_http_ok(self):
-        ok, ms, level = cc.itdog_rec_ok({"http_code": 200, "connect_time": 0.02, "all_time": 0.05})
+        ok, ms, level = ci.itdog_rec_ok({"http_code": 200, "connect_time": 0.02, "all_time": 0.05})
         self.assertIs(ok, True)
         self.assertEqual(ms, 20.0)
         self.assertEqual(level, "http")
 
     def test_tcp_only_port(self):
-        ok, ms, level = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.013, "all_time": 10.0})
+        ok, ms, level = ci.itdog_rec_ok({"http_code": 0, "connect_time": 0.013, "all_time": 10.0})
         self.assertIs(ok, True)
         self.assertEqual(ms, 13.0)
         self.assertEqual(level, "tcp")
 
     def test_connect_refused(self):
-        ok, _, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 0.001, "all_time": 10.0})
+        ok, _, _ = ci.itdog_rec_ok({"http_code": 0, "connect_time": 0.001, "all_time": 10.0})
         self.assertIs(ok, False)
 
     def test_connect_timeout(self):
-        ok, _, _ = cc.itdog_rec_ok({"http_code": 0, "connect_time": 10.0, "all_time": 10.0})
+        ok, _, _ = ci.itdog_rec_ok({"http_code": 0, "connect_time": 10.0, "all_time": 10.0})
         self.assertIs(ok, False)
 
     def test_node_error_inconclusive(self):
-        ok, ms, level = cc.itdog_rec_ok({"type": "node_error", "task_num": 1})
+        ok, ms, level = ci.itdog_rec_ok({"type": "node_error", "task_num": 1})
         self.assertIsNone(ok)
         self.assertIsNone(ms)
         self.assertIsNone(level)
 
     def test_tcping_record_ok(self):
         # batch_tcping：result 为 TCP 耗时毫秒字符串
-        ok, ms, level = cc.itdog_rec_ok(
+        ok, ms, level = ci.itdog_rec_ok(
             {"ip": "1.2.3.4", "port": "443", "result": "166",
              "node_id": "abc", "task_num": 1, "address": "Anycast/x"})
         self.assertIs(ok, True)
@@ -496,13 +497,13 @@ class TestItdogRecOk(unittest.TestCase):
         self.assertEqual(level, "tcp")
 
     def test_tcping_record_fail(self):
-        ok, ms, level = cc.itdog_rec_ok({"result": "-1", "node_id": "abc"})
+        ok, ms, level = ci.itdog_rec_ok({"result": "-1", "node_id": "abc"})
         self.assertIs(ok, False)
         self.assertIsNone(ms)
         self.assertIsNone(level)
 
     def test_tcping_record_bad_result(self):
-        ok, _, _ = cc.itdog_rec_ok({"result": None, "node_id": "abc"})
+        ok, _, _ = ci.itdog_rec_ok({"result": None, "node_id": "abc"})
         self.assertIs(ok, False)
 
 
@@ -512,7 +513,7 @@ class TestItdogAggregate(unittest.TestCase):
             {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.001},
             {"task_num": 1, "node_id": "b", "http_code": 0, "connect_time": 0.020},
         ]
-        agg = cc.itdog_aggregate(records, 1)
+        agg = ci.itdog_aggregate(records, 1)
         self.assertEqual(agg[1]["status"], "ok")
         self.assertEqual(agg[1]["ms"], 20.0)
         self.assertEqual(agg[1]["level"], "tcp")
@@ -522,7 +523,7 @@ class TestItdogAggregate(unittest.TestCase):
             {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.020},
             {"task_num": 1, "node_id": "b", "http_code": 200, "connect_time": 0.030},
         ]
-        agg = cc.itdog_aggregate(records, 1)
+        agg = ci.itdog_aggregate(records, 1)
         self.assertEqual(agg[1]["level"], "http")
         # ms 取所有成功节点最小值（含 tcp 节点）
         self.assertEqual(agg[1]["ms"], 20.0)
@@ -532,17 +533,17 @@ class TestItdogAggregate(unittest.TestCase):
             {"task_num": 1, "node_id": "a", "http_code": 0, "connect_time": 0.001},
             {"task_num": 1, "node_id": "b", "http_code": 0, "connect_time": 10.0},
         ]
-        agg = cc.itdog_aggregate(records, 1)
+        agg = ci.itdog_aggregate(records, 1)
         self.assertEqual(agg[1]["status"], "fail")
         self.assertIsNone(agg[1]["level"])
 
     def test_no_records_error(self):
-        self.assertEqual(cc.itdog_aggregate([], 2)[2]["status"], "error")
-        self.assertEqual(cc.itdog_aggregate([], 2)[1]["status"], "error")
+        self.assertEqual(ci.itdog_aggregate([], 2)[2]["status"], "error")
+        self.assertEqual(ci.itdog_aggregate([], 2)[1]["status"], "error")
 
     def test_node_error_only_error(self):
         records = [{"task_num": 1, "node_id": "a", "type": "node_error"}]
-        self.assertEqual(cc.itdog_aggregate(records, 1)[1]["status"], "error")
+        self.assertEqual(ci.itdog_aggregate(records, 1)[1]["status"], "error")
 
 
 class TestItdogMergeVerdict(unittest.TestCase):
