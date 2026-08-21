@@ -154,6 +154,14 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 - `check-host.cc`：呼和浩特阿里云节点，匿名限速 5/10s、250/h
 - `xxapi.cn`：北京节点，免 key
 
+**batch_tcping 补测（降级通道）**：
+
+- batch_http 对某目标失败/被限时（captcha、风控、熔断），改用
+  `itdog.cn/batch_tcping` 纯 TCPING 复测
+- 节点池大得多（电信/联通/移动各 ~75-88 个，默认等距取 6×3=18 节点）
+- 结果记为独立多节点源 `itdog_tcping`（`result>0` → 可达，`-1` → 失败），
+  单独 ok 即可判 reachable
+
 #### L3 多节点复核（串行小样本）
 
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive

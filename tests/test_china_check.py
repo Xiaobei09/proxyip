@@ -486,6 +486,25 @@ class TestItdogRecOk(unittest.TestCase):
         self.assertIsNone(ms)
         self.assertIsNone(level)
 
+    def test_tcping_record_ok(self):
+        # batch_tcping：result 为 TCP 耗时毫秒字符串
+        ok, ms, level = cc.itdog_rec_ok(
+            {"ip": "1.2.3.4", "port": "443", "result": "166",
+             "node_id": "abc", "task_num": 1, "address": "Anycast/x"})
+        self.assertIs(ok, True)
+        self.assertEqual(ms, 166.0)
+        self.assertEqual(level, "tcp")
+
+    def test_tcping_record_fail(self):
+        ok, ms, level = cc.itdog_rec_ok({"result": "-1", "node_id": "abc"})
+        self.assertIs(ok, False)
+        self.assertIsNone(ms)
+        self.assertIsNone(level)
+
+    def test_tcping_record_bad_result(self):
+        ok, _, _ = cc.itdog_rec_ok({"result": None, "node_id": "abc"})
+        self.assertIs(ok, False)
+
 
 class TestItdogAggregate(unittest.TestCase):
     def test_any_node_ok(self):
@@ -580,6 +599,23 @@ class TestMergeVerdictLevel(unittest.TestCase):
         # 旧格式源（无 level 字段）不报错，按 tcp 计
         sources = {"itdog": {"status": "ok", "ok": True, "ms": 10}}
         self.assertEqual(cc.merge_verdict(sources, cf=False)["level"], "tcp")
+
+    def test_itdog_tcping_is_multi_node_source(self):
+        # batch_http 失败 + batch_tcping 单独 ok → reachable（多节点源）
+        sources = {
+            "itdog": self._src("fail"),
+            "itdog_tcping": self._src("ok", "tcp"),
+        }
+        merged = cc.merge_verdict(sources, cf=False)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["basis"], ["itdog_tcping"])
+
+    def test_itdog_tcping_fail_plus_single_fail_unreachable(self):
+        sources = {
+            "itdog_tcping": self._src("fail"),
+            "check_host": self._src("fail"),
+        }
+        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
 
 
 class TestApplyStreak(unittest.TestCase):
