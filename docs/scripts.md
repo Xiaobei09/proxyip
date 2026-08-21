@@ -241,6 +241,27 @@ python scripts/annotate_classify.py
 python scripts/annotate_classify.py --data-dir /path/to/data
 ```
 
+### `scripts/build_good.py`
+
+构建综合最优 `good.txt` 清单（策略组/国家组/集合组各一份）。从验证池（`data/valid/all.txt`、`countries/*/all.txt`、`sets/*/all.txt`）中筛选同时满足以下条件的代理，按综合分降序输出（行内容原样保留）：
+
+1. **大陆可达**：`china.json` 判定 `reachable`，或行内已带历史 `-CN` 备注（与 `all_cn.txt` 同规则）
+2. **有信誉分**：存在于 `reputation.json`
+3. **非高风险**：`reputation.json` 的 `risk != high`
+
+综合分公式（信誉为主）：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0。同分依次按延迟升序、key 升序。质量 JSON 缺失时优雅降级为空清单。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--data-dir` | 数据根目录（含 `valid/` 与 `quality/`） | `data` |
+
+输出文件：`data/valid/all_good.txt`、`data/valid/countries/<CC>/good.txt`、`data/valid/sets/<name>/good.txt`。CI 在 quality-check / china-check / exit-family / annotate-classify 四个 workflow 的后缀填充步骤后自动运行。
+
+```bash
+python scripts/build_good.py
+python scripts/build_good.py --data-dir /path/to/data
+```
+
 ### `scripts/analyze_sources.py`
 
 分析各下载源的质量。读取 `ip_sources.json`（逐 IP 来源归属）并与验证/信誉/流媒体/大陆可达性数据交叉引用，产出每个源的存活率、延迟、速度、信誉分、流媒体解锁率、大陆可达率等指标。

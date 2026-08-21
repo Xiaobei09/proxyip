@@ -11,7 +11,7 @@
 - **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
 - **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→JP-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
 - **去重**：同一 `ip:port` 组合全局唯一
-- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）
+- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序，`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
 
 ### 备注段（note）与 token 规范
 
@@ -88,7 +88,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 ### 输出
 
 - `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
-- `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
+- `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）、`good.txt`（综合最优，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
 - 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
   - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
   - `cn.txt` — 大陆可达（`-CN` 备注）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
@@ -230,6 +230,16 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ### `data/valid/all_rep.txt`
 
 与 `all.txt` 同源（全量存活池）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
+
+### `data/valid/all_good.txt` 及各目录 `good.txt`
+
+**综合最优清单**（质量 CI 生成，`build_good.py`）：从对应池（根级 `all.txt` / 各国家、集合目录 `all.txt`）中筛选同时满足以下条件的代理：
+
+1. 大陆可达（`china.json` 判定 `reachable`，或行内已带历史 `-CN` 备注，与 `all_cn.txt` 同规则）
+2. 有信誉分（存在于 `reputation.json`）
+3. 非高风险（`reputation.json` 的 `risk != high`）
+
+按综合分降序排列：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0；同分依次按延迟升序、IP 序。行内容为源池原行（含全部备注），不改动。
 
 ### `data/quality/china.json`（china-check CI 输出）
 

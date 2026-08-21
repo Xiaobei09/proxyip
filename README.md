@@ -69,6 +69,9 @@ data/valid/countries/US/46.txt             # 该国出口为双栈（v4+v6）的
 data/valid/countries/US/cn.txt             # 该国大陆可达的代理
 data/valid/countries/US/cn4.txt            # 该国大陆可达且出口为 IPv4 的代理
 data/valid/countries/US/rep.txt            # 该国按信誉分降序（质量 CI 生成）
+data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 有信誉分 + 非高风险，综合分降序）
+data/valid/countries/US/good.txt           # 该国综合最优（质量 CI 生成）
+data/valid/sets/hot/good.txt                # 热门集合综合最优（质量 CI 生成）
 data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录多件套）
 data/valid/all_46.txt                      # 全部出口为双栈的代理（根级分组）
 data/valid/ports/443.txt                    # 仅 443 端口的存活代理
@@ -94,28 +97,28 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
 - **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `build_good.py`（重建综合最优 good 清单）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `generate_stats.py`（更新图表含 CN 数据）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `build_good.py`（重建综合最优 good 清单）→ `generate_stats.py`（更新图表含 CN 数据）→ 有变更则自动提交并推送
 - **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流按文件所有权范围提交 `data/`（update-proxies 不触碰 `data/quality/china.json`/`data/valid/all_cn.txt`），与主更新/质量 CI 的并发提交安全共存
 
 `.github/workflows/exit-family.yml`（实际出口家族独立 CI）：
 
 - **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `exit_family.py`（全量存活池按家族分离，并对照 `data/quality/upstream_meta.json` 交叉验证）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `exit_family.py`（全量存活池按家族分离，并对照 `data/quality/upstream_meta.json` 交叉验证）→ `annotate_classify.py` → `build_good.py`（重建综合最优 good 清单）→ 有变更则自动提交并推送
 - **细节**：作业超时 60 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
 - **说明**：CF 边缘代理真实出口常为 IPv6（尽管呈现为 v4 地址），分离清单供按家族选路使用；上游交叉验证仅作参照，实时探测仍是判定依据
 
 `.github/workflows/annotate-classify.yml`（后缀填充 + 节点分类）：
 
 - **触发**：quality-check 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `annotate_classify.py`（读取 5 个 JSON 数据源，填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `annotate_classify.py`（读取 5 个 JSON 数据源，填充缺失后缀 + 追加分类 token）→ `build_good.py`（重建综合最优 good 清单）→ 有变更则自动提交并推送
 - **细节**：作业超时 30 分钟；`concurrency` 组防重入；`contents: write` 权限；无第三方依赖、无密钥
 - **说明**：分类维度：IP 类型（DC/RES/MOB/PROXY，来自 ipinfo.json）+ 速度等级（fast≥5MB/s / mid 1-5 / slow<1，来自行内 speed 解析）。行格式：`...-DC-fast`
 
@@ -139,6 +142,7 @@ scripts/china_itdog.py                   itdog.cn 批量探活模块（china_che
 scripts/exit_family.py                   实际出口 IP 家族检测与分离（TLS trace 回显）
 scripts/generate_fingerprint.py          浏览器指纹生成
 scripts/annotate_classify.py             后缀填充 + 节点分类（CI 自动运行）
+scripts/build_good.py                    综合最优 good 清单构建（CI 自动运行）
 scripts/common.py                        共享常量与助手（data 布局、HTTP/JSON 探测）
 
 data/download/                           下载产出（原始代理列表）
@@ -156,8 +160,9 @@ data/valid/all_cn*.txt                   变体（cn、cn4、cn6、cn46、cn46_l
 data/valid/all_ipv4.txt                  出口为 IPv4 的代理清单（exit-family CI，双栈双入）
 data/valid/all_ipv6.txt                  出口为 IPv6 的代理清单（exit-family CI，双栈双入）
 data/valid/all_rep.txt                   信誉排行（按分数降序，质量 CI）
+data/valid/all_good.txt                  综合最优清单（CN 可达 + 有信誉分 + 非高风险，按综合分降序，质量 CI）
 data/valid/all_cn.txt                    全量大陆可达清单（全量池，china-check CI）
-data/valid/countries/<CC>/               按国家分组（all.txt、ltd.txt、v4.txt、v6.txt、46.txt、cn.txt、rep.txt 等）
+data/valid/countries/<CC>/               按国家分组（all.txt、ltd.txt、v4.txt、v6.txt、46.txt、cn.txt、rep.txt、good.txt 等）
 data/valid/ports/<port>.txt              按端口分组
 data/valid/sets/<name>/                  按集合分组
 data/valid/index.json                    代理索引（延迟与检测方法）
