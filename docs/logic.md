@@ -215,7 +215,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 ### 6.1 检测方法
 
-所有代理使用 **双栈探测** 方法：分别以 `socket.AF_INET`（IPv4）和 `socket.AF_INET6`（IPv6）各发起一次 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判定出口家族。若两次均失败，尝试通用（不限地址族）连接兜底。
+所有代理使用 **双栈出口探测** 方法：分别请求仅 IPv4（`ipv4.icanhazip.com`，仅 A 记录）与仅 IPv6（`ipv6.icanhazip.com`，仅 AAAA 记录）的回显服务——走得通即证明代理具备对应家族的**出口能力**，两者皆通判 `dual`。回显为纯 IP 文本；若两者均失败，尝试通用目标 `cloudflare.com/cdn-cgi/trace` 兜底。注意：入口 socket 家族（AF_INET/AF_INET6）无法反映出口家族——它只约束客户端→代理一跳；CF 边缘代理的出口由 Worker fetch() 决定、与入口和目标主机名均无关（对单族目标也返回同一出口 IP），故 CF 类代理 `dual` 恒为 0 属架构固有行为。
 
 ### 6.2 家族判定
 
