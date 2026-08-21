@@ -33,6 +33,7 @@
 | `--speed-timeout` | 测速单次时长上限（秒） | 5 |
 | `--speed-workers` | 同时进行的下载测速并发上限 | 30 |
 | `--no-speed` | 跳过速度测试（`_ltd` 回退按延迟） | 关 |
+| `--no-adaptive-speed` | 关闭 RTT 自适应下载窗口（固定 5s / 1MB） | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 5 |
 | `-w, --workers` | asyncio 并发上限 | 500 |
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
