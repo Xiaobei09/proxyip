@@ -178,7 +178,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
       cf = True/False（是否 CF 边缘代理）
 
 规则：
-1. 多节点源（pingpe/itdog/tcpping）任一 ok → reachable
+1. 多节点源（pingpe/itdog/itdog_tcping/tcpping）任一 ok → reachable
 2. 单节点源（check_host/xxapi）≥2 个 ok → reachable
 3. 仅 1 个单节点源 ok → uncertain（单点不可靠）
 4. check_host + xxapi 均 fail → unreachable

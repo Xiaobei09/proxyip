@@ -40,7 +40,6 @@ from common import (
     DATA_DIR,
     LATENCY_RE,
     REPUTATION_FILE,
-    SPEED_FILE,
     SPEED_RE,
     has_token,
     line_to_key,

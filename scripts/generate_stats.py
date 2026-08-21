@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import DATA_DIR, OUTPUT_DIR, SOURCE_STATS_FILE, now_ts, read_json, write_text_if_changed
+from common import DATA_DIR, OUTPUT_DIR, now_ts, read_json, write_text_if_changed
 
 WIDTH = 800
 HEIGHT = 300

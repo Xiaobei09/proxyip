@@ -22,17 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import (
     SPEED_RE,
-    LATENCY_RE,
-    EXIT_REGION_RE,
     DATA_DIR,
-    QUALITY_DIR,
-    VALID_DIR,
     has_token,
     insert_exit_region,
-    line_to_key,
     parse_line,
     read_json,
-    write_text_if_changed,
     collect_txt_files,
     annotate_files,
 )

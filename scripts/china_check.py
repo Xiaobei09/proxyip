@@ -35,7 +35,7 @@
   （表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）。
 
 保守判定逻辑（merge_verdict）：
-  多节点源（pingpe/itdog/tcpping）任一 ok → reachable；
+  多节点源（pingpe/itdog/itdog_tcping/tcpping）任一 ok → reachable；
   单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   check_host + xxapi 均 fail → unreachable；
   pingpe/itdog fail + 任一其他源 fail → unreachable。
@@ -93,11 +93,6 @@ from china_itdog import (
     ITDOG_TCPING_NODES_PER_ISP,
     ITDOG_TCPING_URL,
     itdog_batch_run,
-    itdog_md5_16,
-    itdog_parse_nodes,
-    itdog_parse_submit,
-    itdog_rec_ok,
-    itdog_aggregate,
 )
 
 FALLBACK_SOURCE = DEFAULT_SOURCE

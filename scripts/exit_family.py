@@ -30,7 +30,6 @@ import json
 import socket
 import ssl
 import sys
-import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -38,7 +37,6 @@ from pathlib import Path
 
 from common import (
     EXIT_FAMILY_FILE,
-    UA,
     UPSTREAM_META_FILE,
     VALID_ALL_FILE,
     VALID_ALL_IPV4_FILE,
@@ -52,7 +50,6 @@ from common import (
     load_methods,
     load_sample,
     parse_headers,
-    parse_ltd_line,
     write_json,
     write_text_if_changed,
     _note,

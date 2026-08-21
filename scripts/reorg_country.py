@@ -27,14 +27,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from common import (
-    COUNTRIES_DIR,
     DATA_DIR,
-    IPINFO_FILE,
-    VALID_DIR,
     line_to_key,
     parse_ltd_line,
     write_text_if_changed,

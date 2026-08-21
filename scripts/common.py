@@ -14,7 +14,6 @@ utilities (``read_json``, ``load_sample``, ``collect_txt_files``,
 on it without creating import cycles.
 """
 
-import asyncio
 import json
 import re
 import ssl
