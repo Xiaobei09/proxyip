@@ -88,7 +88,7 @@ class TestFilterRank(unittest.TestCase):
         "9.9.9.9:443#US-500ms-2.00MB/s-CN-90\n"
         "1.1.1.1:443#US-100ms-5.00MB/s-CN-90\n"
         "5.5.5.5:443#JP-60ms-10.0MB/s-95\n"          # not CN reachable
-        "2.2.2.2:443#HK-50ms-8.00MB/s-CN-40\n"       # lower composite
+        "2.2.2.2:443#HK-50ms-8.00MB/s-CN-40\n"       # rep below 80
         "3.3.3.3:443#SG-70ms-1.00MB/s-CN-99-risky\n" # risk high below
     )
 
@@ -106,11 +106,24 @@ class TestFilterRank(unittest.TestCase):
     def test_filters_and_orders(self):
         out = bg.filter_rank(self.LINES, self.china, self.rep)
         # 1.1.1.1: 0.6*90+0.2*100+0.2*100=94; 9.9.9.9: 54+20+8=82;
-        # 2.2.2.2: 24+20+16=60; JP dropped (no CN); SG dropped (high risk)
+        # 2.2.2.2 dropped (rep 40 < 80); JP dropped (no CN); SG dropped (high)
         self.assertEqual(
             [l.split("#")[0] for l in out],
-            ["1.1.1.1:443", "9.9.9.9:443", "2.2.2.2:443"],
+            ["1.1.1.1:443", "9.9.9.9:443"],
         )
+
+    def test_rep_score_threshold_boundary(self):
+        lines = (
+            "8.0.0.1:443#US-100ms-CN-80\n"
+            "8.0.0.2:443#US-100ms-CN-79\n"
+        )
+        china = {f"8.0.0.{i}:443#US" for i in (1, 2)}
+        rep = {
+            "8.0.0.1:443#US": {"score": 80, "risk": "low"},
+            "8.0.0.2:443#US": {"score": 79, "risk": "low"},
+        }
+        out = bg.filter_rank(lines, china, rep)
+        self.assertEqual([l.split(":")[0] for l in out], ["8.0.0.1"])
 
     def test_tie_breaks_by_latency_then_key(self):
         lines = (
@@ -153,7 +166,7 @@ class TestWriteGoodFiles(unittest.TestCase):
     CHINA = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
     REP = {
         "1.1.1.1:443#US": {"score": 90, "risk": "low"},
-        "2.2.2.2:443#US": {"score": 70, "risk": "low"},
+        "2.2.2.2:443#US": {"score": 85, "risk": "low"},
     }
 
     def test_layout_and_content(self):
