@@ -79,6 +79,23 @@ data/valid/speed.json                       # 每存活代理的实测速度（M
 data/valid/sets/hot/all.txt                 # 热门国家集合（验证后）
 data/download/all.txt                       # 全量去重清单（未验证）
 ```
+
+## 中国大陆使用建议
+
+- **优先消费**：`data/valid/all_cn.txt`（大陆可达，按**大陆实测延迟升序**）、
+  `data/valid/all_good.txt`（综合最优：CN 可达 + 信誉≥80 + 非高风险；延迟分优先采用大陆实测值）、
+  `data/valid/countries/<CC>/cn4.txt`（该国大陆可达且 IPv4 出口）
+- **可靠性叠加**：代理池 churn 快（检测时活着、使用时可能已死），且"TLS 握手存活"≠"能用"。
+  任何清单都可叠加两个可靠性维度（如 `all_cn_verified.txt`、`countries/US/cn4_stable.txt`）：
+  - `*_verified` — **全链路验证**：本轮测速成功 = TLS + HTTP 2xx + 真实下载全部通过，
+    过滤"能握手但不吐数据"的半死代理
+  - `*_stable` — **连续两轮存活**：上一轮与本轮存活的交集，对抗快速 churn
+  - 推荐组合：`all_cn_verified.txt` > `all_cn_stable.txt` > `all_cn.txt`
+- **行内备注**：`-CN` = 大陆可达；`-V4/-V6/-DS` = 实际出口家族（CF 边缘代理入口是 v4，
+  实际出口常为 v6）；`→XXX` = 出口地区
+- **本地运行**：脚本访问 `raw.githubusercontent.com` 失败时自动回退 gh-proxy.com /
+  jsDelivr / gitmirror 镜像，大陆网络无需自备代理即可拉取源与黑名单
+
 ## 文档
 
 - [数据规范与数据文件参考](docs/data-spec.md) — 行格式与备注段、限量版规则、国家集合、验证算法、各数据文件字段

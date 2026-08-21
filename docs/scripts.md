@@ -46,6 +46,8 @@
 
 除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（缺失时回退行内 `-V4`/`-V6`/`-DS`），大陆可达取自行内 `-CN`；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
 
+每个清单（含根级 `all*.txt` 与全部分组）同步派生两个可靠性维度：`*_verified.txt`（本轮测速成功 = TLS + HTTP 2xx + 真实下载全链路通过，过滤半死代理）与 `*_stable.txt`（上一轮 `index.json` 与本轮存活的交集，抗 churn；首轮无上一轮数据时不生成）。可与任意分组叠加，如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`；空清单不落盘并清理残留，数量计入 `meta.json` 的 `sets.all_verified` / `sets.all_stable`。
+
 ### `scripts/generate_stats.py`
 
 读取历史与验证汇总，生成统计与一组零依赖 SVG 图表。

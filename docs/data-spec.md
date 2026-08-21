@@ -94,11 +94,16 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 
 - `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
 - `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）、`good.txt`（综合最优，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
-- 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
-  - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
-  - `cn.txt` — 大陆可达（`-CN` 备注）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
-  - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），缺失时回退行内 `-V4`/`-V6`/`-DS` 备注；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
-  - 根级另有 `all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`（及 `*_ltd.txt`）；v4/v6 复用既有 `all_ipv4.txt`/`all_ipv6.txt`，不重复生成
+ - 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
+   - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
+   - `cn.txt` — 大陆可达（`-CN` 备注）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
+   - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），缺失时回退行内 `-V4`/`-V6`/`-DS` 备注；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
+   - 根级另有 `all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`（及 `*_ltd.txt`）；v4/v6 复用既有 `all_ipv4.txt`/`all_ipv6.txt`，不重复生成
+   - **可靠性变体**：上述每个清单（含根级 `all*.txt`）同步派生 `*_verified.txt` 与 `*_stable.txt` 两个维度，可与任意分组叠加（如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`）：
+     - `*_verified` — **全链路验证**子集：本轮测速成功 = TLS 握手 + HTTP 2xx 响应 + 真实下载全部通过，过滤"能握手但不吐数据"的半死代理
+     - `*_stable` — **连续两轮存活**交集：上一轮 `index.json` 与本轮存活的交集，对抗代理池快速 churn（首轮无上一轮数据时不生成）
+     - 空清单不落盘（并清理上轮残留）；数量计入 `meta.json` 的 `sets.all_verified` / `sets.all_stable`
+
 - `data/valid/meta.json`：本次验证汇总（字段见下）
 - `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）
 - `data/valid/speed.json`：每测速成功代理的实测速度（MB/s，按速度降序）
