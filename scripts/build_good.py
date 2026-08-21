@@ -6,7 +6,8 @@ Filters the annotated valid pools to proxies that simultaneously satisfy:
 1. CN-reachable      — ``china.json`` verdict == ``reachable``, or the line
    already carries a historical ``-CN`` annotation (same rule as
    ``all_cn.txt``)
-2. reputation-scored — present in ``reputation.json``
+2. reputation >= 80  — present in ``reputation.json`` with a score of at
+   least 80
 3. not high risk     — ``reputation.json`` risk != ``high``
 
 Survivors are ranked by a composite, reputation-weighted score::
@@ -45,6 +46,8 @@ from common import (
 LATENCY_BEST_MS = 100
 LATENCY_WORST_MS = 1500
 SPEED_FULL_MBPS = 5.0
+
+MIN_REP_SCORE = 80
 
 WEIGHT_REP = 0.6
 WEIGHT_LATENCY = 0.2
@@ -133,7 +136,7 @@ def filter_rank(
         if not key or not is_cn_reachable(key, line, china_set):
             continue
         rep = rep_map.get(key)
-        if not rep or rep["risk"] == "high":
+        if not rep or rep["risk"] == "high" or rep["score"] < MIN_REP_SCORE:
             continue
         ms, mbps = parse_metrics(line)
         score = composite_score(rep["score"], ms, mbps)

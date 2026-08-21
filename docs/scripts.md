@@ -246,7 +246,7 @@ python scripts/annotate_classify.py --data-dir /path/to/data
 构建综合最优 `good.txt` 清单（策略组/国家组/集合组各一份）。从验证池（`data/valid/all.txt`、`countries/*/all.txt`、`sets/*/all.txt`）中筛选同时满足以下条件的代理，按综合分降序输出（行内容原样保留）：
 
 1. **大陆可达**：`china.json` 判定 `reachable`，或行内已带历史 `-CN` 备注（与 `all_cn.txt` 同规则）
-2. **有信誉分**：存在于 `reputation.json`
+2. **信誉分 ≥ 80**：存在于 `reputation.json` 且 `score >= 80`
 3. **非高风险**：`reputation.json` 的 `risk != high`
 
 综合分公式（信誉为主）：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0。同分依次按延迟升序、key 升序。质量 JSON 缺失时优雅降级为空清单。

@@ -69,7 +69,7 @@ data/valid/countries/US/46.txt             # 该国出口为双栈（v4+v6）的
 data/valid/countries/US/cn.txt             # 该国大陆可达的代理
 data/valid/countries/US/cn4.txt            # 该国大陆可达且出口为 IPv4 的代理
 data/valid/countries/US/rep.txt            # 该国按信誉分降序（质量 CI 生成）
-data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 有信誉分 + 非高风险，综合分降序）
+data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 信誉≥80 + 非高风险，综合分降序）
 data/valid/countries/US/good.txt           # 该国综合最优（质量 CI 生成）
 data/valid/sets/hot/good.txt                # 热门集合综合最优（质量 CI 生成）
 data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录多件套）
@@ -160,7 +160,7 @@ data/valid/all_cn*.txt                   变体（cn、cn4、cn6、cn46、cn46_l
 data/valid/all_ipv4.txt                  出口为 IPv4 的代理清单（exit-family CI，双栈双入）
 data/valid/all_ipv6.txt                  出口为 IPv6 的代理清单（exit-family CI，双栈双入）
 data/valid/all_rep.txt                   信誉排行（按分数降序，质量 CI）
-data/valid/all_good.txt                  综合最优清单（CN 可达 + 有信誉分 + 非高风险，按综合分降序，质量 CI）
+data/valid/all_good.txt                  综合最优清单（CN 可达 + 信誉≥80 + 非高风险，按综合分降序，质量 CI）
 data/valid/all_cn.txt                    全量大陆可达清单（全量池，china-check CI）
 data/valid/countries/<CC>/               按国家分组（all.txt、ltd.txt、v4.txt、v6.txt、46.txt、cn.txt、rep.txt、good.txt 等）
 data/valid/ports/<port>.txt              按端口分组
