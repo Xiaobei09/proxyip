@@ -20,9 +20,10 @@
 
 - L1 启发式（零网络）：行备注已带 ``CF``（Cloudflare 边缘 tls 代理）记录 heuristic 源，
   但不自动判 reachable——CF 启发式仅作为 basis 标注，需其他源确认。
-- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 9 节点
-  （电信/联通/移动各 3，跨省等距采样），经 WebSocket 收结果，TCP 连通即判可达，
-  HTTP 响应另计应用层确认（level=http）。
+- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 18 节点
+  （电信/联通/移动各 6，池子 ~80/ISP，跨省等距采样），经 WebSocket 收结果，
+  TCP 连通即判可达；节点返回 http_code>0 时计应用层确认（level=http）——
+  TLS 端口上明文探测会收到 CF 的 400 响应，同样证明完整数据往返无 TCP 层干扰。
 - L2 itdog batch_tcping 补测（降级通道）：batch_http 对某目标失败/被限时，
   改用 `batch_tcping` 纯 TCPING 复测——节点池大得多（每 ISP ~75-88 个，
   默认取 6×3=18 节点），结果记为独立多节点源 ``itdog_tcping``。
