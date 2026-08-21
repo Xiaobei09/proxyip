@@ -1221,3 +1221,91 @@ class TestSpeedWarmupFlag(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 vp.main(["--help"])
         self.assertIn("--speed-warmup-bytes", buf.getvalue())
+
+
+class TestVerifiedStableOutputs(unittest.TestCase):
+    """all_verified / all_stable 根级清单与分组变体（含 cn4 等联动）。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="vp_vs_"))
+        self.orig = (vp.VALID_DIR, vp.CHINA_FILE, vp.INDEX_FILE, vp.SPEED_FILE)
+        vp.VALID_DIR = self.tmp
+        vp.CHINA_FILE = self.tmp / "china.json"
+        vp.INDEX_FILE = self.tmp / "index.json"
+        vp.SPEED_FILE = self.tmp / "speed.json"
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        vp.VALID_DIR, vp.CHINA_FILE, vp.INDEX_FILE, vp.SPEED_FILE = self.orig
+
+    def test_root_verified_stable_lists(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 200.0, None, None),
+            "3.0.0.1:443#JP": ("3.0.0.1", "443", "JP", "tls", 150.0, 0.8, None),
+        }
+        stats = vp.write_valid_outputs(
+            alive,
+            per_country_limit=0,
+            prev_keys={"1.0.0.1:443#US", "2.0.0.1:443#US"},
+        )
+        verified = (vp.VALID_DIR / "all_verified.txt").read_text().splitlines()
+        self.assertEqual(
+            [l.split("#")[0] for l in verified],
+            ["1.0.0.1:443", "3.0.0.1:443"],
+        )
+        stable = (vp.VALID_DIR / "all_stable.txt").read_text().splitlines()
+        self.assertEqual(
+            [l.split("#")[0] for l in stable],
+            ["1.0.0.1:443", "2.0.0.1:443"],
+        )
+        sets = stats["__sets__"]
+        self.assertEqual(sets["all_verified"], 2)
+        self.assertEqual(sets["all_stable"], 2)
+
+    def test_group_verified_stable_variants(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 200.0, None, None),
+        }
+        families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#US": "ipv4"}
+        vp.write_valid_outputs(
+            alive,
+            per_country_limit=0,
+            families=families,
+            cn_reachable={"1.0.0.1:443#US", "2.0.0.1:443#US"},
+            prev_keys={"2.0.0.1:443#US"},
+        )
+        us = vp.VALID_DIR / "countries" / "US"
+        self.assertTrue((us / "cn4.txt").exists())
+        v = (us / "cn4_verified.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in v], ["1.0.0.1:443"])
+        s = (us / "cn4_stable.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in s], ["2.0.0.1:443"])
+        root_v = (vp.VALID_DIR / "all_cn4_verified.txt").read_text().splitlines()
+        self.assertEqual(len(root_v), 1)
+        root_s = (vp.VALID_DIR / "all_cn4_stable.txt").read_text().splitlines()
+        self.assertEqual(len(root_s), 1)
+
+    def test_empty_variant_files_cleaned(self):
+        vp.VALID_DIR.mkdir(parents=True, exist_ok=True)
+        stale_v = vp.VALID_DIR / "all_verified.txt"
+        stale_s = vp.VALID_DIR / "all_stable.txt"
+        stale_v.write_text("stale\n")
+        stale_s.write_text("stale\n")
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, None, None),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=0, prev_keys=None)
+        self.assertFalse(stale_v.exists())
+        self.assertFalse(stale_s.exists())
+
+    def test_first_run_no_prev_keys_writes_no_stable(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.0, None),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=0, prev_keys=None)
+        self.assertFalse((vp.VALID_DIR / "all_stable.txt").exists())
+        self.assertTrue((vp.VALID_DIR / "all_verified.txt").exists())

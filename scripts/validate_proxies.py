@@ -24,7 +24,13 @@ Alongside ``all.txt`` each country/set directory also gets family and
 mainland-China group files: ``v4.txt`` (IPv4-only exit), ``v6.txt``
 (IPv6-only exit), ``46.txt`` (dual-stack exit), ``cn.txt`` (China-reachable),
 ``cn4.txt`` / ``cn6.txt`` / ``cn46.txt`` (China-reachable × family), plus a
-``*_ltd.txt`` speed-limited variant per group. Family comes from
+``*_ltd.txt`` speed-limited variant per group. Every list additionally gets
+a ``*_verified.txt`` variant (full-chain verified: the speed test succeeded,
+i.e. TLS + HTTP 2xx + real download all worked — filters half-dead proxies
+that handshake but serve no data) and a ``*_stable.txt`` variant (alive in
+both this and the previous run, via the previous ``index.json`` — counters
+fast churn); root-level ``all_verified.txt`` / ``all_stable.txt`` mirror
+this for the global list. Family comes from
 ``exit_family.json`` (falling back to ``-V4``/``-V6``/``-DS`` line notes);
 China reachability from the ``-CN`` line note or ``china.json``
 (``verdict == reachable``) as a fallback, matching ``all_cn.txt`` semantics.
@@ -703,11 +709,30 @@ def write_ext_check(alive: dict) -> None:
     write_text_if_changed(EXT_CHECK_FILE, content)
 
 
+def load_prev_alive_keys() -> set[str] | None:
+    """上一轮 ``index.json`` 的存活 key 集合；缺失/损坏返回 ``None``。
+
+    用于生成 ``all_stable.txt``（连续两轮存活交集，抗 churn）。必须在
+    ``write_index`` 覆盖本轮结果**之前**调用。
+    """
+    if not INDEX_FILE.exists():
+        return None
+    try:
+        data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    proxies = data.get("proxies", data) if isinstance(data, dict) else {}
+    if not isinstance(proxies, dict):
+        return None
+    return set(proxies)
+
+
 def write_valid_outputs(
     alive: dict[str, tuple[str, str, str, str, float, float | None, dict | None]],
     per_country_limit: int,
     families: dict | None = None,
     cn_reachable: set[str] | None = None,
+    prev_keys: set[str] | None = None,
 ) -> dict:
     VALID_DIR.mkdir(parents=True, exist_ok=True)
     if families is None:
@@ -754,6 +779,14 @@ def write_valid_outputs(
             return (0, -speed, 0.0)
         return (1, 0.0, alive[entry][4])
 
+    def is_verified(entry: str) -> bool:
+        """全链路验证：测速成功 = TLS + HTTP 2xx + 真实下载全部通过。"""
+        return alive[entry][5] is not None
+
+    def is_stable(entry: str) -> bool:
+        """连续两轮存活：上一轮 index.json 与本轮 alive 的交集（抗 churn）。"""
+        return bool(prev_keys) and entry in prev_keys
+
     def entry_groups(entry: str) -> set[str]:
         if entry in groups_cache:
             return groups_cache[entry]
@@ -774,26 +807,35 @@ def write_valid_outputs(
                 groups[g].append(e)
         return groups
 
+    def write_variant(directory: Path, name: str, entries: list[str]) -> None:
+        """写单个清单文件；空清单清理残留文件。"""
+        path = directory / f"{name}.txt"
+        if entries:
+            write_text_if_changed(
+                path, "\n".join(line(e) for e in entries) + "\n"
+            )
+        elif path.exists():
+            path.unlink()
+
     def write_group_files(
         directory: Path, grouped: dict[str, list[str]], ltd: dict[str, list[str]] | None = None
     ) -> None:
-        """写全量分组文件；``ltd`` 提供时写 ``*_ltd`` 分组，否则清理残留。"""
+        """写全量分组文件；``ltd`` 提供时写 ``*_ltd`` 分组，否则清理残留。
+
+        每个分组同时派生 ``<g>_verified``（全链路验证）与 ``<g>_stable``
+        （连续两轮存活）变体，空则清理残留。
+        """
         for g in GROUP_NAMES:
-            path = directory / f"{g}.txt"
-            if grouped[g]:
-                write_text_if_changed(
-                    path, "\n".join(line(e) for e in grouped[g]) + "\n"
-                )
-            elif path.exists():
-                path.unlink()
-            ltd_path = directory / f"{g}_ltd.txt"
-            entries = (ltd or {}).get(g, [])
-            if entries:
-                write_text_if_changed(
-                    ltd_path, "\n".join(line(e) for e in entries) + "\n"
-                )
-            elif ltd_path.exists():
-                ltd_path.unlink()
+            write_variant(directory, g, grouped[g])
+            write_variant(directory, f"{g}_ltd", (ltd or {}).get(g, []))
+            write_variant(
+                directory, f"{g}_verified",
+                [e for e in grouped[g] if is_verified(e)],
+            )
+            write_variant(
+                directory, f"{g}_stable",
+                [e for e in grouped[g] if is_stable(e)],
+            )
 
     by_country: dict[str, list[str]] = defaultdict(list)
     by_port: dict[str, list[str]] = defaultdict(list)
@@ -895,6 +937,18 @@ def write_valid_outputs(
 
     write_text_if_changed(VALID_DIR / "all.txt", "\n".join(line(e) for e in ordered) + "\n")
     set_counts["all"] = len(ordered)
+
+    # 全链路验证子集：测速成功 = TLS + HTTP 2xx + 真实下载全部通过，
+    # 比纯握手判活可靠（过滤"能握手不吐数据"的半死代理）。
+    verified = [e for e in ordered if is_verified(e)]
+    write_variant(VALID_DIR, "all_verified", verified)
+    set_counts["all_verified"] = len(verified)
+
+    # 连续两轮存活交集：上一轮 index.json 与本轮 alive 的交集，抗 churn。
+    stable = [e for e in ordered if is_stable(e)]
+    write_variant(VALID_DIR, "all_stable", stable)
+    set_counts["all_stable"] = len(stable)
+
     if per_country_limit > 0:
         ltd_all = sorted(
             [e for cc in country_ltd for e in country_ltd[cc]], key=ltd_key
@@ -906,14 +960,7 @@ def write_valid_outputs(
     root_grouped = group_map(ordered)
     for name in ROOT_GROUP_FILES:
         g = name[len("all_"):]
-        path = VALID_DIR / f"{name}.txt"
-        if root_grouped[g]:
-            write_text_if_changed(
-                path, "\n".join(line(e) for e in root_grouped[g]) + "\n"
-            )
-        elif path.exists():
-            path.unlink()
-        ltd_path = VALID_DIR / f"{name}_ltd.txt"
+        write_variant(VALID_DIR, name, root_grouped[g])
         ltd = []
         if per_country_limit > 0:
             ltd = sorted(
@@ -924,12 +971,15 @@ def write_valid_outputs(
                 ],
                 key=ltd_key,
             )
-        if ltd:
-            write_text_if_changed(
-                ltd_path, "\n".join(line(e) for e in ltd) + "\n"
-            )
-        elif ltd_path.exists():
-            ltd_path.unlink()
+        write_variant(VALID_DIR, f"{name}_ltd", ltd)
+        write_variant(
+            VALID_DIR, f"{name}_verified",
+            [e for e in root_grouped[g] if is_verified(e)],
+        )
+        write_variant(
+            VALID_DIR, f"{name}_stable",
+            [e for e in root_grouped[g] if is_stable(e)],
+        )
     write_index(ordered, alive)
     write_speed(alive)
     return {
@@ -1133,6 +1183,8 @@ async def run(args: argparse.Namespace) -> int:
     total = len(entries)
     print(f"Checking {total} proxies (timeout={args.timeout}s, workers={args.workers}) ...")
 
+    # 上一轮存活集合须在 write_index 覆盖 index.json 之前读取
+    prev_keys = load_prev_alive_keys()
     results, by_method, checked, elapsed, ext_stats = await check_entries(entries, args)
 
     dead = checked - len(results)
@@ -1151,7 +1203,7 @@ async def run(args: argparse.Namespace) -> int:
             f"dead={ext_stats['ext_check_dead']}"
         )
 
-    stats = write_valid_outputs(results, args.per_country_limit)
+    stats = write_valid_outputs(results, args.per_country_limit, prev_keys=prev_keys)
 
     if args.ext_check:
         write_ext_check(results)
