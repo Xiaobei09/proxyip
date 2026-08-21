@@ -23,6 +23,9 @@
 - L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 9 节点
   （电信/联通/移动各 3，跨省等距采样），经 WebSocket 收结果，TCP 连通即判可达，
   HTTP 响应另计应用层确认（level=http）。
+- L2 itdog batch_tcping 补测（降级通道）：batch_http 对某目标失败/被限时，
+  改用 `batch_tcping` 纯 TCPING 复测——节点池大得多（每 ISP ~75-88 个，
+  默认取 6×3=18 节点），结果记为独立多节点源 ``itdog_tcping``。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+ `xxapi.cn`
   （北京节点，免 key）。
 - L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
@@ -86,6 +89,8 @@ from china_itdog import (
     ITDOG_NODES_PER_ISP,
     ITDOG_PACING,
     ITDOG_TASK_TIMEOUT,
+    ITDOG_TCPING_NODES_PER_ISP,
+    ITDOG_TCPING_URL,
     itdog_batch_run,
     itdog_md5_16,
     itdog_parse_nodes,
@@ -508,10 +513,9 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
 
     - 至少 2 个独立方法确认 → reachable
     - 仅 1 个方法确认（非多节点源）→ uncertain（单点不可靠）
-    - 多节点源（ping.pe / itdog）单独确认 → reachable（已有多节点交叉）
+    - 多节点源（ping.pe / itdog / itdog_tcping / tcpping）单独确认 → reachable（已有多节点交叉）
     - check_host 与 xxapi 均失败 → unreachable
-    - 多节点源（ping.pe / itdog）失败且所有单节点源也失败 → unreachable
-    - itdog 失败且所有单节点源也失败 → unreachable
+    - 多节点源失败且所有单节点源也失败 → unreachable
     - 有确认源但也有失败源（冲突）→ uncertain（保守）
     - 全部为错误/跳过 → skipped（不误判）
     - CF 启发式不再自动判可达，仅作为 basis 标注
@@ -533,7 +537,7 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     else:
         level = None
 
-    multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping")]
+    multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping", "itdog_tcping")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
 
     if len(multi_ok) >= 1:
@@ -553,9 +557,17 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     if "check_host" in fail_sources and "xxapi" in fail_sources:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
-    if "pingpe" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "itdog")):
+    if "pingpe" in fail_sources and any(
+        s in fail_sources for s in ("check_host", "xxapi", "itdog", "itdog_tcping")
+    ):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
-    if "itdog" in fail_sources and any(s in fail_sources for s in ("check_host", "xxapi", "pingpe")):
+    if "itdog" in fail_sources and any(
+        s in fail_sources for s in ("check_host", "xxapi", "pingpe")
+    ):
+        return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
+    if "itdog_tcping" in fail_sources and any(
+        s in fail_sources for s in ("check_host", "xxapi", "pingpe")
+    ):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
         return {"verdict": "uncertain", "basis": fail_sources, "ms": None, "level": None}
@@ -769,6 +781,26 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     if not args.skip_itdog:
         for key, res in itdog_batch_run(sample, args).items():
             entries.setdefault(key, {})["itdog"] = res
+        # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
+        if not getattr(args, "skip_itdog_tcping", False):
+            pending = [
+                item for item in sample
+                if entries.get(item[1], {}).get("itdog", {}).get("status")
+                in ("error", "rate_limited")
+            ]
+            if pending:
+                print(
+                    f"itdog_tcping fallback: {len(pending)} targets",
+                    file=sys.stderr,
+                )
+                for key, res in itdog_batch_run(
+                    pending,
+                    args,
+                    page_url=ITDOG_TCPING_URL,
+                    nodes_per_isp=getattr(args, "itdog_tcping_nodes", 0)
+                    or ITDOG_TCPING_NODES_PER_ISP,
+                ).items():
+                    entries.setdefault(key, {})["itdog_tcping"] = res
 
     for item in sample[: args.pingpe_limit]:
         _, key, ip, port, _ = item
@@ -829,6 +861,10 @@ def main(argv=None) -> int:
                         help=f"itdog 单任务收结果上限秒（默认 {ITDOG_TASK_TIMEOUT}）")
     parser.add_argument("--skip-itdog", action="store_true",
                         help="跳过 itdog 批量探活（快速冒烟用）")
+    parser.add_argument("--skip-itdog-tcping", action="store_true",
+                        help="跳过 batch_tcping 补测（batch_http 失败时的大节点池降级）")
+    parser.add_argument("--itdog-tcping-nodes", type=int, default=ITDOG_TCPING_NODES_PER_ISP,
+                        help=f"batch_tcping 每运营商取 N 节点（默认 {ITDOG_TCPING_NODES_PER_ISP} → 共 {ITDOG_TCPING_NODES_PER_ISP * 3}）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只输出计划，不做任何网络请求与写盘")
     parser.add_argument("--skip-pingpe", action="store_true",

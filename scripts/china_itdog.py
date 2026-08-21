@@ -23,10 +23,12 @@ from concurrent.futures import ThreadPoolExecutor
 from common import UA, is_cf_heuristic, request_follow
 
 ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
+ITDOG_TCPING_URL = "https://www.itdog.cn/batch_tcping/"
 ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
 ITDOG_TOKEN = "What this is is no longer important."
 ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
 ITDOG_NODES_PER_ISP = 3  # 电信/联通/移动各取 N 节点（默认 3 → 共 9，跨省等距采样）
+ITDOG_TCPING_NODES_PER_ISP = 6  # batch_tcping 节点池大（每 ISP ~75-88），取 6 → 共 18
 ITDOG_CONCURRENCY = 8
 ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
 ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
@@ -55,12 +57,12 @@ def itdog_parse_nodes(html: str, per_isp: int) -> list[str]:
     return ids
 
 
-def itdog_fetch_nodes(per_isp: int) -> list[str]:
+def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> list[str]:
     """拉取当前节点列表（节点 id 会轮换，必须每次运行现取）。"""
     hdrs = {"User-Agent": UA, "Referer": "https://www.itdog.cn/"}
     for _ in range(2):
         try:
-            _, _, body = request_follow(ITDOG_BATCH_URL, hdrs, 20)
+            _, _, body = request_follow(page_url, hdrs, 20)
             ids = itdog_parse_nodes(body.decode("utf-8", "replace"), per_isp)
             if ids:
                 return ids
@@ -80,7 +82,9 @@ def itdog_parse_submit(html: str) -> tuple[str | None, str]:
     return None, "no task_id"
 
 
-def itdog_submit_task(targets: list[str], node_ids: list[str]) -> tuple[str | None, str]:
+def itdog_submit_task(
+    targets: list[str], node_ids: list[str], page_url: str = ITDOG_BATCH_URL
+) -> tuple[str | None, str]:
     """POST 一个批量任务（host 以 CRLF 连接，itdog 对 LF 会拒绝）。"""
     data = urllib.parse.urlencode({
         "host": "\r\n".join(targets),
@@ -92,11 +96,11 @@ def itdog_submit_task(targets: list[str], node_ids: list[str]) -> tuple[str | No
     hdrs = {
         "User-Agent": UA,
         "Origin": "https://www.itdog.cn",
-        "Referer": "https://www.itdog.cn/batch_http/",
+        "Referer": page_url,
         "Content-Type": "application/x-www-form-urlencoded",
     }
     try:
-        status, _, resp = request_follow(ITDOG_BATCH_URL, hdrs, 20, method="POST", data=data)
+        status, _, resp = request_follow(page_url, hdrs, 20, method="POST", data=data)
     except urllib.error.HTTPError as e:
         return None, f"http {e.code}"
     except Exception as e:
@@ -291,6 +295,16 @@ def itdog_rec_ok(rec: dict) -> tuple[bool | None, float | None, str | None]:
     """
     if rec.get("type") == "node_error":
         return None, None, None
+    # batch_tcping 记录：``result`` 为 TCP 耗时毫秒字符串，"-1"/无效 = 失败，
+    # 无 http_code（纯 TCPING，level 恒为 "tcp"）
+    if "result" in rec and "connect_time" not in rec:
+        try:
+            ms = float(rec.get("result"))
+        except (TypeError, ValueError):
+            return False, None, None
+        if ms > 0:
+            return True, ms, "tcp"
+        return False, None, None
     try:
         ct = float(rec.get("connect_time") or 0)
     except (TypeError, ValueError):
@@ -333,13 +347,18 @@ def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
     return out
 
 
-def itdog_task(batch: list[tuple[str, str]], node_ids: list[str], args) -> dict:
+def itdog_task(
+    batch: list[tuple[str, str]],
+    node_ids: list[str],
+    args,
+    page_url: str = ITDOG_BATCH_URL,
+) -> dict:
     """单批（≤5 目标）：提交 → 收记录 → 聚合；失败重试并降级。"""
     keys = [k for k, _ in batch]
     target_strs = [t for _, t in batch]
     last_err = ""
     for attempt in range(3):
-        task_id, err = itdog_submit_task(target_strs, node_ids)
+        task_id, err = itdog_submit_task(target_strs, node_ids, page_url)
         if task_id:
             expected = len(batch) * len(node_ids)
             records = itdog_collect(task_id, expected, args.itdog_timeout)
@@ -369,8 +388,17 @@ def _pace(interval: float) -> None:
         time.sleep(wait)
 
 
-def itdog_batch_run(sample, args) -> dict:
-    """对非 CF 启发式目标分批跑 itdog，返回 ``{key: source_result}``。"""
+def itdog_batch_run(
+    sample,
+    args,
+    page_url: str = ITDOG_BATCH_URL,
+    nodes_per_isp: int | None = None,
+) -> dict:
+    """对非 CF 启发式目标分批跑 itdog，返回 ``{key: source_result}``。
+
+    ``page_url``/``nodes_per_isp`` 用于 batch_tcping 降级通道（更大节点池，
+    纯 TCPING）；缺省走 batch_http。
+    """
     targets: list[tuple[str, str]] = []
     seen: set = set()
     for item in sample:
@@ -381,7 +409,7 @@ def itdog_batch_run(sample, args) -> dict:
         targets.append((key, f"{ip}:{port}"))
     if not targets:
         return {}
-    node_ids = itdog_fetch_nodes(args.itdog_nodes)
+    node_ids = itdog_fetch_nodes(nodes_per_isp or args.itdog_nodes, page_url)
     if not node_ids:
         return {key: {"status": "error", "ok": False, "ms": None, "error": "no itdog nodes"}
                 for key, _ in targets}
@@ -407,7 +435,7 @@ def itdog_batch_run(sample, args) -> dict:
         if tripped:
             return {key: {"status": "error", "ok": False, "ms": None, "error": "itdog breaker"}
                     for key, _ in batch}
-        res = itdog_task(batch, node_ids, args)
+        res = itdog_task(batch, node_ids, args, page_url)
         mark(any(r["status"] in ("ok", "fail") for r in res.values()))
         return res
 
