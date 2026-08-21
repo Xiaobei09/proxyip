@@ -36,6 +36,25 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(ef.classify_family(None, None), "unknown")
 
 
+class TestExtractExitIp(unittest.TestCase):
+    def test_trace_format(self):
+        self.assertEqual(ef._extract_exit_ip(b"fl=1\nip=1.2.3.4\n"), "1.2.3.4")
+
+    def test_plain_ip_v4(self):
+        self.assertEqual(ef._extract_exit_ip(V4_IP.encode() + b"\n"), V4_IP)
+
+    def test_plain_ip_v6(self):
+        self.assertEqual(ef._extract_exit_ip((V6_IP + "\n").encode()), V6_IP)
+
+    def test_garbage(self):
+        self.assertIsNone(ef._extract_exit_ip(b"<html>blocked</html>"))
+        self.assertIsNone(ef._extract_exit_ip(b""))
+
+    def test_single_family_targets(self):
+        self.assertEqual(ef.EXIT_V4_HOST, "ipv4.icanhazip.com")
+        self.assertEqual(ef.EXIT_V6_HOST, "ipv6.icanhazip.com")
+
+
 class TestTlsExit(unittest.TestCase):
     def test_v6_exit(self):
         with mock.patch.object(ef, "request_tls_sni", return_value=(200, {}, f"ip={V6_IP}\nloc=AT\n".encode())):
@@ -109,6 +128,20 @@ class TestCheckOne(unittest.TestCase):
             key, res = ef.check_one(item, {}, 10)
         self.assertEqual(res["family"], "ipv4")
         self.assertEqual(res["exit_v4"], V4_IP)
+
+    def test_probe_targets_are_single_family(self):
+        """探测目标必须是固定家族回显服务，且不强制入口 socket 家族。"""
+        with mock.patch.object(
+            ef, "request_tls_sni",
+            side_effect=[(200, {}, V4_IP.encode()), (None, {}, b"")],
+        ) as m:
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            ef.check_one(item, {}, 10)
+        calls = m.call_args_list
+        self.assertEqual(calls[0].args[2], "ipv4.icanhazip.com")
+        self.assertEqual(calls[1].args[2], "ipv6.icanhazip.com")
+        for c in calls[:2]:
+            self.assertIsNone(c.args[5])  # 不强制入口家族
 
 
 class TestNotes(unittest.TestCase):

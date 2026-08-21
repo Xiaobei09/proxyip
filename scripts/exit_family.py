@@ -11,10 +11,14 @@
 并在 ``all.txt`` / ``all_ltd.txt`` 对应行追加 ``-V4`` / ``-V6`` / ``-DS`` 备注
 （幂等，与 ``quality_check`` 已有的 ``DS``/``V6`` token 约定一致）。
 
-所有代理使用 TLS（Cloudflare 边缘）方法，逐条做 **双栈探测**：
-分别以 ``socket.AF_INET``（IPv4）和 ``socket.AF_INET6``（IPv6）各发起一次
-TLS + SNI → ``cloudflare.com/cdn-cgi/trace``，取回显 ``ip=`` 判定出口家族。
-若两次均失败，尝试通用（不限地址族）连接兜底。
+所有代理使用 TLS（Cloudflare 边缘）方法，逐条做 **双栈出口探测**：
+分别请求仅 IPv4（``ipv4.icanhazip.com``，仅 A 记录）与仅 IPv6
+（``ipv6.icanhazip.com``，仅 AAAA 记录）的回显服务——走得通即证明代理
+具备对应家族的**出口能力**，两者皆通判 ``dual``。回显为纯 IP 文本；
+若两者均失败，尝试通用目标 ``cloudflare.com/cdn-cgi/trace`` 兜底。
+注意：入口 socket 家族（AF_INET/AF_INET6）无法反映出口家族——它只约束
+客户端→代理一跳，代理→目标的家族由代理端解析决定（CF 边缘代理尤其如此，
+出口由 Worker fetch() 决定、与入口无关）。
 
 家族判定：仅 v4 → ``ipv4``；仅 v6 → ``ipv6``；双通 → ``dual``；探测全失败 →
 ``unknown``（不入任何分离清单）。纯标准库，ThreadPoolExecutor 并发。
@@ -62,6 +66,14 @@ TIMEOUT_DEFAULT = 10
 
 TRACE_HOST = "cloudflare.com"
 TRACE_PATH = "/cdn-cgi/trace"
+
+# 双栈出口探测目标：固定家族的 IP 回显服务（仅 A / 仅 AAAA 记录）。
+# 代理能连通对应目标 = 具备该家族的出口能力；两者皆通 → dual。
+# 注意：不能靠入口 socket 家族（AF_INET/AF_INET6）判断——那只约束客户端→代理
+# 这一跳，代理→目标的出口家族由代理端对同一目标的解析决定，天然单一家族。
+EXIT_V4_HOST = "ipv4.icanhazip.com"   # 仅 A 记录
+EXIT_V6_HOST = "ipv6.icanhazip.com"   # 仅 AAAA 记录
+EXIT_ECHO_PATH = "/"                  # 返回纯 IP 文本（非 CF trace 格式）
 
 FAMILY_TOKENS = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}
 
@@ -194,14 +206,24 @@ def tls_exit(ip: str, port: str, timeout: float) -> dict:
     return {"status": "no_ip", "family": "unknown", "ip": None}
 
 
+def _extract_exit_ip(body: bytes) -> str | None:
+    """从响应体提取出口 IP：CF trace ``ip=`` 优先，纯 IP 文本回退。"""
+    ip = parse_trace(body).get("ip") or ""
+    if ip:
+        return ip
+    text = body.decode("utf-8", "replace").strip()
+    if text and "\n" not in text and len(text) <= 45 and ("." in text or ":" in text):
+        return text
+    return None
+
+
 def _probe_one(ip: str, port: str, host: str, path: str, timeout: float,
                family: int | None = None) -> str | None:
-    """单次探测：返回退出 IP 字符串，失败返回 ``None``。"""
+    """单次探测：返回出口 IP 字符串，失败返回 ``None``。"""
     status, _headers, body = request_tls_sni(ip, port, host, path, timeout, family)
     if status != 200 or not body:
         return None
-    exit_ip = parse_trace(body).get("ip") or ""
-    return exit_ip or None
+    return _extract_exit_ip(body)
 
 
 def check_one(item, methods: dict, timeout: float) -> dict:
@@ -216,9 +238,9 @@ def check_one(item, methods: dict, timeout: float) -> dict:
         "method": method,
         "ts": ts,
     }
-    # --- dual-stack probe: try v4 and v6 separately ---
-    exit_v4 = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout, socket.AF_INET)
-    exit_v6 = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout, socket.AF_INET6)
+    # --- 双栈出口探测：分别请求仅 v4 / 仅 v6 目标（入口家族无关） ---
+    exit_v4 = _probe_one(ip, port, EXIT_V4_HOST, EXIT_ECHO_PATH, timeout)
+    exit_v6 = _probe_one(ip, port, EXIT_V6_HOST, EXIT_ECHO_PATH, timeout)
     # Fallback: if neither specific probe succeeded, try generic
     if not exit_v4 and not exit_v6:
         generic = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout)

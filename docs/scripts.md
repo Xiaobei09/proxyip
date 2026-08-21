@@ -158,7 +158,7 @@
 
 实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
 
-- 分别以 `socket.AF_INET`（IPv4）和 `socket.AF_INET6`（IPv6）各发起一次 TLS + SNI → `cloudflare.com/cdn-cgi/trace`，取回显 `ip=` 判定出口家族；两次均失败则尝试通用连接兜底
+- 分别请求仅 IPv4（`ipv4.icanhazip.com`，仅 A 记录）与仅 IPv6（`ipv6.icanhazip.com`，仅 AAAA）的回显服务（纯 IP 文本），走得通即具备对应家族出口能力；两者均失败则尝试 `cloudflare.com/cdn-cgi/trace` 兜底。注意：CF 边缘代理的出口由 Worker fetch() 决定、与入口/目标主机名无关，故 CF 类代理 `dual` 恒为 0 属架构固有行为
 
 家族判定：仅 v4 → `ipv4`；仅 v6 → `ipv6`；双通 → `dual`；探测全失败 → `unknown`。结果写入：
 
