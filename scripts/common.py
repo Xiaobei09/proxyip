@@ -338,6 +338,8 @@ def annotate_files(
     from annotate_classify import fill_and_classify
 
     total_changed = 0
+    # 同一线会出现在 root/countries/sets/ports/ltd 多个视图，缓存去重
+    cache: dict[str, str] = {}
     for path in files:
         text = path.read_text(encoding="utf-8")
         out_lines = []
@@ -345,10 +347,12 @@ def annotate_files(
         for line in text.splitlines():
             if not line:
                 continue
-            new_line = fill_and_classify(
-                line, china_set, family_map, streaming_map, rep_map,
-                ip_type_map, exit_map,
-            )
+            if line not in cache:
+                cache[line] = fill_and_classify(
+                    line, china_set, family_map, streaming_map, rep_map,
+                    ip_type_map, exit_map,
+                )
+            new_line = cache[line]
             if new_line != line:
                 changed += 1
             out_lines.append(new_line)
