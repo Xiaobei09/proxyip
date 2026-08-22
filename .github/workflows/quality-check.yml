@@ -76,6 +76,11 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/build_good.py
 
+      - name: Audit entry CC labels
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: python scripts/audit_entry_cc.py --timeout 20
+
       - name: Generate stats and chart
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/generate_stats.py
