@@ -209,7 +209,9 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 写 `china.json` 前读取上一轮结果：
 
-- **streak**：per-key 连续可达轮数（reachable 且上轮也 reachable → 累加；否则清零/置 1）
+- **streak**：per-key 连续可达轮数（reachable 且上轮也 reachable 且
+  观测间隔 ≤3h → 累加；否则清零/置 1）。`last_ok_ts` 记录最近可达时间，
+  用于时间窗判定——即使 china.json 被并发提交短暂回滚，连续计数不丢
 - **uncertain 优先复检**：上一轮 uncertain 的键在本轮采样中稳定排序置顶
   （limit 截断时优先覆盖）
 

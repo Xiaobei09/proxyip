@@ -22,6 +22,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Mark job start
+        run: touch .jobstart
+
       - name: Skip if superseded or no data change
         id: gate
         run: |
@@ -72,32 +75,4 @@ jobs:
 
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
-            ':(exclude)data/output' ':(exclude)data/diff'
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          git commit -m "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          for i in 1 2 3 4 5; do
-            if git push; then
-              echo "Pushed successfully"
-              exit 0
-            fi
-            echo "Push attempt $i failed, reapplying local data on origin/main..."
-            git fetch origin main || { sleep 5; continue; }
-            git reset --mixed origin/main
-            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/download' \
-              ':(exclude)data/output' ':(exclude)data/diff'
-            if git diff --cached --quiet; then
-              echo "No changes to push"
-              exit 0
-            fi
-            git commit -m "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          done
-          echo "Push failed after 5 attempts"
-          exit 1
+        run: bash .github/scripts/commit_data.sh "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

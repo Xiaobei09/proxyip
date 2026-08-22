@@ -631,13 +631,25 @@ def annotate_cnh(line: str) -> str:
     return merge_note_tokens(line, "CNH")
 
 
-def apply_streak(entries: dict, prev_entries: dict) -> None:
-    """就地写入连续可达轮数 ``streak``。
+STREAK_GAP_TOLERANCE_S = 3 * 3600  # 连续轮时间窗：基线观测早于此视为中断
 
-    reachable 且上一轮也 reachable → 上一轮 streak+1（上轮值缺失按 1 计，
-    因其确实可达）；仅本轮 reachable → 1；其余 → 0。用于生成
-    ``all_cn_stable.txt``，对抗单轮误判与快速 churn。
+
+def apply_streak(
+    entries: dict, prev_entries: dict, now: float | None = None
+) -> None:
+    """就地写入连续可达轮数 ``streak`` 与最近可达时间 ``last_ok_ts``。
+
+    reachable 且上一轮也 reachable、且上一轮观测距今 ≤
+    STREAK_GAP_TOLERANCE_S → 上一轮 streak+1；否则从 1 起算。其余 verdict
+    清零并清除 last_ok_ts。
+
+    时间窗判定用于对抗 china.json 被并发工作流短暂回滚（lost-update）：
+    基线落后数小时时不再误把连续可达清零。无 last_ok_ts 的旧格式按紧邻
+    一轮处理，保持向后兼容。
     """
+    if now is None:
+        now = time.time()
+    now = int(now)
     for key, entry in entries.items():
         if not isinstance(entry, dict):
             continue
@@ -648,11 +660,20 @@ def apply_streak(entries: dict, prev_entries: dict) -> None:
         if entry.get("verdict") == "reachable":
             base = 0
             if prev_reachable:
-                ps = prev.get("streak")
-                base = ps if isinstance(ps, int) and ps > 0 else 1
+                ts = prev.get("last_ok_ts")
+                fresh = (
+                    not isinstance(ts, (int, float))
+                    or ts <= 0
+                    or (now - ts) <= STREAK_GAP_TOLERANCE_S
+                )
+                if fresh:
+                    ps = prev.get("streak")
+                    base = ps if isinstance(ps, int) and ps > 0 else 1
             entry["streak"] = base + 1
+            entry["last_ok_ts"] = now
         else:
             entry["streak"] = 0
+            entry.pop("last_ok_ts", None)
 
 
 def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
