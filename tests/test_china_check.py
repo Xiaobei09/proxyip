@@ -643,6 +643,32 @@ class TestApplyStreak(unittest.TestCase):
         cc.apply_streak(entries, {})
         self.assertEqual(entries["a"]["streak"], 1)
 
+    def test_stale_baseline_resets(self):
+        """基线观测早于时间窗 → 连续计数清零重算（防回滚误判）。"""
+        now = 1_800_000_000
+        entries = {"a": {"verdict": "reachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": 9,
+                      "last_ok_ts": now - cc.STREAK_GAP_TOLERANCE_S - 60}}
+        cc.apply_streak(entries, prev, now=now)
+        self.assertEqual(entries["a"]["streak"], 1)
+        self.assertEqual(entries["a"]["last_ok_ts"], now)
+
+    def test_fresh_baseline_accumulates_with_ts(self):
+        now = 1_800_000_000
+        entries = {"a": {"verdict": "reachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": 3,
+                      "last_ok_ts": now - 3600}}
+        cc.apply_streak(entries, prev, now=now)
+        self.assertEqual(entries["a"]["streak"], 4)
+
+    def test_unreachable_clears_last_ok_ts(self):
+        entries = {"a": {"verdict": "unreachable", "last_ok_ts": 1_234}}
+        prev = {"a": {"verdict": "reachable", "streak": 2,
+                      "last_ok_ts": 1_200}}
+        cc.apply_streak(entries, prev, now=1_500)
+        self.assertEqual(entries["a"]["streak"], 0)
+        self.assertNotIn("last_ok_ts", entries["a"])
+
 
 class TestAnnotateCnh(unittest.TestCase):
     def test_appends_token(self):

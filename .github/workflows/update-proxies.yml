@@ -24,6 +24,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Mark job start
+        run: touch .jobstart
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -56,45 +59,5 @@ jobs:
           ls data/diff/*.json 2>/dev/null | wc -l
 
       - name: Commit changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -Af data/ ':(exclude)data/raw' ':(exclude)data/diff' \
-            ':(exclude)data/quality/quality_meta.json' \
-            ':(exclude)data/quality/china.json' \
-            ':(exclude)data/quality/exit_family.json' \
-            ':(exclude)data/quality/reputation.json' \
-            ':(exclude)data/quality/streaming.json'
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          git commit -m "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          for i in 1 2 3 4 5; do
-            if git push; then
-              echo "Pushed successfully"
-              exit 0
-            fi
-            echo "Push attempt $i failed, reapplying local data on origin/main..."
-            git fetch origin main || { sleep 5; continue; }
-            # data/ 每次全量重生成，last-writer-wins 安全：reset --mixed 把 HEAD 和
-            # index 对齐到最新远端（工作区保留本次生成的数据），再重新 stage + commit
-            # 为直接子提交，天然避免 -X theirs 无法解决的 modify/delete 等一切冲突。
-            # 必须用 --mixed（而非 --soft）：--soft 只动 HEAD 不动 index，陈旧 checkout
-            # 的 index 会连非 data 文件一起带进数据提交，回退他人已推送的代码改动。
-            git reset --mixed origin/main
-            git add -Af data/ ':(exclude)data/raw' ':(exclude)data/diff' \
-              ':(exclude)data/quality/quality_meta.json' \
-              ':(exclude)data/quality/china.json' \
-              ':(exclude)data/quality/exit_family.json' \
-              ':(exclude)data/quality/reputation.json' \
-              ':(exclude)data/quality/streaming.json'
-            if git diff --cached --quiet; then
-              echo "No changes to push"
-              exit 0
-            fi
-            git commit -m "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          done
-          echo "Push failed after 5 attempts"
-          exit 1
+        if: steps.gate.outputs.skip != 'true'
+        run: bash .github/scripts/commit_data.sh "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
