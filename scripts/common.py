@@ -514,12 +514,37 @@ def normalize_note(line: str) -> str:
     return _rebuild_note(line)
 
 
+def _is_known_note_token(s: str) -> bool:
+    """是否任一受管 token（用于空格复合段的拆分判定）。"""
+    return bool(
+        _NOTE_LAT_RE.match(s) or _NOTE_SPEED_RE.match(s)
+        or _NOTE_STREAMING_RE.match(s) or s in _NOTE_TYPE_TOKENS
+        or s == "CF" or s in _NOTE_TIER_TOKENS or s in _NOTE_FAMILY_TOKENS
+        or s in ("CN", "CNH") or _NOTE_SCORE_RE.match(s)
+    )
+
+
+def _flatten_segs(segs: list[str]) -> list[str]:
+    """拆开旧版空格分隔的流媒体复合段（如 ``D+ MX GPT``）。
+
+    仅当段内所有空白分隔的子 token 均为受管 token 时才展开，
+    否则原样保留（避免误碎未知段）。
+    """
+    flat: list[str] = []
+    for s in segs:
+        if (" " in s) and all(_is_known_note_token(p) for p in s.split()):
+            flat.extend(p for p in s.split() if p)
+        else:
+            flat.append(s)
+    return flat
+
+
 def _parse_note_segs(note: str) -> dict | None:
     segs = [s for s in note.split("-") if s]
     if not segs:
         return None
     lead = segs[0]
-    segs = segs[1:]
+    segs = _flatten_segs(segs[1:])
     b: dict = {
         "lead": lead, "lat": None, "spd": None, "stream": [], "typ": None,
         "cf": False, "tier": None, "fam": None, "cn": False, "cnh": False,
