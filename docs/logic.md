@@ -273,18 +273,28 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 ### 7.2 出口国家标记的四数据源
 
-`→CC` 由统一构建器 `common.build_exit_cc_map` 四源汇聚（annotate_classify
+`→CC` 由统一构建器 `common.build_exit_cc_map` 多源汇聚（annotate_classify
 与 reorg_country 共用），优先级从高到低：
 
 1. `external_check.json` —— 外部探测接口直接回显的出口地理；
-2. `upstream_meta.json` —— 自有 CF Worker 观测到的代理出口
-   （`clientIp` 所在国家，直连证据）；
+2. `upstream_meta.json` —— 自有 CF Worker 观测到的代理出口国。其键为
+   裸出口 IP，经 `common.build_exit_ip_map`（external 回显 `exit_geo.ip`
+   > exit_family 实测 `exit_v4`/`exit_v6`）解析到行键后命中；
 3. `streaming.json` —— 经代理观测的服务解锁国；openai 为 CF trace
    `loc`（最接近真实出口），其余服务按序兜底。覆盖面最大（98%+）；
 4. `ipinfo.json` —— 出口 IP 的 ip-api 地理。历史轮次可能是入口 IP 的
    地理，仅作末位兜底。
 
 已有 `→CC` 但与新观测不同视为陈旧出口（出口会漂移），直接替换。
+
+### 7.2.1 入口/出口冲突处理
+
+- **入口 CC**（行内 `#<emoji><CC>`）：订阅源自带标签，全链路不改写——
+  它是溯源标识，也是全 pipeline 键的组成部分（`line_to_key` 含 `#CC`），
+  改写会撕裂所有 quality JSON 的历史对应。准确性无保证，以出口实测为准。
+- **出入口不一致**：入口标注保留原样，行内追加实测出口 `→OC`，
+  `countries/` 下目录迁移到出口国；sets/ports 混国文件只标注不迁移。
+- **多源出口观测互相冲突**：按上述优先级取高者。
 
 ### 7.3 行格式示例
 

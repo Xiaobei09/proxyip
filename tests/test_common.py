@@ -97,5 +97,55 @@ class TestMergeNoteTokens(unittest.TestCase):
         self.assertEqual(once.count("V6"), 1)
 
 
+class TestBuildExitCcMap(unittest.TestCase):
+    def test_upstream_by_exit_ip_resolved(self):
+        """upstream_meta 裸出口 IP 键经 build_exit_ip_map 解析到行键。"""
+        from common import build_exit_cc_map, build_exit_ip_map
+        external = {"proxies": {
+            "a:443#US": {"exit_geo": {"ip": "1.1.1.1", "country": None}},
+        }}
+        family = {"proxies": {
+            "b:443#US": {"exit_v4": "2.2.2.2"},
+            "c:443#US": {"exit_v6": "2606:4700::1"},
+        }}
+        ips = build_exit_ip_map(external, family)
+        self.assertEqual(ips, {
+            "a:443#US": "1.1.1.1",
+            "b:443#US": "2.2.2.2",
+            "c:443#US": "2606:4700::1",
+        })
+        upstream = {"proxies": {
+            "1.1.1.1": {"country": "sg"},       # 小写规范化
+            "2.2.2.2": {"country": "HK"},
+        }}
+        streaming = {"proxies": {
+            "a:443#US": {"openai": {"status": "ok", "region": "JP"}},
+            "b:443#US": {"openai": {"status": "ok", "region": "JP"}},
+        }}
+        m = build_exit_cc_map({}, external, upstream, streaming, family)
+        # upstream（第 2 层）胜过 streaming（第 3 层）
+        self.assertEqual(m["a:443#US"], "SG")
+        self.assertEqual(m["b:443#US"], "HK")
+        # c 无 upstream 观测 → 不受影响，且不产生幽灵键
+        self.assertNotIn("c:443#US", m)
+
+    def test_upstream_line_key_compat(self):
+        """upstream_meta 若直接为行键则原样命中。"""
+        from common import build_exit_cc_map
+        m = build_exit_cc_map(
+            {}, {}, {"proxies": {"x:443#US": {"country": "FR"}}}, {}
+        )
+        self.assertEqual(m, {"x:443#US": "FR"})
+
+    def test_external_beats_upstream(self):
+        from common import build_exit_cc_map
+        external = {"proxies": {
+            "a:443#US": {"exit_geo": {"ip": "1.1.1.1", "country": "DE"}},
+        }}
+        upstream = {"proxies": {"1.1.1.1": {"country": "SG"}}}
+        m = build_exit_cc_map({}, external, upstream, {}, {})
+        self.assertEqual(m["a:443#US"], "DE")
+
+
 if __name__ == "__main__":
     unittest.main()

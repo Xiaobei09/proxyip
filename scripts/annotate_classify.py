@@ -104,9 +104,10 @@ def _build_exit_map(
     external_check: dict | None = None,
     upstream_meta: dict | None = None,
     streaming: dict | None = None,
+    family_data: dict | None = None,
 ) -> dict[str, str]:
     """多源出口国汇聚（见 common.build_exit_cc_map 的优先级文档）。"""
-    return build_exit_cc_map(ipinfo, external_check, upstream_meta, streaming)
+    return build_exit_cc_map(ipinfo, external_check, upstream_meta, streaming, family_data)
 
 
 def fill_and_classify(
@@ -211,7 +212,9 @@ def main(argv: list[str] | None = None) -> int:
     streaming_map = _build_streaming_map(streaming_data)
     rep_map = _build_rep_map(rep_data)
     ip_type_map = _build_ip_type_map(ipinfo)
-    exit_map = _build_exit_map(ipinfo, external_check, upstream_meta, streaming_data)
+    exit_map = _build_exit_map(
+        ipinfo, external_check, upstream_meta, streaming_data, family_data
+    )
 
     print(
         f"Maps: cn={len(china_set)} family={len(family_map)} "

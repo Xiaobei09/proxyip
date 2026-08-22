@@ -399,6 +399,30 @@ def upsert_exit_region(line: str, exit_region: str) -> str:
 _EXIT_STREAMING_ORDER = ("openai", "netflix", "disney", "max", "prime", "youtube")
 
 
+def build_exit_ip_map(
+    external_check: dict | None = None,
+    family_data: dict | None = None,
+) -> dict[str, str]:
+    """``{行键: 出口 IP}``，与 quality_check.resolve_exit_ips 同优先级：
+
+    外部探测回显（``external_check.exit_geo.ip``）> exit_family 实测
+    （``exit_v4``/``exit_v6``）。两者皆无则不含该键。
+    """
+    result: dict[str, str] = {}
+    for key, info in (external_check or {}).get("proxies", {}).items():
+        ip = (info.get("exit_geo") if isinstance(info, dict) else None) or {}
+        ip = ip.get("ip") if isinstance(ip, dict) else None
+        if isinstance(ip, str) and ip:
+            result[key] = ip
+    for key, info in (family_data or {}).get("proxies", {}).items():
+        if key in result or not isinstance(info, dict):
+            continue
+        ip = info.get("exit_v4") or info.get("exit_v6")
+        if isinstance(ip, str) and ip:
+            result[key] = ip
+    return result
+
+
 def _norm_cc(v) -> str:
     """2 位字母国家码规范化；非法输入返回空串。"""
     return v.upper() if isinstance(v, str) and len(v) == 2 and v.isalpha() else ""
@@ -409,13 +433,15 @@ def build_exit_cc_map(
     external_check: dict | None = None,
     upstream_meta: dict | None = None,
     streaming: dict | None = None,
+    family_data: dict | None = None,
 ) -> dict[str, str]:
-    """汇聚四源出口国观测为 ``{key: exit_cc}``，高优先级者胜。
+    """汇聚多源出口国观测为 ``{key: exit_cc}``，高优先级者胜。
 
     1. ``external_check.json`` —— 外部探测接口直接回显的出口地理
        （``probe_results.ipv4.exit.country/countryCode``）
-    2. ``upstream_meta.json`` —— 自有 CF Worker 观测到的代理出口
-       （``clientIp`` 所在国家，直连证据）
+    2. ``upstream_meta.json`` —— 自有 CF Worker 观测到的代理出口国。
+       键为裸出口 IP 时经 ``build_exit_ip_map`` 解析到行键；
+       若直接为行键则原样使用（兼容）
     3. ``streaming.json`` —— 经代理观测的服务解锁国；openai 为 CF trace
        ``loc``（最接近真实出口），其余服务按序兜底。覆盖面最大（98%+）
     4. ``ipinfo.json`` —— ``country_code``（ip-api 地理）。历史轮次可能是
@@ -432,8 +458,21 @@ def build_exit_cc_map(
         geo = info.get("exit_geo") if isinstance(info, dict) else None
         if isinstance(geo, dict):
             put(key, geo.get("country") or geo.get("countryCode"))
+
+    # upstream_meta：{出口IP或行键: country}
+    upstream_cc: dict[str, str] = {}
     for key, info in (upstream_meta or {}).get("proxies", {}).items():
-        put(key, info.get("country") if isinstance(info, dict) else None)
+        cc = info.get("country") if isinstance(info, dict) else None
+        cc = _norm_cc(cc)
+        if cc:
+            upstream_cc[key] = cc
+    if upstream_cc:
+        for key, cc in upstream_cc.items():
+            put(key, cc)  # 行键直命中（兼容）
+        exit_ips = build_exit_ip_map(external_check, family_data)
+        for key, ip in exit_ips.items():
+            put(key, upstream_cc.get(ip))
+
     for key, services in (streaming or {}).get("proxies", {}).items():
         if not isinstance(services, dict):
             continue

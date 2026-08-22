@@ -148,7 +148,8 @@ def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
     external = {"proxies": load_quality_json(quality_dir / "external_check.json")}
     upstream = {"proxies": load_quality_json(quality_dir / "upstream_meta.json")}
     streaming = {"proxies": load_quality_json(quality_dir / "streaming.json")}
-    exit_map = build_exit_cc_map(ipinfo, external, upstream, streaming)
+    family = {"proxies": load_quality_json(quality_dir / "exit_family.json")}
+    exit_map = build_exit_cc_map(ipinfo, external, upstream, streaming, family)
     if not exit_map:
         print("No exit-country observations to reorganize.")
         return 0
