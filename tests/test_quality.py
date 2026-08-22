@@ -411,24 +411,9 @@ class TestAnnotation(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(out.strip(), "1.2.3.4:443#ALL-120ms-0.44MB/s")
 
-    def test_build_exits(self):
-        results = {
-            "1.2.3.4:443#US": {
-                "key": "1.2.3.4:443#US",
-                "streaming": {"openai": {"status": "ok", "region": "NRT"}},
-            },
-            "2.2.2.2:443#JP": {
-                "key": "2.2.2.2:443#JP",
-                "streaming": {"openai": {"status": "blocked"}},
-            },
-            "3.3.3.3:80#SG": {
-                "key": "3.3.3.3:80#SG", "streaming": {},
-            },
-        }
-        self.assertEqual(
-            qc.build_exits(results, {}),
-            {"1.2.3.4:443#US": "NRT"},
-        )
+    def test_build_exits_removed(self):
+        """build_exits 已删——出口国统一走 common.build_exit_cc_map。"""
+        self.assertFalse(hasattr(qc, "build_exits"))
 
 
 class TestReputation(unittest.TestCase):
@@ -1449,8 +1434,9 @@ class TestAnnotateClassify(unittest.TestCase):
             ip_type_map={},
             exit_map={"1.2.3.4:443#US": "JP"},
         )
-        # Already has →, should not add another
-        self.assertEqual(result, line)
+        # 已有 → 但与新观测不同 → 陈旧出口，应替换
+        self.assertIn("→JP", result)
+        self.assertNotIn("→LAX", result)
 
     def test_fill_exit_marker_no_match(self):
         from annotate_classify import fill_and_classify
@@ -1486,31 +1472,48 @@ class TestBuildExitMap(unittest.TestCase):
         })
 
     def test_build_exit_map_multi_source_priority(self):
-        """external_check > ipinfo > upstream_meta 三源回退。"""
+        """external_check > upstream_meta > streaming > ipinfo 四源回退。"""
         from annotate_classify import _build_exit_map
         ipinfo = {
             "proxies": {
-                "a:443#US": {"country_code": "JP"},   # 被 external 覆盖
-                "b:443#US": {},                        # 由 upstream 补齐
+                "a:443#US": {"country_code": "JP"},   # 陈旧入口地理，被 external 覆盖
+                "b:443#US": {"country_code": "JP"},   # 被 streaming 覆盖
+                "c:443#US": {},                        # 由 upstream 补齐
+                "e:443#US": {"country_code": "KR"},   # 仅 ipinfo 兜底
             }
         }
         external = {
             "proxies": {
                 "a:443#US": {"exit_geo": {"country": "SG"}},
-                "c:443#US": {"exit_geo": {"country": 123}},  # 非法 → 忽略
+                "f:443#US": {"exit_geo": {"country": 123}},  # 非法 → 忽略
             }
         }
         upstream = {
             "proxies": {
-                "b:443#US": {"country": "HK"},
+                "c:443#US": {"country": "HK"},
                 "d:443#US": {"clientIp": "::1", "country": "TW"},
             }
         }
-        exit_map = _build_exit_map(ipinfo, external, upstream)
+        streaming = {
+            "proxies": {
+                "b:443#US": {
+                    "openai": {"status": "ok", "region": "SG"},
+                    "netflix": {"status": "ok", "region": "US"},
+                },
+                "g:443#US": {  # openai 无观测 → 其余服务按序兜底
+                    "netflix": {"status": "blocked"},
+                    "disney": {"status": "ok", "region": "GB"},
+                },
+            }
+        }
+        exit_map = _build_exit_map(ipinfo, external, upstream, streaming)
         self.assertEqual(exit_map, {
             "a:443#US": "SG",
-            "b:443#US": "HK",
+            "b:443#US": "SG",
+            "c:443#US": "HK",
             "d:443#US": "TW",
+            "e:443#US": "KR",
+            "g:443#US": "GB",
         })
 
     def test_build_exit_map_missing_fields(self):
@@ -1556,7 +1559,14 @@ class TestReorgCountry(unittest.TestCase):
         from reorg_country import ensure_exit_marker
         line = "1.2.3.4:443#\U0001F1F3\U0001F1F5NP→JP-10ms"
         result = ensure_exit_marker(line, "US")
-        # Already has →, should be unchanged
+        # 已有 → 但国家不同 → 陈旧观测，直接替换
+        self.assertIn("NP→US", result)
+        self.assertNotIn("→JP", result)
+
+    def test_ensure_exit_marker_same(self):
+        from reorg_country import ensure_exit_marker
+        line = "1.2.3.4:443#\U0001F1F3\U0001F1F5NP→JP-10ms"
+        result = ensure_exit_marker(line, "JP")
         self.assertEqual(result, line)
 
     def test_reorganize_mismatched_line(self):

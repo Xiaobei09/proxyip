@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Reorganize country/set/port files by exit IP country.
 
-Reads ``data/quality/ipinfo.json`` (written by ``quality_check.py``) and moves
-proxy lines whose exit-IP country differs from the listed country (``#CC``)
-to the exit country directory.  The line format becomes ``#<IC>→<OC>`` where
-IC is the listed country and OC is the exit country; if ``→`` is already
-present (from OpenAI trace), it is left unchanged.
+出口国观测经四源汇聚（``common.build_exit_cc_map``：external_check >
+upstream_meta > streaming > ipinfo），将代理行标注/迁移为 ``#<IC>→<OC>``
+格式。已有 ``→CC`` 但与新观测不同视为陈旧，直接替换；同国行也补齐标记。
 
-Idempotent: running twice with the same ``ipinfo.json`` produces no changes.
+Idempotent: running twice with the same quality JSONs produces no changes.
 
 Affected directories:
 
@@ -31,57 +29,35 @@ from pathlib import Path
 
 from common import (
     DATA_DIR,
+    build_exit_cc_map,
     line_to_key,
     parse_ltd_line,
+    upsert_exit_region,
     write_text_if_changed,
 )
 
 
 def ensure_exit_marker(line: str, exit_cc: str) -> str:
-    """Append ``→<exit_cc>`` after ``#<emoji><CC>`` if not already present.
+    """Insert or **replace** ``→<exit_cc>`` after ``#<emoji><CC>``.
 
-    The listed ``#CC`` is preserved; only the exit-country marker is added.
-    If the line already contains ``→`` after the CC (from OpenAI trace), it
-    is left unchanged.
+    The listed ``#CC`` is preserved; only the exit-country marker changes.
+    已有 ``→`` 但国家不同视为陈旧观测，直接替换（出口会漂移）。
     """
     parsed = parse_ltd_line(line)
     if not parsed:
         return line
-    _key, _ip, _port, listed_cc = parsed
-    addr, rest = line.rsplit("#", 1)
-    # Skip emoji (non-ASCII) to reach the 2-letter CC
-    i = 0
-    while i < len(rest) and ord(rest[i]) > 127:
-        i += 1
-    after_cc = rest[i + 2:]  # everything after CC (starts with '-' or '→')
-    if after_cc.startswith("→"):
-        return line  # already has exit marker, leave as-is
-    return f"{addr}#{rest[:i + 2]}→{exit_cc}{after_cc}"
+    return upsert_exit_region(line, exit_cc)
 
 
-def load_ipinfo(ipinfo_path: Path) -> dict:
-    """Load ipinfo.json → ``{key: {country_code, country_match, …}}``."""
-    if not ipinfo_path.exists():
+def load_quality_json(path: Path) -> dict:
+    """Load a quality JSON → ``{key: info}``；缺失/损坏 → ``{}``。"""
+    if not path.exists():
         return {}
     try:
-        data = json.loads(ipinfo_path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
-    return data.get("proxies", data)
-
-
-def _build_exit_map(ipinfo: dict) -> dict[str, str]:
-    """``{key: exit_cc}`` for proxies where ``country_match=False``."""
-    result: dict[str, str] = {}
-    for key, info in ipinfo.items():
-        if not isinstance(info, dict):
-            continue
-        if info.get("country_match") is not False:
-            continue
-        exit_cc = info.get("country_code")
-        if exit_cc and len(exit_cc) == 2 and exit_cc.isalpha():
-            result[key] = exit_cc.upper()
-    return result
+    return data.get("proxies", data) if isinstance(data, dict) else {}
 
 
 def reorganize_file(
@@ -89,9 +65,9 @@ def reorganize_file(
 ) -> None:
     """Reorganize a single txt file in-place based on ``exit_map``.
 
-    Lines whose key is in ``exit_map`` get an ``→OC`` exit-country marker
-    appended and are moved to the exit country's counterpart path.  The
-    listed ``#CC`` is preserved unchanged.  ``stats`` accumulates counts.
+    命中出口观测的行一律 upsert ``→OC`` 标记（同国也标注，保证覆盖面）；
+    仅当位于 ``countries/<CC>/`` 且与出口国不同时才迁移目录。sets/ports
+    混国文件只标注不移动。
     """
     if not path.exists():
         return
@@ -99,6 +75,7 @@ def reorganize_file(
     keep: list[str] = []
     # {exit_cc: [line, …]}
     moves: dict[str, list[str]] = {}
+    changed = False
     # Determine this file's country code from path (countries/<CC>/all.txt)
     src_cc = _path_country(path)
     for raw in lines:
@@ -108,15 +85,18 @@ def reorganize_file(
         key = line_to_key(line)
         if key and key in exit_map:
             exit_cc = exit_map[key]
-            if src_cc == exit_cc:
-                keep.append(raw)  # already in correct directory
+            marked = ensure_exit_marker(line, exit_cc)
+            if src_cc is None or src_cc == exit_cc:
+                # sets/ports 混国文件或已在出口国目录：只更新标记
+                if marked != raw:
+                    changed = True
+                keep.append(marked)
                 continue
-            moved_line = ensure_exit_marker(line, exit_cc)
-            moves.setdefault(exit_cc, []).append(moved_line)
+            moves.setdefault(exit_cc, []).append(marked)
             stats["moved"] += 1
         else:
             keep.append(raw)
-    if not moves:
+    if not moves and not changed:
         return
     write_text_if_changed(path, "\n".join(keep) + "\n" if keep else "")
     stats["files_written"] += 1
@@ -157,13 +137,22 @@ def _path_country(path: Path) -> str | None:
 
 
 def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
-    """Main entry: reorganize all country/set/port files.  Returns moved count."""
-    ipinfo = load_ipinfo(ipinfo_path)
-    exit_map = _build_exit_map(ipinfo)
+    """Main entry: reorganize all country/set/port files.  Returns moved count.
+
+    出口国观测四源汇聚（external_check > upstream_meta > streaming >
+    ipinfo，见 common.build_exit_cc_map），不再仅依赖 ipinfo 的
+    country_match（历史覆盖不足 1%）。
+    """
+    quality_dir = data_dir / "quality"
+    ipinfo = {"proxies": load_quality_json(ipinfo_path)}
+    external = {"proxies": load_quality_json(quality_dir / "external_check.json")}
+    upstream = {"proxies": load_quality_json(quality_dir / "upstream_meta.json")}
+    streaming = {"proxies": load_quality_json(quality_dir / "streaming.json")}
+    exit_map = build_exit_cc_map(ipinfo, external, upstream, streaming)
     if not exit_map:
-        print("No country mismatches to reorganize.")
+        print("No exit-country observations to reorganize.")
         return 0
-    print(f"Reorganizing {len(exit_map)} mismatched proxies ...")
+    print(f"Reorganizing with {len(exit_map)} exit observations ...")
     stats = {"moved": 0, "files_written": 0}
     valid_root = data_dir / "valid"
     # countries/

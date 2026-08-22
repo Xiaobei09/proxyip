@@ -313,16 +313,6 @@ def build_annotations(results: dict, rep_map: dict) -> dict[str, str]:
     return annotations
 
 
-def build_exits(results: dict, ipinfo: dict) -> dict[str, str]:
-    """Exit region per key: CF edge ``loc`` from the OpenAI trace response."""
-    exits: dict[str, str] = {}
-    for res in results.values():
-        region = (res.get("streaming") or {}).get("openai", {}).get("region")
-        if region:
-            exits[res["key"]] = region
-    return exits
-
-
 def annotate_text(
     text: str, annotations: dict,
 ) -> tuple[str, bool]:

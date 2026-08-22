@@ -23,9 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (
     SPEED_RE,
     DATA_DIR,
+    build_exit_cc_map,
     clear_note_buckets,
     has_token,
-    insert_exit_region,
+    upsert_exit_region,
     merge_note_tokens,
     normalize_note,
     parse_line,
@@ -102,40 +103,10 @@ def _build_exit_map(
     ipinfo: dict,
     external_check: dict | None = None,
     upstream_meta: dict | None = None,
+    streaming: dict | None = None,
 ) -> dict[str, str]:
-    """多源汇聚 ``{key: exit_cc}``（出口国家观测，优先级从高到低）：
-
-    1. ``external_check.json`` —— 外部探测接口直接返回的出口地理
-       （``probe_results.ipv4.exit.country``）；
-    2. ``ipinfo.json`` —— 出口 IP 的 ip-api 地理（``country_code``）；
-    3. ``upstream_meta.json`` —— 我们自己的 CF Worker 观测到的代理出口
-       （``clientIp`` 所在国家，覆盖面最大，1.5w+ 键）。
-    """
-    result: dict[str, str] = {}
-
-    def _cc_of(v) -> str:
-        if not isinstance(v, dict):
-            return ""
-        cc = v.get("country") or ""
-        if isinstance(cc, dict):
-            cc = cc.get("code") or ""
-        return cc.upper() if isinstance(cc, str) and len(cc) == 2 and cc.isalpha() else ""
-
-    for key, info in external_check.get("proxies", {}).items() if external_check else []:
-        cc = _cc_of((info or {}).get("exit_geo"))
-        if cc:
-            result[key] = cc
-    for key, info in (ipinfo.get("proxies", {}) or {}).items():
-        if not isinstance(info, dict):
-            continue
-        cc = info.get("country_code") or ""
-        if isinstance(cc, str) and len(cc) == 2 and cc.isalpha() and key not in result:
-            result[key] = cc.upper()
-    for key, info in upstream_meta.get("proxies", {}).items() if upstream_meta else []:
-        cc = _cc_of(info)
-        if cc:
-            result.setdefault(key, cc)
-    return result
+    """多源出口国汇聚（见 common.build_exit_cc_map 的优先级文档）。"""
+    return build_exit_cc_map(ipinfo, external_check, upstream_meta, streaming)
 
 
 def fill_and_classify(
@@ -163,11 +134,11 @@ def fill_and_classify(
 
     # --- suffix filling ---
 
-    # exit country marker (→CC) — inserted right after entry CC, idempotent
+    # exit country marker (→CC) — upsert：观测变化时刷新陈旧出口国
     if exit_map:
         exit_cc = exit_map.get(key)
         if exit_cc:
-            out = insert_exit_region(out, exit_cc)
+            out = upsert_exit_region(out, exit_cc)
 
     # CN token
     if key in china_set and not has_token(out, "CN"):
@@ -240,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     streaming_map = _build_streaming_map(streaming_data)
     rep_map = _build_rep_map(rep_data)
     ip_type_map = _build_ip_type_map(ipinfo)
-    exit_map = _build_exit_map(ipinfo, external_check, upstream_meta)
+    exit_map = _build_exit_map(ipinfo, external_check, upstream_meta, streaming_data)
 
     print(
         f"Maps: cn={len(china_set)} family={len(family_map)} "

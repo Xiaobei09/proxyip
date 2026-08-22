@@ -372,6 +372,81 @@ def insert_exit_region(line: str, exit_region: str) -> str:
     return line[: m.end(1)] + "→" + exit_region + line[m.end(1) :]
 
 
+def upsert_exit_region(line: str, exit_region: str) -> str:
+    """Insert **or replace** the ``→<exit>`` marker (stale exits get updated)."""
+    if not exit_region:
+        return line
+    if "→" not in line:
+        return insert_exit_region(line, exit_region)
+    m = EXIT_REGION_RE.match(line)
+    if not m:
+        return line
+    head = line[: m.end(1)]
+    rest = line[m.end(1) :]
+    arrow_end = rest.find("-")
+    if arrow_end < 0:
+        arrow_seg, tail = rest, ""
+    else:
+        arrow_seg, tail = rest[:arrow_end], rest[arrow_end:]
+    return f"{head}→{exit_region}{tail}"
+
+
+# ------------------------------------------------------- 出口国多源汇聚
+# →CC 标记的数据源优先级（高→低）。所有需要出口国的工作流必须经由此构建器，
+# 禁止各自只读单一 JSON（历史上 reorg/annotate 只认 ipinfo.country_match，
+# 覆盖率不足 1%）。
+
+_EXIT_STREAMING_ORDER = ("openai", "netflix", "disney", "max", "prime", "youtube")
+
+
+def _norm_cc(v) -> str:
+    """2 位字母国家码规范化；非法输入返回空串。"""
+    return v.upper() if isinstance(v, str) and len(v) == 2 and v.isalpha() else ""
+
+
+def build_exit_cc_map(
+    ipinfo: dict | None = None,
+    external_check: dict | None = None,
+    upstream_meta: dict | None = None,
+    streaming: dict | None = None,
+) -> dict[str, str]:
+    """汇聚四源出口国观测为 ``{key: exit_cc}``，高优先级者胜。
+
+    1. ``external_check.json`` —— 外部探测接口直接回显的出口地理
+       （``probe_results.ipv4.exit.country/countryCode``）
+    2. ``upstream_meta.json`` —— 自有 CF Worker 观测到的代理出口
+       （``clientIp`` 所在国家，直连证据）
+    3. ``streaming.json`` —— 经代理观测的服务解锁国；openai 为 CF trace
+       ``loc``（最接近真实出口），其余服务按序兜底。覆盖面最大（98%+）
+    4. ``ipinfo.json`` —— ``country_code``（ip-api 地理）。历史轮次可能是
+       入口 IP 的地理，故仅作末位兜底
+    """
+    result: dict[str, str] = {}
+
+    def put(key: str, cc) -> None:
+        cc = _norm_cc(cc)
+        if cc and key not in result:
+            result[key] = cc
+
+    for key, info in (external_check or {}).get("proxies", {}).items():
+        geo = info.get("exit_geo") if isinstance(info, dict) else None
+        if isinstance(geo, dict):
+            put(key, geo.get("country") or geo.get("countryCode"))
+    for key, info in (upstream_meta or {}).get("proxies", {}).items():
+        put(key, info.get("country") if isinstance(info, dict) else None)
+    for key, services in (streaming or {}).get("proxies", {}).items():
+        if not isinstance(services, dict):
+            continue
+        for svc in _EXIT_STREAMING_ORDER:
+            svc_info = services.get(svc)
+            if isinstance(svc_info, dict) and svc_info.get("status") == "ok":
+                put(key, svc_info.get("region"))
+                break
+    for key, info in (ipinfo or {}).get("proxies", {}).items():
+        put(key, info.get("country_code") if isinstance(info, dict) else None)
+    return result
+
+
 def classify_ip(geo: dict) -> str:
     """Return ``DC``/``MOB``/``PROXY``/``RES`` from ip-api geo dict."""
     if geo.get("hosting"):
