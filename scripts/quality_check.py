@@ -143,7 +143,8 @@ def resolve_exit_ips(results: dict, fam_map: dict) -> dict:
     n_src: Counter = Counter()
     for key, res in results.items():
         entry_ip = res["ip"]
-        ext_ip = (res.get("external_check") or {}).get("exit_geo", {}).get("ip")
+        # ``exit_geo`` 键可能存在但值为 null（探测成功但响应无出口字段）
+        ext_ip = ((res.get("external_check") or {}).get("exit_geo") or {}).get("ip")
         fam = fam_map.get(key) if isinstance(fam_map.get(key), dict) else {}
         ef_ip = fam.get("exit_v4") or fam.get("exit_v6")
         if ext_ip:
