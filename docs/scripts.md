@@ -136,6 +136,31 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 影响目录：`countries/*/all.txt`、`sets/*/all.txt`、`ports/*.txt`。子分组文件（`cn.txt`、`v4.txt` 等）不处理，由下次 `annotate_classify.py` 刷新。
 
+### `scripts/audit_entry_cc.py`
+
+入口国家标签准确性审计。订阅标签（`#CC`）此前无从验证，本脚本以两个
+独立信号交叉对比：① 入口 IP 地理（ip-api batch，含 ASN）；② 出口国观测
+（四源 exit map）。判定写入 `data/quality/entry_audit.json`
+（`proxies[key].verdict`）并打印汇总：
+
+| verdict | 含义 |
+|---|---|
+| `ok` | 标签 == 入口实测，出口缺失或一致 |
+| `ok_with_drift` | 标签 == 入口实测，但出口在别国（正常漂移） |
+| `tag_mismatch` | 标签 != 入口实测（原始标签可疑，实测约 8%） |
+| `cf_fronted` | 入口为 CF 边缘（AS13335），入口验证不适用 |
+| `domain_entry` | 入口为域名，无 IP 可查 |
+| `entry_unknown` | geo 查询失败 |
+
+只读不改行、不影响门控；CI 中 `continue-on-error`。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--data-dir` | 数据根目录 | `data/` |
+| `--source` | 代理列表 | `<data-dir>/valid/all.txt` |
+| `--timeout` | 单批 HTTP 超时（秒） | 15 |
+| `--delay` | 批间延时（秒），ip-api 免费档限 45 req/min | 1.5 |
+
 ### `scripts/china_check.py`
 
 大陆连通性检测（独立 CI 运行）。CI 以 `--source data/valid/all.txt --limit 0` 全量池检测；本地缺省按 `data/valid/all_rep.txt` 信誉降序采样前 250 条（缺失时回退 `all_ltd.txt`）。从大陆视角实测 TCP 可达性，分四层判定：
