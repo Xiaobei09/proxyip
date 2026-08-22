@@ -255,6 +255,49 @@ class TestBuildIpinfo(unittest.TestCase):
         self.assertFalse(info["country_match"])
 
 
+class TestResolveExitIps(unittest.TestCase):
+    def test_priority_trace_over_exit_family_over_proxy(self):
+        results = {
+            "a": {"ip": "1.1.1.1", "external_check": {
+                "exit_geo": {"ip": "9.9.9.9"}}},
+            "b": {"ip": "2.2.2.2", "external_check": None},
+            "c": {"ip": "3.3.3.3"},
+        }
+        fam_map = {
+            "a": {"exit_v4": "8.8.8.8"},   # 被 trace 覆盖
+            "b": {"exit_v4": "7.7.7.7", "exit_v6": None},
+            "d": {"exit_v4": "6.6.6.6"},   # 不在 results 中 → 忽略
+        }
+        out = qc.resolve_exit_ips(results, fam_map)
+        self.assertEqual(out["a"]["exit_ip"], "9.9.9.9")
+        self.assertEqual(out["a"]["exit_ip_source"], "trace")
+        self.assertEqual(out["b"]["exit_ip"], "7.7.7.7")
+        self.assertEqual(out["b"]["exit_ip_source"], "exit_family")
+        # 无任何出口信息 → 回退代理自身 IP（保持旧行为）
+        self.assertEqual(out["c"]["exit_ip"], "3.3.3.3")
+        self.assertEqual(out["c"]["exit_ip_source"], "proxy")
+
+    def test_malformed_family_entries_ignored(self):
+        results = {"a": {"ip": "1.1.1.1"}}
+        out = qc.resolve_exit_ips(results, {"a": "junk", "b": None})
+        self.assertEqual(out["a"]["exit_ip"], "1.1.1.1")
+
+    def test_build_reputation_uses_exit_ip(self):
+        risk_data = {"9.9.9.9": {"netcoffee": {"trust_score": 80}}}
+        rep_map = qc.build_reputation_map(
+            {"a": {"key": "k", "ip": "1.1.1.1", "exit_ip": "9.9.9.9"}},
+            risk_data, qc.REPUTATION_WEIGHTS,
+        )
+        self.assertIn("k", rep_map)
+        # 入口 IP 上即使有数据也不应被采用
+        empty = qc.build_reputation_map(
+            {"a": {"key": "k", "ip": "1.1.1.1", "exit_ip": "9.9.9.9"}},
+            {"1.1.1.1": {"netcoffee": {"trust_score": 80}}},
+            qc.REPUTATION_WEIGHTS,
+        )
+        self.assertEqual(empty, {})
+
+
 class TestAnnotation(unittest.TestCase):
     def test_streaming_tokens(self):
         streaming = {
@@ -1320,7 +1363,38 @@ class TestAnnotateClassify(unittest.TestCase):
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={"1.2.3.4:443#US": "DC"},
         )
-        self.assertEqual(result, line)
+        # 历史乱序段被规范器重排为规范顺序，且不重复追加
+        self.assertEqual(
+            result,
+            "1.2.3.4:443#🇺🇸US-100ms-5.5MB/s-GPT-DC-fast-V6-CN-85",
+        )
+        # 幂等：再次处理不变
+        self.assertEqual(fill_and_classify(
+            result,
+            china_set={"1.2.3.4:443#US"},
+            family_map={"1.2.3.4:443#US": "ipv6"},
+            streaming_map={"1.2.3.4:443#US": {"openai": {"status": "ok"}}},
+            rep_map={"1.2.3.4:443#US": 85},
+            ip_type_map={"1.2.3.4:443#US": "DC"},
+        ), result)
+
+    def test_normalizes_stacked_suffixes(self):
+        """多轮历史堆叠的快照段被收敛为单组规范段。"""
+        from annotate_classify import fill_and_classify
+        stacked = ("1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-CN-V6-GPT-CF-77"
+                   "-mid-GPT-CF-70-DC-fast-GPT-CF-62-RES-GPT-CF-70")
+        result = fill_and_classify(
+            stacked,
+            china_set=set(),
+            family_map={},
+            streaming_map={},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertEqual(
+            result,
+            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-CF-fast-V6-CN-70",
+        )
 
     def test_skip_no_cc_line(self):
         from annotate_classify import fill_and_classify
@@ -1383,24 +1457,44 @@ class TestBuildExitMap(unittest.TestCase):
         from annotate_classify import _build_exit_map
         ipinfo = {
             "proxies": {
-                "1.2.3.4:443#US": {
-                    "country_code": "JP",
-                    "country_match": False,
-                },
-                "5.6.7.8:443#US": {
-                    "country_code": "US",
-                    "country_match": True,
-                },
-                "9.9.9.9:443#DE": {
-                    "country_code": "FR",
-                    "country_match": False,
-                },
+                "1.2.3.4:443#US": {"country_code": "JP"},
+                "5.6.7.8:443#US": {"country_code": "US"},
+                "9.9.9.9:443#DE": {"country_code": "FR"},
             }
         }
         exit_map = _build_exit_map(ipinfo)
         self.assertEqual(exit_map, {
             "1.2.3.4:443#US": "JP",
+            "5.6.7.8:443#US": "US",
             "9.9.9.9:443#DE": "FR",
+        })
+
+    def test_build_exit_map_multi_source_priority(self):
+        """external_check > ipinfo > upstream_meta 三源回退。"""
+        from annotate_classify import _build_exit_map
+        ipinfo = {
+            "proxies": {
+                "a:443#US": {"country_code": "JP"},   # 被 external 覆盖
+                "b:443#US": {},                        # 由 upstream 补齐
+            }
+        }
+        external = {
+            "proxies": {
+                "a:443#US": {"exit_geo": {"country": "SG"}},
+                "c:443#US": {"exit_geo": {"country": 123}},  # 非法 → 忽略
+            }
+        }
+        upstream = {
+            "proxies": {
+                "b:443#US": {"country": "HK"},
+                "d:443#US": {"clientIp": "::1", "country": "TW"},
+            }
+        }
+        exit_map = _build_exit_map(ipinfo, external, upstream)
+        self.assertEqual(exit_map, {
+            "a:443#US": "SG",
+            "b:443#US": "HK",
+            "d:443#US": "TW",
         })
 
     def test_build_exit_map_missing_fields(self):

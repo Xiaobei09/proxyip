@@ -48,8 +48,10 @@ from common import (
     VALID_ALL_LTD_FILE,
     _SSL_CTX,
     build_request,
+    clear_note_buckets,
     has_token,
     keyed_json,
+    merge_note_tokens,
     line_to_key,
     load_methods,
     load_sample,
@@ -268,9 +270,8 @@ def annotate_family(line: str, family: str) -> str:
     tok = FAMILY_TOKENS.get(family)
     if not tok:
         return line
-    if has_token(_note(line), tok):
-        return line
-    return line + "-" + tok
+    # 家族为互斥桶：权威探测结果直接替换旧值
+    return merge_note_tokens(clear_note_buckets(line, "family"), tok)
 
 
 def split_by_family(results: dict) -> tuple[list, list]:

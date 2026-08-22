@@ -77,6 +77,7 @@ from common import (
     is_cf_heuristic,
     keyed_json,
     line_to_key,
+    merge_note_tokens,
     parse_ltd_line,
     read_json,
     request_follow,
@@ -578,9 +579,7 @@ def has_cn_note(line: str) -> bool:
 
 
 def annotate_cn(line: str) -> str:
-    if has_cn_note(line):
-        return line
-    return line + "-CN"
+    return merge_note_tokens(line, "CN")
 
 
 # ------------------------------------------------------------ 数据装载与写出
@@ -629,9 +628,7 @@ def load_cn_pool() -> str:
 
 def annotate_cnh(line: str) -> str:
     """给行追加 ``-CNH``（应用层 HTTP 确认），幂等。"""
-    if has_token(_note(line), "CNH"):
-        return line
-    return line + "-CNH"
+    return merge_note_tokens(line, "CNH")
 
 
 def apply_streak(entries: dict, prev_entries: dict) -> None:
@@ -739,7 +736,7 @@ def annotate_cn_files(reachable_keys: set) -> None:
                 continue
             key = line_to_key(line)
             if key and key in reachable_keys and not has_cn_note(line):
-                out.append(line + "-CN")
+                out.append(merge_note_tokens(line, "CN"))
                 changed = True
             else:
                 out.append(line)

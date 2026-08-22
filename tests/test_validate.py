@@ -1316,6 +1316,33 @@ class TestVerifiedStableOutputs(unittest.TestCase):
         root_s = (vp.VALID_DIR / "all_cn4_stable.txt").read_text().splitlines()
         self.assertEqual(len(root_s), 1)
 
+    def test_group_ltd_verified_stable_variants(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 200.0, None, None),
+        }
+        families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#US": "ipv4"}
+        families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#US": "ipv4"}
+        stats = vp.write_valid_outputs(
+            alive,
+            per_country_limit=2,
+            families=families,
+            cn_reachable={"1.0.0.1:443#US", "2.0.0.1:443#US"},
+            prev_keys={"1.0.0.1:443#US"},
+        )
+        us = vp.VALID_DIR / "countries" / "US"
+        # 分组 ltd 变体（每目录 {g}_ltd_verified/_stable）
+        v = (us / "cn4_ltd_verified.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in v], ["1.0.0.1:443"])
+        s = (us / "cn4_ltd_stable.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in s], ["1.0.0.1:443"])
+        # 根级分组 ltd 可靠性变体
+        rv = (vp.VALID_DIR / "all_cn4_ltd_verified.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in rv], ["1.0.0.1:443"])
+        rs = (vp.VALID_DIR / "all_cn4_ltd_stable.txt").read_text().splitlines()
+        self.assertEqual([l.split("#")[0] for l in rs], ["1.0.0.1:443"])
+        self.assertIn("all_ltd_verified", stats["__sets__"])
+
     def test_empty_variant_files_cleaned(self):
         vp.VALID_DIR.mkdir(parents=True, exist_ok=True)
         stale_v = vp.VALID_DIR / "all_verified.txt"

@@ -38,7 +38,6 @@ Lines without results stay untouched.
 import argparse
 import asyncio
 import logging
-import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -59,7 +58,7 @@ def build_ipinfo_map(
     weights = weights or REPUTATION_WEIGHTS
     info_map: dict[str, dict] = {}
     for res in results.values():
-        ip = res.get("ip", "")
+        ip = res.get("exit_ip") or res.get("ip", "")
         geo_item = geo.get(ip) or {}
         cc = geo_item.get("countryCode")
         # Supplement with external API exit geo when ip-api is missing data
@@ -130,56 +129,36 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
     return "-".join(seg for seg in (stream_toks, type_toks) if seg)
 
 
-_QC_TOKEN_RE = re.compile(
-    r"(?:^|(?<=-))(?:NF\([^)]*\)|D\+|YT|MX|PV|GPT|CF|\d{1,3})(?=$|-)"
-)
+# 旧 QC 后缀清理已由 common.normalize_note 统一接管（含流媒体并集、
+# 类型/档位/家族/分数取最右、CF 独立维度），此处不再单独实现。
 
 
-def _strip_qc_match(m: re.Match) -> str:
-    """Collapse matched QC token into a single ``-`` delimiter (or ``""`` at
-    string boundaries) so adjacent delimiters merge cleanly."""
-    s = m.group(0)
-    if s.startswith("-") and s.endswith("-"):
-        return "-"
-    return ""
+def resolve_exit_ips(results: dict, fam_map: dict) -> dict:
+    """为每个检测结果解析真实出口 IP（原地写入 ``exit_ip`` 字段）。
 
-
-def strip_qc_annotations(line: str) -> str:
-    """Remove ALL QC-produced tokens from *line* to prevent suffix duplication.
-
-    Strips streaming tokens (NF(..), D+, YT, MX, PV, GPT), CF, and reputation
-    scores — but preserves other workflow tokens (CN, V4, V6, DS, DC, speed
-    tier, exit region →CC). This lets ``annotate_text`` re-append a clean
-    annotation without accumulating stale duplicates across CI runs.
+    优先级：外部探测回显（``external_check.exit_geo.ip``）> exit_family
+    实测（``exit_v4``/``exit_v6``）> 代理自身 IP。CF 中转代理的入口恒为
+    CF 边缘 IP，信誉/地理必须查出口才有效。
     """
-    idx = line.find("#")
-    if idx < 0:
-        return line
-    base = line[:idx]
-    rest = line[idx + 1:]
-    i = 0
-    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-        i += 1
-    if rest[i:].startswith("ALL") and rest[i + 3:i + 4] in ("", "-"):
-        cc_end = i + 3
-    else:
-        cc_end = i + 2
-    note = rest[cc_end:]
-    if not note:
-        return line
-    # Split off leading → exit-region so it is never consumed by the regex
-    prefix = ""
-    if note.startswith("→"):
-        dash_pos = note.find("-", 1)
-        if dash_pos > 0:
-            prefix = note[:dash_pos]
-            note = note[dash_pos:]
+    n_src: Counter = Counter()
+    for key, res in results.items():
+        entry_ip = res["ip"]
+        ext_ip = (res.get("external_check") or {}).get("exit_geo", {}).get("ip")
+        fam = fam_map.get(key) if isinstance(fam_map.get(key), dict) else {}
+        ef_ip = fam.get("exit_v4") or fam.get("exit_v6")
+        if ext_ip:
+            res["exit_ip"], res["exit_ip_source"] = ext_ip, "trace"
+        elif ef_ip:
+            res["exit_ip"], res["exit_ip_source"] = ef_ip, "exit_family"
         else:
-            return line  # note is just "→XX", nothing to strip
-    cleaned = _QC_TOKEN_RE.sub(_strip_qc_match, note)
-    cleaned = re.sub(r"-{2,}", "-", cleaned)
-    cleaned = cleaned.strip("-")
-    return base + "#" + rest[:cc_end] + prefix + ("-" + cleaned if cleaned else "")
+            res["exit_ip"], res["exit_ip_source"] = entry_ip, "proxy"
+        n_src[res["exit_ip_source"]] += 1
+    if n_src:
+        print(
+            "Exit IP source: "
+            + ", ".join(f"{k}={n_src[k]}" for k in sorted(n_src))
+        )
+    return results
 
 
 def build_reputation_map(
@@ -190,7 +169,8 @@ def build_reputation_map(
     rep_map: dict[str, dict] = {}
     for res in results.values():
         signals = collect_signals(
-            res["ip"], {}, risk_data, weights, include_ipapi=False
+            res.get("exit_ip") or res["ip"], {}, risk_data, weights,
+            include_ipapi=False,
         )
         score, sources = weighted_reputation(signals, weights)
         source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
@@ -218,8 +198,8 @@ def build_ranked(text: str, annotations: dict, rep_map: dict) -> list[str]:
             continue
         key = line_to_key(line)
         ann = annotations.get(key) if key else None
-        if ann and not line.rstrip().endswith("-" + ann):
-            out = strip_qc_annotations(line) + "-" + ann
+        if ann:
+            out = merge_note_tokens(line, *ann.split("-"))
         else:
             out = line
         rep = rep_map.get(key)
@@ -247,8 +227,8 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
     变体过滤信号（与 validate/build_good 共用）：
     - ``_verified``: speed.json（本轮全链路验证通过）
     - ``_stable``:  china.json streak≥2（连续两轮大陆可达）
-    根级 all_rep / all_{g}_rep / all_{g}_rep_ltd 与子目录 rep.txt 全覆盖；
-    子目录分组 rep 保持单维度以控制文件数量。
+    根级 all_rep / all_{g}_rep / all_{g}_rep_ltd 全覆盖；子目录产出
+    rep(+v/s)、rep_ltd(+v/s) 与 {g}_rep(_ltd) 单维度文件。
     """
     speed_keys = load_speed_keys()
     stable_keys = load_china_stable_keys()
@@ -279,12 +259,19 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
             r = build_ranked(ltd_src.read_text(encoding="utf-8"), annotations, rep_map)
             emit(valid_root / f"all_{g}_rep_ltd.txt", r)
 
-    # --- 每个 set/country 子目录: rep.txt + cross-product rep 文件 ---
+    # --- 每个 set/country 子目录: rep(+v/s) + rep_ltd(+v/s) + 分组 rep ---
     for sub in ("countries", "sets"):
         for src in sorted((valid_root / sub).glob("*/all.txt")):
             emit(
                 src.with_name("rep.txt"),
                 build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map),
+            )
+        for ltd_src in sorted((valid_root / sub).glob("*/ltd.txt")):
+            emit(
+                ltd_src.with_name("rep_ltd.txt"),
+                build_ranked(
+                    ltd_src.read_text(encoding="utf-8"), annotations, rep_map
+                ),
             )
         for g in REP_GROUP_NAMES:
             for src in sorted((valid_root / sub).glob(f"*/{g}.txt")):
@@ -351,8 +338,8 @@ def annotate_text(
         key = line_to_key(line)
         ann = annotations.get(key) if key else None
         out_line = line
-        if ann and not out_line.rstrip().endswith("-" + ann):
-            out_line = strip_qc_annotations(out_line) + "-" + ann
+        if ann:
+            out_line = merge_note_tokens(out_line, *ann.split("-"))
         if out_line != line:
             changed = True
         out.append(out_line)
@@ -465,9 +452,14 @@ async def run(args: argparse.Namespace) -> int:
     results = await run_checks(entries, methods, args)
     print(f"Completed {len(results)} checks")
 
-    geo = await batch_ipapi([res["ip"] for res in results.values()])
+    # 出口 IP 解析后，信誉/地理/滥用全部查真实出口——CF 中转代理的
+    # 入口恒为 CF 边缘 IP，查入口会得到千篇一律的"干净"结果。
+    fam_map = read_json(EXIT_FAMILY_FILE).get("proxies", {})
+    results = resolve_exit_ips(results, fam_map)
 
-    rep_ips = [res["ip"] for res in results.values()]
+    geo = await batch_ipapi([res["exit_ip"] for res in results.values()])
+
+    rep_ips = [res["exit_ip"] for res in results.values()]
     asn_map = {ip: norm_asn(geo[ip].get("asn")) for ip in rep_ips
                if ip in geo and norm_asn(geo[ip].get("asn"))}
     risk_data = await lookup_all_risk(rep_ips, args, asn_map)
@@ -477,7 +469,7 @@ async def run(args: argparse.Namespace) -> int:
             f"{', '.join(args.reputation_sources)}"
         )
     abuse_map = await run_abuse(results, {
-        k: {"exit_ip": res["ip"]} for k, res in results.items()
+        k: {"exit_ip": res["exit_ip"]} for k, res in results.items()
     }, args)
     ipinfo = build_ipinfo_map(
         results, geo, abuse_map, risk_data, args.reputation_weights
