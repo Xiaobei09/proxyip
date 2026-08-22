@@ -35,15 +35,10 @@ jobs:
             echo "::notice::Superseded by run $LATEST, skipping"
             exit 0
           fi
-          # 2. 触发者成功检查
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            CONCLUSION="${{ github.event.workflow_run.conclusion }}"
-            if [ "$CONCLUSION" != "success" ]; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "::notice::Triggering run concluded: $CONCLUSION, skipping"
-              exit 0
-            fi
-          fi
+          # 注：不因触发者(quality-check)失败而跳过——本工作流从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），上游单次失败不应冻结 CN 连通性追踪(streak)
+          # 与后缀应用，否则 IP 未变更期间 stable 永远无法累积。
         env:
           GH_TOKEN: ${{ github.token }}
 

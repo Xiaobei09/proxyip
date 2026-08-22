@@ -289,9 +289,11 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 各阶段通过 CI workflow 顺序执行，互不干扰：
 
-1. `update-proxies.yml`（每 30 分钟）→ download + validate
+1. `update-proxies.yml`（每 2 小时，`0 */2 * * *`）→ download + validate
 2. `quality-check.yml`（触发于 1）→ streaming + reputation + reorg
-3. `china-check.yml`（触发于 2）→ 大陆连通性
+3. `china-check.yml` → 大陆连通性。双触发：quality 完成后 + **每小时独立
+   心跳**（`11 * * * *`）。streak 依赖"连续多轮可达"，独立心跳保证上游
+   失败或 IP 长期未变更时 stable 仍按小时累积
 4. `exit-family.yml`（触发于 2）→ 出口家族
 5. `annotate-classify.yml`（触发于 2）→ 后缀填充 + 分类
 
@@ -302,15 +304,10 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 ### 8.3 门控逻辑
 
-下游 workflow 使用 `git merge-base --is-ancestor` 检查前次运行状态：
+下游 workflow 仅做**竞态去重**：用 `gh run list` 查同工作流是否有更新的
+in_progress/queued 运行，有则让位（旧运行自动跳过），防止积压排队。
 
-```bash
-LAST_DOWNSTREAM=$(git log --oneline -1 --grep="<commit message>" --format=%H)
-LAST_UPSTREAM=$(git log --oneline -1 --grep="proxyip" --format=%H)
-if [ -n "$LAST_DOWNSTREAM" ] && git merge-base --is-ancestor "$LAST_DOWNSTREAM" "$LAST_UPSTREAM"; then
-    echo "No new upstream data since last run, skipping"
-    exit 0
-fi
-```
-
-防止前次被取消/跳过时，后续 workflow 因文件无变化而误跳过。
+刻意**不因触发者失败而跳过**：下游脚本从仓库 checkout 的自洽数据运行
+（all.txt 与各 JSON 均为上次成功轮的完整快照），quality 单次失败不应
+冻结 CN 连通性追踪与后缀应用——否则 IP 未变更期间 stable 永远无法累积、
+信誉/家族等新数据也无法及时反映到清单后缀。

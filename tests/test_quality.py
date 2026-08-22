@@ -282,6 +282,22 @@ class TestResolveExitIps(unittest.TestCase):
         out = qc.resolve_exit_ips(results, {"a": "junk", "b": None})
         self.assertEqual(out["a"]["exit_ip"], "1.1.1.1")
 
+    def test_none_and_missing_exit_geo_no_crash(self):
+        """CI 回归：external_check 存在但 exit_geo 为 null/缺失时不得崩溃。"""
+        results = {
+            "a": {"ip": "1.1.1.1", "external_check": {
+                "success": True, "response_ms": 3, "colo": "IAD",
+                "ipv4_ok": True, "ipv6_ok": False, "exit_geo": None,
+            }},
+            "b": {"ip": "2.2.2.2", "external_check": {"success": False}},
+            "c": {"ip": "3.3.3.3", "external_check": {
+                "success": True, "exit_geo": {"ip": None}}},
+        }
+        out = qc.resolve_exit_ips(results, {})
+        for key, ip in (("a", "1.1.1.1"), ("b", "2.2.2.2"), ("c", "3.3.3.3")):
+            self.assertEqual(out[key]["exit_ip"], ip)
+            self.assertEqual(out[key]["exit_ip_source"], "proxy")
+
     def test_build_reputation_uses_exit_ip(self):
         risk_data = {"9.9.9.9": {"netcoffee": {"trust_score": 80}}}
         rep_map = qc.build_reputation_map(
