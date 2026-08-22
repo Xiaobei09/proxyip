@@ -819,12 +819,13 @@ def write_valid_outputs(
     ) -> None:
         """写全量分组文件；``ltd`` 提供时写 ``*_ltd`` 分组，否则清理残留。
 
-        每个分组同时派生 ``<g>_verified``（全链路验证）与 ``<g>_stable``
-        （连续两轮存活）变体，空则清理残留。
+        每个分组同时派生 ``<g>_verified``（全链路验证）、``<g>_stable``
+        （连续两轮存活）及二者的 ``<g>_ltd_*`` 变体，空则清理残留。
         """
         for g in GROUP_NAMES:
             write_variant(directory, g, grouped[g])
-            write_variant(directory, f"{g}_ltd", (ltd or {}).get(g, []))
+            g_ltd = (ltd or {}).get(g, [])
+            write_variant(directory, f"{g}_ltd", g_ltd)
             write_variant(
                 directory, f"{g}_verified",
                 [e for e in grouped[g] if is_verified(e)],
@@ -832,6 +833,14 @@ def write_valid_outputs(
             write_variant(
                 directory, f"{g}_stable",
                 [e for e in grouped[g] if is_stable(e)],
+            )
+            write_variant(
+                directory, f"{g}_ltd_verified",
+                [e for e in g_ltd if is_verified(e)],
+            )
+            write_variant(
+                directory, f"{g}_ltd_stable",
+                [e for e in g_ltd if is_stable(e)],
             )
 
     by_country: dict[str, list[str]] = defaultdict(list)
@@ -979,6 +988,15 @@ def write_valid_outputs(
                 key=ltd_key,
             )
         write_variant(VALID_DIR, f"{name}_ltd", ltd)
+        if per_country_limit > 0:
+            write_variant(
+                VALID_DIR, f"{name}_ltd_verified",
+                [e for e in ltd if is_verified(e)],
+            )
+            write_variant(
+                VALID_DIR, f"{name}_ltd_stable",
+                [e for e in ltd if is_stable(e)],
+            )
         write_variant(
             VALID_DIR, f"{name}_verified",
             [e for e in root_grouped[g] if is_verified(e)],

@@ -489,6 +489,133 @@ def has_token(note: str, token: str) -> bool:
     return bool(re.search(rf"(?:^|-){re.escape(token)}(?:$|-)", note))
 
 
+# ------------------------------------------------------- 备注段规范（唯一出口）
+# 所有工作流追加/清理备注必须经由 normalize_note，禁止各自 ``line += "-TOK"``
+# 拼接——否则多 CI 并发写同一文件时段序漂移、旧 token 无限堆叠
+# （历史上出现过 "...-GPT-CF-77-mid-GPT-CF-70-DC-fast-GPT-CF-62" 四层快照）。
+
+_NOTE_STREAMING_RE = re.compile(r"^(?:D\+|YT|MX|PV|GPT|NF\([^)]*\))$")
+_NOTE_TYPE_TOKENS = {"DC", "RES", "MOB", "PROXY"}
+_NOTE_TIER_TOKENS = {"fast", "mid", "slow"}
+_NOTE_FAMILY_TOKENS = {"V4", "V6", "DS"}
+_NOTE_SCORE_RE = re.compile(r"^\d{1,3}$")
+_NOTE_LAT_RE = re.compile(r"^\d+ms$")
+_NOTE_SPEED_RE = re.compile(r"^\d+(?:\.\d+)?MB/s$")
+
+
+def normalize_note(line: str) -> str:
+    """解析备注段并按规范顺序重建（幂等，全仓库唯一的后缀处理器）。
+
+    规范顺序：`入口CC[→出口CC] - 延迟 - 速度 - 流媒体(并集去重) - 类型 -
+    CF边缘标 - 速度档 - 家族 - CN/CNH - 信誉分 - 未知段(保序垫底)`。
+    单值桶（类型/档位/家族/分数）取最右（最新）；`CF` 为独立维度（出现过
+    即保留，与出口类型正交）；流媒体桶取并集；CNH 蕴含 CN。未识别的行原样返回。
+    """
+    return _rebuild_note(line)
+
+
+def _parse_note_segs(note: str) -> dict | None:
+    segs = [s for s in note.split("-") if s]
+    if not segs:
+        return None
+    lead = segs[0]
+    segs = segs[1:]
+    b: dict = {
+        "lead": lead, "lat": None, "spd": None, "stream": [], "typ": None,
+        "cf": False, "tier": None, "fam": None, "cn": False, "cnh": False,
+        "score": None, "other": [],
+    }
+    for s in segs:
+        if _NOTE_LAT_RE.match(s):
+            b["lat"] = s
+        elif _NOTE_SPEED_RE.match(s):
+            b["spd"] = s
+        elif _NOTE_STREAMING_RE.match(s):
+            if s not in b["stream"]:
+                b["stream"].append(s)
+        elif s in _NOTE_TYPE_TOKENS:
+            b["typ"] = s
+        elif s == "CF":
+            b["cf"] = True
+        elif s in _NOTE_TIER_TOKENS:
+            b["tier"] = s
+        elif s in _NOTE_FAMILY_TOKENS:
+            b["fam"] = s
+        elif s == "CN":
+            b["cn"] = True
+        elif s == "CNH":
+            b["cnh"] = True
+        elif _NOTE_SCORE_RE.match(s):
+            b["score"] = s
+        else:
+            b["other"].append(s)
+    return b
+
+
+def _render_note(head: str, b: dict) -> str:
+    parts = [p for p in (
+        b["lead"], b["lat"], b["spd"], *b["stream"],
+        b["typ"], "CF" if b["cf"] else None, b["tier"], b["fam"],
+        "CN" if (b["cn"] or b["cnh"]) else None,
+        "CNH" if b["cnh"] else None, b["score"],
+    ) if p]
+    parts.extend(b["other"])
+    return f"{head}#{'-'.join(parts)}"
+
+
+_NOTE_BUCKET_KEYS = ("type", "tier", "family", "score", "streaming", "cf", "cn")
+_BUCKET_TO_KEY = {
+    "type": "typ", "tier": "tier", "family": "fam", "score": "score",
+    "streaming": "stream",
+}
+
+
+def _rebuild_note(line: str, clear: tuple = ()) -> str:
+    if "#" not in line:
+        return line
+    head, note = line.split("#", 1)
+    b = _parse_note_segs(note)
+    if b is None:
+        return line
+    # 既无延迟也无任何受管 token → 非验证池行（如裸 `#US`），不动
+    if b["lat"] is None and not any(
+        (b["spd"], b["stream"], b["typ"], b["tier"], b["fam"],
+         b["cn"], b["cnh"], b["score"], b["cf"])
+    ):
+        return line
+    for bucket in clear:
+        key = _BUCKET_TO_KEY.get(bucket, bucket)
+        if key == "stream":
+            b["stream"] = []
+        elif key in ("cn",):
+            b["cn"] = b["cnh"] = False
+        elif isinstance(b.get(key), bool):
+            b[key] = False
+        elif key in b:
+            b[key] = None
+    return _render_note(head, b)
+
+
+def clear_note_buckets(line: str, *buckets: str) -> str:
+    """删除给定互斥桶（type/tier/family/score/streaming/cf/cn）的既有 token。
+
+    权威数据源写入前先清桶再追加（merge_note_tokens），避免新旧值并存。
+    """
+    return _rebuild_note(line, clear=tuple(buckets))
+
+
+def merge_note_tokens(line: str, *tokens: str) -> str:
+    """先规范再幂等追加 token —— 各工作流追加备注的唯一入口。"""
+    out = normalize_note(line)
+    for tok in tokens:
+        if not tok:
+            continue
+        note = out.split("#", 1)[-1]
+        if not has_token(note, tok):
+            out += "-" + tok
+    return normalize_note(out)
+
+
 def is_cf_heuristic(line: str) -> bool:
     """行备注是否带 ``-CF``（Cloudflare 边缘标记，用于检测时记录 heuristic 源）。"""
     return has_token(_note(line), "CF")

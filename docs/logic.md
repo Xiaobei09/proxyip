@@ -71,6 +71,17 @@ TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降�
 
 ## 4. IP 信誉评分（quality_reputation.py）
 
+### 4.0 出口 IP 解析（resolve_exit_ips）
+
+信誉 / 地理 / 滥用查询一律使用**真实出口 IP**，按优先级解析：
+
+1. `external_check.exit_geo.ip` —— 外部探测回显的出口
+2. `exit_family.json` 的 `exit_v4` / `exit_v6` —— 专用双栈探测实测
+3. 代理自身 IP（兜底；仅当无任何出口观测）
+
+> CF 中转代理的入口恒为 Cloudflare 边缘 IP——查入口会得到千篇一律的
+> "干净"结果，完全失真。`exit_ip_source` 字段记录取值来源。
+
 ### 4.1 评分公式
 
 **多源加权合成**：
@@ -232,11 +243,27 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 ## 7. 后缀填充与分类（annotate_classify.py）
 
-读取 5 个 JSON 数据源，向所有 `data/valid/*.txt` 文件填充缺失后缀并追加分类 token。
+读取 7 个 JSON 数据源，向所有 `data/valid/*.txt` 文件填充缺失后缀并追加分类 token。
+
+### 7.0 统一备注规范器（common.normalize_note）
+
+所有工作流**禁止**直接 `line += "-TOK"` 拼接备注；必须经由
+`normalize_note` / `merge_note_tokens`（追加）/ `clear_note_buckets`
+（互斥桶先清后设）。规范段顺序：
+
+```
+入口CC[→出口CC] - 延迟ms - 速度MB/s - 流媒体(并集) - 类型 - CF标 - 速度档 - 家族 - CN/CNH - 信誉分
+```
+
+- 单值桶（类型/档位/家族/分数）取最右（最新）；多轮 CI 堆叠的历史快照自动收敛。
+- `CF`（边缘标记）与出口类型正交：出现过即保留，不参与类型互斥。
+- 流媒体为并集去重；`CNH` 蕴含 `CN`。
+- 互斥桶由权威源"先清后设"：ipinfo 类型覆盖历史类型，exit_family 家族覆盖旧家族，
+  重算的速度档替换旧档——避免 `-DC-…-RES` 新旧并存。
 
 ### 7.1 Token 追加顺序
 
-1. 出口国家标记：`→CC`（出口 ≠ 列出国家时）
+1. 出口国家标记：`→CC`（有出口观测即标注，含同国）
 2. 大陆可达：`-CN`
 3. IP 家族：`-V4` / `-V6` / `-DS`
 4. 流媒体解锁：`-NF(US) -D+ -YT -MX -PV -GPT`
@@ -244,10 +271,16 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 6. IP 类型：`-DC` / `-RES` / `-MOB` / `-PROXY`
 7. 速度等级：`-fast`（≥5 MB/s）/ `-mid`（1-5 MB/s）/ `-slow`（<1 MB/s）
 
-### 7.2 行格式示例
+### 7.2 出口国家标记的三数据源
+
+`→CC` 按优先级取自：① `external_check.json`（外部探测回显的出口地理）→
+② `ipinfo.json`（出口 IP 的 ip-api 地理）→ ③ `upstream_meta.json`
+（自有 CF Worker 观测到的代理出口国，覆盖面最大）。
+
+### 7.3 行格式示例
 
 ```
-1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-NF(US) D+ YT GPT-CF-72-V4-DC-fast
+1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-GPT-CF-72-DC-fast-V4-CN
 ```
 
 ## 8. 并发与容错

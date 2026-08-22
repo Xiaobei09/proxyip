@@ -77,6 +77,7 @@
 流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）检测，所有代理使用统一的 TLS 直连方法：
 
 - 对每个代理建立 TLS 直连（SNI=服务域名），检测 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`；`loc` 机场码同时写入行备注的 `→` 出口地区段
+- **出口 IP 解析**：信誉/地理/滥用查询使用真实出口 IP——优先外部探测回显，其次 `exit_family.json` 实测，兜底代理自身 IP（见 logic.md §4.0）
 - 批量查出口 IP 地理（`ip-api.com/batch`）与 ASN/IP 类型
 
 | 参数 | 说明 | 默认 |
@@ -202,7 +203,7 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 
 ### `scripts/annotate_classify.py`
 
-后缀填充 + 节点分类（CI 在 quality-check 完成后自动运行）。读取 5 个 JSON 数据源，向所有 `data/valid/*.txt` 文件填充缺失后缀并追加分类 token。幂等设计：多次运行结果一致。
+后缀填充 + 节点分类（CI 在 quality-check 完成后自动运行）。读取 7 个 JSON 数据源，向所有 `data/valid/*.txt` 文件填充缺失后缀并追加分类 token。幂等设计：多次运行结果一致。所有备注写入统一经 `common.normalize_note` / `merge_note_tokens` / `clear_note_buckets` 处理（规范段序 + 互斥桶先清后设），禁止裸拼接。
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
@@ -217,6 +218,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 | `china.json` | 大陆可达 token（CN） |
 | `exit_family.json` | IP 家族 token（V4/V6/DS） |
 | `streaming.json` | 流媒体解锁 tokens（NF/D+/YT/MX/PV/GPT） |
+| `external_check.json` | 出口国标记 →CC（优先级最高） |
+| `upstream_meta.json` | 出口国标记 →CC（CF Worker 观测，覆盖面最大） |
 
 **分类 token**：
 
@@ -258,7 +261,7 @@ python scripts/annotate_classify.py --data-dir /path/to/data
 |---|---|---|
 | `--data-dir` | 数据根目录（含 `valid/` 与 `quality/`） | `data` |
 
-输出文件：`data/valid/all_good.txt`、`data/valid/countries/<CC>/good.txt`、`data/valid/sets/<name>/good.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）可靠性变体。CI 在 quality-check / china-check / exit-family / annotate-classify 四个 workflow 的后缀填充步骤后自动运行。
+输出文件：`data/valid/all_good.txt`、`data/valid/countries/<CC>/good.txt`、`data/valid/sets/<name>/good.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）可靠性变体；对同目录 `ltd.txt` 池额外产出 `good_ltd(+_verified/_stable)`（每国最快的优质子集）。CI 在 quality-check / china-check / exit-family / annotate-classify 四个 workflow 的后缀填充步骤后自动运行。
 
 ```bash
 python scripts/build_good.py

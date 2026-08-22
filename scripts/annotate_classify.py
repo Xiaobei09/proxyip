@@ -23,8 +23,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (
     SPEED_RE,
     DATA_DIR,
+    clear_note_buckets,
     has_token,
     insert_exit_region,
+    merge_note_tokens,
+    normalize_note,
     parse_line,
     read_json,
     collect_txt_files,
@@ -95,18 +98,43 @@ def _build_rep_map(data: dict) -> dict[str, int]:
     }
 
 
-def _build_exit_map(data: dict) -> dict[str, str]:
-    """``ipinfo.json`` → ``{key: exit_cc}`` for proxies where exit country
-    differs from the listed entry country."""
+def _build_exit_map(
+    ipinfo: dict,
+    external_check: dict | None = None,
+    upstream_meta: dict | None = None,
+) -> dict[str, str]:
+    """多源汇聚 ``{key: exit_cc}``（出口国家观测，优先级从高到低）：
+
+    1. ``external_check.json`` —— 外部探测接口直接返回的出口地理
+       （``probe_results.ipv4.exit.country``）；
+    2. ``ipinfo.json`` —— 出口 IP 的 ip-api 地理（``country_code``）；
+    3. ``upstream_meta.json`` —— 我们自己的 CF Worker 观测到的代理出口
+       （``clientIp`` 所在国家，覆盖面最大，1.5w+ 键）。
+    """
     result: dict[str, str] = {}
-    for key, info in data.get("proxies", {}).items():
+
+    def _cc_of(v) -> str:
+        if not isinstance(v, dict):
+            return ""
+        cc = v.get("country") or ""
+        if isinstance(cc, dict):
+            cc = cc.get("code") or ""
+        return cc.upper() if isinstance(cc, str) and len(cc) == 2 and cc.isalpha() else ""
+
+    for key, info in external_check.get("proxies", {}).items() if external_check else []:
+        cc = _cc_of((info or {}).get("exit_geo"))
+        if cc:
+            result[key] = cc
+    for key, info in (ipinfo.get("proxies", {}) or {}).items():
         if not isinstance(info, dict):
             continue
-        if info.get("country_match") is not False:
-            continue
-        exit_cc = info.get("country_code")
-        if exit_cc and len(exit_cc) == 2 and exit_cc.isalpha():
-            result[key] = exit_cc.upper()
+        cc = info.get("country_code") or ""
+        if isinstance(cc, str) and len(cc) == 2 and cc.isalpha() and key not in result:
+            result[key] = cc.upper()
+    for key, info in upstream_meta.get("proxies", {}).items() if upstream_meta else []:
+        cc = _cc_of(info)
+        if cc:
+            result.setdefault(key, cc)
     return result
 
 
@@ -130,7 +158,8 @@ def fill_and_classify(
         return line
 
     key, _ip, _port, _cc, _note = parsed
-    out = line
+    # 先经全仓库唯一规范器清洗历史堆叠段，再判重追加
+    out = normalize_note(line)
 
     # --- suffix filling ---
 
@@ -144,14 +173,14 @@ def fill_and_classify(
     if key in china_set and not has_token(out, "CN"):
         out += "-CN"
 
-    # V4 / V6 / DS
+    # V4 / V6 / DS（互斥桶：先清后设，权威源替换旧值）
     family = family_map.get(key, "")
     if family:
         fam_token = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}.get(family, "")
-        if fam_token and not has_token(out, fam_token) and not any(
-            has_token(out, t) for t in FAMILY_TOKENS
-        ):
+        if fam_token and not any(has_token(out, t) for t in FAMILY_TOKENS):
             out += "-" + fam_token
+        elif fam_token:
+            out = merge_note_tokens(clear_note_buckets(out, "family"), fam_token)
 
     # streaming tokens
     st = streaming_map.get(key)
@@ -166,20 +195,20 @@ def fill_and_classify(
     rep_score = rep_map.get(key)
     if rep_score is not None:
         score_str = str(rep_score)
-        if not has_token(out, score_str) and score_str not in out:
-            out += "-" + score_str
+        if not has_token(out.split("#", 1)[-1], score_str):
+            out = merge_note_tokens(clear_note_buckets(out, "score"), score_str)
 
     # --- classification tokens ---
 
-    # IP type
+    # IP type（互斥桶：先清后设）
     ip_type = ip_type_map.get(key, "")
-    if ip_type and ip_type in IP_TYPES and not has_token(out, ip_type):
-        out += "-" + ip_type
+    if ip_type and ip_type in IP_TYPES:
+        out = merge_note_tokens(clear_note_buckets(out, "type"), ip_type)
 
-    # speed tier
+    # speed tier（由延迟/速度重算，互斥桶先清后设）
     tier = speed_tier(out)
-    if tier != "unknown" and not has_token(out, tier):
-        out += "-" + tier
+    if tier != "unknown":
+        out = merge_note_tokens(clear_note_buckets(out, "tier"), tier)
 
     return out
 
@@ -202,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
     china_data = read_json(quality_dir / "china.json")
     family_data = read_json(quality_dir / "exit_family.json")
     streaming_data = read_json(quality_dir / "streaming.json")
+    external_check = read_json(quality_dir / "external_check.json")
+    upstream_meta = read_json(quality_dir / "upstream_meta.json")
 
     # build maps
     china_set = _build_china_set(china_data)
@@ -209,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     streaming_map = _build_streaming_map(streaming_data)
     rep_map = _build_rep_map(rep_data)
     ip_type_map = _build_ip_type_map(ipinfo)
-    exit_map = _build_exit_map(ipinfo)
+    exit_map = _build_exit_map(ipinfo, external_check, upstream_meta)
 
     print(
         f"Maps: cn={len(china_set)} family={len(family_map)} "
