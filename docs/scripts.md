@@ -122,7 +122,12 @@
 
 ### `scripts/reorg_country.py`
 
-按出口 IP 国家重组 country/set/port 文件。读取 `quality_check.py` 生成的 `ipinfo.json`，将出口国家与列出国家不一致（`country_match=False`）的代理行移动到出口国家目录，同时改写行内 `#<emoji><CC>` 为出口国家的 emoji + CC。幂等：重复运行不产生变化。
+按出口 IP 国家重组 country/set/port 文件。出口国观测经四源汇聚
+（`common.build_exit_cc_map`：`external_check.json` > `upstream_meta.json` >
+`streaming.json` > `ipinfo.json`，见 logic.md §7.2），命中观测的行一律
+upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当位于
+`countries/<CC>/` 且与出口国不同时才迁移目录，sets/ports 混国文件只标注
+不移动。幂等：重复运行不产生变化。
 
 | 参数 | 说明 | 默认 |
 |---|---|---|

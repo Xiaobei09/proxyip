@@ -271,11 +271,20 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 6. IP 类型：`-DC` / `-RES` / `-MOB` / `-PROXY`
 7. 速度等级：`-fast`（≥5 MB/s）/ `-mid`（1-5 MB/s）/ `-slow`（<1 MB/s）
 
-### 7.2 出口国家标记的三数据源
+### 7.2 出口国家标记的四数据源
 
-`→CC` 按优先级取自：① `external_check.json`（外部探测回显的出口地理）→
-② `ipinfo.json`（出口 IP 的 ip-api 地理）→ ③ `upstream_meta.json`
-（自有 CF Worker 观测到的代理出口国，覆盖面最大）。
+`→CC` 由统一构建器 `common.build_exit_cc_map` 四源汇聚（annotate_classify
+与 reorg_country 共用），优先级从高到低：
+
+1. `external_check.json` —— 外部探测接口直接回显的出口地理；
+2. `upstream_meta.json` —— 自有 CF Worker 观测到的代理出口
+   （`clientIp` 所在国家，直连证据）；
+3. `streaming.json` —— 经代理观测的服务解锁国；openai 为 CF trace
+   `loc`（最接近真实出口），其余服务按序兜底。覆盖面最大（98%+）；
+4. `ipinfo.json` —— 出口 IP 的 ip-api 地理。历史轮次可能是入口 IP 的
+   地理，仅作末位兜底。
+
+已有 `→CC` 但与新观测不同视为陈旧出口（出口会漂移），直接替换。
 
 ### 7.3 行格式示例
 
