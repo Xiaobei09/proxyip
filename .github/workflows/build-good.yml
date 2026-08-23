@@ -1,0 +1,70 @@
+name: Build good lists
+
+on:
+  workflow_dispatch:
+  # 质量链或心跳链任一成功完成后即重建 good 变体与 tiers/ 目录：
+  # good_stable 依赖 china.json（每小时刷新），good_verified 依赖
+  # speed.json（质量链产出）——此前挂在两条链内部重复执行且互相覆盖，
+  # 独立后单一写入者、更快反馈。
+  workflow_run:
+    workflows: ["Quality check", "China check"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-good
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Good variants & tier directories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or trigger failed
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ] \
+             && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Trigger workflow failed, skipping"
+            exit 0
+          fi
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Build good lists and tiers
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/build_good.py
+
+      - name: Generate stats and chart
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/generate_stats.py
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): good tiers & variants ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

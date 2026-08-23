@@ -45,6 +45,7 @@ from common import (
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
+    note_tier,
     read_json,
     write_text_if_changed,
 )
@@ -170,6 +171,9 @@ def filter_rank(
     return [line for _s, _ms, _k, line in ranked]
 
 
+TIER_TOKENS = ("fast", "mid", "slow")
+
+
 def write_good_file(path: Path, lines: list[str]) -> int:
     content = "\n".join(lines) + "\n" if lines else ""
     write_text_if_changed(path, content)
@@ -184,14 +188,22 @@ def write_good_files(
 ) -> dict[str, int]:
     """Write all_good.txt + per-country/set good.txt; return per-file counts.
 
-    每份 good 清单同步产出 ``_verified``（speed.json 全链路验证）与
-    ``_stable``（china.json streak≥2 跨轮稳定）可靠性变体。
+    每份 good 清单同步产出：
+
+    - ``_verified``（speed.json 全链路验证）与 ``_stable``（china.json
+      streak≥2 且 flip≤1 跨轮稳定）可靠性变体；
+    - ``good_<tier>.txt`` 速度档变体（fast/mid/slow，来自行备注档位 token）
+      ——不同国家实测速度天然分层，档位文件让消费者按带宽需求直达；
+    - 同内容镜像进细分目录 ``data/valid/tiers/<tier>/``：
+      全局组写 ``all.txt``，国家组写 ``<CC>.txt``，集合组写
+      ``sets/<name>.txt``——目录导航式消费入口（空档位整目录跳过）。
     """
     stats: dict[str, int] = {}
     speed_keys = load_speed_keys()
     stable_keys = load_china_stable_keys()
+    tier_lines: dict[str, list[tuple[str, Path]]] = {t: [] for t in TIER_TOKENS}
 
-    def emit(base: Path, lines: list[str]) -> int:
+    def emit(base: Path, lines: list[str], tier_name: str | None = None) -> int:
         n = write_good_file(base, lines)
         for suffix, keys in (("_verified", speed_keys), ("_stable", stable_keys)):
             vpath = base.with_name(f"{base.stem}{suffix}.txt")
@@ -200,6 +212,17 @@ def write_good_files(
                 write_text_if_changed(vpath, "\n".join(vlines) + "\n")
             elif vpath.exists():
                 vpath.unlink()
+        # 速度档变体：<base_stem>_<tier>.txt（与所在目录同级的扁平入口）
+        for tier in TIER_TOKENS:
+            tlines = [ln for ln in lines if note_tier(ln) == tier]
+            tpath = base.with_name(f"{base.stem}_{tier}.txt")
+            if tlines:
+                write_text_if_changed(tpath, "\n".join(tlines) + "\n")
+            elif tpath.exists():
+                tpath.unlink()
+            if tier_name is not None:
+                tier_lines[tier].append(("\n".join(tlines) + "\n" if tlines else "",
+                                         tier_name))
         return n
 
     all_pool = valid_dir / "all.txt"
@@ -209,6 +232,7 @@ def write_good_files(
             filter_rank(
                 all_pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
             ),
+            tier_name="all",
         )
 
     for sub in ("countries", "sets"):
@@ -220,12 +244,40 @@ def write_good_files(
             if not pool.exists():
                 continue
             name = f"{sub}/{group_dir.name}"
+            rel = (f"sets/{group_dir.name}" if sub == "sets"
+                   else f"{group_dir.name}")
             stats[name] = emit(
                 group_dir / "good.txt",
                 filter_rank(
                     pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
                 ),
+                tier_name=rel,
             )
+
+    # 细分目录：tiers/<tier>/{all.txt,<CC>.txt,sets/<name>.txt}
+    # 先清理陈旧产物（组消失/档位清空后残留），再写当前代内容
+    import shutil
+
+    tiers_root = valid_dir / "tiers"
+    for tier, parts in tier_lines.items():
+        content_by_rel = {rel: body for body, rel in parts if body}
+        tdir = tiers_root / tier
+        if tdir.is_dir():
+            keep = {f"{rel}.txt" for rel in content_by_rel}
+            for old in tdir.rglob("*.txt"):
+                if old.relative_to(tdir).as_posix() not in keep:
+                    old.unlink()
+            for dead in sorted(tdir.rglob("*"), reverse=True):
+                if dead.is_dir() and not any(dead.iterdir()):
+                    dead.rmdir()
+            if not any(tdir.iterdir()):
+                tdir.rmdir()
+        if not content_by_rel:
+            continue
+        total = sum(body.count("\n") for body in content_by_rel.values())
+        stats[f"tiers/{tier}"] = total
+        for rel, body in content_by_rel.items():
+            write_text_if_changed(tiers_root / tier / f"{rel}.txt", body)
     return stats
 
 
