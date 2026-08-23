@@ -253,6 +253,66 @@ class TestWriteGoodFiles(unittest.TestCase):
                 [l.split("#")[0] for l in sta.splitlines()], ["2.2.2.2:443"]
             )
 
+    def test_tier_variants_and_dirs(self):
+        """good_<tier> 变体 + tiers/<tier>/ 细分目录（全局/国家/集合三视图）。"""
+        pool = (
+            "1.1.1.1:443#US-100ms-5.00MB/s-CN-fast-90\n"
+            "2.2.2.2:443#US-400ms-1.00MB/s-CN-slow-85\n"
+            "3.3.3.3:443#JP-80ms-4.00MB/s-CN-mid-90\n"
+        )
+        china = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
+        rep = {k: {"score": 90, "risk": "low"} for k in
+               ("1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#JP")}
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            (valid / "countries" / "US").mkdir(parents=True)
+            (valid / "sets" / "hot").mkdir(parents=True)
+            (valid / "all.txt").write_text(pool, encoding="utf-8")
+            (valid / "countries" / "US" / "all.txt").write_text(pool, encoding="utf-8")
+            (valid / "sets" / "hot" / "all.txt").write_text(pool, encoding="utf-8")
+
+            stats = bg.write_good_files(valid, china, rep)
+
+            # 扁平变体：按档位 token 分桶
+            fast = (valid / "all_good_fast.txt").read_text(encoding="utf-8")
+            self.assertEqual(fast.splitlines()[0].split("#")[0], "1.1.1.1:443")
+            slow = (valid / "all_good_slow.txt").read_text(encoding="utf-8")
+            self.assertEqual(slow.splitlines()[0].split("#")[0], "2.2.2.2:443")
+            self.assertIn("tiers/fast", stats)
+
+            # 细分目录：tiers/<t>/{all,<CC>,sets/<name>}.txt 内容与扁平一致
+            tdir = valid / "tiers"
+            self.assertEqual(
+                (tdir / "fast" / "US.txt").read_text(encoding="utf-8"), fast)
+            self.assertEqual(
+                (tdir / "slow" / "US.txt").read_text(encoding="utf-8"), slow)
+            mid_all = (tdir / "mid" / "all.txt").read_text(encoding="utf-8")
+            self.assertEqual(mid_all.splitlines()[0].split("#")[0], "3.3.3.3:443")
+            self.assertTrue((tdir / "mid" / "sets" / "hot.txt").exists())
+            self.assertTrue((tdir / "slow" / "US.txt").exists())
+            self.assertFalse((tdir / "slow" / "JP.txt").exists())  # JP 无 slow 行
+
+    def test_tier_dir_removed_when_empty(self):
+        """池中不再有某档位 → 对应 tiers 子目录内容被清理。"""
+        pool_fast = "1.1.1.1:443#US-100ms-5.00MB/s-CN-fast-90\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            (valid / "all.txt").write_text(pool_fast, encoding="utf-8")
+            bg.write_good_files(valid, {"1.1.1.1:443#US"},
+                                {"1.1.1.1:443#US": {"score": 90, "risk": "low"}})
+            stale = valid / "tiers" / "slow" / "all.txt"
+            stale.parent.mkdir(parents=True)
+            stale.write_text("9.9.9.9:80#US\n", encoding="utf-8")
+            bg.write_good_files(valid, {"1.1.1.1:443#US"},
+                                {"1.1.1.1:443#US": {"score": 90, "risk": "low"}})
+            self.assertFalse(stale.exists())
+
+    def test_note_tier_helper(self):
+        import common
+        self.assertEqual(common.note_tier("1.1.1.1:80#US-x-fast"), "fast")
+        self.assertIsNone(common.note_tier("1.1.1.1:80#US-x"))
+
     def test_idempotent_rewrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             valid = Path(tmp) / "valid"

@@ -612,6 +612,16 @@ def has_token(note: str, token: str) -> bool:
     return bool(re.search(rf"(?:^|-){re.escape(token)}(?:$|-)", note))
 
 
+def note_tier(line: str) -> str | None:
+    """行的速度档 token（``fast``/``mid``/``slow``），无档位返回 ``None``。
+
+    不同国家/机房的实测速度天然分层（同一"good"里美西与欧东可差一个
+    数量级），供 build_good 产 ``good_<tier>`` 变体与 ``tiers/`` 目录。
+    """
+    b = _parse_note_segs(_note(line))
+    return b.get("tier") if isinstance(b, dict) else None
+
+
 # ------------------------------------------------------- 备注段规范（唯一出口）
 # 所有工作流追加/清理备注必须经由 normalize_note，禁止各自 ``line += "-TOK"``
 # 拼接——否则多 CI 并发写同一文件时段序漂移、旧 token 无限堆叠

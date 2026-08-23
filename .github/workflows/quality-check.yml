@@ -75,9 +75,7 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/annotate_classify.py
 
-      - name: Build good lists
-        if: steps.gate.outputs.skip != 'true'
-        run: python scripts/build_good.py
+      # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
 
       - name: Audit entry CC labels
         if: steps.gate.outputs.skip != 'true'
