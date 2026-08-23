@@ -118,12 +118,8 @@ class TestBuildExitCcMap(unittest.TestCase):
             "1.1.1.1": {"country": "sg"},       # 小写规范化
             "2.2.2.2": {"country": "HK"},
         }}
-        streaming = {"proxies": {
-            "a:443#US": {"openai": {"status": "ok", "region": "JP"}},
-            "b:443#US": {"openai": {"status": "ok", "region": "JP"}},
-        }}
-        m = build_exit_cc_map({}, external, upstream, streaming, family)
-        # upstream（第 2 层）胜过 streaming（第 3 层）
+        m = build_exit_cc_map({}, external, upstream, family_data=family)
+        # upstream（第 2 层）胜过 ipinfo（末位兜底）
         self.assertEqual(m["a:443#US"], "SG")
         self.assertEqual(m["b:443#US"], "HK")
         # c 无 upstream 观测 → 不受影响，且不产生幽灵键
@@ -143,7 +139,7 @@ class TestBuildExitCcMap(unittest.TestCase):
             "a:443#US": {"exit_geo": {"ip": "1.1.1.1", "country": "DE"}},
         }}
         upstream = {"proxies": {"1.1.1.1": {"country": "SG"}}}
-        m = build_exit_cc_map({}, external, upstream, {}, {})
+        m = build_exit_cc_map({}, external, upstream)
         self.assertEqual(m["a:443#US"], "DE")
 
 

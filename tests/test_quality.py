@@ -6,6 +6,7 @@ import json
 import sys
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -72,72 +73,6 @@ class TestParseHeaders(unittest.TestCase):
         status, headers = qc.parse_headers(b"garbage\r\n")
         self.assertIsNone(status)
         self.assertEqual(headers, {})
-
-
-class TestServiceParsers(unittest.TestCase):
-    def test_netflix_ok(self):
-        res = qc.parse_netflix(200, {}, b'{"data":{"countryCode":"US"}}')
-        self.assertEqual(res, {"status": "ok", "region": "US"})
-
-    def test_netflix_blocked(self):
-        res = qc.parse_netflix(404, {}, b"Not Available in your region")
-        self.assertEqual(res["status"], "blocked")
-
-    def test_netflix_error(self):
-        self.assertEqual(qc.parse_netflix(500, {}, b"")["status"], "error")
-
-    def test_disney_ok_with_region(self):
-        res = qc.parse_disney(200, {}, b'{"countryCode":"JP"}')
-        self.assertEqual(res["status"], "ok")
-        self.assertEqual(res["region"], "JP")
-
-    def test_disney_ok_without_region(self):
-        self.assertEqual(qc.parse_disney(200, {}, b"<html>app</html>"),
-                         {"status": "ok", "region": None})
-
-    def test_disney_blocked(self):
-        self.assertEqual(qc.parse_disney(403, {}, b"")["status"], "blocked")
-
-    def test_youtube_ok(self):
-        res = qc.parse_youtube(200, {}, b'var ytcfg = {"countryCode":"JP"};')
-        self.assertEqual(res, {"status": "ok", "region": "JP"})
-
-    def test_youtube_blocked(self):
-        self.assertEqual(qc.parse_youtube(403, {}, b"")["status"], "blocked")
-
-    def test_max_ok_from_location(self):
-        res = qc.parse_max(
-            301, {"location": "https://www.max.com/en-de?country=DE"}, b""
-        )
-        self.assertEqual(res, {"status": "ok", "region": "DE"})
-
-    def test_max_blocked(self):
-        self.assertEqual(qc.parse_max(503, {}, b"")["status"], "blocked")
-
-    def test_prime_ok_from_location(self):
-        res = qc.parse_prime(
-            302,
-            {"location": "https://www.primevideo.com/?country=US&foo=1"},
-            b"",
-        )
-        self.assertEqual(res, {"status": "ok", "region": "US"})
-
-    def test_prime_ok_from_body(self):
-        res = qc.parse_prime(200, {}, b'{"currentTerritory":"SG"}')
-        self.assertEqual(res, {"status": "ok", "region": "SG"})
-
-    def test_prime_blocked(self):
-        self.assertEqual(qc.parse_prime(503, {}, b"")["status"], "blocked")
-
-    def test_openai_ok(self):
-        res = qc.parse_openai(200, {}, b"ip=1.2.3.4\nloc=US\ncolo=LAX\n")
-        self.assertEqual(res, {"status": "ok", "region": "US"})
-
-    def test_openai_blocked(self):
-        self.assertEqual(qc.parse_openai(403, {}, b"")["status"], "blocked")
-
-    def test_openai_error(self):
-        self.assertEqual(qc.parse_openai(500, {}, b"")["status"], "error")
 
 
 class TestGroupChunks(unittest.TestCase):
@@ -315,23 +250,6 @@ class TestResolveExitIps(unittest.TestCase):
 
 
 class TestAnnotation(unittest.TestCase):
-    def test_streaming_tokens(self):
-        streaming = {
-            "netflix": {"status": "ok", "region": "US"},
-            "disney": {"status": "ok", "region": None},
-            "youtube": {"status": "ok", "region": "JP"},
-            "max": {"status": "blocked"},
-            "prime": {"status": "ok", "region": None},
-            "openai": {"status": "ok", "region": "US"},
-        }
-        self.assertEqual(
-            qc.streaming_tokens(streaming), "NF(US) D+ YT PV GPT"
-        )
-
-    def test_streaming_tokens_empty(self):
-        streaming = {name: {"status": "blocked"} for name in qc.SERVICES}
-        self.assertEqual(qc.streaming_tokens(streaming), "")
-
     def test_type_tokens(self):
         self.assertEqual(
             qc.type_tokens({"ip_type": "RES", "family": "dual"}), "RES DS"
@@ -525,11 +443,9 @@ class TestReputation(unittest.TestCase):
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "ip": "1.2.3.4",
-                "streaming": {},
             },
             "5.6.7.8:8443#JP": {
                 "key": "5.6.7.8:8443#JP", "ip": "5.6.7.8",
-                "streaming": {},
             },
         }
         risk_data = {"5.6.7.8": {"netcoffee": {"trust_score": 70}}}
@@ -538,6 +454,40 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(rep["5.6.7.8:8443#JP"]["score"], 70)
         self.assertEqual(rep["5.6.7.8:8443#JP"]["source"], "netcoffee")
         self.assertEqual(rep["5.6.7.8:8443#JP"]["sources"], ["netcoffee"])
+
+    def test_deep_speed_bonus(self):
+        results = {"a": {"key": "a", "ip": "1.1.1.1"}}
+        risk_data = {"1.1.1.1": {"netcoffee": {"trust_score": 70}}}
+        deep = {"proxies": {
+            "a": {"cdnjs": {"agg_mbps": 25.0}, "ovh": {"agg_mbps": 50.0}},
+        }}
+        rep = qc.build_reputation_map(results, risk_data, self.W, deep)
+        # 最优目标 50MB/s → +10 满额加成
+        self.assertEqual(rep["a"]["score"], 80)
+        self.assertEqual(rep["a"]["deep_bonus"], 10)
+
+    def test_deep_speed_bonus_scales_and_caps(self):
+        results = {"a": {"key": "a", "ip": "1.1.1.1"},
+                   "b": {"key": "b", "ip": "2.2.2.2"},
+                   "c": {"key": "c", "ip": "3.3.3.3"}}
+        risk_data = {ip: {"netcoffee": {"trust_score": 70}}
+                     for ip in ("1.1.1.1", "2.2.2.2", "3.3.3.3")}
+        deep = {"proxies": {
+            "a": {"cdnjs": {"agg_mbps": 12.5}},   # 半额
+            "b": {"cdnjs": {"agg_mbps": 500.0}},  # 封顶
+            "c": {"ovh": {"streams_ok": 0}},      # 无带宽观测
+        }}
+        rep = qc.build_reputation_map(results, risk_data, self.W, deep)
+        self.assertEqual(rep["a"]["deep_bonus"], 2)   # round(12.5/50*10) 银行家舍入
+        self.assertEqual(rep["b"]["score"], 80)
+        self.assertNotIn("deep_bonus", rep["c"])
+
+    def test_deep_speed_no_ghost_scores(self):
+        """深测是抽样：无信誉分来源的节点不得凭带宽产生分数。"""
+        results = {"a": {"key": "a", "ip": "9.9.9.9"}}
+        deep = {"proxies": {"a": {"cdnjs": {"agg_mbps": 99.0}}}}
+        rep = qc.build_reputation_map(results, {}, self.W, deep)
+        self.assertNotIn("a", rep)
 
     def test_netcoffee_lookup_parsing(self):
         payload = (
@@ -1254,27 +1204,6 @@ class TestReputationCache(unittest.TestCase):
         self.assertIn("1.1.1.1", data["proxies"])
 
 
-class TestFinalize(unittest.TestCase):
-    def test_netflix_native(self):
-        results = {
-            "1.2.3.4:443#US": {
-                "key": "1.2.3.4:443#US",
-                "streaming": {"netflix": {"status": "ok", "region": "US"}},
-            },
-            "5.6.7.8:8443#JP": {
-                "key": "5.6.7.8:8443#JP",
-                "streaming": {"netflix": {"status": "ok", "region": "US"}},
-            },
-        }
-        ipinfo = {
-            "1.2.3.4:443#US": {"country_code": "US"},
-            "5.6.7.8:8443#JP": {"country_code": "JP"},
-        }
-        streaming = qc.finalize_streaming(results, ipinfo)
-        self.assertTrue(streaming["1.2.3.4:443#US"]["netflix"]["native"])
-        self.assertFalse(streaming["5.6.7.8:8443#JP"]["netflix"]["native"])
-
-
 class TestAnnotateClassify(unittest.TestCase):
     """Tests for annotate_classify.py suffix filling and classification."""
 
@@ -1292,7 +1221,6 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set={"1.2.3.4:443#US"},
             family_map={},
-            streaming_map={},
             rep_map={},
             ip_type_map={},
         )
@@ -1306,24 +1234,11 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set=set(),
             family_map={"1.2.3.4:443#US": "ipv6"},
-            streaming_map={},
             rep_map={},
             ip_type_map={},
         )
         self.assertIn("-V6", result)
 
-    def test_fill_streaming_tokens(self):
-        from annotate_classify import fill_and_classify
-        line = "1.2.3.4:443#🇺🇸US-100ms"
-        result = fill_and_classify(
-            line,
-            china_set=set(),
-            family_map={},
-            streaming_map={"1.2.3.4:443#US": {"openai": {"status": "ok"}}},
-            rep_map={},
-            ip_type_map={},
-        )
-        self.assertIn("-GPT", result)
 
     def test_fill_rep_score(self):
         from annotate_classify import fill_and_classify
@@ -1332,11 +1247,39 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set=set(),
             family_map={},
-            streaming_map={},
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={},
         )
         self.assertTrue(result.endswith("-85"))
+
+    def test_fill_uptime_token(self):
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms"
+        result = fill_and_classify(
+            line,
+            china_set=set(),
+            family_map={},
+            rep_map={},
+            ip_type_map={},
+            uptime_map={"1.2.3.4:443#US": 92},
+        )
+        self.assertTrue(result.endswith("-U92"))
+        # 幂等
+        again = fill_and_classify(
+            result, set(), {}, {}, {},
+            uptime_map={"1.2.3.4:443#US": 92},
+        )
+        self.assertEqual(again, result)
+
+    def test_no_uptime_token_without_data(self):
+        import re
+
+        from annotate_classify import fill_and_classify
+        result = fill_and_classify(
+            "1.2.3.4:443#🇺🇸US-100ms",
+            set(), {}, {}, {}, None,
+        )
+        self.assertIsNone(re.search(r"-U\d+", result))
 
     def test_add_ip_type_and_tier(self):
         from annotate_classify import fill_and_classify
@@ -1345,7 +1288,6 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set=set(),
             family_map={},
-            streaming_map={},
             rep_map={},
             ip_type_map={"1.2.3.4:443#US": "DC"},
         )
@@ -1360,7 +1302,6 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set={"1.2.3.4:443#US"},
             family_map={"1.2.3.4:443#US": "ipv6"},
-            streaming_map={"1.2.3.4:443#US": {"openai": {"status": "ok"}}},
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={"1.2.3.4:443#US": "DC"},
         )
@@ -1374,7 +1315,6 @@ class TestAnnotateClassify(unittest.TestCase):
             result,
             china_set={"1.2.3.4:443#US"},
             family_map={"1.2.3.4:443#US": "ipv6"},
-            streaming_map={"1.2.3.4:443#US": {"openai": {"status": "ok"}}},
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={"1.2.3.4:443#US": "DC"},
         ), result)
@@ -1388,7 +1328,6 @@ class TestAnnotateClassify(unittest.TestCase):
             stacked,
             china_set=set(),
             family_map={},
-            streaming_map={},
             rep_map={},
             ip_type_map={},
         )
@@ -1412,7 +1351,6 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set=set(),
             family_map={},
-            streaming_map={},
             rep_map={},
             ip_type_map={},
             exit_map={"1.2.3.4:443#US": "JP"},
@@ -1429,7 +1367,6 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set=set(),
             family_map={},
-            streaming_map={},
             rep_map={},
             ip_type_map={},
             exit_map={"1.2.3.4:443#US": "JP"},
@@ -1445,7 +1382,6 @@ class TestAnnotateClassify(unittest.TestCase):
             line,
             china_set=set(),
             family_map={},
-            streaming_map={},
             rep_map={},
             ip_type_map={},
             exit_map={"9.9.9.9:443#DE": "FR"},
@@ -1472,12 +1408,12 @@ class TestBuildExitMap(unittest.TestCase):
         })
 
     def test_build_exit_map_multi_source_priority(self):
-        """external_check > upstream_meta > streaming > ipinfo 四源回退。"""
+        """external_check > upstream_meta > ipinfo 三源回退。"""
         from annotate_classify import _build_exit_map
         ipinfo = {
             "proxies": {
                 "a:443#US": {"country_code": "JP"},   # 陈旧入口地理，被 external 覆盖
-                "b:443#US": {"country_code": "JP"},   # 被 streaming 覆盖
+                "b:443#US": {"country_code": "JP"},   # 仅 ipinfo 兜底
                 "c:443#US": {},                        # 由 upstream 补齐
                 "e:443#US": {"country_code": "KR"},   # 仅 ipinfo 兜底
             }
@@ -1494,26 +1430,13 @@ class TestBuildExitMap(unittest.TestCase):
                 "d:443#US": {"clientIp": "::1", "country": "TW"},
             }
         }
-        streaming = {
-            "proxies": {
-                "b:443#US": {
-                    "openai": {"status": "ok", "region": "SG"},
-                    "netflix": {"status": "ok", "region": "US"},
-                },
-                "g:443#US": {  # openai 无观测 → 其余服务按序兜底
-                    "netflix": {"status": "blocked"},
-                    "disney": {"status": "ok", "region": "GB"},
-                },
-            }
-        }
-        exit_map = _build_exit_map(ipinfo, external, upstream, streaming)
+        exit_map = _build_exit_map(ipinfo, external, upstream)
         self.assertEqual(exit_map, {
             "a:443#US": "SG",
-            "b:443#US": "SG",
+            "b:443#US": "JP",
             "c:443#US": "HK",
             "d:443#US": "TW",
             "e:443#US": "KR",
-            "g:443#US": "GB",
         })
 
     def test_build_exit_map_missing_fields(self):
@@ -1532,18 +1455,18 @@ class TestBuildExitMap(unittest.TestCase):
 
 class TestBuildMetaCountryMismatch(unittest.TestCase):
     def test_country_mismatch_in_meta(self):
-        results = {"a": {"streaming": {}}}
+        results = {"a": {}}
         ipinfo = {
             "a": {"ip_type": "DC", "risk": "low", "country_match": True},
             "b": {"ip_type": "DC", "risk": "low", "country_match": False},
         }
-        meta = qc.build_meta(results, ipinfo, {}, {}, None)
+        meta = qc.build_meta(results, ipinfo, {}, None)
         self.assertEqual(meta["country_mismatch"], 1)
 
     def test_country_mismatch_all_match(self):
         results = {"a": {}}
         ipinfo = {"a": {"ip_type": "DC", "risk": "low", "country_match": True}}
-        meta = qc.build_meta(results, ipinfo, {}, {}, None)
+        meta = qc.build_meta(results, ipinfo, {}, None)
         self.assertEqual(meta["country_mismatch"], 0)
 
 
@@ -1613,7 +1536,7 @@ class TestReorgCountry(unittest.TestCase):
 
 class TestExternalCheck(unittest.TestCase):
     def test_check_external_api_success(self):
-        import quality_streaming as qs
+        import quality_probe as qs
         fake_data = {
             "success": True,
             "responseTime": 123,
@@ -1651,7 +1574,7 @@ class TestExternalCheck(unittest.TestCase):
         self.assertEqual(result["exit_geo"]["countryCode"], "HK")
 
     def test_check_external_api_failure(self):
-        import quality_streaming as qs
+        import quality_probe as qs
 
         def fake_urlopen(req, timeout=30):
             raise ConnectionError("nope")
@@ -1668,7 +1591,7 @@ class TestExternalCheck(unittest.TestCase):
             "k2": {"ip": "2.2.2.2", "external_check": {"success": False}},
             "k3": {"ip": "3.3.3.3"},
         }
-        meta = qc.build_meta(results, {}, {}, {})
+        meta = qc.build_meta(results, {}, {})
         self.assertEqual(meta["ext_check_total"], 2)
         self.assertEqual(meta["ext_check_ok"], 1)
 

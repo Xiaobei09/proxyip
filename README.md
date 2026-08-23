@@ -13,11 +13,11 @@
 ![Port distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_port.svg)
 ![Churn](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_churn.svg)
 ![Latency & Speed distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_latency_speed.svg)
-![Streaming unlock](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_streaming.svg)
 ![Sets](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_sets.svg)
 ![Mainland China reachability](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_cn.svg)
 ![Exit IP family](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_family.svg)
 ![Exit country top 15](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_exit.svg)
+![Country speed distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_country_speed.svg)
 ![Entry CC label audit](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_entry_audit.svg)
 ![IP type distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_ip_type.svg)
 ![IP source availability](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_source_avail.svg)
@@ -28,7 +28,9 @@
 
 - **自动抓取整理**：下载上游 `all.json`（失败自动回退 zip）→ 按端口/国家/常用集合/全量多维度汇总，去重合并；并把上游真实出口 IP、ASN、地理等元数据落盘为 `data/quality/upstream_meta.json` 供下游消费
 - **可用性验证**：TLS 握手检测，asyncio 高并发测活，并在判活连接内做**稳态下载测速**（丢弃慢启动爬坡、仅对稳态窗口计时，MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
-- **流媒体解锁 + 出口 IP 质量检测**（独立 CI）：对全量存活池做 Netflix（含原生 IP 判定）/ Disney+ / YouTube Premium / Max / Prime Video / ChatGPT 解锁检测、出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`
+- **出口 IP 质量检测**（独立 CI）：对全量存活池做出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`；**滚动可用率跟踪**（`uptime.py`：按轮记录存活日期，7d/30d 存活率写入 `data/quality/uptime.json` 并追加 `-U<NN>` 备注）；
+  **结构化导出** `data/valid/all.json` 与**出口多样性视图** `data/valid/all_diverse.txt`（每实测出口/入口网段仅留综合分最高一条）；**池健康看门狗**（`health_alert.py`：池量暴跌/大陆可达崩塌/数据过期 → webhook 告警）
+  （流媒体解锁检查已移除；历史行上的 NF/D+/YT 等标记仍被解析器容忍但不再产生新观测）
 - **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性 + itdog 应用层确认），保守判定（≥2 方法确认才标 reachable）+ 证据分级（`level`：http/tcp）+ 跨轮稳定计数（`streak`），itdog.cn 批量（18 节点跨省采样 + batch_tcping 238 节点降级补测）+ check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细、`data/valid/all_cn.txt` 全量清单及 `all_cn_http.txt`/`all_cn_stable.txt` 可靠性子集，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `data/quality/upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`data/quality/exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
@@ -54,7 +56,10 @@ python -m unittest discover -s tests -v     # 0. 运行测试套件（可选）
 python scripts/download_proxies.py          # 1. 下载解压整理
 python scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止）
 python scripts/generate_stats.py            # 3. 统计与趋势图
-python scripts/quality_check.py             # 4. 流媒体解锁 + 出口 IP 质量检测（可选）
+python scripts/quality_check.py             # 4. 出口 IP 质量检测（可选）
+python scripts/uptime.py                   # 5. 滚动可用率统计
+python scripts/export_json.py              # 6. 结构化 JSON 导出
+python scripts/health_alert.py             # 7. 池健康告警（可选 webhook）
 ```
 
 ### 消费数据
@@ -120,7 +125,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
 - **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `build_good.py`（重建综合最优 good 清单）→ `generate_stats.py`（含 streaming 统计与 `chart_streaming.svg`）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `uptime.py`（滚动可用率）→ `annotate_classify.py` 之后由专职 build-good 工作流重建 good 清单（含 `_uptime` 可靠性变体）→ stats 工作流统一渲染图表并执行 `export_json.py` + `health_alert.py`→ 有变更则自动提交并推送
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
@@ -152,16 +157,19 @@ data/download/all.txt                       # 全量去重清单（未验证）
 
 ```
 .github/workflows/update-proxies.yml     CI 自动更新（下载、验证、统计）
-.github/workflows/quality-check.yml      独立 CI：流媒体解锁 + 出口 IP 质量检测
+.github/workflows/quality-check.yml      独立 CI：出口 IP 质量检测 + 滚动可用率
 .github/workflows/china-check.yml        独立 CI：大陆连通性检测
 .github/workflows/exit-family.yml        独立 CI：实际出口 IPv4/IPv6 分离
 .github/workflows/annotate-classify.yml  独立 CI：后缀填充 + 节点分类
 scripts/download_proxies.py              下载与解压整理
 scripts/validate_proxies.py              可用性验证与测速
 scripts/generate_stats.py                统计与趋势图
-scripts/quality_check.py                 流媒体解锁与出口 IP 质量检测（入口）
+scripts/quality_check.py                 出口 IP 质量检测（入口）
+scripts/quality_probe.py                 TLS 探测引擎（TLS GET / 外部出口地理 / ip-api 批量）
 scripts/quality_reputation.py            信誉分/滥用分模块（quality_check 拆分）
-scripts/quality_streaming.py             流媒体解锁模块（quality_check 拆分）
+scripts/uptime.py                        滚动节点可用率（node_seen.json → uptime.json）
+scripts/export_json.py                   结构化 all.json 导出
+scripts/health_alert.py                  池健康看门狗（webhook 告警）
 scripts/reorg_country.py                 按出口国家重组 country/set/port 文件
 scripts/china_check.py                   大陆连通性检测（CF 启发式 + check-host + xxapi + ping.pe）
 scripts/china_itdog.py                   itdog.cn 批量探活模块（china_check 拆分）
@@ -198,7 +206,11 @@ data/valid/history.jsonl                 验证历史
 
 data/quality/                            质量/检测元数据
 data/quality/ipinfo.json                 出口 IP 地理/类型/信誉分（质量 CI）
-data/quality/streaming.json              各服务流媒体解锁结果（质量 CI）
+data/quality/node_seen.json              节点按轮存活日期（滚动 45 天窗口）
+data/quality/uptime.json                 7d/30d 存活率
+data/valid/all.json                      结构化代理池（ip/port/cc/延迟/速度/家族/信誉…）
+data/valid/all_diverse.txt               出口多样性视图（每出口一条最优）
+data/quality/alert_state.json            健康看门狗状态
 data/quality/abuse.json                  滥用分结果（配置 key 时生成，质量 CI）
 data/quality/quality_meta.json           质量检测汇总（质量 CI）
 data/quality/reputation.json             信誉分索引（0-100，质量 CI）
@@ -218,7 +230,6 @@ data/output/chart_country.svg            存活代理按国家 top-15 条形图
 data/output/chart_port.svg               存活代理按端口条形图
 data/output/chart_churn.svg              每次更新 added/removed 条形图
 data/output/chart_latency_speed.svg      延迟与速度分桶双面板条形图
-data/output/chart_streaming.svg          各服务流媒体解锁 ok/blocked/error 堆叠条形图
 data/output/chart_sets.svg               各命名集合存活代理条形图
 data/output/chart_cn.svg                 大陆连通性 verdict 分布条形图
 data/output/chart_family.svg             实际出口 IP 家族分布条形图

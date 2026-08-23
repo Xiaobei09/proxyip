@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Reorganize country/set/port files by exit IP country.
 
-出口国观测经四源汇聚（``common.build_exit_cc_map``：external_check >
-upstream_meta > streaming > ipinfo），将代理行标注/迁移为 ``#<IC>→<OC>``
+出口国观测经三源汇聚（``common.build_exit_cc_map``：external_check >
+upstream_meta > ipinfo），将代理行标注/迁移为 ``#<IC>→<OC>``
 格式。已有 ``→CC`` 但与新观测不同视为陈旧，直接替换；同国行也补齐标记。
 
 Idempotent: running twice with the same quality JSONs produces no changes.
@@ -139,7 +139,7 @@ def _path_country(path: Path) -> str | None:
 def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
     """Main entry: reorganize all country/set/port files.  Returns moved count.
 
-    出口国观测四源汇聚（external_check > upstream_meta > streaming >
+    出口国观测三源汇聚（external_check > upstream_meta >
     ipinfo，见 common.build_exit_cc_map），不再仅依赖 ipinfo 的
     country_match（历史覆盖不足 1%）。
     """
@@ -147,9 +147,8 @@ def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
     ipinfo = {"proxies": load_quality_json(ipinfo_path)}
     external = {"proxies": load_quality_json(quality_dir / "external_check.json")}
     upstream = {"proxies": load_quality_json(quality_dir / "upstream_meta.json")}
-    streaming = {"proxies": load_quality_json(quality_dir / "streaming.json")}
     family = {"proxies": load_quality_json(quality_dir / "exit_family.json")}
-    exit_map = build_exit_cc_map(ipinfo, external, upstream, streaming, family)
+    exit_map = build_exit_cc_map(ipinfo, external, upstream, family_data=family)
     if not exit_map:
         print("No exit-country observations to reorganize.")
         return 0

@@ -67,6 +67,10 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/quality_check.py --source data/valid/all.txt --time-budget 5400 --rep-cache-ttl 604800
 
+      - name: Rolling uptime
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/uptime.py
+
       - name: Reorganize by exit country
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/reorg_country.py
@@ -89,8 +93,6 @@ jobs:
         run: |
           echo "Checked proxies:"
           wc -l data/valid/all.txt
-          echo "Streaming unlock:"
-          jq -r '.streaming // empty' data/quality/quality_meta.json 2>/dev/null || true
           echo "IP type distribution:"
           jq -r '.by_type // empty' data/quality/quality_meta.json 2>/dev/null || true
 

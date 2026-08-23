@@ -94,7 +94,6 @@ class TestBuilders(unittest.TestCase):
         }
     }
     QUALITY_META = {
-        "streaming": {"openai": {"ok": 10, "blocked": 2, "error": 1}},
         "by_type": {"DC": 50, "RES": 100, "MOB": 30, "PROXY": 25},
     }
 
@@ -105,9 +104,6 @@ class TestBuilders(unittest.TestCase):
             "chart_port.svg": gs.build_port(self.META),
             "chart_churn.svg": gs.build_churn(self.HISTORY),
             "chart_latency_speed.svg": gs.build_latency_speed(self.META),
-            "chart_streaming.svg": gs.build_streaming(
-                {"streaming": {"openai": {"ok": 10, "blocked": 2, "error": 1}}}
-            ),
             "chart_sets.svg": gs.build_sets(self.META),
             "chart_cn.svg": gs.build_cn(self.CN_DATA),
             "chart_family.svg": gs.build_family(self.FAMILY_DATA),
@@ -123,7 +119,6 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("No data", gs.build_combo([], []))
         self.assertIn("No latency/speed", gs.build_latency_speed({}))
         self.assertIn("No data", gs.build_country({}))
-        self.assertIn("No streaming", gs.build_streaming({}))
         self.assertIn("No set data", gs.build_sets({}))
         self.assertIn("No CN data", gs.build_cn({}))
         self.assertIn("No family data", gs.build_family({}))
@@ -143,15 +138,6 @@ class TestBuilders(unittest.TestCase):
     def test_escapes_labels(self):
         svg = gs.build_churn([{"ts": '2026-08-12T00:00:00Z&"<x>', "added": 1, "removed": 0}])
         svg_ok(svg)
-
-    def test_streaming_stacked_layers_and_legend(self):
-        svg = gs.build_streaming(
-            {"streaming": {"openai": {"ok": 10, "blocked": 2, "error": 1}}}
-        )
-        svg_ok(svg)
-        self.assertGreaterEqual(svg.count("<rect"), 3)
-        self.assertIn("blocked", svg)
-        self.assertIn("error", svg)
 
     def test_legend_shows_latest_value(self):
         svg = gs.build_combo(self.HISTORY, self.VALID_HISTORY)
@@ -212,7 +198,6 @@ class TestMain(unittest.TestCase):
             for f in (
                 "chart_combo.svg", "chart_country.svg", "chart_port.svg",
                 "chart_churn.svg", "chart_latency_speed.svg",
-                "chart_streaming.svg",
                 "chart_sets.svg", "chart_cn.svg", "chart_family.svg",
                 "chart_source_avail.svg", "chart_rep.svg",
                 "chart_source_stats.svg",

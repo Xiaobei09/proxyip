@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (
     CHINA_FILE,
     DATA_DIR,
+    EXIT_FAMILY_FILE,
     LATENCY_RE,
     REPUTATION_FILE,
     SPEED_RE,
@@ -45,7 +46,9 @@ from common import (
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
+    load_uptime_keys,
     note_tier,
+    parse_line,
     read_json,
     write_text_if_changed,
 )
@@ -202,6 +205,52 @@ def write_good_file(path: Path, lines: list[str]) -> int:
     return len(lines)
 
 
+def exit_identity(
+    key: str, family_proxies: dict
+) -> str:
+    """出口身份：实测出口 IP 优先（exit_v4/exit_v6），否则入口 /24。
+
+    CF 中转代理的入口恒为 CF 边缘——同农场节点往往共享 /24，用入口
+    网段兜底分组仍能聚合同源节点；有实测出口时按出口精确去重。
+    """
+    fam = family_proxies.get(key, {}) or {}
+    ident = fam.get("exit_v4") or fam.get("exit_v6")
+    if isinstance(ident, str) and ident:
+        return f"exit/{ident}"
+    ip = key.split("#", 1)[0].rsplit(":", 1)[0]
+    parts = ip.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return f"ip24/{'.'.join(parts[:3])}.0/24"
+    return f"ip/{ip}"
+
+
+def build_diverse_lines(
+    pool_text: str, family_proxies: dict, rep_map: dict
+) -> list[str]:
+    """每出口身份只保留综合分最高的一条，返回按分数降序的行列表。
+
+    避免整池被同一农场/同一出口连坐（shared_exit 聚簇）：消费方拿到
+    ``all_diverse.txt`` 即得到出口层面互不重复的最大覆盖组合。
+    """
+    groups: dict[str, list[tuple[int, str]]] = {}
+    for ln in pool_text.splitlines():
+        parsed = parse_line(ln)
+        if not parsed:
+            continue
+        key = parsed[0]
+        rep = rep_map.get(key, {})
+        ms, mbps = parse_metrics(ln)
+        score = composite_score(int(rep.get("score") or 0), ms, mbps)
+        ident = exit_identity(key, family_proxies)
+        groups.setdefault(ident, []).append((score, ln))
+    ranked: list[tuple[int, str]] = []
+    for cands in groups.values():
+        best = max(cands, key=lambda t: (t[0], t[1]))
+        ranked.append(best)
+    ranked.sort(key=lambda t: -t[0])
+    return [ln for _s, ln in ranked]
+
+
 def write_good_files(
     valid_dir: Path,
     china_set: set[str],
@@ -223,11 +272,16 @@ def write_good_files(
     stats: dict[str, int] = {}
     speed_keys = load_speed_keys()
     stable_keys = load_china_stable_keys()
+    uptime_keys = load_uptime_keys()
     tier_lines: dict[str, list[tuple[str, Path]]] = {t: [] for t in TIER_TOKENS}
 
     def emit(base: Path, lines: list[str], tier_name: str | None = None) -> int:
         n = write_good_file(base, lines)
-        for suffix, keys in (("_verified", speed_keys), ("_stable", stable_keys)):
+        for suffix, keys in (
+            ("_verified", speed_keys),
+            ("_stable", stable_keys),
+            ("_uptime", uptime_keys),
+        ):
             vpath = base.with_name(f"{base.stem}{suffix}.txt")
             vlines = [ln for ln in lines if (k := line_to_key(ln)) and k in keys]
             if vlines:
@@ -330,6 +384,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Maps: cn={len(china_set)} cn_ms={len(cn_ms)} rep={len(rep_map)}")
 
     stats = write_good_files(valid_dir, china_set, rep_map, cn_ms)
+
+    # 出口多样性视图：每出口身份一条，按综合分降序
+    all_pool = valid_dir / "all.txt"
+    if all_pool.exists():
+        family_proxies = read_json(
+            quality_dir / EXIT_FAMILY_FILE.name
+        ).get("proxies", {})
+        diverse = build_diverse_lines(
+            all_pool.read_text(encoding="utf-8"), family_proxies, rep_map
+        )
+        stats["all_diverse"] = write_good_file(valid_dir / "all_diverse.txt", diverse)
     total = sum(stats.values())
     for name in sorted(stats):
         print(f"  {name}.txt: {stats[name]}")

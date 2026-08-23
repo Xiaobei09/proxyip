@@ -3,7 +3,7 @@
 
 Reads ``data/quality/ip_sources.json`` (per-IP source attribution produced by
 ``download_proxies.py``) and cross-references it with validation results,
-reputation scores, streaming unlock status, and China reachability data to
+reputation scores, and China reachability data to
 produce a per-source quality report.
 
 Output: ``data/quality/source_quality.json``
@@ -67,7 +67,6 @@ def analyze(
     ip_sources: dict,
     valid_lines: list[str],
     rep_data: dict,
-    streaming_data: dict,
     china_data: dict,
     family_data: dict,
     speed_data: dict,
@@ -142,19 +141,6 @@ def analyze(
                 rep_dist[risk] = rep_dist.get(risk, 0) + 1
         avg_rep = round(statistics.mean(rep_scores), 1) if rep_scores else None
 
-        # Streaming
-        streaming_ok = 0
-        for k in keys:
-            s = streaming_data.get(k)
-            if s and isinstance(s, dict):
-                if any(
-                    isinstance(v, dict) and v.get("status") == "ok"
-                    for v in s.values()
-                    if isinstance(v, dict)
-                ):
-                    streaming_ok += 1
-        streaming_ok_rate = round(streaming_ok / alive, 4) if alive else 0
-
         # China reachability
         china_reachable = 0
         for k in keys:
@@ -195,8 +181,6 @@ def analyze(
             "median_speed": med_speed,
             "avg_reputation": avg_rep,
             "reputation_dist": rep_dist,
-            "streaming_ok_count": streaming_ok,
-            "streaming_ok_rate": streaming_ok_rate,
             "china_reachable_count": china_reachable,
             "china_reachable_rate": china_rate,
             "family_dist": family_dist,
@@ -223,7 +207,7 @@ def _format_report(data: dict) -> str:
     header = (
         f"{'Source':<22} {'Total':>6} {'Alive':>6} {'Surv%':>6} "
         f"{'Lat(ms)':>8} {'Spd(MB)':>8} {'Rep':>5} "
-        f"{'Strm%':>6} {'CN%':>6}"
+        f"{'CN%':>6}"
     )
     lines.append(header)
     lines.append("-" * len(header))
@@ -238,7 +222,6 @@ def _format_report(data: dict) -> str:
             f"{label:<22} {m['total']:>6} {m['alive']:>6} "
             f"{m['survival_rate'] * 100:>5.1f}% "
             f"{lat:>8} {spd:>8} {rep:>5} "
-            f"{m['streaming_ok_rate'] * 100:>5.1f}% "
             f"{m['china_reachable_rate'] * 100:>5.1f}%"
         )
 
@@ -273,9 +256,6 @@ def main(argv: list[str] | None = None) -> int:
     rep_data = read_json(data_dir / "quality" / "reputation.json")
     rep_proxies = rep_data.get("proxies", rep_data)
 
-    streaming_data = read_json(data_dir / "quality" / "streaming.json")
-    streaming_proxies = streaming_data.get("proxies", streaming_data)
-
     china_data = read_json(data_dir / "quality" / "china.json")
     china_proxies = china_data.get("proxies", china_data)
 
@@ -286,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     speed_proxies = speed_data.get("proxies", speed_data)
 
     result = analyze(
-        ip_sources, valid_lines, rep_proxies, streaming_proxies,
+        ip_sources, valid_lines, rep_proxies,
         china_proxies, family_proxies, speed_proxies,
     )
 

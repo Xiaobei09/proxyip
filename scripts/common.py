@@ -268,6 +268,24 @@ def load_speed_keys(path: Path | None = None) -> set[str]:
     )
 
 
+def load_uptime_keys(
+    min_pct: int = 80, path: Path | None = None
+) -> set[str]:
+    """uptime.json 中 7d 存活率 ≥ ``min_pct`` 的 key 集合。"""
+    proxies = read_json(path or QUALITY_DIR / "uptime.json").get("proxies", {})
+    out: set[str] = set()
+    if isinstance(proxies, dict):
+        for k, v in proxies.items():
+            if (
+                isinstance(k, str)
+                and isinstance(v, dict)
+                and isinstance(v.get("pct7"), int)
+                and v["pct7"] >= min_pct
+            ):
+                out.add(k)
+    return out
+
+
 def load_china_stable_keys(path: Path | None = None) -> set[str]:
     """china.json 中跨轮稳定 key 集合：连续 ≥2 轮 reachable 且翻转 ≤1。
 
@@ -330,10 +348,10 @@ def annotate_files(
     files: list[Path],
     china_set: set[str],
     family_map: dict[str, str],
-    streaming_map: dict[str, dict],
     rep_map: dict[str, int],
     ip_type_map: dict[str, str],
     exit_map: dict[str, str] | None = None,
+    uptime_map: dict[str, int] | None = None,
 ) -> int:
     """Annotate all files with suffixes + classification, return lines changed.
 
@@ -354,8 +372,8 @@ def annotate_files(
                 continue
             if line not in cache:
                 cache[line] = fill_and_classify(
-                    line, china_set, family_map, streaming_map, rep_map,
-                    ip_type_map, exit_map,
+                    line, china_set, family_map, rep_map,
+                    ip_type_map, exit_map, uptime_map,
                 )
             new_line = cache[line]
             if new_line != line:
@@ -405,8 +423,6 @@ def upsert_exit_region(line: str, exit_region: str) -> str:
 # 禁止各自只读单一 JSON（历史上 reorg/annotate 只认 ipinfo.country_match，
 # 覆盖率不足 1%）。
 
-_EXIT_STREAMING_ORDER = ("openai", "netflix", "disney", "max", "prime", "youtube")
-
 
 def build_exit_ip_map(
     external_check: dict | None = None,
@@ -441,7 +457,6 @@ def build_exit_cc_map(
     ipinfo: dict | None = None,
     external_check: dict | None = None,
     upstream_meta: dict | None = None,
-    streaming: dict | None = None,
     family_data: dict | None = None,
 ) -> dict[str, str]:
     """汇聚多源出口国观测为 ``{key: exit_cc}``，高优先级者胜。
@@ -451,10 +466,9 @@ def build_exit_cc_map(
     2. ``upstream_meta.json`` —— 自有 CF Worker 观测到的代理出口国。
        键为裸出口 IP 时经 ``build_exit_ip_map`` 解析到行键；
        若直接为行键则原样使用（兼容）
-    3. ``streaming.json`` —— 经代理观测的服务解锁国；openai 为 CF trace
-       ``loc``（最接近真实出口），其余服务按序兜底。覆盖面最大（98%+）
-    4. ``ipinfo.json`` —— ``country_code``（ip-api 地理）。历史轮次可能是
+    3. ``ipinfo.json`` —— ``country_code``（ip-api 地理）。历史轮次可能是
        入口 IP 的地理，故仅作末位兜底
+    （流媒体解锁国作为第 3 源已随解锁检查一并移除。）
     """
     result: dict[str, str] = {}
 
@@ -482,14 +496,6 @@ def build_exit_cc_map(
         for key, ip in exit_ips.items():
             put(key, upstream_cc.get(ip))
 
-    for key, services in (streaming or {}).get("proxies", {}).items():
-        if not isinstance(services, dict):
-            continue
-        for svc in _EXIT_STREAMING_ORDER:
-            svc_info = services.get(svc)
-            if isinstance(svc_info, dict) and svc_info.get("status") == "ok":
-                put(key, svc_info.get("region"))
-                break
     for key, info in (ipinfo or {}).get("proxies", {}).items():
         put(key, info.get("country_code") if isinstance(info, dict) else None)
     return result

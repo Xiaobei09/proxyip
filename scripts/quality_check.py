@@ -6,7 +6,6 @@ under ``data/quality/``:
 
 - ``ipinfo.json``      exit IP / geo / IP type / reputation score + source
                       (per checked proxy)
-- ``streaming.json``   per-service unlock results (incl. native Netflix)
 - ``abuse.json``       optional abuse-score results (key-gated)
 - ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
                       netcoffee / ncgy / ip-api / ipquery / ffraud / blackbox
@@ -27,8 +26,9 @@ SNI routing. Only Cloudflare-fronted hosts are reachable. The exit is the edge
 itself and is tagged ``CF``.
 
 Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
-lines as ``-<streaming>-<type>-<rep>``, e.g.
-``1.2.3.4:443#US-120ms-0.44MB/s-NF(US) D+ YT GPT-CF-72``. When the exit
+lines as ``-<type>-<rep>``, e.g. ``1.2.3.4:443#US-120ms-0.44MB/s-CF-72``.
+(流媒体解锁检查已移除——历史行上的 NF/D+/YT/MX/PV/GPT token 由
+normalize_note 作为遗留段继续容忍解析，但不再产生新观测。) When the exit
 region is known it is inserted right after the entry country code as
 ``<cc>→<exit>`` (CF edge ``loc`` airport code), e.g.
 ``1.2.3.4:443#US→LAX-120ms-...``.
@@ -44,7 +44,7 @@ from pathlib import Path
 
 from common import *  # noqa: F401,F403  (paths + shared helpers + regex + classify_ip)
 from quality_reputation import *  # noqa: F401,F403
-from quality_streaming import *  # noqa: F401,F403
+from quality_probe import *  # noqa: F401,F403  (TLS engine + exit geo + ipapi)
 
 
 def build_ipinfo_map(
@@ -166,8 +166,10 @@ def build_reputation_map(
     results: dict,
     risk_data: dict,
     weights: dict,
+    deep_speed: dict | None = None,
 ) -> dict[str, dict]:
     rep_map: dict[str, dict] = {}
+    deep = (deep_speed or {}).get("proxies") or {}
     for res in results.values():
         signals = collect_signals(
             res.get("exit_ip") or res["ip"], {}, risk_data, weights,
@@ -177,11 +179,26 @@ def build_reputation_map(
         source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
         if score is None:
             continue
+        # 深测带宽分量：最优目标 agg_mbps ≥50MB/s 记满分 +10，线性缩放，
+        # 仅对已有信誉分的节点加成（深测是抽样，不产生幽灵分）
+        bonus = 0
+        ds = deep.get(res["key"])
+        if isinstance(ds, dict):
+            aggs = [
+                v.get("agg_mbps")
+                for v in ds.values()
+                if isinstance(v, dict)
+                and isinstance(v.get("agg_mbps"), (int, float))
+            ]
+            if aggs:
+                bonus = round(min(max(aggs) / 50.0, 1.0) * 10)
+                score = min(100, score + bonus)
         rep_map[res["key"]] = {
             "score": score,
             "risk": reputation_risk(score),
             "source": source,
             "sources": sources,
+            **({"deep_bonus": bonus} if bonus else {}),
         }
     return rep_map
 
@@ -304,8 +321,7 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
 def build_annotations(results: dict, rep_map: dict) -> dict[str, str]:
     annotations: dict[str, str] = {}
     for res in results.values():
-        stream_toks = streaming_tokens(res["streaming"])
-        ann = build_annotation(stream_toks, "CF")
+        ann = build_annotation("", "CF")
         rep = rep_map.get(res["key"])
         if rep:
             ann = build_annotation(ann, str(rep["score"]))
@@ -357,20 +373,10 @@ def annotate_valid_files(annotations: dict) -> None:
 
 
 def build_meta(
-    results: dict, ipinfo: dict, streaming: dict, abuse_map: dict,
+    results: dict, ipinfo: dict, abuse_map: dict,
     rep_map: dict | None = None,
 ) -> dict:
     rep_map = rep_map or {}
-    per_service = {name: {"ok": 0, "blocked": 0, "error": 0} for name in SERVICES}
-    streaming_ok = 0
-    for st in streaming.values():
-        if any(res.get("status") == "ok" for res in st.values()):
-            streaming_ok += 1
-        for name, res in st.items():
-            status = res.get("status", "error")
-            if status not in per_service[name]:
-                status = "error"
-            per_service[name][status] += 1
     by_type = Counter(info["ip_type"] for info in ipinfo.values())
     risk = Counter(
         info["risk"] for info in ipinfo.values() if info.get("risk")
@@ -400,9 +406,6 @@ def build_meta(
         "ts": now_ts(),
         "total": len(results),
         "tls": len(results),
-        "services": list(SERVICES),
-        "streaming": per_service,
-        "streaming_ok": streaming_ok,
         "by_type": dict(sorted(by_type.items())),
         "risk": dict(sorted(risk.items())),
         "abuse_checked": len(abuse_map),
@@ -466,10 +469,10 @@ async def run(args: argparse.Namespace) -> int:
         results, geo, abuse_map, risk_data, args.reputation_weights
     )
     rep_map = build_reputation_map(
-        results, risk_data, args.reputation_weights
+        results, risk_data, args.reputation_weights,
+        deep_speed=read_json(QUALITY_DIR / "deep_speed.json"),
     )
 
-    streaming = finalize_streaming(results, ipinfo)
     annotations = build_annotations(results, rep_map)
     source_text = args.source.read_text(encoding="utf-8")
     if rep_map:
@@ -488,15 +491,14 @@ async def run(args: argparse.Namespace) -> int:
         write_json(IPINFO_FILE, keyed_json(ipinfo))
     else:
         IPINFO_FILE.unlink(missing_ok=True)
-    write_json(STREAMING_FILE, keyed_json(streaming))
+    STREAMING_FILE.unlink(missing_ok=True)  # 流媒体检查已移除，清理遗留产物
     if abuse_map:
         write_json(ABUSE_FILE, keyed_json(abuse_map))
-    meta = build_meta(results, ipinfo, streaming, abuse_map, rep_map)
+    meta = build_meta(results, ipinfo, abuse_map, rep_map)
     write_json(QUALITY_META_FILE, meta)
     annotate_valid_files(annotations)
 
     print(
-        f"streaming_ok={meta['streaming_ok']} "
         f"by_type={meta['by_type']} "
         f"rep_avg={meta['rep_avg']} rep_dist={meta['rep_dist']}"
     )
@@ -508,10 +510,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--source", type=Path, default=DEFAULT_SOURCE,
         help="Input proxy list (default: data/valid/all.txt)",
-    )
-    parser.add_argument(
-        "--services", nargs="*", default=None,
-        help="Services to check (default: all of netflix disney youtube max prime openai)",
     )
     parser.add_argument(
         "--abuse-service", choices=("none", "abuseipdb", "ipqs"), default="none",
@@ -566,8 +564,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Stop after this many seconds (0 = unlimited)",
     )
     args = parser.parse_args(argv)
-    if not args.services:
-        args.services = list(SERVICES)
     import os
 
     args.abuse_key = ""

@@ -2,9 +2,9 @@
 """Fill missing suffixes and add node classification tokens to proxy lines.
 
 Reads JSON data files (ipinfo.json, reputation.json, china.json,
-exit_family.json, streaming.json) from ``data/quality/`` and annotates all
+exit_family.json) from ``data/quality/`` and annotates all
 ``data/valid/*.txt`` files with missing exit-country markers (→CC) and suffixes
-(CN, V4/V6, streaming, reputation) and classification tokens (IP type,
+(CN, V4/V6, reputation) and classification tokens (IP type,
 speed tier).
 
 Output line format:
@@ -34,7 +34,6 @@ from common import (
     collect_txt_files,
     annotate_files,
 )
-from quality_streaming import streaming_tokens
 
 
 IP_TYPES = frozenset({"DC", "RES", "MOB", "PROXY"})
@@ -72,15 +71,6 @@ def _build_family_map(data: dict) -> dict[str, str]:
     }
 
 
-def _build_streaming_map(data: dict) -> dict[str, dict]:
-    """``streaming.json`` → ``{key: streaming_dict}``."""
-    return {
-        k: v
-        for k, v in data.get("proxies", {}).items()
-        if v
-    }
-
-
 def _build_ip_type_map(data: dict) -> dict[str, str]:
     """``ipinfo.json`` → ``{key: ip_type}``."""
     return {
@@ -103,21 +93,20 @@ def _build_exit_map(
     ipinfo: dict,
     external_check: dict | None = None,
     upstream_meta: dict | None = None,
-    streaming: dict | None = None,
     family_data: dict | None = None,
 ) -> dict[str, str]:
     """多源出口国汇聚（见 common.build_exit_cc_map 的优先级文档）。"""
-    return build_exit_cc_map(ipinfo, external_check, upstream_meta, streaming, family_data)
+    return build_exit_cc_map(ipinfo, external_check, upstream_meta, family_data)
 
 
 def fill_and_classify(
     line: str,
     china_set: set[str],
     family_map: dict[str, str],
-    streaming_map: dict[str, dict],
     rep_map: dict[str, int],
     ip_type_map: dict[str, str],
     exit_map: dict[str, str] | None = None,
+    uptime_map: dict[str, int] | None = None,
 ) -> str:
     """Fill missing suffixes and append classification tokens.
 
@@ -154,15 +143,6 @@ def fill_and_classify(
         elif fam_token:
             out = merge_note_tokens(clear_note_buckets(out, "family"), fam_token)
 
-    # streaming tokens
-    st = streaming_map.get(key)
-    if st:
-        stoks = streaming_tokens(st)
-        if stoks:
-            for tok in stoks.split():
-                if not has_token(out, tok):
-                    out += "-" + tok
-
     # reputation score (only if not already present)
     rep_score = rep_map.get(key)
     if rep_score is not None:
@@ -181,6 +161,12 @@ def fill_and_classify(
     tier = speed_tier(out)
     if tier != "unknown":
         out = merge_note_tokens(clear_note_buckets(out, "tier"), tier)
+
+    # uptime%（7d 存活率，取整；无观测则不加）
+    if uptime_map:
+        pct = uptime_map.get(key)
+        if pct is not None and not has_token(out, f"U{pct}"):
+            out += f"-U{pct}"
 
     return out
 
@@ -202,24 +188,29 @@ def main(argv: list[str] | None = None) -> int:
     rep_data = read_json(quality_dir / "reputation.json")
     china_data = read_json(quality_dir / "china.json")
     family_data = read_json(quality_dir / "exit_family.json")
-    streaming_data = read_json(quality_dir / "streaming.json")
     external_check = read_json(quality_dir / "external_check.json")
     upstream_meta = read_json(quality_dir / "upstream_meta.json")
+    uptime_data = read_json(quality_dir / "uptime.json")
 
     # build maps
     china_set = _build_china_set(china_data)
     family_map = _build_family_map(family_data)
-    streaming_map = _build_streaming_map(streaming_data)
     rep_map = _build_rep_map(rep_data)
     ip_type_map = _build_ip_type_map(ipinfo)
+    uptime_map = {
+        k: v["pct7"]
+        for k, v in (uptime_data.get("proxies") or {}).items()
+        if isinstance(v, dict) and v.get("pct7") is not None
+    }
     exit_map = _build_exit_map(
-        ipinfo, external_check, upstream_meta, streaming_data, family_data
+        ipinfo, external_check, upstream_meta, family_data
     )
 
     print(
         f"Maps: cn={len(china_set)} family={len(family_map)} "
-        f"streaming={len(streaming_map)} rep={len(rep_map)} "
-        f"ip_type={len(ip_type_map)} exit={len(exit_map)}"
+        f"rep={len(rep_map)} "
+        f"ip_type={len(ip_type_map)} exit={len(exit_map)} "
+        f"uptime={len(uptime_map)}"
     )
 
     # collect and annotate
@@ -229,8 +220,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     total = annotate_files(
-        files, china_set, family_map, streaming_map, rep_map, ip_type_map,
-        exit_map,
+        files, china_set, family_map, rep_map, ip_type_map,
+        exit_map, uptime_map,
     )
     print(f"Done: {len(files)} files, {total} lines updated")
     return 0

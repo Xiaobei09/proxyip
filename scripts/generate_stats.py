@@ -9,7 +9,6 @@ Reads ``data/quality/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_port.svg``         alive proxies per port (vertical bars)
 - ``chart_churn.svg``        added / removed per update (grouped bars)
 - ``chart_latency_speed.svg`` latency & speed distribution (dual-panel bars)
-- ``chart_streaming.svg``    streaming ok/blocked/error per service (stacked bars)
 - ``chart_sets.svg``         alive proxies per named set (horizontal bars)
 - ``chart_cn.svg``           mainland-China reachability verdicts (horizontal bars)
 - ``chart_family.svg``       actual exit IP family distribution (horizontal bars)
@@ -769,30 +768,6 @@ def plot_stacked_vbars(
     return "\n".join(parts)
 
 
-def build_streaming(quality_meta: dict) -> str:
-    streaming = quality_meta.get("streaming", {})
-    names = ("netflix", "disney", "youtube", "max", "prime", "openai")
-    if not any(streaming.get(n, {}).get("ok", 0) for n in names):
-        return empty_svg(text="No streaming data yet")
-    layers = [
-        Series(
-            "ok", COLOR_OK, list(names),
-            [streaming.get(n, {}).get("ok", 0) for n in names],
-        ),
-        Series(
-            "blocked", COLOR_BLOCKED, list(names),
-            [streaming.get(n, {}).get("blocked", 0) for n in names],
-        ),
-        Series(
-            "error", COLOR_ERROR, list(names),
-            [streaming.get(n, {}).get("error", 0) for n in names],
-        ),
-    ]
-    return plot_stacked_vbars(
-        list(names), layers, title="Streaming unlock (ok / blocked / error)"
-    )
-
-
 def build_sets(meta: dict) -> str:
     sets_data = meta.get("sets", {})
     items = sorted(sets_data.items(), key=lambda kv: kv[1], reverse=True)
@@ -828,14 +803,13 @@ def build_family(family_data: dict) -> str:
 
 
 def build_exit_cc(quality_dir: Path) -> str:
-    """出口国分布 Top15（common.build_exit_cc_map 四源汇聚，→CC 观测）。"""
+    """出口国分布 Top15（common.build_exit_cc_map 三源汇聚，→CC 观测）。"""
     from common import build_exit_cc_map
 
     m = build_exit_cc_map(
         read_json(quality_dir / "ipinfo.json"),
         read_json(quality_dir / "external_check.json"),
         read_json(quality_dir / "upstream_meta.json"),
-        read_json(quality_dir / "streaming.json"),
         read_json(quality_dir / "exit_family.json"),
     )
     counts: dict[str, int] = {}
@@ -1179,8 +1153,6 @@ def main(argv: list[str] | None = None) -> int:
         "latency_dist": meta.get("latency_dist", {}),
         "speed": meta.get("speed", {}),
         "speed_dist": meta.get("speed_dist", {}),
-        "streaming": quality_meta.get("streaming", {}),
-        "streaming_ok": quality_meta.get("streaming_ok", 0),
         "ip_type": quality_meta.get("by_type", {}),
         "family": quality_meta.get("family", {}),
         "dual_stack": quality_meta.get("dual_stack", 0),
@@ -1209,7 +1181,6 @@ def main(argv: list[str] | None = None) -> int:
         "chart_port.svg": build_port(meta),
         "chart_churn.svg": build_churn(history),
         "chart_latency_speed.svg": build_latency_speed(meta),
-        "chart_streaming.svg": build_streaming(quality_meta),
         "chart_sets.svg": build_sets(meta),
         "chart_cn.svg": build_cn(china_data),
         "chart_family.svg": build_family(family_data),
