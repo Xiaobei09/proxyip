@@ -82,6 +82,7 @@ from common import (
     parse_ltd_line,
     read_json,
     request_follow,
+    rewrite_latency,
     write_json,
     write_text_if_changed,
     _note,
@@ -717,9 +718,12 @@ def generate_all_cn(
 
     - ``http_keys``：应用层（HTTP）确认的 key 集合，对应行追加 ``-CNH``
     - ``strict=True``：仅收当前集合，跳过历史 ``-CN`` 兜底（供 stable 清单）
-    - ``cn_ms``（``key -> 大陆实测毫秒``）提供时按大陆延迟升序输出——对大陆
-      使用者这比海外 TLS 延迟更有参考意义；未测到延迟的行排在最后，同延迟
-      保持原池顺序。缺省 ``None`` 时保持原池顺序。
+    - ``cn_ms``（``key -> 大陆实测毫秒``）提供时：
+      * 行内延迟 token **替换为大陆实测 RTT**——CN 清单里 ``ms`` 的语义
+        即"大陆使用者连接该节点的延迟"，而非海外 runner 的 TLS 延迟；
+      * 按大陆延迟升序输出（对大陆使用者比海外延迟更有参考意义）；
+        未测到延迟的行排在最后，同延迟保持原池顺序。
+      缺省 ``None`` 时保持原池顺序、不改写延迟。
     """
     lines = []
     for line in pool_text.splitlines():
@@ -732,6 +736,8 @@ def generate_all_cn(
             out = annotate_cn(line)
             if http_keys and key in http_keys:
                 out = annotate_cnh(out)
+            if cn_ms:
+                out = rewrite_latency(out, cn_ms.get(key))
             lines.append(out)
     lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
@@ -744,7 +750,8 @@ def generate_cn_subset(
 ) -> tuple[str, int]:
     """按谓词过滤全量池文本，保持行原文；``keep(key, line)`` 为真则保留。
 
-    排序规则同 :func:`generate_all_cn`（``cn_ms`` 升序，缺失垫底）。
+    排序规则同 :func:`generate_all_cn`（``cn_ms`` 升序，缺失垫底）；
+    ``cn_ms`` 提供时同样将行内延迟替换为大陆实测 RTT（CN 视图语义）。
     """
     lines = []
     for line in pool_text.splitlines():
@@ -754,7 +761,8 @@ def generate_cn_subset(
         if not key:
             continue
         if keep(key, line):
-            lines.append(line)
+            out = rewrite_latency(line, cn_ms.get(key)) if cn_ms else line
+            lines.append(out)
     lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
 

@@ -174,6 +174,28 @@ def filter_rank(
 TIER_TOKENS = ("fast", "mid", "slow")
 
 
+def _line_mbps(line: str) -> float:
+    m = SPEED_RE.search(line)
+    return float(m.group(1)) if m else -1.0
+
+
+def top_slice(lines: list[str], frac: float = 0.25,
+              min_samples: int = 8) -> tuple[list[str], float | None]:
+    """按**组内**实测速度取前 ``frac`` 分位的行，返回 ``(行列表, 阈值MB/s)``。
+
+    动机：不同国家/机房供给差距巨大，全局档位（≥5MB/s=fast）会让弱供给
+    国家全军覆没——某国最快的线也可能被标 slow。``good_top.txt`` 保证每个
+    组都暴露自己的最快一档（相对最优），与绝对档位互补。
+    有效速度样本少于 ``min_samples`` 时视为无统计意义，返回空。
+    """
+    vals = sorted(v for v in map(_line_mbps, lines) if v >= 0)
+    if len(vals) < min_samples:
+        return [], None
+    thr = vals[max(0, int(len(vals) * (1 - frac)) - 1)]
+    picked = [ln for ln in lines if _line_mbps(ln) >= thr]
+    return picked, thr
+
+
 def write_good_file(path: Path, lines: list[str]) -> int:
     content = "\n".join(lines) + "\n" if lines else ""
     write_text_if_changed(path, content)
@@ -212,6 +234,15 @@ def write_good_files(
                 write_text_if_changed(vpath, "\n".join(vlines) + "\n")
             elif vpath.exists():
                 vpath.unlink()
+        # 组内相对最优：good_top.txt（前 25% 分位，按组内实测速度）
+        tlines, thr = top_slice(lines)
+        tpath = base.with_name(f"{base.stem}_top.txt")
+        if tlines:
+            write_text_if_changed(tpath, "\n".join(tlines) + "\n")
+        elif tpath.exists():
+            tpath.unlink()
+        if tier_name is not None and tlines:
+            stats[f"top:{tier_name}"] = len(tlines)
         # 速度档变体：<base_stem>_<tier>.txt（与所在目录同级的扁平入口）
         for tier in TIER_TOKENS:
             tlines = [ln for ln in lines if note_tier(ln) == tier]
