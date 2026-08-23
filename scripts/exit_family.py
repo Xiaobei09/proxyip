@@ -184,6 +184,16 @@ def parse_trace(body: bytes) -> dict:
 
 
 def classify_family(v4: str | None, v6: str | None) -> str:
+    """按回显字面量的实际地址族归类（不信域名，信 IP 本身）。
+
+    防御两类异常：
+    - 回显服务未按家族区分 / 代理固定上游 → 两次探测返回**同一地址**，
+      此时按该地址的真实家族归单栈，避免假 dual；
+    - 某次探测意外返回了另一族的字面量（中间设备劫持等）→ 仍按字面量
+      版本号统计，不依赖"哪个域名应该返回什么"的假设。
+    """
+    if v4 and v6 and v4 == v6:
+        return "ipv6" if ":" in v4 else "ipv4"
     has_v4 = (v4 and ":" not in v4) or (v6 and ":" not in v6)
     has_v6 = (v4 and ":" in v4) or (v6 and ":" in v6)
     if has_v4 and has_v6:
