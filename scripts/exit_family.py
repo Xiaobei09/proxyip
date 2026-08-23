@@ -30,6 +30,7 @@
 """
 
 import argparse
+import ipaddress
 import json
 import socket
 import ssl
@@ -183,6 +184,21 @@ def parse_trace(body: bytes) -> dict:
     return out
 
 
+def shared_exit_counts(results: dict) -> dict[str, int]:
+    """统计每个出口 IP 被多少条代理共享（``{出口IP: 条数}``）。
+
+    同一出口被大量入口复用 = 机房农场/同机多端口：对使用者是单点故障
+    与连坐风控风险，供 ``shared_exit`` 字段与摘要输出。
+    """
+    counts: dict[str, int] = {}
+    for res in results.values():
+        if not isinstance(res, dict):
+            continue
+        for ip in {res.get("exit_v4"), res.get("exit_v6")} - {None}:
+            counts[ip] = counts.get(ip, 0) + 1
+    return counts
+
+
 def classify_family(v4: str | None, v6: str | None) -> str:
     """按回显字面量的实际地址族归类（不信域名，信 IP 本身）。
 
@@ -219,14 +235,25 @@ def tls_exit(ip: str, port: str, timeout: float) -> dict:
 
 
 def _extract_exit_ip(body: bytes) -> str | None:
-    """从响应体提取出口 IP：CF trace ``ip=`` 优先，纯 IP 文本回退。"""
+    """从响应体提取出口 IP：CF trace ``ip=`` 优先，纯 IP 文本回退。
+
+    判定加固：候选字面量必须能被 :mod:`ipaddress` 解析为**全局公网**地址
+    （``is_global``）——私网（RFC1918）、环回、CGNAT（100.64/10）、基准
+    测试段（198.18/15，fake-ip DNS 特征）、链路本地等一律视为探测失败，
+    防止透明代理/fake-ip 环境把假地址误标成真实出口家族。
+    """
     ip = parse_trace(body).get("ip") or ""
-    if ip:
-        return ip
-    text = body.decode("utf-8", "replace").strip()
-    if text and "\n" not in text and len(text) <= 45 and ("." in text or ":" in text):
-        return text
-    return None
+    if not ip:
+        text = body.decode("utf-8", "replace").strip()
+        if text and "\n" not in text and len(text) <= 45 and ("." in text or ":" in text):
+            ip = text
+    if not ip:
+        return None
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    return ip if addr.is_global else None
 
 
 def _probe_one(ip: str, port: str, host: str, path: str, timeout: float,
@@ -421,9 +448,17 @@ def main(argv=None) -> int:
     v4_lines, v6_lines = split_by_family(results)
     upstream = load_upstream_meta()
     cross_check(results, upstream)
+    shared = shared_exit_counts(results)
+    for res in results.values():
+        mx = max(
+            (shared.get(ip, 0) for ip in (res.get("exit_v4"), res.get("exit_v6")) if ip),
+            default=1,
+        )
+        if mx > 1:
+            res["shared_exit"] = mx
     # keyed 写入，值只保留探测/交叉验证字段（line/ip/port/cc 均可由 key 推导，不落盘）
     keep = (
-        "method", "ts", "family", "exit_v4", "exit_v6",
+        "method", "ts", "family", "exit_v4", "exit_v6", "shared_exit",
         "upstream_client_ip", "upstream_family", "upstream_absent", "upstream_match",
     )
     entries = {
@@ -441,6 +476,13 @@ def main(argv=None) -> int:
     print(f"family: {dict(fam_counts)}", file=sys.stderr)
     print(f"all_ipv4.txt: {len(v4_lines)} lines; all_ipv6.txt: {len(v6_lines)} lines",
           file=sys.stderr)
+    shared_keys = [k for k, r in results.items() if r.get("shared_exit")]
+    top_shared = sorted(shared.items(), key=lambda kv: -kv[1])[:3]
+    print(
+        f"shared exits: {len(shared_keys)}/{len(results)} entries on reused IPs; "
+        f"top: {top_shared}",
+        file=sys.stderr,
+    )
     if upstream:
         compared = sum(1 for r in results.values() if not r.get("upstream_absent"))
         matched = sum(1 for r in results.values() if r.get("upstream_match") is True)
