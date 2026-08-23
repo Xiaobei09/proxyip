@@ -72,3 +72,13 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): stats & charts ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+
+      # jsDelivr 的 @main 缓存不随仓库更新失效——README 图片会长期停留在
+      # 旧版（曾出现空占位图被缓存数日）。提交后对本轮变更的产物逐个 purge。
+      - name: Purge jsDelivr cache
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          for f in $(git diff --name-only HEAD~1 -- data/output 2>/dev/null); do
+            curl -sf -o /dev/null --max-time 15 \
+              "https://purge.jsdelivr.net/gh/Xiaobei09/proxyip@main/$f" || true
+          done
