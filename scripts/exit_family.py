@@ -70,13 +70,28 @@ TIMEOUT_DEFAULT = 10
 TRACE_HOST = "cloudflare.com"
 TRACE_PATH = "/cdn-cgi/trace"
 
-# 双栈出口探测目标：固定家族的 IP 回显服务（仅 A / 仅 AAAA 记录）。
-# 代理能连通对应目标 = 具备该家族的出口能力；两者皆通 → dual。
+# 双栈出口探测目标：每家族两个独立回显服务（仅 A / 仅 AAAA 记录）。
+# 代理能连通对应目标 = 具备该家族的出口能力；两者皆通且字面量不同 → dual。
 # 注意：不能靠入口 socket 家族（AF_INET/AF_INET6）判断——那只约束客户端→代理
-# 这一跳，代理→目标的出口家族由代理端对同一目标的解析决定，天然单一家族。
+# 这一跳，代理→目标的出口家族由代理端解析决定，天然单一家族。
+# 双源动机：实测发现大量代理端无视查询家族（SNI 嗅探后统一走唯一可用栈），
+# 单一服务无法区分"真单栈"与"路由劫持"；两独立服务商给出一致结论才算硬证据。
+# ``main()`` 启动时会先做记录钉扎自检（runner 干净网络内解析），若服务商
+# 不再维持单族记录会立刻暴露在日志中。
 EXIT_V4_HOST = "ipv4.icanhazip.com"   # 仅 A 记录
 EXIT_V6_HOST = "ipv6.icanhazip.com"   # 仅 AAAA 记录
 EXIT_ECHO_PATH = "/"                  # 返回纯 IP 文本（非 CF trace 格式）
+
+# (host, path) 列表：按序尝试，首个成功者生效；两家族使用不同服务商，
+# 因此"同址回显"必然意味着跨服务商一致——单栈结论的证据强度反而更高。
+V4_TARGETS = [
+    (EXIT_V4_HOST, EXIT_ECHO_PATH),
+    ("api4.ipify.org", EXIT_ECHO_PATH),
+]
+V6_TARGETS = [
+    (EXIT_V6_HOST, EXIT_ECHO_PATH),
+    ("api6.ipify.org", EXIT_ECHO_PATH),
+]
 
 FAMILY_TOKENS = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}
 
@@ -265,6 +280,53 @@ def _probe_one(ip: str, port: str, host: str, path: str, timeout: float,
     return _extract_exit_ip(body)
 
 
+def _probe_targets(ip: str, port: str, targets: list, timeout: float) -> tuple:
+    """按序尝试一组同家族回显目标，返回 ``(出口字面量|None, 命中host|None)``。"""
+    for host, path in targets:
+        literal = _probe_one(ip, port, host, path, timeout)
+        if literal:
+            return literal, host
+    return None, None
+
+
+def verify_pinning() -> dict[str, dict[str, list[str]]]:
+    """记录钉扎自检：runner 干净网络内解析全部回显目标的 A/AAAA。
+
+    返回 ``{host: {"A": [...], "AAAA": [...]}}`` 并向 stderr 打印违规项。
+    v4 目标应只有 A、v6 目标应只有 AAAA——服务商若放弃单族承诺，
+    同族探测结论即不可信，日志会第一时间暴露。仅诊断用，不阻断探测。
+    """
+    out: dict[str, dict[str, list[str]]] = {}
+    for host in {h for h, _ in V4_TARGETS} | {h for h, _ in V6_TARGETS}:
+        recs = out.setdefault(host, {"A": [], "AAAA": []})
+        for af, key in ((socket.AF_INET, "A"), (socket.AF_INET6, "AAAA")):
+            try:
+                infos = socket.getaddrinfo(host, 443, af)
+            except OSError:
+                continue
+            for inf in infos:
+                addr = inf[4][0]
+                if addr not in recs[key]:
+                    recs[key].append(addr)
+    for host, recs in out.items():
+        want = "A" if host in {h for h, _ in V4_TARGETS} else "AAAA"
+        other = "AAAA" if want == "A" else "A"
+        ok = recs[want] and not recs[other]
+        print(f"pinning {host}: A={recs['A'] or '无'} AAAA={recs['AAAA'] or '无'} "
+              f"{'OK' if ok else '!! 钉扎失效'}", file=sys.stderr)
+    return out
+
+
+def evidence_of(v4: str | None, v6: str | None) -> str:
+    """回显证据强度：``cross``（异址双通，硬 dual 证据）/ ``single_path``
+    （同址——跨服务商一致的单栈结论）/ ``one_sided``（仅一族可达）。"""
+    if v4 and v6:
+        return "cross" if v4 != v6 else "single_path"
+    if v4 or v6:
+        return "one_sided"
+    return "none"
+
+
 def check_one(item, methods: dict, timeout: float) -> dict:
     line, key, ip, port, cc = item
     method = methods.get(key, "tls")
@@ -277,20 +339,23 @@ def check_one(item, methods: dict, timeout: float) -> dict:
         "method": method,
         "ts": ts,
     }
-    # --- 双栈出口探测：分别请求仅 v4 / 仅 v6 目标（入口家族无关） ---
-    exit_v4 = _probe_one(ip, port, EXIT_V4_HOST, EXIT_ECHO_PATH, timeout)
-    exit_v6 = _probe_one(ip, port, EXIT_V6_HOST, EXIT_ECHO_PATH, timeout)
+    # --- 双栈出口探测：每家族按序尝试多个独立回显源（入口家族无关） ---
+    exit_v4, src4 = _probe_targets(ip, port, V4_TARGETS, timeout)
+    exit_v6, src6 = _probe_targets(ip, port, V6_TARGETS, timeout)
     # Fallback: if neither specific probe succeeded, try generic
     if not exit_v4 and not exit_v6:
         generic = _probe_one(ip, port, TRACE_HOST, TRACE_PATH, timeout)
         if generic:
             if ":" in generic:
-                exit_v6 = generic
+                exit_v6, src6 = generic, TRACE_HOST
             else:
-                exit_v4 = generic
+                exit_v4, src4 = generic, TRACE_HOST
     family = classify_family(exit_v4, exit_v6)
     base.update(
         family=family,
+        evidence=evidence_of(exit_v4, exit_v6),
+        v4_src=src4,
+        v6_src=src6,
         exit_v4=exit_v4,
         exit_v6=exit_v6,
     )
@@ -435,6 +500,8 @@ def main(argv=None) -> int:
         print("dry-run: no network, no writes", file=sys.stderr)
         return 0
 
+    verify_pinning()
+
     results: dict = {}
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -458,7 +525,8 @@ def main(argv=None) -> int:
             res["shared_exit"] = mx
     # keyed 写入，值只保留探测/交叉验证字段（line/ip/port/cc 均可由 key 推导，不落盘）
     keep = (
-        "method", "ts", "family", "exit_v4", "exit_v6", "shared_exit",
+        "method", "ts", "family", "evidence", "v4_src", "v6_src",
+        "exit_v4", "exit_v6", "shared_exit",
         "upstream_client_ip", "upstream_family", "upstream_absent", "upstream_match",
     )
     entries = {
@@ -474,6 +542,8 @@ def main(argv=None) -> int:
 
     fam_counts = Counter(families.values())
     print(f"family: {dict(fam_counts)}", file=sys.stderr)
+    ev_counts = Counter(r.get("evidence") for r in results.values())
+    print(f"evidence: {dict(ev_counts)}", file=sys.stderr)
     print(f"all_ipv4.txt: {len(v4_lines)} lines; all_ipv6.txt: {len(v6_lines)} lines",
           file=sys.stderr)
     shared_keys = [k for k, r in results.items() if r.get("shared_exit")]
