@@ -1,6 +1,7 @@
 """Tests for exit_family.py pure functions."""
 
 import json
+import socket
 import sys
 import tempfile
 import unittest
@@ -44,6 +45,44 @@ class TestClassify(unittest.TestCase):
         """v4 域名探测意外返回 v6 字面量 → 仍按字面量计（不按域名假设）。"""
         self.assertEqual(ef.classify_family(V6_IP, None), "ipv6")
         self.assertEqual(ef.classify_family("1.2.3.4", V6_IP), "dual")
+
+
+class TestEvidence(unittest.TestCase):
+    def test_evidence_of(self):
+        self.assertEqual(ef.evidence_of("1.2.3.4", V6_IP), "cross")
+        self.assertEqual(ef.evidence_of("1.2.3.4", "1.2.3.4"), "single_path")
+        self.assertEqual(ef.evidence_of("1.2.3.4", None), "one_sided")
+        self.assertEqual(ef.evidence_of(None, None), "none")
+
+
+class TestProbeTargets(unittest.TestCase):
+    def test_first_success_wins(self):
+        calls = []
+
+        def fake(ip, port, host, path, timeout, family=None):
+            calls.append(host)
+            return "9.9.9.9" if host == "first.example" else None
+
+        orig = ef._probe_one
+        ef._probe_one = fake
+        try:
+            lit, src = ef._probe_targets(
+                "1.1.1.1", 443,
+                [("first.example", "/"), ("second.example", "/")], 5)
+        finally:
+            ef._probe_one = orig
+        self.assertEqual((lit, src), ("9.9.9.9", "first.example"))
+        self.assertEqual(calls, ["first.example"])  # 命中即停，不浪费探测
+
+    def test_all_fail(self):
+        orig = ef._probe_one
+        ef._probe_one = lambda *a, **k: None
+        try:
+            self.assertEqual(ef._probe_targets("1.1.1.1", 443,
+                                               [("a.example", "/")], 5),
+                             (None, None))
+        finally:
+            ef._probe_one = orig
 
 
 class TestExtractExitIp(unittest.TestCase):
@@ -115,11 +154,11 @@ class TestTlsExit(unittest.TestCase):
 
 class TestCheckOne(unittest.TestCase):
     def test_tls_method_v6(self):
-        trace_v4 = b""
         trace_v6 = f"ip={V6_IP}\nloc=AT\n".encode()
         with mock.patch.object(ef, "request_tls_sni", side_effect=[
-            (None, {}, b""),            # v4 probe fails
-            (200, {}, trace_v6),        # v6 probe succeeds
+            (None, {}, b""),            # v4: icanhazip 失败
+            (None, {}, b""),            # v4: ipify 失败
+            (200, {}, trace_v6),        # v6: icanhazip 成功
         ]):
             item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
             key, res = ef.check_one(item, {"1.2.3.4:443#US": "tls"}, 10)
@@ -127,59 +166,115 @@ class TestCheckOne(unittest.TestCase):
         self.assertEqual(res["family"], "ipv6")
         self.assertEqual(res["exit_v6"], V6_IP)
         self.assertIsNone(res["exit_v4"])
+        self.assertEqual(res["evidence"], "one_sided")
         self.assertIn("ts", res)
 
     def test_tls_method_v4(self):
         trace_v4 = f"ip={V4_IP}\n".encode()
-        trace_v6 = b""
         with mock.patch.object(ef, "request_tls_sni", side_effect=[
-            (200, {}, trace_v4),        # v4 probe succeeds
-            (None, {}, b""),            # v6 probe fails
+            (200, {}, trace_v4),        # v4: 首源成功
+            (None, {}, b""),            # v6: 两源均失败
+            (None, {}, b""),
         ]):
             item = ("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")
             key, res = ef.check_one(item, {}, 10)
-        self.assertEqual(res["method"], "tls")
         self.assertEqual(res["family"], "ipv4")
         self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["v4_src"], ef.V4_TARGETS[0][0])
+
+    def test_second_provider_used_when_first_bogon(self):
+        """首源回显私网地址（被过滤）→ 自动落到第二服务商。"""
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, b"10.0.0.1"),     # icanhazip 回显 fake-ip 段 → 视为失败
+            (200, {}, f"ip={V4_IP}\n".encode()),   # ipify 兜住
+            (None, {}, b""),
+            (None, {}, b""),
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["v4_src"], "api4.ipify.org")
+        self.assertEqual(res["family"], "ipv4")
+
+    def test_cross_provider_agreement_single_path(self):
+        """两家族不同服务商返回同一字面量（路由劫持特征）→ 单栈而非 dual。"""
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, V4_IP.encode()),          # icanhazip-v4 → A
+            (None, {}, b""),                    # icanhazip-v6 失败
+            (200, {}, V4_IP.encode()),          # ipify-v6 → 同一字面量
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "ipv4")       # 不虚标 dual
+        self.assertEqual(res["evidence"], "single_path")
+        self.assertNotEqual(res["v4_src"], res["v6_src"])  # 跨服务商一致
 
     def test_dual_stack(self):
         trace_v4 = f"ip={V4_IP}\n".encode()
         trace_v6 = f"ip={V6_IP}\n".encode()
         with mock.patch.object(ef, "request_tls_sni", side_effect=[
-            (200, {}, trace_v4),        # v4 probe succeeds
-            (200, {}, trace_v6),        # v6 probe succeeds
+            (200, {}, trace_v4),
+            (200, {}, trace_v6),
         ]):
             item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
             key, res = ef.check_one(item, {}, 10)
         self.assertEqual(res["family"], "dual")
+        self.assertEqual(res["evidence"], "cross")
         self.assertEqual(res["exit_v4"], V4_IP)
         self.assertEqual(res["exit_v6"], V6_IP)
 
     def test_fallback_generic(self):
         trace_generic = f"ip={V4_IP}\n".encode()
         with mock.patch.object(ef, "request_tls_sni", side_effect=[
-            (None, {}, b""),            # v4 probe fails
-            (None, {}, b""),            # v6 probe fails
-            (200, {}, trace_generic),   # generic fallback succeeds
+            (None, {}, b""), (None, {}, b""),   # v4 双源失败
+            (None, {}, b""), (None, {}, b""),   # v6 双源失败
+            (200, {}, trace_generic),           # generic fallback 成功
         ]):
             item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
             key, res = ef.check_one(item, {}, 10)
         self.assertEqual(res["family"], "ipv4")
         self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["v4_src"], ef.TRACE_HOST)
 
     def test_probe_targets_are_single_family(self):
         """探测目标必须是固定家族回显服务，且不强制入口 socket 家族。"""
         with mock.patch.object(
             ef, "request_tls_sni",
-            side_effect=[(200, {}, V4_IP.encode()), (None, {}, b"")],
+            side_effect=[(200, {}, V4_IP.encode())]
+                        + [(None, {}, b"")] * (len(ef.V4_TARGETS) - 1
+                                               + len(ef.V6_TARGETS)),
         ) as m:
             item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
             ef.check_one(item, {}, 10)
         calls = m.call_args_list
-        self.assertEqual(calls[0].args[2], "ipv4.icanhazip.com")
-        self.assertEqual(calls[1].args[2], "ipv6.icanhazip.com")
-        for c in calls[:2]:
+        v4_hosts = {h for h, _ in ef.V4_TARGETS}
+        v6_hosts = {h for h, _ in ef.V6_TARGETS}
+        got = [c.args[2] for c in calls]
+        self.assertIn(got[0], v4_hosts)              # 从 v4 组开始
+        self.assertTrue(set(got) <= v4_hosts | v6_hosts)
+        self.assertTrue(v6_hosts & set(got))          # v6 组确实被尝试
+        for c in calls:
             self.assertIsNone(c.args[5])  # 不强制入口家族
+
+
+class TestPinning(unittest.TestCase):
+    def test_verify_pinning_flags_violation(self):
+        """钉扎自检：v4 目标混入 AAAA 时应在返回结构中暴露。"""
+        def fake_getaddrinfo(host, port, family):
+            if family == socket.AF_INET:
+                return [(socket.AF_INET, None, None, "", ("203.0.113.1", 443))]
+            if host == "api4.ipify.org":  # 模拟 v4 源被加挂 AAAA（钉扎失效）
+                return [(socket.AF_INET6, None, None, "", ("2001:db8::1", 443))]
+            raise OSError("no record")
+
+        orig = ef.socket.getaddrinfo
+        ef.socket.getaddrinfo = fake_getaddrinfo
+        try:
+            out = ef.verify_pinning()
+        finally:
+            ef.socket.getaddrinfo = orig
+        self.assertEqual(out["ipv4.icanhazip.com"]["A"], ["203.0.113.1"])
+        self.assertIn("2001:db8::1", out["api4.ipify.org"]["AAAA"])
 
 
 class TestNotes(unittest.TestCase):
