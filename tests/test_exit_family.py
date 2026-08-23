@@ -60,6 +60,34 @@ class TestExtractExitIp(unittest.TestCase):
         self.assertIsNone(ef._extract_exit_ip(b"<html>blocked</html>"))
         self.assertIsNone(ef._extract_exit_ip(b""))
 
+    def test_bogon_rejected(self):
+        """私网/环回/CGNAT/fake-ip 段回显一律视为探测失败。"""
+        for bogon in (
+            b"192.168.1.1", b"10.0.0.7", b"172.16.0.9", b"127.0.0.1",
+            b"100.64.0.5", b"198.18.0.66", b"169.254.1.2",
+            b"ip=192.168.1.1\n", b"fe80::1\n", b"fc00::1234\n",
+        ):
+            self.assertIsNone(ef._extract_exit_ip(bogon), bogon)
+
+    def test_public_kept(self):
+        for ok in (b"8.8.8.8", b"2606:4700:4700::1111"):
+            self.assertIsNotNone(ef._extract_exit_ip(ok))
+
+
+class TestSharedExits(unittest.TestCase):
+    def test_shared_exit_counts(self):
+        results = {
+            "a": {"exit_v4": "1.1.1.1"},
+            "b": {"exit_v4": "1.1.1.1"},
+            "c": {"exit_v4": "2.2.2.2", "exit_v6": V6_IP},
+            "d": {"exit_v6": V6_IP},
+            "e": {},
+        }
+        counts = ef.shared_exit_counts(results)
+        self.assertEqual(counts["1.1.1.1"], 2)
+        self.assertEqual(counts[V6_IP], 2)
+        self.assertEqual(counts["2.2.2.2"], 1)  # 独占出口也入表，仅计 1
+
     def test_single_family_targets(self):
         self.assertEqual(ef.EXIT_V4_HOST, "ipv4.icanhazip.com")
         self.assertEqual(ef.EXIT_V6_HOST, "ipv6.icanhazip.com")

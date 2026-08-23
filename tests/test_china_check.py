@@ -669,6 +669,55 @@ class TestApplyStreak(unittest.TestCase):
         self.assertEqual(entries["a"]["streak"], 0)
         self.assertNotIn("last_ok_ts", entries["a"])
 
+    def test_flip_accrues_on_verdict_change(self):
+        entries = {"a": {"verdict": "unreachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": 2, "flip": 0}}
+        cc.apply_streak(entries, prev)
+        self.assertEqual(entries["a"]["flip"], 1)
+
+    def test_flip_carries_when_stable(self):
+        entries = {"a": {"verdict": "reachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": 2, "flip": 2}}
+        cc.apply_streak(entries, prev)
+        self.assertEqual(entries["a"]["flip"], 2)  # 状态未变不增
+
+    def test_flip_forgiven_after_long_stable_run(self):
+        entries = {"a": {"verdict": "reachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": cc.FLIP_FORGIVE_STREAK - 1,
+                      "flip": 3}}
+        cc.apply_streak(entries, prev)
+        self.assertEqual(entries["a"]["streak"], cc.FLIP_FORGIVE_STREAK)
+        self.assertEqual(entries["a"]["flip"], 0)
+
+    def test_flip_first_seen_is_zero(self):
+        entries = {"a": {"verdict": "unreachable"}}
+        cc.apply_streak(entries, {})
+        self.assertEqual(entries["a"]["flip"], 0)
+
+    def test_flip_both_directions_count(self):
+        # 恢复（不可达→可达）同样计一次翻转
+        entries = {"a": {"verdict": "reachable"}}
+        prev = {"a": {"verdict": "unreachable", "streak": 0, "flip": 1}}
+        cc.apply_streak(entries, prev)
+        self.assertEqual(entries["a"]["flip"], 2)
+        self.assertEqual(entries["a"]["streak"], 1)
+
+
+class TestStableAdmission(unittest.TestCase):
+    def test_flip_excludes_from_stable(self):
+        """stable 准入：streak≥2 且 flip≤1；慢性抖动源被排除。"""
+        entries = {
+            "good": {"verdict": "reachable", "streak": 5, "flip": 1},
+            "flapper": {"verdict": "unreachable", "streak": 0, "flip": 3},
+            "edge": {"verdict": "reachable", "streak": 2, "flip": 0},
+            "lowstreak": {"verdict": "reachable", "streak": 1, "flip": 0},
+        }
+        stable = {
+            k for k, e in entries.items()
+            if e.get("streak", 0) >= 2 and e.get("flip", 0) <= cc.STABLE_MAX_FLIP
+        }
+        self.assertEqual(stable, {"good", "edge"})
+
 
 class TestAnnotateCnh(unittest.TestCase):
     def test_appends_token(self):

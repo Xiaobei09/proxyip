@@ -269,7 +269,10 @@ def load_speed_keys(path: Path | None = None) -> set[str]:
 
 
 def load_china_stable_keys(path: Path | None = None) -> set[str]:
-    """china.json 中连续 ≥2 轮 reachable 的 key 集合（跨轮大陆稳定）。"""
+    """china.json 中跨轮稳定 key 集合：连续 ≥2 轮 reachable 且翻转 ≤1。
+
+    与 china_check 的 stable 准入保持一致（flip 判定排除慢性抖动源）。
+    """
     proxies = read_json(path or CHINA_FILE).get("proxies", {})
     out: set[str] = set()
     if isinstance(proxies, dict):
@@ -280,6 +283,8 @@ def load_china_stable_keys(path: Path | None = None) -> set[str]:
                 and v.get("verdict") == "reachable"
                 and isinstance(v.get("streak"), int)
                 and v["streak"] >= 2
+                and isinstance(v.get("flip", 0), int)
+                and v.get("flip", 0) <= 1
             ):
                 out.add(k)
     return out

@@ -12,7 +12,8 @@
   应用层确认行追加 ``-CNH``）
 - ``data/valid/all_cn_http.txt`` — 应用层（HTTP）确认子集：本轮 level=http 或历史
   已带 ``-CNH`` 的行
-- ``data/valid/all_cn_stable.txt`` — 跨轮稳定子集：连续 ≥2 轮判 reachable 的行
+- ``data/valid/all_cn_stable.txt`` — 跨轮稳定子集：连续 ≥2 轮 reachable 且
+  历史翻转 ≤1（flip 判定排除慢性抖动源）
   （strict，不含历史兜底）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
 
@@ -632,16 +633,23 @@ def annotate_cnh(line: str) -> str:
 
 
 STREAK_GAP_TOLERANCE_S = 3 * 3600  # 连续轮时间窗：基线观测早于此视为中断
+FLIP_FORGIVE_STREAK = 4  # 连续可达达此轮数后清零 flip（稳定恢复赦免历史抖动）
+STABLE_MAX_FLIP = 1  # stable 准入：历史翻转次数上限（排除慢性抖动源）
 
 
 def apply_streak(
     entries: dict, prev_entries: dict, now: float | None = None
 ) -> None:
-    """就地写入连续可达轮数 ``streak`` 与最近可达时间 ``last_ok_ts``。
+    """就地写入连续可达轮数 ``streak``、最近可达时间 ``last_ok_ts`` 与翻转
+    计数 ``flip``。
 
     reachable 且上一轮也 reachable、且上一轮观测距今 ≤
     STREAK_GAP_TOLERANCE_S → 上一轮 streak+1；否则从 1 起算。其余 verdict
     清零并清除 last_ok_ts。
+
+    ``flip``：上一轮与本轮 reachable 状态相反则 +1，否则沿用上一轮计数；
+    连续可达达 FLIP_FORGIVE_STREAK 轮后清零（稳定恢复即赦免历史抖动）。
+    stable 准入要求 flip ≤ STABLE_MAX_FLIP，排除"可达↔不可达"慢性振荡源。
 
     时间窗判定用于对抗 china.json 被并发工作流短暂回滚（lost-update）：
     基线落后数小时时不再误把连续可达清零。无 last_ok_ts 的旧格式按紧邻
@@ -657,7 +665,12 @@ def apply_streak(
         prev_reachable = (
             isinstance(prev, dict) and prev.get("verdict") == "reachable"
         )
-        if entry.get("verdict") == "reachable":
+        cur_reachable = entry.get("verdict") == "reachable"
+        prev_flip = prev.get("flip") if isinstance(prev, dict) else None
+        flip = prev_flip if isinstance(prev_flip, int) and prev_flip > 0 else 0
+        if isinstance(prev, dict) and prev_reachable != cur_reachable:
+            flip += 1
+        if cur_reachable:
             base = 0
             if prev_reachable:
                 ts = prev.get("last_ok_ts")
@@ -671,9 +684,12 @@ def apply_streak(
                     base = ps if isinstance(ps, int) and ps > 0 else 1
             entry["streak"] = base + 1
             entry["last_ok_ts"] = now
+            if entry["streak"] >= FLIP_FORGIVE_STREAK:
+                flip = 0
         else:
             entry["streak"] = 0
             entry.pop("last_ok_ts", None)
+        entry["flip"] = flip
 
 
 def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
@@ -925,15 +941,22 @@ def main(argv=None) -> int:
     apply_streak(entries, prev_entries)
     stable_keys = {
         k for k, e in entries.items()
-        if isinstance(e, dict) and e.get("streak", 0) >= 2
+        if isinstance(e, dict)
+        and e.get("streak", 0) >= 2
+        and e.get("flip", 0) <= STABLE_MAX_FLIP
     }
     http_keys = {
         k for k, e in entries.items()
         if isinstance(e, dict) and e.get("level") == "http"
     }
+    flappers = sum(
+        1 for e in entries.values()
+        if isinstance(e, dict) and e.get("flip", 0) > STABLE_MAX_FLIP
+    )
     print(
         f"reachable: {len(reachable)} uncertain: {len(uncertain)} "
-        f"http-verified: {len(http_keys)} stable(>=2 runs): {len(stable_keys)}",
+        f"http-verified: {len(http_keys)} stable(>=2 runs): {len(stable_keys)} "
+        f"flappers: {flappers}",
         file=sys.stderr,
     )
     write_json(CHINA_FILE, keyed_json(entries))
