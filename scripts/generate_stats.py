@@ -13,6 +13,9 @@ Reads ``data/quality/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_sets.svg``         alive proxies per named set (horizontal bars)
 - ``chart_cn.svg``           mainland-China reachability verdicts (horizontal bars)
 - ``chart_family.svg``       actual exit IP family distribution (horizontal bars)
+- ``chart_exit.svg``         exit country top 15 (four-source →CC observations)
+- ``chart_entry_audit.svg``  entry CC label audit verdicts (tag mismatch rate)
+- ``chart_ip_type.svg``      IP type distribution (DC/RES/MOB/PROXY)
 - ``chart_source_avail.svg`` IP source coverage + sources-per-proxy (composite)
 - ``chart_source_stats.svg`` per-download-source IP count & overlap (stacked bars)
 - ``chart_rep.svg``          reputation score distribution (vertical bars)
@@ -822,6 +825,53 @@ def build_family(family_data: dict) -> str:
     return plot_hbars(items, color=COLOR_ALIVE, title="Exit IP family distribution")
 
 
+def build_exit_cc(quality_dir: Path) -> str:
+    """出口国分布 Top15（common.build_exit_cc_map 四源汇聚，→CC 观测）。"""
+    from common import build_exit_cc_map
+
+    m = build_exit_cc_map(
+        read_json(quality_dir / "ipinfo.json"),
+        read_json(quality_dir / "external_check.json"),
+        read_json(quality_dir / "upstream_meta.json"),
+        read_json(quality_dir / "streaming.json"),
+        read_json(quality_dir / "exit_family.json"),
+    )
+    counts: dict[str, int] = {}
+    for cc in m.values():
+        counts[cc] = counts.get(cc, 0) + 1
+    items = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:15]
+    if not items:
+        return empty_svg(text="No exit-country data yet")
+    return plot_hbars(
+        items, color=COLOR_PORT,
+        title=f"Exit country top 15 (of {len(m)} observed)",
+    )
+
+
+def build_entry_audit(audit_data: dict) -> str:
+    """入口国家标签审计 verdict 分布（audit_entry_cc.py 产出）。"""
+    summary = audit_data.get("summary", {})
+    total = audit_data.get("total", 0)
+    items = sorted(summary.items(), key=lambda kv: kv[1], reverse=True)
+    if not items:
+        return empty_svg(text="No entry-audit data yet")
+    mism = summary.get("tag_mismatch", 0)
+    return plot_hbars(
+        items, color=COLOR_LATENCY,
+        title=f"Entry CC label audit (mismatch {mism}/{total} "
+              f"= {mism / max(total, 1) * 100:.1f}%)",
+    )
+
+
+def build_ip_type(quality_meta: dict) -> str:
+    """IP 类型分布（DC/RES/MOB/PROXY）。"""
+    items = sorted(quality_meta.get("by_type", {}).items(),
+                   key=lambda kv: kv[1], reverse=True)
+    if not items:
+        return empty_svg(text="No IP-type data yet")
+    return plot_hbars(items, color=COLOR_STREAMING, title="IP type distribution")
+
+
 def build_source_avail(rep_data: dict) -> str:
     """Combined chart: per-source coverage + sources-per-proxy distribution."""
     proxies = rep_data.get("proxies", {})
@@ -1016,6 +1066,7 @@ def main(argv: list[str] | None = None) -> int:
     quality_meta = read_json(data_dir / "quality" / "quality_meta.json")
     china_data = read_json(data_dir / "quality" / "china.json")
     family_data = read_json(data_dir / "quality" / "exit_family.json")
+    entry_audit = read_json(data_dir / "quality" / "entry_audit.json")
     rep_data = read_json(data_dir / "quality" / "reputation.json")
     source_stats = read_json(data_dir / "quality" / "source_stats.json")
 
@@ -1084,6 +1135,9 @@ def main(argv: list[str] | None = None) -> int:
         "chart_sets.svg": build_sets(meta),
         "chart_cn.svg": build_cn(china_data),
         "chart_family.svg": build_family(family_data),
+        "chart_exit.svg": build_exit_cc(data_dir / "quality"),
+        "chart_entry_audit.svg": build_entry_audit(entry_audit),
+        "chart_ip_type.svg": build_ip_type(quality_meta),
         "chart_source_avail.svg": build_source_avail(rep_data),
         "chart_source_stats.svg": build_source_stats(source_stats),
         "chart_rep.svg": build_rep(rep_data),
