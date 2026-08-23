@@ -64,7 +64,6 @@
 | `chart_port.svg` | 存活代理按端口纵向条形图 |
 | `chart_churn.svg` | 每次更新 added / removed 分组条形图 |
 | `chart_latency_speed.svg` | 延迟与速度分桶双面板条形图 |
-| `chart_streaming.svg` | 流媒体各服务 ok/blocked/error 堆叠条形图 |
 | `chart_sets.svg` | 各命名集合存活代理条形图 |
 | `chart_cn.svg` | 大陆连通性 verdict 分布条形图 |
 | `chart_family.svg` | 实际出口 IP 家族分布条形图 |
@@ -74,16 +73,17 @@
 
 ### `scripts/quality_check.py`
 
-流媒体解锁 + 出口 IP 质量检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）检测，所有代理使用统一的 TLS 直连方法：
+出口 IP 质量检测（独立 CI 运行，探测引擎拆分于 `quality_probe.py`：TLS GET / 外部出口地理回显 / ip-api 批量）。默认对 `data/valid/all.txt`（全量存活池）检测：
 
-- 对每个代理建立 TLS 直连（SNI=服务域名），检测 ChatGPT/OpenAI（`chat.openai.com/cdn-cgi/trace`，取边缘机房 `loc`），备注 `CF`；`loc` 机场码同时写入行备注的 `→` 出口地区段
+- TLS 直连（Cloudflare 边缘）测活，备注 `CF`
+- **滚动可用率**：质量链每轮运行后由 `uptime.py` 更新 `node_seen.json`/`uptime.json`，注解链为节点追加 `-U<NN>` 备注
+- **深测带宽加成**：`deep_speed.json` 的最优目标 `agg_mbps` 线性加成分数（封顶 +10，仅对已有信誉分节点生效）
 - **出口 IP 解析**：信誉/地理/滥用查询使用真实出口 IP——优先外部探测回显，其次 `exit_family.json` 实测，兜底代理自身 IP（见 logic.md §4.0）
 - 批量查出口 IP 地理（`ip-api.com/batch`）与 ASN/IP 类型
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
-| `--services` | 检测服务（netflix disney youtube max prime openai） | 全部 |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
 | `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location |
@@ -122,9 +122,9 @@
 
 ### `scripts/reorg_country.py`
 
-按出口 IP 国家重组 country/set/port 文件。出口国观测经四源汇聚
+按出口 IP 国家重组 country/set/port 文件。出口国观测经三源汇聚
 （`common.build_exit_cc_map`：`external_check.json` > `upstream_meta.json` >
-`streaming.json` > `ipinfo.json`，见 logic.md §7.2），命中观测的行一律
+`ipinfo.json`，见 logic.md §7.2），命中观测的行一律
 upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当位于
 `countries/<CC>/` 且与出口国不同时才迁移目录，sets/ports 混国文件只标注
 不移动。幂等：重复运行不产生变化。
@@ -247,9 +247,9 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 | `reputation.json` | 信誉评分（仅缺失时追加） |
 | `china.json` | 大陆可达 token（CN） |
 | `exit_family.json` | IP 家族 token（V4/V6/DS） |
-| `streaming.json` | 流媒体解锁 tokens（NF/D+/YT/MX/PV/GPT） |
 | `external_check.json` | 出口国标记 →CC（优先级最高） |
-| `upstream_meta.json` | 出口国标记 →CC（CF Worker 观测，覆盖面最大） |
+| `upstream_meta.json` | 出口国标记 →CC（CF Worker 观测） |
+| `uptime.json` | 滚动可用率 token `-U<NN>`（7d 存活率） |
 
 **分类 token**：
 
@@ -266,8 +266,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 **行格式变化**：
 
 ```
-Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-GPT-CF-77
-After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-GPT-CF-77-DC-fast
+Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-CF-77
+After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-CF-77-DC-fast-U92
 ```
 
 **处理范围**：`data/valid/all.txt`、`all_ltd.txt`、`countries/*/all.txt`、`countries/*/ltd.txt`、`sets/*/all.txt`、`sets/*/ltd.txt`、`ports/*.txt`
@@ -300,7 +300,7 @@ python scripts/build_good.py --data-dir /path/to/data
 
 ### `scripts/analyze_sources.py`
 
-分析各下载源的质量。读取 `ip_sources.json`（逐 IP 来源归属）并与验证/信誉/流媒体/大陆可达性数据交叉引用，产出每个源的存活率、延迟、速度、信誉分、流媒体解锁率、大陆可达率等指标。
+分析各下载源的质量。读取 `ip_sources.json`（逐 IP 来源归属）并与验证/信誉/大陆可达性数据交叉引用，产出每个源的存活率、延迟、速度、信誉分、大陆可达率等指标。
 
 | 参数 | 说明 | 默认 |
 |---|---|---|

@@ -1,6 +1,9 @@
 name: Deep speed probe
 
 on:
+  schedule:
+    # 每周六 03:07 UTC 自动深测：取 country_speed.json p50 最优国家
+    - cron: "7 3 * * 6"
   workflow_dispatch:
     inputs:
       cc:
@@ -55,13 +58,36 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
+      - name: Pick weekly countries
+        if: github.event_name == 'schedule'
+        id: pick
+        run: |
+          CC=$(python3 - <<'EOF'
+          import json, pathlib
+          p = pathlib.Path("data/output/country_speed.json")
+          d = json.loads(p.read_text()) if p.exists() else {}
+          cands = [(v.get("p50", 0), cc) for cc, v in d.items()
+                   if isinstance(v, dict) and v.get("n", 0) >= 20]
+          cands.sort(reverse=True)
+          print(",".join(cc for _s, cc in cands[:8]))
+          EOF
+          )
+          echo "cc=$CC" >> "$GITHUB_OUTPUT"
+          echo "weekly countries: $CC"
+
       - name: Deep probe
         run: |
+          CC="${{ github.event.inputs.cc }}"
+          SRC="${{ github.event.inputs.source }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            CC="${{ steps.pick.outputs.cc }}"
+            SRC=""
+          fi
           ARGS=""
-          if [ -n "${{ github.event.inputs.source }}" ]; then
-            ARGS="$ARGS --source ${{ github.event.inputs.source }}"
+          if [ -n "$SRC" ]; then
+            ARGS="$ARGS --source $SRC"
           else
-            ARGS="$ARGS --cc '${{ github.event.inputs.cc }}'"
+            ARGS="$ARGS --cc '$CC'"
           fi
           eval python scripts/deep_speed.py $ARGS \
             --limit ${{ github.event.inputs.limit }} \

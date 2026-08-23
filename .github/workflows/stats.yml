@@ -57,6 +57,17 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/generate_stats.py
 
+      - name: Export structured JSON
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/export_json.py
+
+      - name: Health watchdog
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: python scripts/health_alert.py
+
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true'
         run: |

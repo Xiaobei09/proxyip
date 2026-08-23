@@ -6,7 +6,7 @@
 
 ```
 download_proxies.py → validate_proxies.py → quality_check.py
-                                             ├─ quality_streaming.py
+                                             ├─ quality_probe.py
                                              ├─ quality_reputation.py
                                              └─ reorg_country.py
                            ↓
@@ -44,30 +44,34 @@ download_proxies.py → validate_proxies.py → quality_check.py
 
 TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降低单次丢包误杀。
 
-## 3. 流媒体解锁检测（quality_streaming.py）
+## 3. 出口探测引擎（quality_probe.py）与已移除的流媒体解锁
 
-### 3.1 检测方法
+> **流媒体解锁检查已于本轮整体移除**（NF/D+/YT/MX/PV/GPT 不再产生新观测）。
+> 历史行上的这些 token 由 `normalize_note` 作为遗留段继续容忍解析，
+> 随节点自然轮换逐渐消失。原 `quality_streaming.py` 拆分为：
+>
+> - `quality_probe.py` —— 通用 TLS 探测引擎：`tls_get_direct`（SNI 直连 GET）、
+>   外部出口地理回显 API（`check_external_api`，exit_cc 第一数据源）、
+>   ip-api 批量地理查询（`batch_ipapi`）；
+> - 流媒体服务表、各服务解析器与 `finalize_streaming`/`streaming_tokens`
+>   一并删除。
 
-对每个代理建立 TLS 直连（SNI=服务域名），发送 GET 请求，解析响应判断解锁状态：
+### 3.1 滚动可用率跟踪（uptime.py）
 
-| 服务 | 主机 | 路径 | 判定方法 |
-|---|---|---|---|
-| Netflix | `www.netflix.com` | `/title/80018499` | 响应中找 `countryCode` JSON 字段 |
-| Disney+ | `www.disneyplus.com` | `/` | 响应中找 `countryCode`/`country`/`region` |
-| YouTube Premium | `www.youtube.com` | `/premium` | 响应中找 `countryCode` JSON 字段 |
-| Max (HBO) | `www.max.com` | `/` | 重定向 `country=` 或响应 `countryCode` |
-| Prime Video | `www.primevideo.com` | `/` | 重定向 `country=` 或响应 `currentTerritory` |
-| OpenAI | `chat.openai.com` | `/cdn-cgi/trace` | 解析 `loc=` 字段（同时用于出口地区标注） |
+质量链每轮把存活节点按 UTC 日期记入 `data/quality/node_seen.json`
+（滚动 45 天窗口），并维护全局"运行日计数器"作为分母：
 
-### 3.2 状态判定
+- `uptime7 / uptime30`：窗口内出现天数 ÷ 运行轮数 → 存活率百分比；
+- 结果写入 `data/quality/uptime.json`，注解链为命中的行追加 `-U<NN>`
+  备注（如 `-U92`），build-good 产出 `_uptime` 可靠性子集（pct7 ≥ 80）。
 
-- **ok**：响应中成功解析到区域码 → `{status: "ok", region: "US"}`
-- **blocked**：403/404 或明确的区域限制消息 → `{status: "blocked"}`
-- **error**：其他错误（超时、解析失败）→ `{status: "error"}`
+### 3.2 深测带宽写回信誉分
 
-### 3.3 Netflix 原生判定
-
-当 Netflix 解锁区域与出口 IP 地理区域一致时，标记为 `native: true`（原生 IP），否则为 `native: false`（解锁 IP）。
+deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
+`agg_mbps`；quality_check 计算信誉分时叠加线性加成：
+`bonus = round(min(agg/50, 1) × 10)`，封顶 +10 分且**只对已有信誉分
+的节点生效**（深测是抽样，不产生幽灵分）。加成记录在
+`reputation.json` 条目的 `deep_bonus` 字段。
 
 ## 4. IP 信誉评分（quality_reputation.py）
 
@@ -268,10 +272,11 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 1. 出口国家标记：`→CC`（有出口观测即标注，含同国）
 2. 大陆可达：`-CN`
 3. IP 家族：`-V4` / `-V6` / `-DS`
-4. 流媒体解锁：`-NF(US) -D+ -YT -MX -PV -GPT`
-5. 信誉评分：`-<score>`（如 `-72`）
-6. IP 类型：`-DC` / `-RES` / `-MOB` / `-PROXY`
-7. 速度等级：`-fast`（≥5 MB/s）/ `-mid`（1-5 MB/s）/ `-slow`（<1 MB/s）
+4. 信誉评分：`-<score>`（如 `-72`）
+5. IP 类型：`-DC` / `-RES` / `-MOB` / `-PROXY`
+6. 速度等级：`-fast`（≥5 MB/s）/ `-mid`（1-5 MB/s）/ `-slow`（<1 MB/s）
+7. 滚动可用率：`-U<NN>`（uptime.json 的 pct7，如 `-U92`；无观测不加）
+   （流媒体解锁 token 已停止生成——历史遗留 token 被规范器容忍）
 
 ### 7.1.1 `ms` 与 `MB/s` 的测量语义（按清单视图区分）
 
@@ -290,7 +295,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
   "CN 测速"；挑选高带宽节点请看海外 MB/s + `good_top`，选低延迟请看
   CN 清单的 ms 排序。
 
-### 7.2 出口国家标记的四数据源
+### 7.2 出口国家标记的三数据源
 
 `→CC` 由统一构建器 `common.build_exit_cc_map` 多源汇聚（annotate_classify
 与 reorg_country 共用），优先级从高到低：
@@ -299,10 +304,9 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 2. `upstream_meta.json` —— 自有 CF Worker 观测到的代理出口国。其键为
    裸出口 IP，经 `common.build_exit_ip_map`（external 回显 `exit_geo.ip`
    > exit_family 实测 `exit_v4`/`exit_v6`）解析到行键后命中；
-3. `streaming.json` —— 经代理观测的服务解锁国；openai 为 CF trace
-   `loc`（最接近真实出口），其余服务按序兜底。覆盖面最大（98%+）；
-4. `ipinfo.json` —— 出口 IP 的 ip-api 地理。历史轮次可能是入口 IP 的
+3. `ipinfo.json` —— 出口 IP 的 ip-api 地理。历史轮次可能是入口 IP 的
    地理，仅作末位兜底。
+   （原第 3 层 streaming 解锁国已随流媒体检查移除。）
 
 已有 `→CC` 但与新观测不同视为陈旧出口（出口会漂移），直接替换。
 
@@ -328,7 +332,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 各阶段通过 CI workflow 顺序执行，互不干扰：
 
 1. `update-proxies.yml`（每 2 小时，`0 */2 * * *`）→ download + validate
-2. `quality-check.yml`（触发于 1）→ streaming + reputation + reorg
+2. `quality-check.yml`（触发于 1）→ reputation + uptime + reorg
 3. `china-check.yml` → 大陆连通性。双触发：quality 完成后 + **每小时独立
    心跳**（`11 * * * *`）。streak 依赖"连续多轮可达"，独立心跳保证上游
    失败或 IP 长期未变更时 stable 仍按小时累积

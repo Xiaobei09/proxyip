@@ -66,7 +66,7 @@ class TestAnalyze(unittest.TestCase):
         ]
         result = asrc.analyze(
             ip_sources, valid_lines,
-            rep_data={}, streaming_data={}, china_data={},
+            rep_data={}, china_data={},
             family_data={}, speed_data={},
         )
         self.assertEqual(result["total_proxies"], 3)
@@ -89,30 +89,12 @@ class TestAnalyze(unittest.TestCase):
         rep_data = {"1.1.1.1:443#US": {"score": 85, "risk": "low"}}
         result = asrc.analyze(
             ip_sources, valid_lines,
-            rep_data=rep_data, streaming_data={}, china_data={},
+            rep_data=rep_data, china_data={},
             family_data={}, speed_data={},
         )
         main = result["sources"]["main"]
         self.assertEqual(main["avg_reputation"], 85.0)
         self.assertEqual(main["reputation_dist"]["low"], 1)
-
-    def test_streaming_integration(self):
-        ip_sources = {"1.1.1.1:443#US": "main"}
-        valid_lines = ["1.1.1.1:443#🇺🇸US-100ms"]
-        streaming_data = {
-            "1.1.1.1:443#US": {
-                "netflix": {"status": "ok", "region": "US"},
-                "disney": {"status": "blocked"},
-            }
-        }
-        result = asrc.analyze(
-            ip_sources, valid_lines,
-            rep_data={}, streaming_data=streaming_data, china_data={},
-            family_data={}, speed_data={},
-        )
-        main = result["sources"]["main"]
-        self.assertEqual(main["streaming_ok_count"], 1)
-        self.assertAlmostEqual(main["streaming_ok_rate"], 1.0)
 
     def test_china_reachability(self):
         ip_sources = {"1.1.1.1:443#US": "main"}
@@ -120,7 +102,7 @@ class TestAnalyze(unittest.TestCase):
         china_data = {"1.1.1.1:443#US": {"verdict": "reachable"}}
         result = asrc.analyze(
             ip_sources, valid_lines,
-            rep_data={}, streaming_data={}, china_data=china_data,
+            rep_data={}, china_data=china_data,
             family_data={}, speed_data={},
         )
         main = result["sources"]["main"]
@@ -142,7 +124,7 @@ class TestAnalyze(unittest.TestCase):
         }
         result = asrc.analyze(
             ip_sources, valid_lines,
-            rep_data={}, streaming_data={}, china_data={},
+            rep_data={}, china_data={},
             family_data=family_data, speed_data={},
         )
         main = result["sources"]["main"]
@@ -150,7 +132,7 @@ class TestAnalyze(unittest.TestCase):
         self.assertEqual(main["family_dist"]["ipv6"], 1)
 
     def test_empty_inputs(self):
-        result = asrc.analyze({}, [], {}, {}, {}, {}, {})
+        result = asrc.analyze({}, [], {}, {}, {}, {})
         self.assertEqual(result["total_proxies"], 0)
         self.assertEqual(result["sources"], {})
 
@@ -165,10 +147,10 @@ class TestFormatReport(unittest.TestCase):
                 "main": {
                     "total": 80, "alive": 75, "survival_rate": 0.9375,
                     "avg_latency": 200.0, "avg_speed": 1.5, "avg_reputation": 80.0,
-                    "streaming_ok_rate": 0.9, "china_reachable_rate": 0.05,
+                    "china_reachable_rate": 0.05,
                     "reputation_dist": {}, "family_dist": {}, "country_dist": {},
                     "port_dist": {}, "median_latency": 180.0, "median_speed": 1.2,
-                    "streaming_ok_count": 68, "china_reachable_count": 4,
+                    "china_reachable_count": 4,
                 },
             },
         }

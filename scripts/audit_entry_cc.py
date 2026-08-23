@@ -125,7 +125,6 @@ def audit(source: Path, quality_dir: Path, timeout: int, delay: float) -> dict:
         read_json(quality_dir / "ipinfo.json"),
         read_json(quality_dir / "external_check.json"),
         read_json(quality_dir / "upstream_meta.json"),
-        read_json(quality_dir / "streaming.json"),
         read_json(quality_dir / "exit_family.json"),
     )
     rows: list[dict] = []

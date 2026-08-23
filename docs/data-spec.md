@@ -9,7 +9,7 @@
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
 - **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
-- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-<流媒体段>[-<出口类型段>][-<信誉分>]`。流媒体段为空格分隔的解锁标记：`NF(区域)`（Netflix+解锁区域，原生判定见 `streaming.json`）、`D+`（Disney+）、`YT`（YouTube Premium）、`MX`（Max）、`PV`（Prime Video）、`GPT`（ChatGPT/OpenAI）；出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-NF(US) D+ YT GPT-DC-72`、`9.9.9.9:443#🇺🇸US→JP-8ms-5.86MB/s-GPT-CF-63`。无结果的行保持原样
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-[-<出口类型段>][-<信誉分>][-U<NN>]`。出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6），tls 方法（Cloudflare 边缘）标记 `CF`；信誉分为 0-100 整数（来自 `reputation.json`）；`U<NN>` 为 7 天滚动存活率百分比（来自 `uptime.json`，如 `-U92`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-CF-72-U92`。无结果的行保持原样。（历史行上的流媒体标记 `NF(区域)/D+/YT/MX/PV/GPT` 仍被解析器容忍但已停止生成）
 - **去重**：同一 `ip:port` 组合全局唯一
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序（`all_cn*.txt` 按**大陆实测延迟**升序），`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
 
@@ -145,7 +145,6 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `latency_dist` | 延迟分桶直方图（如 `0-100`、`1000+`，毫秒） |
 | `speed` | 测速统计（avg/median/p90/max，MB/s） |
 | `speed_dist` | 速度分桶直方图（如 `0-0.5`、`5+`，MB/s） |
-| `streaming` / `streaming_ok` | 各服务解锁计数（来自 `quality_meta.json`）/ 任一解锁条目数 |
 | `ip_type` / `family` / `dual_stack` / `country_mismatch` | 出口 IP 类型分布 / 地址族分布 / 双栈数 / 错区数 |
 | `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
@@ -218,13 +217,24 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件。
 
-### `data/quality/streaming.json`
+### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
-单行 JSON，键为 `ip:port#国家`，值为各服务检测结果：`{netflix: {status, region, native}, disney: {...}, youtube: {...}, max: {...}, prime: {...}, openai: {...}}`。`status` ∈ `ok`/`blocked`/`error`；Netflix 的 `native` 表示解锁区域与出口地理一致（原生 IP）。
+`node_seen.json`：`{runs: {<YYYY-MM-DD>: 轮次计数}, proxies: {<key>: [出现日期…]}}`——滚动 45 天窗口的按轮存活记录。
+
+`uptime.json`：`{proxies: {<key>: {pct7, pct30, hits7, hits30, last_seen}}, runs7, runs30, ts}`。pct 为窗口内存现天数 ÷ 运行轮数的百分比。
+
+### `data/valid/all.json`
+
+结构化代理池导出（`export_json.py`），数组元素：
+`{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`。
+
+### `data/valid/all_diverse.txt`
+
+出口多样性视图：按实测出口 IP（exit_family 的 `exit_v4`/`exit_v6`，缺省回退入口 /24 网段）分组，每组仅保留综合分最高一条，全表按分数降序。
 
 ### `data/quality/quality_meta.json`
 
-质量检测汇总（供 stats 消费）：`ts`（生成时间戳 ISO-8601）、`total`（代理总数）、`tls`（TLS 方法代理数）、`services`（检测服务列表）、`streaming`（各服务 ok/blocked/error 计数）、`streaming_ok`（任一解锁条目数）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
+质量检测汇总（供 stats 消费）：`ts`（生成时间戳 ISO-8601）、`total`（代理总数）、`tls`（TLS 方法代理数）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
 
 ### `data/quality/abuse.json`
 
@@ -291,4 +301,4 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/quality/source_quality.json`
 
-各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`streaming_ok_rate`（流媒体解锁率）、`china_reachable_rate`（大陆可达率）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。
+各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`china_reachable_rate`（大陆可达率）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。
