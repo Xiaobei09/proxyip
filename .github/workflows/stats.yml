@@ -1,0 +1,63 @@
+name: Stats and charts
+
+on:
+  workflow_dispatch:
+  # 任一数据产出链成功后统一重建图表与 stats.json——单一写入者，
+  # 此前 generate_stats 内嵌在 quality/china 两条链里重复执行。
+  workflow_run:
+    workflows: ["Quality check", "China check", "Exit family check"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stats
+  cancel-in-progress: false
+
+jobs:
+  render:
+    name: Generate stats & SVG charts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or trigger failed
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ] \
+             && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Generate stats and charts
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/generate_stats.py
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): stats & charts ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

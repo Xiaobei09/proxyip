@@ -82,9 +82,7 @@ jobs:
         continue-on-error: true
         run: python scripts/audit_entry_cc.py --timeout 20
 
-      - name: Generate stats and chart
-        if: steps.gate.outputs.skip != 'true'
-        run: python scripts/generate_stats.py
+      # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
 
       - name: Show summary
         if: steps.gate.outputs.skip != 'true'

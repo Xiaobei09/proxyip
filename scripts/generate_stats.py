@@ -36,6 +36,8 @@ from pathlib import Path
 
 from common import DATA_DIR, OUTPUT_DIR, now_ts, read_json, write_text_if_changed
 
+SPEED_NOTE_RE = __import__("re").compile(r"(\d+(?:\.\d+)?)MB/s")
+
 WIDTH = 800
 HEIGHT = 300
 MARGIN_L = 46
@@ -872,6 +874,77 @@ def build_ip_type(quality_meta: dict) -> str:
     return plot_hbars(items, color=COLOR_STREAMING, title="IP type distribution")
 
 
+def collect_country_speed(valid_dir: Path) -> dict[str, dict]:
+    """各国速度分布：从 countries/<CC>/all.txt 行内 MB/s 聚合。
+
+    返回 ``{CC: {n, p25, p50, p75, max, spread}}``，``spread`` 为四分位
+    差距 ``(p75-p25)/p50``（百分比，衡量同国内部速度分化程度；样本 <5
+    的国家跳过）。这是对"不同国家差距大、同国却趋同"的直接量化——
+    同国趋同主要源于 CDN 本地化 + 小窗口采样，深测(deep_speed)可拉开。
+    """
+    import statistics
+
+    out: dict[str, dict] = {}
+    cdir = valid_dir / "countries"
+    if not cdir.is_dir():
+        return out
+    for cc_dir in sorted(cdir.iterdir()):
+        pool = cc_dir / "all.txt"
+        if not cc_dir.is_dir() or not pool.exists():
+            continue
+        vals = []
+        for ln in pool.read_text(encoding="utf-8").splitlines():
+            m = SPEED_NOTE_RE.search(ln)
+            if m:
+                vals.append(float(m.group(1)))
+        if len(vals) < 5:
+            continue
+        vals.sort()
+        q = statistics.quantiles(vals, n=4)
+        p50 = q[1]
+        spread = round((q[2] - q[0]) / p50 * 100) if p50 > 0 else 0
+        out[cc_dir.name] = {
+            "n": len(vals),
+            "p25": round(q[0], 2),
+            "p50": round(p50, 2),
+            "p75": round(q[2], 2),
+            "max": round(vals[-1], 2),
+            "spread_pct": spread,
+        }
+    return out
+
+
+def build_country_speed(country_speed: dict[str, dict]) -> str:
+    """中位速度 Top-20 国家（横条，标签含 p25–p75 区间与样本数）。"""
+    items = sorted(
+        country_speed.items(), key=lambda kv: kv[1]["p50"], reverse=True
+    )[:20]
+    if not items:
+        return empty_svg(text="No speed data yet")
+    bars = [(f"{cc} {d['p50']}MB/s", int(round(d["p50"] * 100))) for cc, d in items]
+    svg = plot_hbars(bars, color=COLOR_SPEED,
+                     title="Median speed per country (value ×0.01 MB/s)")
+    # 追加区间注释行：在标题下方列出前 5 国的 IQR
+    notes = " · ".join(
+        f"{cc}[{d['p25']}-{d['p75']}]n={d['n']}"
+        for cc, d in items[:5]
+    )
+    return svg.replace("</svg>", f'<text class="e" x="8" y="14">{esc(notes)}</text></svg>')
+
+
+def build_speed_spread(country_speed: dict[str, dict]) -> str:
+    """同国内部分化 Top-20：四分位差 (p75-p25)/p50 百分比。"""
+    items = sorted(
+        ((cc, d) for cc, d in country_speed.items() if d["spread_pct"] > 0),
+        key=lambda kv: kv[1]["spread_pct"], reverse=True,
+    )[:20]
+    if not items:
+        return empty_svg(text="No spread data yet")
+    bars = [(f"{cc} n={d['n']}", d["spread_pct"]) for cc, d in items]
+    return plot_hbars(bars, color=COLOR_BAR,
+                      title="Intra-country speed spread (IQR/median %)")
+
+
 def build_source_avail(rep_data: dict) -> str:
     """Combined chart: per-source coverage + sources-per-proxy distribution."""
     proxies = rep_data.get("proxies", {})
@@ -1069,6 +1142,11 @@ def main(argv: list[str] | None = None) -> int:
     entry_audit = read_json(data_dir / "quality" / "entry_audit.json")
     rep_data = read_json(data_dir / "quality" / "reputation.json")
     source_stats = read_json(data_dir / "quality" / "source_stats.json")
+    country_speed = collect_country_speed(data_dir / "valid")
+    cs_file = args.out / "country_speed.json"
+    write_text_if_changed(cs_file, json.dumps(country_speed, ensure_ascii=False,
+                                             sort_keys=True) + "\n")
+    print(f"Wrote {cs_file} ({len(country_speed)} countries)")
 
     latest = history[-1] if history else (valid_history[-1] if valid_history else {})
     sets = latest.get("sets", {})
@@ -1138,6 +1216,8 @@ def main(argv: list[str] | None = None) -> int:
         "chart_exit.svg": build_exit_cc(data_dir / "quality"),
         "chart_entry_audit.svg": build_entry_audit(entry_audit),
         "chart_ip_type.svg": build_ip_type(quality_meta),
+        "chart_country_speed.svg": build_country_speed(country_speed),
+        "chart_speed_spread.svg": build_speed_spread(country_speed),
         "chart_source_avail.svg": build_source_avail(rep_data),
         "chart_source_stats.svg": build_source_stats(source_stats),
         "chart_rep.svg": build_rep(rep_data),
