@@ -273,6 +273,23 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 6. IP 类型：`-DC` / `-RES` / `-MOB` / `-PROXY`
 7. 速度等级：`-fast`（≥5 MB/s）/ `-mid`（1-5 MB/s）/ `-slow`（<1 MB/s）
 
+### 7.1.1 `ms` 与 `MB/s` 的测量语义（按清单视图区分）
+
+- **速度 `MB/s`** 一律来自海外测速：GitHub Actions runner（美区）经代理
+  下载 `cdnjs.cloudflare.com` 固定样本（≤1MB、5s 超时、丢弃前 256KB
+  warmup）。它反映"代理入口机 ↔ 其本地 CF PoP"的吞吐 + runner 侧瓶颈，
+  **与大陆链路无关**；同国数值聚集是因为条目多来自同几家主机商的同规格
+  端口，且 CDN 本地化使路径极短。绝对档位阈值全局统一，因此弱供给国家
+  可能整国无 `fast`——请配合组内相对最优 `good_top.txt` 使用。
+- **延迟 `ms`** 分两种视图：
+  * CN 系清单（`all_cn*`、各国/各集合 `cn*.txt`）：行内 ms 已替换为
+    **大陆实测 RTT**（china.json 的 itdog/checkhost/xxapi/pingpe 观测），
+    即大陆使用者连接该节点的真实延迟；
+  * 其他清单（`all.txt`、国家全量等）：ms 为海外 runner 的 TLS 握手延迟。
+- 大陆**带宽**目前无法实测（第三方探测仅提供延迟/可达性），故不存在
+  "CN 测速"；挑选高带宽节点请看海外 MB/s + `good_top`，选低延迟请看
+  CN 清单的 ms 排序。
+
 ### 7.2 出口国家标记的四数据源
 
 `→CC` 由统一构建器 `common.build_exit_cc_map` 多源汇聚（annotate_classify

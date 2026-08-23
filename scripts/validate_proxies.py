@@ -70,6 +70,7 @@ from common import (
     now_ts,
     parse_headers,
     parse_line,
+    rewrite_latency,
     write_text_if_changed,
 )
 from download_proxies import COUNTRY_SETS, SMALL_SETS
@@ -419,6 +420,33 @@ def load_cn_reachable(path: Path | None = None) -> set[str]:
     }
 
 
+def load_cn_ms(path: Path | None = None) -> dict[str, float]:
+    """``china.json`` 中 reachable 条目的 ``key -> 大陆实测毫秒`` 映射。
+
+    供 CN 系分组视图把行内延迟替换为大陆 RTT；缺失/损坏 → 空 dict。
+    """
+    path = path or CHINA_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    proxies = data.get("proxies", data)
+    if not isinstance(proxies, dict):
+        return {}
+    out: dict[str, float] = {}
+    for key, meta in proxies.items():
+        if not isinstance(meta, dict) or meta.get("verdict") != "reachable":
+            continue
+        ms = meta.get("ms")
+        if isinstance(ms, (int, float)) and ms > 0:
+            out[key] = float(ms)
+    return out
+
+
 def family_of(entry: str, note: str, families: dict) -> str | None:
     """入口家族：优先 ``exit_family.json``，缺失时按行内 ``-V4``/``-V6``/``-DS`` 兜底。"""
     fam = families.get(entry)
@@ -736,6 +764,7 @@ def write_valid_outputs(
         families = load_family_map()
     if cn_reachable is None:
         cn_reachable = load_cn_reachable()
+    cn_ms = load_cn_ms()
 
     old_notes: dict[str, str] = {}
     old_all = VALID_DIR / "all.txt"
@@ -805,12 +834,23 @@ def write_valid_outputs(
         return groups
 
     def write_variant(directory: Path, name: str, entries: list[str]) -> None:
-        """写单个清单文件；空清单清理残留文件。"""
+        """写单个清单文件；空清单清理残留文件。
+
+        CN 系分组（``cn*``）行内延迟替换为**大陆实测 RTT**（china.json ms）
+        ——CN 视图里 ``ms`` 的语义是"大陆使用者连接该节点的延迟"，而非
+        海外 runner 的 TLS 延迟；无大陆观测的行保留海外值。
+        """
+        cn_view = name == "cn" or name.startswith("cn_") or \
+            name in ("cn4", "cn6", "cn46")
         path = directory / f"{name}.txt"
         if entries:
-            write_text_if_changed(
-                path, "\n".join(line(e) for e in entries) + "\n"
-            )
+            body = []
+            for e in entries:
+                text = line(e)
+                if cn_view and cn_ms:
+                    text = rewrite_latency(text, cn_ms.get(e))
+                body.append(text)
+            write_text_if_changed(path, "\n".join(body) + "\n")
         elif path.exists():
             path.unlink()
 

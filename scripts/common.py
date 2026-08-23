@@ -622,6 +622,20 @@ def note_tier(line: str) -> str | None:
     return b.get("tier") if isinstance(b, dict) else None
 
 
+def rewrite_latency(line: str, ms: float | int | None) -> str:
+    """将行内延迟 token 替换为 ``ms``（四舍五入取整）；无 token 或 ms 缺失原样返回。
+
+    用途：CN 系列清单把海外 TLS 延迟替换为大陆实测 RTT——同一行内
+    ``ms`` 的语义随清单而定（CN 清单=大陆视角，其他=海外视角），
+    避免大陆使用者把海外延迟误当自己的连接体验。
+    """
+    if not ms or not isinstance(ms, (int, float)) or ms <= 0:
+        return line
+    new = f"-{int(round(ms))}ms"
+    out, n = LATENCY_RE.subn(new, line, count=1)
+    return out if n else line
+
+
 # ------------------------------------------------------- 备注段规范（唯一出口）
 # 所有工作流追加/清理备注必须经由 normalize_note，禁止各自 ``line += "-TOK"``
 # 拼接——否则多 CI 并发写同一文件时段序漂移、旧 token 无限堆叠

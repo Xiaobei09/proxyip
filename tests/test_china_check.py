@@ -280,6 +280,29 @@ class TestAnnotations(unittest.TestCase):
             ["2.2.2.2:443", "1.1.1.1:443", "3.3.3.3:443"],
         )
 
+    def test_generate_all_cn_rewrites_latency_to_cn_rtt(self):
+        """CN 清单行内 ms 替换为大陆实测值（原海外 TLS 延迟不再展示）。"""
+        text = "1.1.1.1:443#US-42ms-5.00MB/s-fast-90\n"
+        reachable = {"1.1.1.1:443#US"}
+        cn_ms = {"1.1.1.1:443#US": 236.4}
+        cn_text, _n = cc.generate_all_cn(text, reachable, cn_ms)
+        self.assertIn("1.1.1.1:443#US-236ms-5.00MB/s-fast-CN-90", cn_text)
+        # 无大陆观测的行保留海外值
+        text2 = "2.2.2.2:443#US-77ms\n"
+        cn_text2, _n = cc.generate_all_cn(text2, {"2.2.2.2:443#US"}, cn_ms)
+        self.assertIn("2.2.2.2:443#US-77ms-CN", cn_text2)
+
+    def test_rewrite_latency_helper(self):
+        import common
+        line = "1.2.3.4:80#US-1000ms-x"
+        self.assertEqual(common.rewrite_latency(line, 250.6),
+                         "1.2.3.4:80#US-251ms-x")
+        self.assertEqual(common.rewrite_latency(line, None), line)
+        self.assertEqual(common.rewrite_latency(line, 0), line)
+        # 无既有 token：原样返回（不注入新语义）
+        self.assertEqual(common.rewrite_latency("1.2.3.4:80#US", 99),
+                         "1.2.3.4:80#US")
+
     def test_generate_all_cn_missing_ms_last_stable(self):
         text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n3.3.3.3:443#US-1ms-CN\n"
         reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
