@@ -75,4 +75,5 @@ jobs:
 
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true'
-        run: bash .github/scripts/commit_data.sh "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

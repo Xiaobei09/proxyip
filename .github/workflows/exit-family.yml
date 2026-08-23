@@ -84,4 +84,5 @@ jobs:
 
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true'
-        run: bash .github/scripts/commit_data.sh "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
