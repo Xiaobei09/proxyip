@@ -1,0 +1,74 @@
+name: Deep speed probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      cc:
+        description: "逗号分隔国家码（如 US,CA）；与 source 二选一"
+        required: false
+        default: ""
+      source:
+        description: "显式池文件路径（优先于 cc）"
+        required: false
+        default: ""
+      limit:
+        description: "最多探测节点数（0=全部）"
+        required: false
+        default: "30"
+      bytes_mb:
+        description: "单流下载上限 MB"
+        required: false
+        default: "20"
+      streams:
+        description: "每节点并发流数"
+        required: false
+        default: "3"
+      targets:
+        description: "目标列表：cdnjs,ovh,cf_trace"
+        required: false
+        default: "cdnjs,ovh"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deep-speed
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Large-sample multi-stream speed
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Deep probe
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.source }}" ]; then
+            ARGS="$ARGS --source ${{ github.event.inputs.source }}"
+          else
+            ARGS="$ARGS --cc '${{ github.event.inputs.cc }}'"
+          fi
+          eval python scripts/deep_speed.py $ARGS \
+            --limit ${{ github.event.inputs.limit }} \
+            --bytes-mb ${{ github.event.inputs.bytes_mb }} \
+            --streams ${{ github.event.inputs.streams }} \
+            --targets '${{ github.event.inputs.targets }}'
+
+      - name: Commit changes
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): deep speed probe ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

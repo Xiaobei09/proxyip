@@ -74,9 +74,7 @@ jobs:
 
       # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
 
-      - name: Generate stats and chart
-        if: steps.gate.outputs.skip != 'true'
-        run: python scripts/generate_stats.py
+      # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
 
       - name: Show summary
         if: steps.gate.outputs.skip != 'true'
