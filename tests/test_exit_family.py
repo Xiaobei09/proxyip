@@ -35,6 +35,16 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(ef.classify_family("1.2.3.4", V6_IP), "dual")
         self.assertEqual(ef.classify_family(None, None), "unknown")
 
+    def test_same_echo_not_dual(self):
+        """两次探测返回同一地址（固定上游/服务未区分家族）→ 按字面量归单栈。"""
+        self.assertEqual(ef.classify_family("1.2.3.4", "1.2.3.4"), "ipv4")
+        self.assertEqual(ef.classify_family(V6_IP, V6_IP), "ipv6")
+
+    def test_literal_over_domain_assumption(self):
+        """v4 域名探测意外返回 v6 字面量 → 仍按字面量计（不按域名假设）。"""
+        self.assertEqual(ef.classify_family(V6_IP, None), "ipv6")
+        self.assertEqual(ef.classify_family("1.2.3.4", V6_IP), "dual")
+
 
 class TestExtractExitIp(unittest.TestCase):
     def test_trace_format(self):
