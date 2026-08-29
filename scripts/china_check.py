@@ -103,7 +103,7 @@ from china_itdog import (
 FALLBACK_SOURCE = DEFAULT_SOURCE
 
 LIMIT_DEFAULT = 250
-PINGPE_LIMIT_DEFAULT = 40
+PINGPE_LIMIT_DEFAULT = 120
 PINGPE_CONCURRENCY = 4  # ping.pe L3 有界并发（每键端到端 ~20-40s，串行太慢）
 PINGPE_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
 WORKERS_DEFAULT = 16
