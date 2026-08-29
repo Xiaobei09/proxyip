@@ -64,8 +64,11 @@ FREEIPAPI_URL = "https://freeipapi.com/api/json/{ip}"
 FREEIPAPI_TIMEOUT = 10
 SCAMALYTICS_URL = "https://scamalytics.com/ip/{ip}"
 SCAMALYTICS_TIMEOUT = 12
+SCAMALYTICS_CAP = 1500
 IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
 IPLOCATION_TIMEOUT = 10
+IPLOCATION_CAP = 3000
+FREEIPAPI_CAP = 3000
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
 SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
@@ -1582,13 +1585,16 @@ async def lookup_all_risk(
         api_tasks.append(cached_batch("ipwhois", ipwhois_lookup_sync, workers=w, delay=d))
     if "freeipapi" in sources:
         w, d = pacing.get("freeipapi", (REP_WORKERS, REP_DELAY))
-        api_tasks.append(cached_batch("freeipapi", freeipapi_lookup_sync, workers=w, delay=d))
+        api_tasks.append(cached_batch(
+            "freeipapi", freeipapi_lookup_sync, cap=FREEIPAPI_CAP, workers=w, delay=d))
     if "scamalytics" in sources:
         w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
-        api_tasks.append(cached_batch("scamalytics", scamalytics_lookup_sync, workers=w, delay=d))
+        api_tasks.append(cached_batch(
+            "scamalytics", scamalytics_lookup_sync, cap=SCAMALYTICS_CAP, workers=w, delay=d))
     if "iplocation" in sources:
         w, d = pacing.get("iplocation", (REP_WORKERS, REP_DELAY))
-        api_tasks.append(cached_batch("iplocation", iplocation_lookup_sync, workers=w, delay=d))
+        api_tasks.append(cached_batch(
+            "iplocation", iplocation_lookup_sync, cap=IPLOCATION_CAP, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:

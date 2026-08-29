@@ -1843,6 +1843,11 @@ class TestNewReputationSources(unittest.TestCase):
             self.assertIn(name, qr.DEFAULT_REP_SOURCES)
             self.assertIn(name, qr.REPUTATION_WEIGHTS)
 
+    def test_bounded_coverage_caps(self):
+        self.assertTrue(0 < qr.SCAMALYTICS_CAP <= 5000)
+        self.assertTrue(0 < qr.FREEIPAPI_CAP <= 10000)
+        self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
+
     def test_freeipapi_lookup_parsing(self):
         body = json.dumps({
             "ipAddress": "1.2.3.4", "isProxy": False, "asn": 15169,
