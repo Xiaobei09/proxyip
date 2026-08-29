@@ -866,6 +866,32 @@ def build_ip_type(quality_meta: dict) -> str:
     return plot_hbars(items, color=COLOR_STREAMING, title="IP 类型分布")
 
 
+def collect_cn_summary(china_data: dict, valid_dir: Path) -> dict:
+    """CN 池规模：``reachable`` = china.json 当前判定（真相）；
+    ``http``/``stable``/``served`` = 实际落盘文件行数。
+
+    注意 china_check 对空子集「不写盘」，重启/横波动后旧子集文件可能
+    短暂残留（设计使然，守住既定清单）；stats 因此以文件行数为口径，
+    让消费者看到真正可下载的规模，而非可能被清空的规则计值。
+    """
+    reachable = sum(
+        1
+        for v in (china_data.get("proxies") or {}).values()
+        if isinstance(v, dict) and v.get("verdict") == "reachable"
+    )
+    def _lines(*parts: str) -> int:
+        p = valid_dir.joinpath(*parts)
+        return sum(1 for _ in p.open(encoding="utf-8")) if p.exists() else 0
+
+    return {
+        "reachable": reachable,
+        "http": _lines("all_cn_http.txt"),
+        "stable": _lines("all_cn_stable.txt"),
+        "served": _lines("all_cn.txt"),
+        "ts": china_data.get("ts"),
+    }
+
+
 def collect_country_speed(valid_dir: Path) -> dict[str, dict]:
     """各国速度分布：从 countries/<CC>/all.txt 行内 MB/s 聚合。
 
@@ -1156,6 +1182,7 @@ def main(argv: list[str] | None = None) -> int:
     stale = age_s is not None and age_s > STALE_AFTER_S
 
     unique = latest.get("unique") or latest.get("total", 0)
+    cn_summary = collect_cn_summary(china_data, data_dir / "valid")
     stats = {
         "ts": now_ts(),
         "updated_at": latest.get("ts"),
@@ -1182,6 +1209,11 @@ def main(argv: list[str] | None = None) -> int:
         "country_mismatch": quality_meta.get("country_mismatch", 0),
         "history_records": len(history),
         "alive_history_records": len(valid_history),
+        "cn_reachable": cn_summary["reachable"],
+        "cn_http": cn_summary["http"],
+        "cn_stable": cn_summary["stable"],
+        "cn_served": cn_summary["served"],
+        "cn_ts": cn_summary["ts"],
     }
 
     stats_file = args.out / "stats.json"

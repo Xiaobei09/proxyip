@@ -149,6 +149,30 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("可达", svg)
         self.assertIn("uncertain", svg)
 
+    def test_collect_cn_summary_rules(self):
+        data = {
+            "ts": "2026-08-29T00:00:00Z",
+            "proxies": {
+                "a:443#US": {"verdict": "reachable", "level": "http"},
+                "b:443#US": {"verdict": "reachable", "level": "tcp"},
+                "c:443#US": {"verdict": "unreachable"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            vd = Path(td)
+            (vd / "all_cn.txt").write_text("x\n" * 3)
+            (vd / "all_cn_http.txt").write_text("x\n")
+            (vd / "all_cn_stable.txt").write_text("x\n")
+            s = gs.collect_cn_summary(data, vd)
+            self.assertEqual(s["reachable"], 2)      # verdict 真相
+            self.assertEqual(s["http"], 1)           # served 文件行数
+            self.assertEqual(s["stable"], 1)
+            self.assertEqual(s["served"], 3)
+            self.assertEqual(s["ts"], data["ts"])
+        empty = gs.collect_cn_summary({}, Path(td_removed := "/nonexistent"))
+        self.assertEqual(empty["reachable"], 0)
+        self.assertEqual(empty["served"], 0)
+
 
 class TestMain(unittest.TestCase):
     def test_end_to_end_writes_all_outputs(self):
@@ -194,6 +218,10 @@ class TestMain(unittest.TestCase):
             self.assertIn("age_s", stats)
             self.assertIn("updated_ago", stats)
             self.assertIn("stale", stats)
+            self.assertEqual(stats["cn_reachable"], 2)
+            self.assertEqual(stats["cn_http"], 0)
+            self.assertEqual(stats["cn_stable"], 0)
+            self.assertEqual(stats["cn_served"], 0)
             badge = json.loads((out / "badge.json").read_text())
             self.assertEqual(badge["label"], "status")
             self.assertIn(badge["color"], ("brightgreen", "red"))
