@@ -675,6 +675,31 @@ class TestMergeVerdictLevel(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
 
 
+class TestWriteContract(unittest.TestCase):
+    """china.json 写盘载荷契约：顶层必须有 ``ts``（看门狗/徽章依赖它）。"""
+
+    def test_payload_includes_top_level_ts(self):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "china.json"
+            cc.write_json(
+                out,
+                {
+                    "ts": cc.datetime.now(cc.timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    "proxies": {"x:443#US": {"verdict": "reachable"}},
+                },
+            )
+            data = json.loads(out.read_text())
+            self.assertIsInstance(data.get("ts"), str)
+            self.assertIn("proxies", data)
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "china.json"
+            cc.write_json(out, {"proxies": {"x:443#US": {"verdict": "reachable"}}})
+            self.assertIsNone(json.loads(out.read_text()).get("ts"))
+
+
 class TestApplyStreak(unittest.TestCase):
     def test_consecutive_reachable_accumulates(self):
         entries = {"a": {"verdict": "reachable"}, "b": {"verdict": "unreachable"}}
