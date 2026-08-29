@@ -21,6 +21,7 @@ from bisect import bisect_right
 
 from common import *  # noqa: F401,F403  (paths, UA, write_json, keyed_json, ...)
 
+REP_CACHE_MAX = 40000   # 信誉缓存 IP 上限（防无限膨胀，超出按最近使用裁剪）
 REP_RISK_HIGH = 30
 REP_RISK_MEDIUM = 75
 
@@ -56,6 +57,9 @@ FIREHOL_ABUSERS_URL = (
 DC_ASN_URL = "https://iplogs.com/data/datacenter-asns.csv"
 VPN_ASN_URL = "https://iplogs.com/data/vpn-providers.csv"
 RESPROXY_ASN_URL = "https://iplogs.com/data/residential-proxy-backbones.csv"
+TOR_EXITS_URL = "https://check.torproject.org/exit-addresses"
+SPAMHAUS_DROP_URL = "https://www.spamhaus.org/drop/drop.txt"
+SPAMHAUS_EDROP_URL = "https://www.spamhaus.org/drop/edrop.txt"
 STATIC_LIST_TIMEOUT = 15
 ABUSER_SCORE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 ABUSER_SCORE_THRESHOLD = 0.1
@@ -131,6 +135,8 @@ STATIC_LIST_SCORES = {
     "dc_asn": 85,       # is_hosting（机房/数据中心）
     "vpn_asn": 70,      # is_vpn
     "resproxy_asn": 75, # is_proxy（住宅代理骨干）
+    "tor_exit": 45,     # is_tor（Tor 出口节点实时列表）
+    "spamhaus": 55,     # is_listed（Spamhaus DROP/EDROP 端用户高风险网段）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -152,6 +158,8 @@ REPUTATION_WEIGHTS = {
     "vpn_asn": 3,
     "resproxy_asn": 2,
     "ipwhois": 6,
+    "tor_exit": 5,
+    "spamhaus": 4,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -159,6 +167,7 @@ DEFAULT_REP_SOURCES = (
     "ipapi_is", "ipdata", "whatismyip", "dc_asn",
     "abuse_list", "vpn_asn", "resproxy_asn",
     "proxycheck", "ip2location", "ipwhois",
+    "tor_exit", "spamhaus",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -603,6 +612,27 @@ async def fetch_firehol_abusers() -> IpSet:
     return IpSet(await fetch_text_list(FIREHOL_ABUSERS_URL))
 
 
+async def fetch_tor_exits() -> IpSet:
+    """Tor exit node IPs（``ExitAddress`` 行取第二列）。"""
+    lines = await fetch_text_list(TOR_EXITS_URL)
+    ips = [
+        ln.split()[1]
+        for ln in lines if ln.startswith(("ExitAddress",))
+    ]
+    return IpSet(ips)
+
+
+async def fetch_spamhaus_drop() -> IpSet:
+    """Spamhaus DROP + EDROP CIDR 网段（``<cidr> ; 描述`` 行）。"""
+    cidrs = []
+    for url in (SPAMHAUS_DROP_URL, SPAMHAUS_EDROP_URL):
+        for ln in await fetch_text_list(url):
+            entry = ln.split(";")[0].strip()
+            if "/" in entry:
+                cidrs.append(entry)
+    return IpSet(cidrs)
+
+
 async def fetch_asn_list(url: str) -> set[str]:
     """CSV → normalized ``ASxxxx`` set (locates the ``asn`` column by header)."""
     rows = list(await fetch_text_list(url))
@@ -634,10 +664,16 @@ async def fetch_static_lists(sources: list) -> dict:
         "dc_asn": set(),
         "vpn_asn": set(),
         "resproxy_asn": set(),
+        "tor_exit": IpSet(),
+        "spamhaus": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
         mapping.append(("abuse_list", fetch_firehol_abusers()))
+    if "tor_exit" in sources:
+        mapping.append(("tor_exit", fetch_tor_exits()))
+    if "spamhaus" in sources:
+        mapping.append(("spamhaus", fetch_spamhaus_drop()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -838,6 +874,8 @@ def source_score(name: str, signal) -> int | None:
             "dc_asn": "is_hosting",
             "vpn_asn": "is_vpn",
             "resproxy_asn": "is_proxy",
+            "tor_exit": "is_tor",
+            "spamhaus": "is_listed",
         }[name]
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
@@ -1032,6 +1070,10 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"vpn": True} if signal.get("is_vpn") else {}
     if name == "resproxy_asn":
         return {"proxy": True} if signal.get("is_proxy") else {}
+    if name == "tor_exit":
+        return {"tor": True} if signal.get("is_tor") else {}
+    if name == "spamhaus":
+        return {"listed": True} if signal.get("is_listed") else {}
     return {}
 
 
@@ -1417,6 +1459,10 @@ async def lookup_all_risk(
     for ip in uniq:
         if ip in static["abuse_list"]:
             put("abuse_list", ip, {"is_abuse": True})
+        if ip in static["tor_exit"]:
+            put("tor_exit", ip, {"is_tor": True})
+        if ip in static["spamhaus"]:
+            put("spamhaus", ip, {"is_listed": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue
@@ -1436,6 +1482,19 @@ async def lookup_all_risk(
                     fresh[src] = src_entry
             if fresh:
                 pruned[ip] = fresh
+        if len(pruned) > REP_CACHE_MAX:
+            # 超上限：按每个 IP 最近一次信号时间裁剪最旧的
+            def last_ts(item) -> float:
+                _ip, entry = item
+                ts = 0.0
+                for src_entry in entry.values():
+                    if isinstance(src_entry, dict):
+                        ts = max(ts, src_entry.get("ts") or 0)
+                return ts
+            for ip, _ in sorted(
+                pruned.items(), key=last_ts, reverse=True
+            )[REP_CACHE_MAX:]:
+                del pruned[ip]
         save_rep_cache(pruned)
     return risk_data
 

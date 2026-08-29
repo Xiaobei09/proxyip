@@ -536,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma list of sources for --reputation-provider multi "
         "(default: netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,"
         "ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,"
-        "proxycheck,ip2location)",
+        "proxycheck,ip2location,ipwhois,tor_exit,spamhaus)",
     )
     parser.add_argument(
         "--reputation-weights",
