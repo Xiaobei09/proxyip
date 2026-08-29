@@ -36,7 +36,7 @@
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `data/output/stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量、双轴复合图、集合规模、大陆可达性、出口家族与信誉分分布
 - **结构化索引**：`valid/index.json` 提供每存活代理的延迟与检测方法索引，`valid/speed.json` 提供实测速度索引，便于程序直接消费
-- **CI 自动化**：每 30 分钟全自动执行下载→验证→统计→提交，无需人工干预；提交前自动跑测试套件（stdlib `unittest`）
+- **CI 自动化**：每 2 小时全自动执行下载→验证→统计→提交，无需人工干预；提交前自动跑测试套件（stdlib `unittest`）
 - **浏览器指纹生成**：生成内部自洽、同一设备配置的 UA/分辨率/时区/WebGL 等指纹
 
 ## 快速开始
@@ -54,7 +54,7 @@ cd proxyip
 
 python -m unittest discover -s tests -v     # 0. 运行测试套件（可选）
 python scripts/download_proxies.py          # 1. 下载解压整理
-python scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止）
+python scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止；上一轮未存活条目先经 TCP 预筛除朽尸）
 python scripts/generate_stats.py            # 3. 统计与趋势图
 python scripts/quality_check.py             # 4. 出口 IP 质量检测（可选）
 python scripts/uptime.py                   # 5. 滚动可用率统计
@@ -124,8 +124,8 @@ data/download/all.txt                       # 全量去重清单（未验证）
 
 `.github/workflows/update-proxies.yml`：
 
-- **触发**：每 30 分钟定时（`cron: */30 * * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
-- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip，产出 `data/quality/upstream_meta.json`）→ 验证与测速（默认不设时间限制，跑完为止）→ 生成统计 → 展示统计 → 有变更则自动提交并推送回仓库
+- **触发**：每 2 小时定时（`cron: 0 */2 * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
+- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip，产出 `data/quality/upstream_meta.json`）→ 验证与测速（`--time-budget 3600`，上一轮未存活的条目先经 2 秒 TCP 预连通筛除朽尸）→ 有变更则自动提交并推送回仓库
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：四个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`data/output/badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
@@ -134,7 +134,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `uptime.py`（滚动可用率）→ `annotate_classify.py` 之后由专职 build-good 工作流重建 good 清单（含 `_uptime` 可靠性变体）→ stats 工作流统一渲染图表并执行 `export_json.py` + `health_alert.py`→ 有变更则自动提交并推送
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
-- **说明**：主更新每 30 分钟重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
+- **说明**：主更新每 2 小时重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
