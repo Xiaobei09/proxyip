@@ -7,6 +7,7 @@
 [![Alive Rate](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json&query=alive_rate&label=Alive%20Rate&color=orange)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/meta.json)
 [![Updated](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json&query=updated_ago&label=Updated&color=informational)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json)
 [![Status](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/badge.json)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json)
+[![CN Reachable](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json&query=cn_reachable&label=CN%20Reachable&color=red)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all_cn.txt)
 
 ![Trend](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_combo.svg)
 ![Country distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_country.svg)
@@ -128,7 +129,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - **触发**：每 2 小时定时（`cron: 0 */2 * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
 - **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip，产出 `data/quality/upstream_meta.json`）→ 验证与测速（`--time-budget 3600`，上一轮未存活的条目先经 2 秒 TCP 预连通筛除朽尸）→ 有变更则自动提交并推送回仓库
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
-- **徽章**：四个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`；`data/output/badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
+- **徽章**：五个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`、`cn_reachable`；`data/output/badge.json` 驱动状态徽章（fresh/stale，超过 3 小时变红）
 
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
