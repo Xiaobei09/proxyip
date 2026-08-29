@@ -127,7 +127,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/update-proxies.yml`：
 
 - **触发**：每 2 小时定时（`cron: 0 */2 * * *`）；支持 `workflow_dispatch` 手动触发；推送 `scripts/*.py` 时也会执行
-- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip，产出 `data/quality/upstream_meta.json`）→ 验证与测速（`--time-budget 3600`，上一轮未存活的条目先经 2 秒 TCP 预连通筛除朽尸）→ 有变更则自动提交并推送回仓库
+- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip；另并 9 个 CF 反代补充源 + 5 个免费 `ip:port` 主线镜像源，产出 `data/quality/upstream_meta.json`）→ 验证与测速（`--time-budget 3600`，上一轮未存活的条目先经 2 秒 TCP 预连通筛除朽尸）→ 有变更则自动提交并推送回仓库
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：五个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`、`cn_reachable`；`data/output/badge.json` 驱动状态徽章——正常时按数据年龄显示 fresh/stale（超过 3 小时变红），看门狗触发告警时直接替换为告警名（如 `stale data`、`valid-lists stale`）并标红，停机原因对访客可见
 
@@ -141,7 +141,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，6 个全免费 CN 验证源分层判定：itdog 批量 http + batch_tcping 238 节点降级、check-host.cc 呼和浩特单节点（匿名 250/h 配额，两段式只投决策键）、xxapi.cn 北京单节点、ping.pe 多运营商复核、tcpping.cn（token））→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
 - **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流提交经 `.github/scripts/commit_data.sh`——只提交本 job
   实际写入的文件（mtime 标记），push 冲突时其余文件对齐 origin，

@@ -60,6 +60,16 @@ RESPROXY_ASN_URL = "https://iplogs.com/data/residential-proxy-backbones.csv"
 TOR_EXITS_URL = "https://check.torproject.org/exit-addresses"
 SPAMHAUS_DROP_URL = "https://www.spamhaus.org/drop/drop.txt"
 SPAMHAUS_EDROP_URL = "https://www.spamhaus.org/drop/edrop.txt"
+FREEIPAPI_URL = "https://freeipapi.com/api/json/{ip}"
+FREEIPAPI_TIMEOUT = 10
+SCAMALYTICS_URL = "https://scamalytics.com/ip/{ip}"
+SCAMALYTICS_TIMEOUT = 12
+IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
+IPLOCATION_TIMEOUT = 10
+CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
+ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
+SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
+SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
 ABUSER_SCORE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 ABUSER_SCORE_THRESHOLD = 0.1
@@ -137,6 +147,8 @@ STATIC_LIST_SCORES = {
     "resproxy_asn": 75, # is_proxy（住宅代理骨干）
     "tor_exit": 45,     # is_tor（Tor 出口节点实时列表）
     "spamhaus": 55,     # is_listed（Spamhaus DROP/EDROP 端用户高风险网段）
+    "cins": 50,         # is_listed（CINS Army 活跃滥用/拒绝服务 IP）
+    "et_compromised": 45,  # is_abuse（EmergingThreats 被入侵主机回连）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -160,6 +172,11 @@ REPUTATION_WEIGHTS = {
     "ipwhois": 6,
     "tor_exit": 5,
     "spamhaus": 4,
+    "freeipapi": 6,
+    "scamalytics": 8,
+    "iplocation": 3,
+    "cins": 5,
+    "et_compromised": 4,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -168,6 +185,8 @@ DEFAULT_REP_SOURCES = (
     "abuse_list", "vpn_asn", "resproxy_asn",
     "proxycheck", "ip2location", "ipwhois",
     "tor_exit", "spamhaus",
+    "freeipapi", "scamalytics", "iplocation",
+    "cins", "et_compromised",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -181,6 +200,9 @@ SOURCE_PACING = {
     "proxycheck": (8, 0.2),
     "ip2location": (6, 0.2),
     "ipwhois": (6, 0.2),
+    "freeipapi": (8, 0.15),
+    "scamalytics": (4, 0.5),
+    "iplocation": (8, 0.12),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -510,6 +532,22 @@ async def fetch_ipsum_list() -> set[str]:
     return await fetch_text_list(IPSUM_URL)
 
 
+async def fetch_cins_badguys() -> IpSet:
+    """CINS Army ``ci-badguys.txt`` 活跃滥用/拒绝服务 IP（单行空白分隔）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(CINS_BADGUYS_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
+async def fetch_et_compromised() -> IpSet:
+    """EmergingThreats ``compromised-ips.txt`` 被入侵主机（单行空白分隔）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(ET_COMPROMISED_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -583,6 +621,70 @@ def ipwhois_lookup_sync(ip: str) -> dict | None:
     if asn:
         out["asn"] = asn
     if not any(out["security"].values()) and not conn.get("type") and not asn:
+        return None
+    return out
+
+
+def freeipapi_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
+    req = urllib.request.Request(
+        FREEIPAPI_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=FREEIPAPI_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict) or not data.get("ipAddress"):
+        return None
+    out = {"is_proxy": bool(data.get("isProxy"))}
+    asn = norm_asn(data.get("asn"))
+    if asn:
+        out["asn"] = asn
+    org = data.get("asnOrganization")
+    if isinstance(org, str) and org:
+        out["org"] = org
+    if not out["is_proxy"] and not asn:
+        return None
+    return out
+
+
+def scamalytics_lookup_sync(ip: str) -> dict | None:
+    """Scrape the free ``scamalytics.com/ip/{ip}`` risk page: ``Fraud Score``
+    (0-100) plus the ``is_blacklisted_external`` flag from the embedded API
+    preview JSON."""
+    req = urllib.request.Request(
+        SCAMALYTICS_URL.format(ip=ip),
+        headers={"User-Agent": UA},
+    )
+    with urllib.request.urlopen(req, timeout=SCAMALYTICS_TIMEOUT) as resp:
+        html = resp.read().decode("utf-8", "replace")
+    m = SCAMALYTICS_SCORE_RE.search(html)
+    if not m:
+        return None
+    out = {"score": int(m.group(1))}
+    bl = SCAMALYTICS_BLACKLIST_RE.search(html)
+    if bl:
+        out["is_blacklisted"] = bl.group(1) == "true"
+    return out
+
+
+def iplocation_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``api.iplocation.net/?ip={ip}``: isp + occasional ``is_proxy``."""
+    req = urllib.request.Request(
+        IPLOCATION_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=IPLOCATION_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict) or not data.get("ip"):
+        return None
+    out: dict = {}
+    proxy = data.get("is_proxy")
+    if isinstance(proxy, str) and proxy.lower() == "yes":
+        out["is_proxy"] = True
+    isp = data.get("isp")
+    if isinstance(isp, str) and isp:
+        out["isp"] = isp
+    if not out.get("is_proxy") and not out.get("isp"):
         return None
     return out
 
@@ -666,6 +768,8 @@ async def fetch_static_lists(sources: list) -> dict:
         "resproxy_asn": set(),
         "tor_exit": IpSet(),
         "spamhaus": IpSet(),
+        "cins": IpSet(),
+        "et_compromised": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -674,6 +778,10 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("tor_exit", fetch_tor_exits()))
     if "spamhaus" in sources:
         mapping.append(("spamhaus", fetch_spamhaus_drop()))
+    if "cins" in sources:
+        mapping.append(("cins", fetch_cins_badguys()))
+    if "et_compromised" in sources:
+        mapping.append(("et_compromised", fetch_et_compromised()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -867,6 +975,16 @@ def source_score(name: str, signal) -> int | None:
         if not penalty and not signal.get("asn"):
             return None
         return max(0, min(100, 100 - penalty))
+    if name == "freeipapi":
+        penalty = 30 if signal.get("is_proxy") else 0
+        return max(0, min(100, 100 - penalty))
+    if name == "scamalytics":
+        if not isinstance(signal.get("score"), (int, float)):
+            return None
+        return max(0, min(100, 100 - round(signal["score"])))
+    if name == "iplocation":
+        penalty = 30 if signal.get("is_proxy") else 0
+        return max(0, min(100, 100 - penalty))
     if name in STATIC_LIST_SCORES:
         flag = {
             "abuse_list": "is_abuse",
@@ -876,6 +994,8 @@ def source_score(name: str, signal) -> int | None:
             "resproxy_asn": "is_proxy",
             "tor_exit": "is_tor",
             "spamhaus": "is_listed",
+            "cins": "is_listed",
+            "et_compromised": "is_abuse",
         }[name]
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
@@ -1074,6 +1194,18 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"tor": True} if signal.get("is_tor") else {}
     if name == "spamhaus":
         return {"listed": True} if signal.get("is_listed") else {}
+    if name == "freeipapi":
+        return {"proxy": signal.get("is_proxy")} if isinstance(
+            signal.get("is_proxy"), bool
+        ) else {}
+    if name == "scamalytics":
+        return {"listed": True} if signal.get("is_blacklisted") else {}
+    if name == "iplocation":
+        return {"proxy": True} if signal.get("is_proxy") else {}
+    if name == "cins":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "et_compromised":
+        return {"abuse": True} if signal.get("is_abuse") else {}
     return {}
 
 
@@ -1448,6 +1580,15 @@ async def lookup_all_risk(
     if "ipwhois" in sources:
         w, d = pacing.get("ipwhois", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipwhois", ipwhois_lookup_sync, workers=w, delay=d))
+    if "freeipapi" in sources:
+        w, d = pacing.get("freeipapi", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("freeipapi", freeipapi_lookup_sync, workers=w, delay=d))
+    if "scamalytics" in sources:
+        w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("scamalytics", scamalytics_lookup_sync, workers=w, delay=d))
+    if "iplocation" in sources:
+        w, d = pacing.get("iplocation", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("iplocation", iplocation_lookup_sync, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:
@@ -1463,6 +1604,10 @@ async def lookup_all_risk(
             put("tor_exit", ip, {"is_tor": True})
         if ip in static["spamhaus"]:
             put("spamhaus", ip, {"is_listed": True})
+        if ip in static["cins"]:
+            put("cins", ip, {"is_listed": True})
+        if ip in static["et_compromised"]:
+            put("et_compromised", ip, {"is_abuse": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue
