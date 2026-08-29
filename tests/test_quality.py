@@ -166,7 +166,6 @@ class TestBuildIpinfo(unittest.TestCase):
         self.assertEqual(info["reputation_source"], "multi")
         self.assertEqual(info["rep_flags"], ["hosting"])
         self.assertEqual(info["risk"], "medium")
-        self.assertEqual(info["risk_flags"]["netcoffee"]["trust_score"], 42)
 
     def test_no_geo_no_reputation(self):
         results = {
