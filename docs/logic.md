@@ -125,6 +125,9 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 | getipintel | 5 | `100 - probability×100`（opt-in，需邮箱） |
 | proxycheck | 12 | `risk` score 直用或标志罚分（取较大者）：proxy -45 / vpn -45 / tor -45 / hosting -30 / scraper -20 |
 | ip2location | 5 | `is_proxy` 标志 -30 |
+| freeipapi | 6 | `isProxy` 标志 -30（附 ASN/org，全免费免 key） |
+| scamalytics | 8 | 免费风险页 `Fraud Score`（0-100）直扣；`is_blacklisted_external` 投 listed 票 |
+| iplocation | 3 | `is_proxy` 标志 -30（附 isp，全免费免 key） |
 
 #### 静态列表源（每 run 重拉）
 
@@ -135,6 +138,8 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 | dc_asn | 5 | 85（机房/数据中心 ASN） |
 | vpn_asn | 3 | 70（VPN 服务商 ASN） |
 | resproxy_asn | 2 | 75（住宅代理骨干 ASN） |
+| cins | 5 | 50（CINS 活跃滥用/拒绝服务 IP） |
+| et_compromised | 4 | 45（EmergingThreats 被入侵主机回连） |
 
 未命中 → 该项不计入合分（不误判满分）。
 

@@ -1782,5 +1782,159 @@ class TestExternalCheck(unittest.TestCase):
         self.assertEqual(meta["ext_check_ok"], 1)
 
 
+class TestNewReputationSources(unittest.TestCase):
+    """+5 free reputation sources: freeipapi / scamalytics / iplocation /
+    CINS ci-badguys / EmergingThreats compromised."""
+
+    def test_source_score_freeipapi(self):
+        self.assertEqual(qr.source_score("freeipapi", {"is_proxy": True}), 70)
+        self.assertEqual(qr.source_score("freeipapi", {"is_proxy": False}), 100)
+
+    def test_source_score_scamalytics(self):
+        self.assertEqual(qr.source_score("scamalytics", {"score": 5}), 95)
+        self.assertEqual(qr.source_score("scamalytics", {"score": 80}), 20)
+        self.assertIsNone(qr.source_score("scamalytics", {}))
+
+    def test_source_score_iplocation(self):
+        self.assertEqual(qr.source_score("iplocation", {"is_proxy": True}), 70)
+        self.assertEqual(qr.source_score("iplocation", {"isp": "X"}), 100)
+
+    def test_source_score_new_static_lists(self):
+        self.assertEqual(qr.source_score("cins", {"is_listed": True}), 50)
+        self.assertIsNone(qr.source_score("cins", {}))
+        self.assertEqual(qr.source_score("et_compromised", {"is_abuse": True}), 45)
+        self.assertIsNone(qr.source_score("et_compromised", {}))
+
+    def test_flag_opinions(self):
+        self.assertEqual(
+            qr._flag_opinions("freeipapi", {"is_proxy": True}), {"proxy": True})
+        self.assertEqual(
+            qr._flag_opinions("freeipapi", {"is_proxy": False}), {"proxy": False})
+        self.assertEqual(qr._flag_opinions("freeipapi", {}), {})
+        self.assertEqual(
+            qr._flag_opinions("scamalytics", {"is_blacklisted": True}),
+            {"listed": True})
+        self.assertEqual(qr._flag_opinions("scamalytics", {}), {})
+        self.assertEqual(
+            qr._flag_opinions("iplocation", {"is_proxy": True}), {"proxy": True})
+        self.assertEqual(
+            qr._flag_opinions("cins", {"is_listed": True}), {"listed": True})
+        self.assertEqual(
+            qr._flag_opinions("et_compromised", {"is_abuse": True}),
+            {"abuse": True})
+
+    def test_vote_reputation_consensus_proxy(self):
+        score, _r, flagged, _n = qr.vote_reputation({
+            "freeipapi": {"is_proxy": True},
+            "iplocation": {"is_proxy": True},
+        }, qr.REPUTATION_WEIGHTS)
+        self.assertEqual(score, 72)
+        self.assertIn("proxy", flagged)
+
+    def test_vote_reputation_numeric_scamalytics(self):
+        score, _r, flagged, _n = qr.vote_reputation(
+            {"scamalytics": {"score": 30}}, qr.REPUTATION_WEIGHTS)
+        self.assertEqual(score, 70)
+        self.assertNotIn("listed", flagged)
+
+    def test_defaults_include_new_sources(self):
+        for name in ("freeipapi", "scamalytics", "iplocation", "cins",
+                     "et_compromised"):
+            self.assertIn(name, qr.DEFAULT_REP_SOURCES)
+            self.assertIn(name, qr.REPUTATION_WEIGHTS)
+
+    def test_freeipapi_lookup_parsing(self):
+        body = json.dumps({
+            "ipAddress": "1.2.3.4", "isProxy": False, "asn": 15169,
+            "asnOrganization": "Google LLC",
+        }).encode()
+        with unittest.mock.patch("urllib.request.urlopen") as m:
+            fake = unittest.mock.MagicMock()
+            fake.read.return_value = body
+            m.return_value.__enter__.return_value = fake
+            out = qr.freeipapi_lookup_sync("1.2.3.4")
+        self.assertEqual(out, {
+            "is_proxy": False, "asn": "AS15169", "org": "Google LLC"})
+
+    def test_freeipapi_lookup_no_signal(self):
+        body = json.dumps({"ipAddress": "1.2.3.4", "isProxy": False}).encode()
+        with unittest.mock.patch("urllib.request.urlopen") as m:
+            fake = unittest.mock.MagicMock()
+            fake.read.return_value = body
+            m.return_value.__enter__.return_value = fake
+            self.assertIsNone(qr.freeipapi_lookup_sync("1.2.3.4"))
+
+    def test_scamalytics_lookup_parsing(self):
+        html = (
+            '<div class="score_container" style="width: 10px;">'
+            "Fraud Score: 12</div>"
+            '<pre>\n"ip":"1.1.1.1",\n"score":"12",\n"risk":"medium",\n'
+            '"is_blacklisted_external": false,\n...\n</pre>'
+        )
+        with unittest.mock.patch("urllib.request.urlopen") as m:
+            fake = unittest.mock.MagicMock()
+            fake.read.return_value = html.encode()
+            m.return_value.__enter__.return_value = fake
+            out = qr.scamalytics_lookup_sync("1.1.1.1")
+        self.assertEqual(out, {"score": 12, "is_blacklisted": False})
+
+    def test_scamalytics_lookup_missing_score(self):
+        with unittest.mock.patch("urllib.request.urlopen") as m:
+            fake = unittest.mock.MagicMock()
+            fake.read.return_value = b"<html>no score</html>"
+            m.return_value.__enter__.return_value = fake
+            self.assertIsNone(qr.scamalytics_lookup_sync("1.1.1.1"))
+
+    def test_iplocation_lookup_parsing(self):
+        body = json.dumps({
+            "ip": "1.2.3.4", "isp": "X Corp", "is_proxy": "Yes",
+        }).encode()
+        with unittest.mock.patch("urllib.request.urlopen") as m:
+            fake = unittest.mock.MagicMock()
+            fake.read.return_value = body
+            m.return_value.__enter__.return_value = fake
+            out = qr.iplocation_lookup_sync("1.2.3.4")
+        self.assertEqual(out, {"is_proxy": True, "isp": "X Corp"})
+
+    def test_iplocation_lookup_clean(self):
+        body = json.dumps({"ip": "1.2.3.4", "isp": "HomeNet",
+                           "is_proxy": "No"}).encode()
+        with unittest.mock.patch("urllib.request.urlopen") as m:
+            fake = unittest.mock.MagicMock()
+            fake.read.return_value = body
+            m.return_value.__enter__.return_value = fake
+            out = qr.iplocation_lookup_sync("1.2.3.4")
+        self.assertEqual(out, {"isp": "HomeNet"})
+
+    def test_fetch_cins_splits_whitespace(self):
+        lines = ["1.2.3.4 5.6.7.8", "  9.9.9.9  "]
+
+        async def _fake(url):
+            return lines
+
+        with unittest.mock.patch.object(qr, "fetch_text_list",
+                                        side_effect=_fake):
+            ipset = asyncio.get_event_loop().run_until_complete(
+                qr.fetch_cins_badguys())
+        for ip in ("1.2.3.4", "5.6.7.8", "9.9.9.9"):
+            self.assertIn(ip, ipset)
+
+    def test_fetch_static_lists_includes_new(self):
+        async def _c():
+            return qr.IpSet(["1.1.1.1"])
+
+        async def _e():
+            return qr.IpSet(["2.2.2.2"])
+
+        with unittest.mock.patch.object(qr, "fetch_cins_badguys",
+                                        side_effect=_c), \
+             unittest.mock.patch.object(qr, "fetch_et_compromised",
+                                        side_effect=_e):
+            out = asyncio.get_event_loop().run_until_complete(
+                qr.fetch_static_lists(["cins", "et_compromised"]))
+        self.assertIn("1.1.1.1", out["cins"])
+        self.assertIn("2.2.2.2", out["et_compromised"])
+
+
 if __name__ == "__main__":
     unittest.main()
