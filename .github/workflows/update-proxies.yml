@@ -4,9 +4,9 @@ on:
   schedule:
     - cron: "0 */2 * * *"
   workflow_dispatch:
-  push:
-    paths:
-      - "scripts/*.py"
+  # push 触发已移除：与 concurrency(cancel-in-progress) 组合时，密集提交会
+  # 连环取消在跑的重探测任务，造成长时间无成功渲染（曾 5h+ 断档）。
+  # 改为 schedule + 手动 dispatch；代码变更需尽快生效时手动触发一次。
 
 permissions:
   contents: write
