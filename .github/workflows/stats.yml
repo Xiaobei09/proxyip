@@ -2,6 +2,11 @@ name: Stats and charts
 
 on:
   workflow_dispatch:
+  # 独立心跳：即使所有数据产出链（update/quality/china/exit/good）连续失败，
+  # stats 仍每 2 小时运行一次，health_alert 得以对"全线死亡"发出 stale/池塌方
+  # 告警（相同告警已被 6h 冷却抑制，不会刷屏）。错开到 update 的 :00/:02h。
+  schedule:
+    - cron: "40 */2 * * *"
   # 任一数据产出链成功后统一重建图表与 stats.json——单一写入者，
   # 此前 generate_stats 内嵌在 quality/china 两条链里重复执行。
   workflow_run:
