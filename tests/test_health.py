@@ -164,6 +164,24 @@ class TestCheckArtifactStale(unittest.TestCase):
                 check_artifact_stale("exit-family", self._file(td, _ts(96), n=9), 12, 100)
             )
 
+    def test_summary_artifact_age_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "quality_meta.json"
+            p.write_text(json.dumps({"ts": _ts(20), "total": 120528}))
+            a = check_artifact_stale(
+                "quality-meta", p, 12, require_proxies=False
+            )
+            self.assertIsNotNone(a)
+            self.assertIn("quality-meta", a)
+            p.write_text(json.dumps({"ts": _ts(1), "total": 120528}))
+            self.assertIsNone(
+                check_artifact_stale("quality-meta", p, 12, require_proxies=False)
+            )
+            p.write_text(json.dumps({"total": 120528}))  # 无 ts 跳过
+            self.assertIsNone(
+                check_artifact_stale("quality-meta", p, 12, require_proxies=False)
+            )
+
 
 class TestCheckCountries(unittest.TestCase):
     def _meta(self, td, per_country):
