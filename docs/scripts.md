@@ -331,7 +331,7 @@ python scripts/analyze_sources.py --data-dir /path/to/data
 | `check_pool` | 池 `alive` 相对近 8 轮中位数下降 ≥30%（样本足够时评估） |
 | `check_cn` | 上次 CN 可达数 ≥20 时，本轮相对上一轮下降 ≥50% |
 | `check_cn_stale` | `china.json` 超过 `CN_STALE_HOURS`(12h) 未刷新且曾有 ≥20 可达样本（CN 专链静默停机时总体数据仍新鲜，仅此检查暴露） |
-| `check_artifact_stale` | 任一产物 JSON 超龄（泛化时效检查）；keyed 产物当前接入 `exit_family.json`（12h / ≥100 条目），summary 产物接入 `quality_meta.json`（12h，`require_proxies=False` 仅按年龄）——分别暴露 exit-family / 质量链静默停机 |
+| `check_artifact_stale` | 任一产物 JSON 超龄（泛化时效检查）；`require_proxies=True` 用于 keyed 产物（`exit_family.json`：12h / ≥100 条目），`require_proxies=False` 用于 summary 产物（`quality_meta.json`、`good_meta.json`：各 12h）——分别暴露 exit-family / 质量链 / build-good 链静默停机 |
 | `check_countries` | 单国上一轮 alive ≥60 时，本轮相对下降 ≥60%（区域性断网/上游国家文件丢失） |
 | `check_sources` | 某上游源 unique 覆盖相对近 8 轮中位数下降 ≥55%（样本 ≥8 轮且规模 ≥500） |
 | `check_stale` | `data/valid/history.jsonl` 最新轮距今超过 8 小时 |
