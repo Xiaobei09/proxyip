@@ -306,3 +306,7 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 ### `data/quality/source_quality.json`
 
 各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`china_reachable_rate`（大陆可达率）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。
+
+### `data/quality/deep_speed.json`
+
+深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）与 `proxies`（另含 `meta` 参数快照）；`proxies[key]` 为 `{<target>: {"agg_mbps": <总吞吐>, "tls_ms": …}}`。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。

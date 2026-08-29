@@ -1692,9 +1692,20 @@ class TestFreshDeepSpeed(unittest.TestCase):
         self._write({"generated_at": datetime.now(timezone.utc).isoformat()})
         self.assertIsNotNone(qc.read_fresh_deep_speed())
 
+    def test_real_deep_speed_uses_generated_field(self):
+        self._write({"generated": datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"), "proxies": {}})
+        self.assertIsNotNone(qc.read_fresh_deep_speed())
+
     def test_stale_iso_ts_returns_none(self):
         old = (datetime.now(timezone.utc) - timedelta(days=12)).isoformat()
         self._write({"generated_at": old, "proxies": {"k": {"a": 1}}})
+        self.assertIsNone(qc.read_fresh_deep_speed())
+
+    def test_stale_generated_field_returns_none(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=12)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        self._write({"generated": old, "proxies": {"k": {"a": 1}}})
         self.assertIsNone(qc.read_fresh_deep_speed())
 
     def test_missing_ts_returns_none(self):
