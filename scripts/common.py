@@ -42,6 +42,8 @@ ALL_FILE = DOWNLOAD_DIR / "all.txt"
 ALL_LTD_FILE = DOWNLOAD_DIR / "all_ltd.txt"
 UPSTREAM_META_FILE = QUALITY_DIR / "upstream_meta.json"
 SOURCE_STATS_FILE = QUALITY_DIR / "source_stats.json"
+SOURCE_HISTORY_FILE = QUALITY_DIR / "source_history.json"
+SOURCE_HISTORY_MAX = 14   # 保留最近几轮的上游源覆盖快照
 IP_SOURCES_FILE = QUALITY_DIR / "ip_sources.json"
 HISTORY_FILE = QUALITY_DIR / "history.jsonl"
 

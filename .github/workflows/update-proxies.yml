@@ -59,6 +59,5 @@ jobs:
           ls data/diff/*.json 2>/dev/null | wc -l
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

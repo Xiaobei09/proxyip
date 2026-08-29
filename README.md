@@ -29,7 +29,7 @@
 - **自动抓取整理**：下载上游 `all.json`（失败自动回退 zip）→ 按端口/国家/常用集合/全量多维度汇总，去重合并；并把上游真实出口 IP、ASN、地理等元数据落盘为 `data/quality/upstream_meta.json` 供下游消费
 - **可用性验证**：TLS 握手检测，asyncio 高并发测活，并在判活连接内做**稳态下载测速**（丢弃慢启动爬坡、仅对稳态窗口计时，MB/s）；非限量输出**按延迟升序**，**`_ltd` 限量清单按实测速度取每国最快**
 - **出口 IP 质量检测**（独立 CI）：对全量存活池做出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`；**滚动可用率跟踪**（`uptime.py`：按轮记录存活日期，7d/30d 存活率写入 `data/quality/uptime.json` 并追加 `-U<NN>` 备注）；
-  **结构化导出** `data/valid/all.json` 与**出口多样性视图** `data/valid/all_diverse.txt`（每实测出口/入口网段仅留综合分最高一条）；**池健康看门狗**（`health_alert.py`：池量暴跌/大陆可达崩塌/数据过期 → webhook 告警）
+  **结构化导出** `data/valid/all.json` 与**出口多样性视图** `data/valid/all_diverse.txt`（每实测出口/入口网段仅留综合分最高一条）；**池健康看门狗**（`health_alert.py`：池量暴跌/大陆可达崩塌/上游源覆盖骤降/数据过期 → webhook 告警）
   （流媒体解锁检查已移除；历史行上的 NF/D+/YT 等标记仍被解析器容忍但不再产生新观测）
 - **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性 + itdog 应用层确认），保守判定（≥2 方法确认才标 reachable）+ 证据分级（`level`：http/tcp）+ 跨轮稳定计数（`streak`），itdog.cn 批量（18 节点跨省采样 + batch_tcping 238 节点降级补测）+ check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细、`data/valid/all_cn.txt` 全量清单及 `all_cn_http.txt`/`all_cn_stable.txt` 可靠性子集，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注；同时对照上游 `data/quality/upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`data/quality/exit_family.json` 记录 `upstream_match`）

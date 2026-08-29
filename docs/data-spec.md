@@ -291,6 +291,10 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 `ts`、`total`、`checked`、`alive`、`dead`。与上一条完全相同则跳过，最多 1000 条。
 
+### `data/quality/source_history.json`
+
+每次 download 运行向该文件**追加**一轮各上游源的 `unique` 数快照：`{"runs": [{"ts": <ISO-8601>, "counts": {<源标签>: 去重数}}]}`，保留最近 14 轮（`SOURCE_HISTORY_MAX`），内容不变不重写。供 `health_alert.check_sources` 检测上游源覆盖率骤降（相对近 8 轮中位数下降 > 55% 且历史规模 ≥ 500 触发告警）。
+
 ### `data/quality/upstream_meta.json`
 
 上游 `all.json` 导出的逐 IP 元数据（keyed by 代理 IP），由 `download_proxies.py` 生成，供下游（如 exit-family 交叉验证）消费。每个值含 `clientIp`（该代理的真实出口 IP，Cloudflare 视角）、`family`（由 `clientIp` 派生，ipv4/ipv6）、`asn`、`asOrganization`、`country`、`city`、`region`、`continent`、`colo_iata`。使用旧版 zip 回退源时本文件不更新。
