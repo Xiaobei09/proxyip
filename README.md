@@ -234,6 +234,7 @@ data/quality/upstream_meta.json          上游 all.json 逐 IP 元数据（真�
 data/quality/source_stats.json           下载源统计（各源 IP 数与重叠）
 data/quality/source_history.json         各源逐轮 unique 覆盖快照（告警基线，最多 14 轮）
 data/quality/source_quality.json         源质量分析（来源依赖关系与来源质量打分）
+data/output/source_quality_report.txt    源质量人类可读汇总表
 data/quality/entry_audit.json            入口国标签三方交叉审计结果
 data/quality/history.jsonl               更新历史记录（每行一条，最多 1000 条）
 
