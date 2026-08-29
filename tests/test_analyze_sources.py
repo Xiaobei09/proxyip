@@ -1,6 +1,6 @@
 """Tests for analyze_sources.py pure functions."""
 
-import json
+
 import sys
 import unittest
 from pathlib import Path

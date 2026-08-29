@@ -28,6 +28,40 @@ class TestParseEntries(unittest.TestCase):
         self.assertEqual(vp.parse_entries(["1.2.3.4:443#HK#extra"]), [])
 
 
+class TestQuickPrefilter(unittest.TestCase):
+    def setUp(self):
+        self.entries = [
+            ("1.2.3.4", "443", "US"),      # 上一轮未存活 → 预连通候选
+            ("5.6.7.8", "8080", "JP"),     # 上一轮存活 → 全检
+            ("9.9.9.9", "8443", "DE"),     # 上一轮未存活 → 预连通候选
+            ("2.2.2.2", "443", "FR"),      # 上一轮存活 → 全检
+        ]
+
+    def test_candidate_classification(self):
+        prev = {"5.6.7.8:8080", "2.2.2.2:443"}
+        cands, normal = vp.classify_quick_candidates(self.entries, prev)
+        self.assertEqual(cands, [("1.2.3.4", "443", "US"), ("9.9.9.9", "8443", "DE")])
+        self.assertEqual(normal, [("5.6.7.8", "8080", "JP"), ("2.2.2.2", "443", "FR")])
+
+    def test_empty_prev_all_candidates(self):
+        cands, normal = vp.classify_quick_candidates(self.entries, set())
+        self.assertEqual(len(cands), len(self.entries))
+        self.assertEqual(normal, [])
+
+    def test_all_prev_no_candidates(self):
+        prev = {f"{e[0]}:{e[1]}" for e in self.entries}
+        cands, normal = vp.classify_quick_candidates(self.entries, prev)
+        self.assertEqual(cands, [])
+        self.assertEqual(len(normal), len(self.entries))
+
+    def test_ipv6_entry_encodes_port(self):
+        entries = [("2001:db8::1", "8443", "US")]
+        cands, _ = vp.classify_quick_candidates(entries, set())
+        self.assertEqual(cands, entries)
+        cands, _ = vp.classify_quick_candidates(entries, {"2001:db8::1:8443"})
+        self.assertEqual(cands, [])
+
+
 class TestBucketLatency(unittest.TestCase):
     def test_histogram_edges(self):
         dist = vp.bucket_latency([50, 99.9, 100, 199.9, 200, 299.9, 300, 499.9, 500, 999.9, 1000, 5000])
