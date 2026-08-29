@@ -571,6 +571,40 @@ class TestWriteSourceAttribution(unittest.TestCase):
         self.assertEqual(data["sources"]["1.1.1.1:443#US"], "proxy")
 
 
+class TestProxyMirrorSources(unittest.TestCase):
+    def test_five_mirror_sources(self):
+        self.assertEqual(len(dp.PROXY_MIRROR_SOURCES), 5)
+
+    def test_mirror_sources_parse_ipport_lines(self):
+        for url in dp.PROXY_MIRROR_SOURCES:
+            by_port = dp.extract_plain(b"1.2.3.4:8080\n5.6.7.8:443\n")
+            self.assertEqual(by_port["8080"]["ALL"], ["1.2.3.4"])
+            self.assertEqual(by_port["443"]["ALL"], ["5.6.7.8"])
+
+    def test_source_label_mapping(self):
+        self.assertEqual(dp.source_label(dp.PROXY_MIRROR_SOURCES[3]),
+                         "proxyscrape")
+        self.assertEqual(
+            dp.source_label(
+                "https://raw.githubusercontent.com/monosans/proxy-list/"
+                "main/proxies/http.txt"),
+            "monosans")
+        self.assertEqual(dp.source_label("https://x/a.txt"), "a")
+
+    def test_load_extras_with_mirror_url(self):
+        url = dp.PROXY_MIRROR_SOURCES[3]
+
+        def fake_fetch(u, timeout):
+            self.assertEqual(u, url)
+            return b"9.9.9.9:3128\n"
+
+        with unittest.mock.patch.object(dp, "fetch", side_effect=fake_fetch):
+            by_port, extra_all, source_ip_sets = dp.load_extras(
+                [("plain", url)], timeout=5)
+        self.assertEqual(by_port["3128"]["ALL"], ["9.9.9.9"])
+        self.assertIn("9.9.9.9", source_ip_sets[url])
+
+
 if __name__ == "__main__":
     unittest.main()
 
