@@ -324,7 +324,7 @@ python scripts/analyze_sources.py --data-dir /path/to/data
 
 ### `scripts/health_alert.py`
 
-池健康看门狗：读取仓库内的数据快照，检查多项异常条件，有告警时发往 `ALERT_WEBHOOK_URL`（未配置时仅打印并正常退出）。每一项都带各自的最小样本/阈值门槛，避免小样本抖动误报；诊断状态持久化于 `data/quality/alert_state.json`（上次 CN 可达数、各国家池快照）；相同告警组合在 6 小时冷却窗口内不重复投递（`last_alert_at` / `last_alert_hash`），防止持续故障期间刷屏 webhook。
+池健康看门狗：读取仓库内的数据快照，检查多项异常条件，有告警时发往 `ALERT_WEBHOOK_URL`（未配置时仅打印并正常退出）。每一项都带各自的最小样本/阈值门槛，避免小样本抖动误报；诊断状态持久化于 `data/quality/alert_state.json`（上次 CN 可达数、各国家池快照）；相同告警组合在 6 小时冷却窗口内不重复投递（`last_alert_at` / `last_alert_hash`），防止持续故障期间刷屏 webhook。有告警时还会改写 `data/output/badge.json` 将 README 状态徽章标红为对应告警名（在 stats 同 job 内 render 之后顺序执行，无竞态）；无告警不改动徽章。
 
 | 检查 | 触发条件 |
 |---|---|

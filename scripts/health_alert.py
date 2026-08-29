@@ -383,9 +383,32 @@ def main(argv: list[str] | None = None) -> int:
             notify(alerts)
             new_state["last_alert_hash"] = _alert_fingerprint(alerts)
             new_state["last_alert_at"] = time.time()
+    update_badge(root, alerts)
     write_state(new_state, root / "data" / "quality" / "alert_state.json")
     print(f"health: {'ALERT ' + str(len(alerts)) if alerts else 'ok'}")
     return 1 if args.strict and alerts else 0
+
+
+def update_badge(root: Path, alerts: list[str]) -> None:
+    """有告警时把 ``data/output/badge.json`` 标红（同 job 内 stats 已先渲染）。
+
+    README 的 Status 徽章由此直接显示停机原因；无告警时不改动
+    （保持 generate_stats 的 fresh/stale 判定）。
+    """
+    if not alerts:
+        return
+    msg = alerts[0].split(":")[0].strip()
+    write_data_json(
+        root / "data" / "output" / "badge.json",
+        {"schemaVersion": 1, "label": "status", "message": msg, "color": "red"},
+    )
+
+
+def write_data_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
 
 
 def write_state(state: dict, path: Path | None = None) -> None:
