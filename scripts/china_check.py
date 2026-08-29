@@ -905,7 +905,18 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 ).items():
                     entries.setdefault(key, {})["itdog_tcping"] = res
 
-    for item in sample[: args.pingpe_limit]:
+    # ping.pe 多节点复核（串行、贵）只投「当前尚未被 itdog/单节点源确认可达」
+    # 的键：已由 itdog 多点达标判 reachable 的不再浪费名额，把有限槽位让给
+    # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
+    # 优先给它派活能最大化「翻正」概率。顺序仍保持 sample 优先级排序。
+    pingpe_candidates = [
+        item for item in sample
+        if merge_verdict(
+            entries.get(item[1], {}),
+            is_cf_heuristic(item[0]),
+        )["verdict"] != "reachable"
+    ]
+    for item in pingpe_candidates[: args.pingpe_limit]:
         _, key, ip, port, _ = item
         pingpe = pingpe_check(ip, port, args.timeout)
         entries[key]["pingpe"] = pingpe

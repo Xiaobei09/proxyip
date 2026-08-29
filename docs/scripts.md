@@ -180,7 +180,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 - **L1 启发式（零网络）**：行备注已带 `-CF`（Cloudflare 边缘 tls 代理）记录 heuristic 源，但不自动判 reachable——CF 启发式仅作为 basis 标注，需其他源确认
 - **L2 itdog.cn 批量实测（主源）**：每任务 5 目标 × 电信/联通/移动各 2 节点（共 6 节点），经 WebSocket 收结果，TCP 连通即判可达
 - **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**保守判定：多节点源（pingpe/itdog）单独确认 → reachable；单节点源 ≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
-- **L3 多节点复核（串行小样本）**：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive）；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
+- **L3 多节点复核（串行小样本）**：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive），只投「当前尚未被 itdog/单节点源判可达」的键，不浪费槽位在已确认键上；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
 
 | 参数 | 说明 | 默认 |
 |---|---|---|

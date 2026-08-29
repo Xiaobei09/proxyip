@@ -928,6 +928,66 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "uncertain")
 
 
+class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
+    """ping.pe 复核（贵、串行）只投当前尚未判 reachable 的键：
+    已由 itdog 多点达标确认的键不再占用复核槽位。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            skip_itdog=False,
+            skip_itdog_tcping=True,
+            pingpe_limit=10,
+            workers=4,
+            timeout=5,
+            api_key="",
+            tcpping_token="",
+        )
+
+    def test_pingpe_skips_already_reachable(self):
+        import unittest.mock as mock
+
+        items = [
+            ("1.1.1.1:80#US", "1.1.1.1:80#US", "1.1.1.1", "80", "US"),
+            ("2.2.2.2:80#US", "2.2.2.2:80#US", "2.2.2.2", "80", "US"),
+        ]
+
+        def fake_xxapi(ip, port, timeout):
+            if ip == "2.2.2.2":
+                return {"status": "fail", "ok": False, "ms": None, "error": ""}
+            return {"status": "ok", "ok": True, "ms": 1.0}
+
+        def fake_check_host(ip, port, limiter, timeout, api_key):
+            if ip == "2.2.2.2":
+                return {"status": "fail", "ok": False, "ms": None, "error": ""}
+            return {"status": "ok", "ok": True, "ms": 1.0}
+
+        def fake_itdog(sample, args, **kwargs):
+            # 1.1.1.1 已由 itdog 多点达标 → 应立即判 reachable
+            return {
+                "1.1.1.1:80#US": {
+                    "status": "ok", "ok": True, "ms": 10.0,
+                    "ratio": 0.9, "nodes": 12, "level": "tcp",
+                },
+            }
+
+        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), \
+             mock.patch.object(cc, "check_host_check", side_effect=fake_check_host), \
+             mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog), \
+             mock.patch.object(cc, "pingpe_check",
+                               return_value={
+                                   "status": "ok", "ok": True, "ms": 20.0,
+                                   "reported": 13, "ok_nodes": 8}) as mpp, \
+             mock.patch.object(cc, "tcpping_check",
+                               return_value={"status": "skipped"}):
+            entries, reachable, _ = cc.run_measurements(items, self._args())
+
+        self.assertEqual(len(mpp.call_args_list), 1)
+        probed = [c.args[0] for c in mpp.call_args_list]
+        self.assertEqual(probed, ["2.2.2.2"])
+        self.assertEqual(set(reachable), {"1.1.1.1:80#US", "2.2.2.2:80#US"})
+
+
 class TestItdogFullPoolTargets(unittest.TestCase):
     """itdog 目标集 = 去重后全量存活池（含 CF 启发式行）。历史上 CF 过滤
     在池子 100% 带 -CF 时把主源锁死成空集，本测试保证不再复发。"""
