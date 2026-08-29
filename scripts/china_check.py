@@ -104,6 +104,8 @@ FALLBACK_SOURCE = DEFAULT_SOURCE
 
 LIMIT_DEFAULT = 250
 PINGPE_LIMIT_DEFAULT = 40
+PINGPE_CONCURRENCY = 4  # ping.pe L3 有界并发（每键端到端 ~20-40s，串行太慢）
+PINGPE_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
 WORKERS_DEFAULT = 8
 TIMEOUT_DEFAULT = 10
 POLL_DEADLINE = 75.0
@@ -836,6 +838,28 @@ def annotate_cn_files(reachable_keys: set) -> None:
 
 # ------------------------------------------------------------ 主流程
 
+def _run_pingpe_slots(
+    candidates: list, entries: dict, timeout: float,
+    tcpping_token: str, concurrency: int,
+) -> None:
+    """L3 ping.pe 多节点复核：串行→有界并发。每键端到端 ~20-40s（AJAX 启动
+    + 轮询），串行 40 键 ≈ 26min；并发受控后同槽位耗时 ~7min，覆盖翻倍而
+    不增加对上游的访问总量。并发数默认 `PINGPE_CONCURRENCY`。"""
+
+    def work(item) -> None:
+        _, key, ip, port, _ = item
+        entries[key]["pingpe"] = pingpe_check(ip, port, timeout)
+        tcpping = tcpping_check(ip, port, tcpping_token, timeout)
+        if tcpping["status"] != "skipped":
+            entries[key]["tcpping"] = tcpping
+        time.sleep(PINGPE_SLOT_GAP)
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(work, item) for item in candidates]
+        for fut in futures:
+            fut.result()
+
+
 def run_measurements(sample, args) -> tuple[dict, set, set]:
     """L2 分两段并发（xxapi 全池免额候选 → check_host 稀缺配额只投决策键）、itdog
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
@@ -891,7 +915,14 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 if entries.get(item[1], {}).get("itdog", {}).get("status")
                 in ("error", "rate_limited")
             ]
-            if pending:
+            # 若主通道连节点列表都没取到（上游被墙/验证码墙的整站性失败），
+            # tcping 同站同墙，兜底只会再空转一轮——直接跳过。
+            node_fetch_ok = any(
+                entries.get(key, {}).get("itdog", {}).get("status")
+                not in ("error", "rate_limited")
+                for _, key, _, _, _ in sample
+            )
+            if pending and node_fetch_ok:
                 print(
                     f"itdog_tcping fallback: {len(pending)} targets",
                     file=sys.stderr,
@@ -916,14 +947,13 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             is_cf_heuristic(item[0]),
         )["verdict"] != "reachable"
     ]
-    for item in pingpe_candidates[: args.pingpe_limit]:
-        _, key, ip, port, _ = item
-        pingpe = pingpe_check(ip, port, args.timeout)
-        entries[key]["pingpe"] = pingpe
-        tcpping = tcpping_check(ip, port, args.tcpping_token, args.timeout)
-        if tcpping["status"] != "skipped":
-            entries[key]["tcpping"] = tcpping
-        time.sleep(2.0)
+    _run_pingpe_slots(
+        pingpe_candidates[: args.pingpe_limit],
+        entries,
+        args.timeout,
+        getattr(args, "tcpping_token", ""),
+        getattr(args, "pingpe_concurrency", PINGPE_CONCURRENCY),
+    )
 
     reachable = set()
     uncertain = set()
@@ -954,7 +984,9 @@ def main(argv=None) -> int:
     parser.add_argument("--limit", type=int, default=LIMIT_DEFAULT,
                         help=f"按信誉降序采样条数（0=全部；默认 {LIMIT_DEFAULT}）")
     parser.add_argument("--pingpe-limit", type=int, default=PINGPE_LIMIT_DEFAULT,
-                        help=f"ping.pe 多节点复核条数（串行小样本；默认 {PINGPE_LIMIT_DEFAULT}）")
+                        help=f"ping.pe 多节点复核条数（有界并发小样本；默认 {PINGPE_LIMIT_DEFAULT}）")
+    parser.add_argument("--pingpe-concurrency", type=int, default=PINGPE_CONCURRENCY,
+                        help=f"ping.pe 并发复核数（默认 {PINGPE_CONCURRENCY}）")
     parser.add_argument("--workers", type=int, default=WORKERS_DEFAULT,
                         help=f"L2 并发上限（默认 {WORKERS_DEFAULT}）")
     parser.add_argument("-t", "--timeout", type=float, default=TIMEOUT_DEFAULT,
