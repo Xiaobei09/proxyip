@@ -865,6 +865,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
     entries: dict = {}
     ch_limiter = RateLimiter(CH_WINDOW_SEC, CH_PER_WINDOW, CH_HOUR_CAP)
+    _t0 = time.monotonic()
 
     def l2_xxapi(item):
         """免额度源（xxapi 北京节点）全池扫描，先建立候选集。"""
@@ -904,6 +905,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         for future in futures:
             key, sources = future.result()
             entries[key].update(sources)
+    print(
+        f"L1 sweep: {time.monotonic() - _t0:.1f}s",
+        file=sys.stderr,
+    )
 
     if not args.skip_itdog:
         for key, res in itdog_batch_run(sample, args).items():
@@ -935,6 +940,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     or ITDOG_TCPING_NODES_PER_ISP,
                 ).items():
                     entries.setdefault(key, {})["itdog_tcping"] = res
+    print(
+        f"itdog phases: {time.monotonic() - _t0:.1f}s",
+        file=sys.stderr,
+    )
 
     # ping.pe 多节点复核（串行、贵）只投「当前尚未被 itdog/单节点源确认可达」
     # 的键：已由 itdog 多点达标判 reachable 的不再浪费名额，把有限槽位让给
@@ -953,6 +962,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         args.timeout,
         getattr(args, "tcpping_token", ""),
         getattr(args, "pingpe_concurrency", PINGPE_CONCURRENCY),
+    )
+    print(
+        f"pingpe review: {time.monotonic() - _t0:.1f}s",
+        file=sys.stderr,
     )
 
     reachable = set()
