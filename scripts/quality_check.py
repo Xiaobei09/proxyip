@@ -172,7 +172,7 @@ def read_fresh_deep_speed(max_age_days: float = DEEP_SPEED_TTL_DAYS) -> dict | N
     deep = read_json(QUALITY_DIR / "deep_speed.json")
     if not deep:
         return None
-    ts = deep.get("ts") or deep.get("generated_at")
+    ts = deep.get("ts") or deep.get("generated_at") or deep.get("generated")
     if not ts:
         return None
     try:
