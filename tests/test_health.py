@@ -296,6 +296,35 @@ class TestAlertRepeatSuppression(unittest.TestCase):
             ha._alert_fingerprint(["a", "b"]),
         )
 
+    def test_valid_lists_stale_alerts_via_main(self):
+        root = _build_stale_root(t := tempfile.mkdtemp())
+        # history 新鲜（避免 stale 干扰），仅 valid/meta.json 超龄 → valid-lists 告警
+        (root / "data" / "valid" / "history.jsonl").write_text(
+            json.dumps({"ts": _ts(1), "alive": 100}) + "\n"
+        )
+        (root / "data" / "valid" / "meta.json").write_text(
+            json.dumps({"ts": _ts(20), "total": 120528, "alive": 101})
+        )
+        notify = unittest.mock.Mock()
+        with unittest.mock.patch.object(ha, "notify", notify):
+            self.assertEqual(self._run(root, notify), 0)
+        self.assertEqual(notify.call_count, 1)
+        args = notify.call_args.args[0]
+        self.assertTrue(any("valid-lists" in a for a in args))
+        # 新鲜 meta → 不再新发告警
+        (root / "data" / "valid" / "meta.json").write_text(
+            json.dumps({"ts": _ts(1), "total": 120528, "alive": 102})
+        )
+        with unittest.mock.patch.object(ha, "notify", notify):
+            self._run(root, notify)
+        self.assertEqual(notify.call_count, 1)
+        persisted = json.loads(
+            (root / "data" / "quality" / "alert_state.json").read_text()
+        )
+        self.assertEqual(
+            persisted.get("last_alert_hash"), persisted.get("last_alert_hash")
+        )
+
 
 class TestCheckSources(unittest.TestCase):
     def _runs(self, series):

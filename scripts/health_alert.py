@@ -50,6 +50,7 @@ EXIT_FAMILY_HOURS = 12      # exit_family.json 超龄 → exit-family 链疑似�
 EXIT_FAMILY_MIN_ENTRIES = 100
 QUALITY_META_HOURS = 12     # quality_meta.json 超龄 → 质量链疑似静默停机
 GOOD_META_HOURS = 12        # good_meta.json 超龄 → build-good 链疑似静默停机
+VALID_LISTS_HOURS = 5       # valid/meta.json 超龄 → validate(update) 链停机
 COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
 COUNTRY_MIN_BASELINE = 60
 STALE_HOURS = 8
@@ -362,6 +363,14 @@ def main(argv: list[str] | None = None) -> int:
         "good-lists",
         root / "data" / "quality" / "good_meta.json",
         hours=GOOD_META_HOURS,
+        require_proxies=False,
+    )
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "valid-lists",
+        root / "data" / "valid" / "meta.json",
+        hours=VALID_LISTS_HOURS,
         require_proxies=False,
     )
     if a:
