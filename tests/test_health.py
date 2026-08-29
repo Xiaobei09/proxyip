@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from health_alert import (  # noqa: E402
     check_cn,
     check_pool,
+    check_sources,
     check_stale,
     load_history,
 )
@@ -90,6 +91,52 @@ class TestCheckCn(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             alert, _ = check_cn({"cn_reachable": 10}, self.make_file(td, 1))
             self.assertIsNone(alert)  # prev ≤ 20 不触发
+
+
+class TestCheckSources(unittest.TestCase):
+    def _runs(self, series):
+        return [
+            {"ts": _ts(i), "counts": c} for i, c in enumerate(series)
+        ]
+
+    def test_no_alert_when_source_small(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "h.json"
+            p.write_text(json.dumps({"runs": self._runs([{"A": 60}] * 10)}))
+            self.assertIsNone(check_sources(p))
+
+    def test_collapse_alert(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "h.json"
+            p.write_text(
+                json.dumps(
+                    {"runs": self._runs([{"A": 8000}] * 9 + [{"A": 2000}])}
+                )
+            )
+            alert = check_sources(p)
+        self.assertIsNotNone(alert)
+        self.assertIn("A", alert)
+        self.assertIn("-75%", alert)
+
+    def test_recovery_no_alert(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "h.json"
+            p.write_text(
+                json.dumps(
+                    {"runs": self._runs([{"A": 8000}] * 6 + [{"A": 9000}, {"A": 8500}])}
+                )
+            )
+            self.assertIsNone(check_sources(p))
+
+    def test_insufficient_samples(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "h.json"
+            p.write_text(json.dumps({"runs": self._runs([{"A": 8000}] * 3)}))
+            self.assertIsNone(check_sources(p))
+
+    def test_missing_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(check_sources(Path(td) / "nope.json"))
 
 
 class TestLoadHistory(unittest.TestCase):

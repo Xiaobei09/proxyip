@@ -8,6 +8,9 @@ Compares the latest round against recent history and fires alerts when:
 - **CN collapse** — china.json reachable count dropped > ``CN_DROP_PCT``
                     (default 50%) vs the previous round's snapshot stored
                     in the alert state file;
+- **source collapse** — an upstream source's unique-count dropped > ``SOURCE_DROP_PCT``
+                    (default 55%) vs the median of its last 8 rounds, from
+                    ``data/quality/source_history.json``;
 - **stale data**  — newest history record older than ``STALE_HOURS``
                     (default 8h).
 
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
 import sys
 import urllib.request
 from datetime import datetime, timezone
@@ -39,6 +43,10 @@ STATE_FILE = QUALITY_DIR / "alert_state.json"
 POOL_DROP_PCT = 30
 CN_DROP_PCT = 50
 STALE_HOURS = 8
+SOURCE_DROP_PCT = 55       # 上游源 unique 相对近 8 轮中位数下降超此百分比触发
+SOURCE_MIN_SAMPLES = 8     # 至少积累这么多历史点才评估
+SOURCE_MIN_SIZE = 500      # 历史中位数 ≥ 此规模的源才告警（过滤小源噪音）
+SOURCE_LOOKBACK = 8        # 取最近几轮作基准
 
 
 def _now() -> datetime:
@@ -118,6 +126,45 @@ def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple
     return None, new_state
 
 
+def check_sources(
+    path: Path,
+    drop_pct: float = SOURCE_DROP_PCT,
+    min_samples: int = SOURCE_MIN_SAMPLES,
+    min_size: int = SOURCE_MIN_SIZE,
+    lookback: int = SOURCE_LOOKBACK,
+) -> str | None:
+    """上游源 unique 覆盖率骤降告警（相对近 ``lookback`` 轮中位数）。
+
+    累积点数不足 / 源规模太小 / 数据缺失时静默。
+    """
+    data = read_json(path) or {}
+    runs = data.get("runs") or []
+    if len(runs) < min_samples:
+        return None
+    series: dict[str, list[int]] = {}
+    for run in runs:
+        for label, count in (run.get("counts") or {}).items():
+            series.setdefault(label, []).append(int(count))
+    alerts = []
+    for label, vals in series.items():
+        if len(vals) < min_samples:
+            continue
+        window = vals[-lookback:]
+        if len(window) < 2:
+            continue
+        baseline = window[:-1]
+        med = statistics.median(baseline) if baseline else 0
+        if med < min_size:
+            continue
+        last = window[-1]
+        if last < med * (100 - drop_pct) / 100:
+            drop = (med - last) / med * 100
+            alerts.append(
+                f"source {label} collapsed {med}->{last} (-{drop:.0f}%)"
+            )
+    return "\n".join(alerts) if alerts else None
+
+
 def notify(alerts: list[str]) -> bool:
     """POST to webhook; returns delivered flag. Always prints to stderr."""
     msg = "[proxyip] ALERT\n" + "\n".join(f"- {a}" for a in alerts)
@@ -168,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
     a, new_state = check_cn(
         state or {}, root / "data" / "quality" / CHINA_FILE.name
     )
+    if a:
+        alerts.append(a)
+    a = check_sources(root / "data" / "quality" / "source_history.json")
     if a:
         alerts.append(a)
 

@@ -51,9 +51,12 @@ from common import (
     RAW_DIR,
     ROOT,
     SETS_DIR,
+    SOURCE_HISTORY_FILE,
+    SOURCE_HISTORY_MAX,
     SOURCE_STATS_FILE,
     UPSTREAM_META_FILE,
     fetch_with_mirror,
+    read_json,
     write_text_if_changed,
 )
 
@@ -846,6 +849,24 @@ def _build_source_stats(
     return stats
 
 
+def _append_source_history(ts: str, counts: dict[str, int]) -> None:
+    """追加本轮各上游源的 unique 数到 ``source_history.json``（供健康告警）。
+
+    保留最近 ``SOURCE_HISTORY_MAX`` 轮；内容不变时不重写。
+    """
+    history: list = []
+    if SOURCE_HISTORY_FILE.exists():
+        existing = read_json(SOURCE_HISTORY_FILE)
+        history = list((existing or {}).get("runs", []))
+    history.append({"ts": ts, "counts": dict(sorted(counts.items()))})
+    history = history[-SOURCE_HISTORY_MAX:]
+    write_text_if_changed(
+        SOURCE_HISTORY_FILE,
+        json.dumps({"runs": history}, ensure_ascii=False, separators=(",", ":"))
+        + "\n",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -907,6 +928,10 @@ def main(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
             + "\n",
+        )
+        _append_source_history(
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            {label: int(stats["unique"]) for label, stats in source_stats.items()},
         )
         print(f"Wrote {src_stats_file} ({len(source_stats)} sources)")
         stats, all_entries = write_outputs(by_port, per_country_limit=args.per_country_limit)
