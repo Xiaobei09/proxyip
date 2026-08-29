@@ -67,9 +67,7 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/build_good.py
 
-      - name: Generate stats and chart
-        if: steps.gate.outputs.skip != 'true'
-        run: python scripts/generate_stats.py
+      # 图表/统计由专职 stats 工作流在 "Exit family check" 完成后统一重建（单一写入者）
 
       - name: Show summary
         if: steps.gate.outputs.skip != 'true'

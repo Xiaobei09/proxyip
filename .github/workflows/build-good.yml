@@ -60,9 +60,7 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/build_good.py
 
-      - name: Generate stats and chart
-        if: steps.gate.outputs.skip != 'true'
-        run: python scripts/generate_stats.py
+      # 图表/渲染由专职 stats 工作流在 "Build good lists" 完成后统一重建（单一写入者）
 
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true'

@@ -5,7 +5,7 @@ on:
   # 任一数据产出链成功后统一重建图表与 stats.json——单一写入者，
   # 此前 generate_stats 内嵌在 quality/china 两条链里重复执行。
   workflow_run:
-    workflows: ["Quality check", "China check", "Exit family check"]
+    workflows: ["Quality check", "China check", "Exit family check", "Build good lists"]
     types: [completed]
 
 permissions:
