@@ -136,7 +136,17 @@ class TestCheckCountries(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             alert, state = check_countries({}, Path(td) / "meta.json")
         self.assertIsNone(alert)
-        self.assertEqual(state.get("countries"), {})
+        self.assertNotIn("countries", state)
+
+    def test_empty_meta_keeps_previous_snapshot(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "meta.json"
+            p.write_text(json.dumps({}))
+            alert, state = check_countries(
+                {"countries": {"US": 800}}, p
+            )
+        self.assertIsNone(alert)
+        self.assertEqual(state["countries"], {"US": 800})
 
 
 class TestCheckSources(unittest.TestCase):

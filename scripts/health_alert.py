@@ -145,6 +145,10 @@ def check_countries(
         if isinstance(c, (int, float))
     }
     new_state = dict(state or {})
+    # meta 缺失/无数据时不覆盖历史快照，也不做对比评估（避免瞬时空窗
+    # 误报"所有国家全灭"；池级断供由 check_pool 兜底）
+    if not cur:
+        return None, new_state
     new_state["countries"] = {
         cc: int(c) for cc, c in sorted(cur.items())
     }
