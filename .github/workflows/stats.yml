@@ -61,6 +61,10 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/export_json.py
 
+      - name: Source quality analysis
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/analyze_sources.py
+
       - name: Health watchdog
         if: steps.gate.outputs.skip != 'true'
         continue-on-error: true
