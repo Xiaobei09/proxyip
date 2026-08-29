@@ -88,12 +88,6 @@ def build_ipinfo_map(
             info["ext_ok"] = ext.get("success", False)
             info["ext_colo"] = ext.get("colo")
             info["ext_response_ms"] = ext.get("response_ms")
-        risk_flags = {
-            source: signal
-            for source, signal in risk_data.get(ip, {}).items()
-        }
-        if risk_flags:
-            info["risk_flags"] = risk_flags
         signals = collect_signals(ip, geo_item, risk_data, weights)
         abuse_item = abuse_map.get(res["key"])
         score = compute_reputation(signals, abuse_item, weights)

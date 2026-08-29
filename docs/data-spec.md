@@ -215,7 +215,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/ipinfo.json`（质量 CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`numeric_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk_sources`（参与合分的源列表）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件。
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
 
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
