@@ -31,6 +31,7 @@ Outputs keep the annotated source lines verbatim:
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -50,6 +51,7 @@ from common import (
     note_tier,
     parse_line,
     read_json,
+    write_json,
     write_text_if_changed,
 )
 
@@ -400,6 +402,14 @@ def main(argv: list[str] | None = None) -> int:
     total = sum(stats.values())
     for name in sorted(stats):
         print(f"  {name}.txt: {stats[name]}")
+    write_json(
+        quality_dir / "good_meta.json",
+        {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "file_count": len(stats),
+            "proxy_count": total,
+        },
+    )
     print(f"Done: {len(stats)} files, {total} proxies")
     return 0
 
