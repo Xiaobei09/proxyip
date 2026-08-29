@@ -186,8 +186,8 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all_rep.txt` |
 | `--limit` | 按信誉降序采样条数（0=全部） | 250 |
-| `--pingpe-limit` | ping.pe 多节点复核条数（串行） | 40 |
-| `--workers` | L2 并发上限 | 8 |
+| `--pingpe-limit` | ping.pe 多节点复核条数（有界并发） | 40 |
+| `--workers` | L2 并发上限 | 16 |
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | check-host.cc key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | tcpping.cn token（读 `TCPPING_CN_TOKEN`） | 空 |
