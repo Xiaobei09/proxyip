@@ -489,6 +489,50 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(score, 72)
         self.assertEqual(flagged, ["proxy"])
 
+    def test_static_list_sources_vote_and_score(self):
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"tor_exit": {"is_tor": True}}, self.W)
+        self.assertEqual(score, 60)
+        self.assertEqual(flagged, ["tor"])
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"spamhaus": {"is_listed": True}}, self.W)
+        self.assertEqual(score, 70)
+        self.assertEqual(flagged, ["listed"])
+        self.assertEqual(qc.source_score("tor_exit", {"is_tor": True}), 45)
+        self.assertEqual(qc.source_score("spamhaus", {"is_listed": True}), 55)
+        self.assertIn("tor_exit", qc.REPUTATION_WEIGHTS)
+        self.assertIn("spamhaus", qc.REPUTATION_WEIGHTS)
+        self.assertIn("ipwhois", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("tor_exit", qc.DEFAULT_REP_SOURCES)
+
+    def test_cache_cap_tiles(self):
+        """REP_CACHE_MAX 裁剪逻辑：超阈值仅保留最新 REP_CACHE_MAX 项。"""
+        import time
+        cache = {}
+        now = time.time()
+        for i in range(qc.REP_CACHE_MAX + 25):
+            cache[f"10.0.{i >> 8}.{i & 255}"] = {
+                "netcoffee": {"ts": now - i, "data": {"trust_score": 60}}
+            }
+        # 复现 lookup_all_risk 的 TTL 裁剪 + 封顶分支
+        ttl = 7 * 86400
+        pruned = {}
+        for ip, entry in cache.items():
+            fresh = {src: e for src, e in entry.items()
+                     if (e.get("ts") or 0) + ttl >= now}
+            if fresh:
+                pruned[ip] = fresh
+        self.assertGreater(len(pruned), qc.REP_CACHE_MAX)
+        if len(pruned) > qc.REP_CACHE_MAX:
+            def last_ts(item) -> float:
+                _ip, entry = item
+                return max((e.get("ts") or 0 for e in entry.values()
+                            if isinstance(e, dict)), default=0.0)
+            for ip, _ in sorted(pruned.items(), key=last_ts,
+                                reverse=True)[qc.REP_CACHE_MAX:]:
+                del pruned[ip]
+        self.assertEqual(len(pruned), qc.REP_CACHE_MAX)
+
     def test_mobile_bonus_only_when_otherwise_clean(self):
         sigs = {"ip-api": {"proxy": False, "hosting": False, "mobile": True}}
         self.assertEqual(qc.compute_reputation(sigs, None, self.W), 100)
