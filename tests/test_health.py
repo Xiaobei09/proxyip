@@ -326,6 +326,35 @@ class TestAlertRepeatSuppression(unittest.TestCase):
         )
 
 
+class TestBadgeSurfacing(unittest.TestCase):
+    def setUp(self):
+        self.ts = datetime.now(timezone.utc).timestamp()
+
+    def _run(self, root: Path) -> tuple[int, Path]:
+        with unittest.mock.patch.object(ha.time, "time", return_value=self.ts):
+            return (
+                ha.main(["--data-dir", str(root)]),
+                root / "data" / "output" / "badge.json",
+            )
+
+    def test_alert_turns_badge_red(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td, ts_ago_hours=9)
+            rc, badge = self._run(root)
+            self.assertEqual(rc, 0)
+            self.assertTrue(badge.exists())
+            data = json.loads(badge.read_text())
+            self.assertEqual(data["color"], "red")
+            self.assertEqual(data["message"], "stale data")
+
+    def test_no_alert_leaves_badge_untouched(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td, ts_ago_hours=0)
+            rc, badge = self._run(root)
+            self.assertEqual(rc, 0)
+            self.assertFalse(badge.exists())  # 无告警不改写
+
+
 class TestCheckSources(unittest.TestCase):
     def _runs(self, series):
         return [
