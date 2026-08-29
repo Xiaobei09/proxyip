@@ -1023,6 +1023,105 @@ class TestItdogBreakerSkipsPacing(unittest.TestCase):
         self.assertLess(mpace.call_count, 40)
 
 
+class TestPingpeConcurrency(unittest.TestCase):
+    """L3 ping.pe 有界并发：同槽位端到端耗时远小于串行（覆盖提升的点）。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            skip_itdog=True,
+            skip_itdog_tcping=True,
+            pingpe_limit=6,
+            pingpe_concurrency=4,
+            workers=4,
+            timeout=5,
+            api_key="",
+            tcpping_token="",
+        )
+
+    def test_concurrent_slots_finish_fast(self):
+        import time
+        import unittest.mock as mock
+
+        items = [
+            (f"10.{i}.0.1:443#US", f"10.{i}.0.1:443#US",
+             f"10.{i}.0.1", "443", "US")
+            for i in range(1, 7)
+        ]
+
+        def slow_pingpe(ip, port, timeout):
+            time.sleep(0.2)
+            return {"status": "ok", "ok": True, "ms": 1.0,
+                    "reported": 13, "ok_nodes": 8}
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "ok", "ok": True,
+                                             "ms": 1.0}), \
+             mock.patch.object(cc, "check_host_check",
+                               return_value={"status": "fail", "ok": False,
+                                             "ms": None, "error": ""}), \
+             mock.patch.object(cc, "PINGPE_SLOT_GAP", 0.01), \
+             mock.patch.object(cc, "pingpe_check", side_effect=slow_pingpe), \
+             mock.patch.object(cc, "tcpping_check",
+                               return_value={"status": "skipped"}):
+            t0 = time.monotonic()
+            entries, _, _ = cc.run_measurements(items, self._args())
+            dt = time.monotonic() - t0
+
+        # 串行 6×0.2s=1.2s；4 并发应明显更快（留 CI 抖动余量）
+        self.assertLess(dt, 0.8)
+        self.assertEqual(
+            [v["sources"]["pingpe"]["ok"] for v in entries.values()].count(True), 6)
+        self.assertEqual(
+            [v["verdict"] for v in entries.values()].count("reachable"), 6)
+
+
+class TestItdogTcpingFallbackGuard(unittest.TestCase):
+    """主通道节点获取失败（整站被墙/验证码墙）时，同一上游的 tcping
+    兜底必然同样拿不到节点，应跳过而非再空转一轮。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            skip_itdog=False,
+            skip_itdog_tcping=False,
+            pingpe_limit=0,
+            pingpe_concurrency=4,
+            workers=4,
+            timeout=5,
+            api_key="",
+            tcpping_token="",
+        )
+
+    def test_fallback_skipped_when_main_nodes_failed(self):
+        import unittest.mock as mock
+
+        items = [
+            ("1.1.1.1:80#US", "1.1.1.1:80#US", "1.1.1.1", "80", "US"),
+            ("2.2.2.2:80#US", "2.2.2.2:80#US", "2.2.2.2", "80", "US"),
+        ]
+
+        def failed_nodes(sample, args, **kwargs):
+            return {
+                item[1]: {"status": "error", "ok": False, "ms": None,
+                          "error": "no itdog nodes"}
+                for item in sample
+            }
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": ""}), \
+             mock.patch.object(cc, "check_host_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": ""}), \
+             mock.patch.object(cc, "itdog_batch_run", side_effect=failed_nodes) as mib:
+            cc.run_measurements(items, self._args())
+
+        # 主通道一次 + 兜底应零次（节点连取都失败的整站性故障不白跑第二轮）
+        self.assertEqual(len(mib.call_args_list), 1)
+        self.assertNotIn("page_url", mib.call_args_list[0].kwargs)
+
+
 class TestItdogFullPoolTargets(unittest.TestCase):
     """itdog 目标集 = 去重后全量存活池（含 CF 启发式行）。历史上 CF 过滤
     在池子 100% 带 -CF 时把主源锁死成空集，本测试保证不再复发。"""
