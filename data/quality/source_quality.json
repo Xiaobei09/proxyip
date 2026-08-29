@@ -10,7 +10,9 @@
       "country_dist": {
         "US": 2
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 2
+      },
       "median_latency": 52.0,
       "median_speed": 11.18,
       "port_dist": {
@@ -36,7 +38,10 @@
         "NL": 1,
         "US": 2
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 3,
+        "ipv6": 1
+      },
       "median_latency": 156.0,
       "median_speed": 1.88,
       "port_dist": {
@@ -66,7 +71,10 @@
         "SG": 8,
         "US": 2
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 2,
+        "unknown": 36
+      },
       "median_latency": 355.0,
       "median_speed": 1.56,
       "port_dist": {
@@ -112,10 +120,10 @@
         "US": 1903
       },
       "family_dist": {
-        "dual": 81,
-        "ipv4": 4786,
-        "ipv6": 11559,
-        "unknown": 96
+        "dual": 112,
+        "ipv4": 4804,
+        "ipv6": 11610,
+        "unknown": 67
       },
       "median_latency": 278.0,
       "median_speed": 1.64,
@@ -157,7 +165,11 @@
         "SG": 12,
         "US": 5
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 7,
+        "ipv6": 2,
+        "unknown": 62
+      },
       "median_latency": 284.0,
       "median_speed": 1.38,
       "port_dist": {
@@ -190,7 +202,10 @@
         "NL": 10,
         "SG": 5
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 5,
+        "unknown": 63
+      },
       "median_latency": 362.0,
       "median_speed": 1.59,
       "port_dist": {
@@ -218,7 +233,7 @@
       },
       "family_dist": {
         "ipv4": 2,
-        "unknown": 16
+        "unknown": 17
       },
       "median_latency": 365.0,
       "median_speed": 1.44,
@@ -245,7 +260,10 @@
         "NL": 1,
         "US": 1
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 2,
+        "ipv6": 1
+      },
       "median_latency": 252.0,
       "median_speed": 1.9,
       "port_dist": {
@@ -264,5 +282,5 @@
   },
   "total_alive": 16798,
   "total_proxies": 120140,
-  "ts": "2026-08-29T12:55:47Z"
+  "ts": "2026-08-29T13:19:28Z"
 }
