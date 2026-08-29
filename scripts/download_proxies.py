@@ -11,10 +11,11 @@ cross-check in ``exit_family.py``).
 If ``all.json`` is unreachable, the legacy zip archive of ``<port>/<country>.txt``
 files is used as a fallback so scheduled runs never break.
 
-A set of Cloudflare 反代 (reverse-proxy) sources from :data:`EXTRA_SOURCES` is
-also fetched and merged (port/country bucket aware); entries without a country
+A set of Cloudflare 反代 (reverse-proxy) sources from :data:`EXTRA_SOURCES`
+is also fetched and merged (port/country bucket aware); entries without a country
 tag get one via a best-effort ``ip-api.com/batch`` lookup (``#ALL`` otherwise).
-Per-source failures are non-fatal and never break a scheduled run.
+Free mainline ``ip:port`` mirrors from :data:`PROXY_MIRROR_SOURCES` are fetched
+the same way. Per-source failures are non-fatal and never break a scheduled run.
 
 Each run also archives the added/removed entries versus the previous committed
 list into ``data/diff/`` and records the change counts in ``data/quality/history.jsonl``.
@@ -108,6 +109,32 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
 DEFAULT_EXTRA_PORT = "443"
+
+# 全免费主线 ``ip:port`` 代理镜像源（行式，与主源同构；各自失败非致命）：
+PROXY_MIRROR_SOURCES: list[str] = [
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=ipport&format=text",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+]
+
+SOURCE_LABELS: dict[str, str] = {
+    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=ipport&format=text": "proxyscrape",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt": "monosans",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt": "speedx",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt": "shiftytr",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt": "roosterkid",
+}
+
+
+def source_label(url: str) -> str:
+    """可读的源标签：镜像/列表 URL 用显式映射，其余取文件名主干。"""
+    if url in SOURCE_LABELS:
+        return SOURCE_LABELS[url]
+    stem = url.rsplit("/", 1)[-1].split(".")[0] if "/" in url else url
+    return stem
+
 
 CN_COUNTRY_MAP: dict[str, str] = {
     "香港": "HK", "台湾": "TW", "中国": "CN", "澳门": "MO",
@@ -608,7 +635,7 @@ def write_source_attribution(
     # Map bare IP → list of extra source labels that contributed it
     ip_extra_labels: dict[str, list[str]] = {}
     for url, ips in source_ip_sets.items():
-        label = url.rsplit("/", 1)[-1].split(".")[0] if "/" in url else url
+        label = source_label(url)
         for ip in ips:
             ip_extra_labels.setdefault(ip, []).append(label)
 
@@ -867,7 +894,7 @@ def _build_source_stats(
         "overlap": len(main_ips & overlap_ips),
     }
     for url, ips in source_ip_sets.items():
-        label = url.rsplit("/", 1)[-1].split(".")[0] if "/" in url else url
+        label = source_label(url)
         stats[label] = {
             "total": len(ips),
             "unique": len(ips - overlap_ips),
@@ -916,12 +943,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--no-extra-sources", action="store_true",
-        help="Skip the built-in extra CF reverse-proxy sources",
+        help="Skip the built-in extra CF reverse-proxy and mirror sources",
     )
     args = parser.parse_args(argv)
 
     extra_sources = list(EXTRA_SOURCES)
     if not args.no_extra_sources:
+        extra_sources.extend(("plain", u) for u in PROXY_MIRROR_SOURCES)
         for spec in args.extra_source:
             kind, sep, url = spec.partition(",")
             if not sep or not url or not kind:
