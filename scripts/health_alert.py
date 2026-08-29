@@ -46,6 +46,8 @@ POOL_DROP_PCT = 30
 CN_DROP_PCT = 50
 CN_MIN_BASELINE = 20    # CN 上一轮基准 ≥ 此值才评估塌方
 CN_STALE_HOURS = 12     # china.json 超过此年龄且曾有可达样本 → CN 链疑似静默停机
+EXIT_FAMILY_HOURS = 12      # exit_family.json 超龄 → exit-family 链疑似停机
+EXIT_FAMILY_MIN_ENTRIES = 100
 COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
 COUNTRY_MIN_BASELINE = 60
 STALE_HOURS = 8
@@ -151,6 +153,25 @@ def check_cn_stale(
     age_h = (_now() - _ts(ts)).total_seconds() / 3600
     if age_h > hours:
         return f"CN data stale: china.json {age_h:.1f}h old (> {hours}h)"
+    return None
+
+
+def check_artifact_stale(
+    label: str,
+    path: Path,
+    hours: float,
+    min_entries: int,
+    ts_field: str = "ts",
+) -> str | None:
+    """任一 keyed 产物 JSON 的时效告警（label 给出可读名）。"""
+    data = read_json(path) or {}
+    ts = data.get(ts_field)
+    proxies = data.get("proxies") or {}
+    if not isinstance(ts, str) or len(proxies) < min_entries:
+        return None
+    age_h = (_now() - _ts(ts)).total_seconds() / 3600
+    if age_h > hours:
+        return f"{label} stale: {path.name} {age_h:.1f}h old (> {hours}h)"
     return None
 
 
@@ -307,6 +328,14 @@ def main(argv: list[str] | None = None) -> int:
     if a:
         alerts.append(a)
     a = check_cn_stale(root / "data" / "quality" / CHINA_FILE.name)
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "exit-family",
+        root / "data" / "quality" / "exit_family.json",
+        hours=EXIT_FAMILY_HOURS,
+        min_entries=EXIT_FAMILY_MIN_ENTRIES,
+    )
     if a:
         alerts.append(a)
 

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import health_alert as ha  # noqa: E402
 from health_alert import (  # noqa: E402
+    check_artifact_stale,
     check_cn,
     check_cn_stale,
     check_countries,
@@ -128,6 +129,40 @@ class TestCheckCnStale(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = self.make_file(td, _ts(30), n=5)
             self.assertIsNone(check_cn_stale(p))
+
+
+class TestCheckArtifactStale(unittest.TestCase):
+    def _file(self, td, ts: str | None, n=200):
+        p = Path(td) / "artifact.json"
+        data = {"proxies": {f"{i}:443#US": {"v": 1} for i in range(n)}}
+        if ts is not None:
+            data["ts"] = ts
+        p.write_text(json.dumps(data))
+        return p
+
+    def test_stale_alerts(self):
+        with tempfile.TemporaryDirectory() as td:
+            a = check_artifact_stale("exit-family", self._file(td, _ts(20)), 12, 100)
+        self.assertIsNotNone(a)
+        self.assertIn("exit-family", a)
+
+    def test_fresh_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(
+                check_artifact_stale("exit-family", self._file(td, _ts(1)), 12, 100)
+            )
+
+    def test_missing_ts_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(
+                check_artifact_stale("exit-family", self._file(td, None), 12, 100)
+            )
+
+    def test_small_pool_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(
+                check_artifact_stale("exit-family", self._file(td, _ts(96), n=9), 12, 100)
+            )
 
 
 class TestCheckCountries(unittest.TestCase):

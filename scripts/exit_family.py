@@ -51,7 +51,6 @@ from common import (
     build_request,
     clear_note_buckets,
     has_token,
-    keyed_json,
     merge_note_tokens,
     line_to_key,
     load_methods,
@@ -533,7 +532,13 @@ def main(argv=None) -> int:
         key: {k: res[k] for k in keep if k in res}
         for key, res in results.items()
     }
-    write_json(EXIT_FAMILY_FILE, keyed_json(entries))
+    write_json(
+        EXIT_FAMILY_FILE,
+        {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "proxies": entries,
+        },
+    )
     write_lines(VALID_ALL_IPV4_FILE, v4_lines)
     write_lines(VALID_ALL_IPV6_FILE, v6_lines)
     annotate_source_files(families, args.source)
