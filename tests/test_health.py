@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from health_alert import (  # noqa: E402
     check_cn,
+    check_countries,
     check_pool,
     check_sources,
     check_stale,
@@ -91,6 +92,51 @@ class TestCheckCn(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             alert, _ = check_cn({"cn_reachable": 10}, self.make_file(td, 1))
             self.assertIsNone(alert)  # prev ≤ 20 不触发
+
+
+class TestCheckCountries(unittest.TestCase):
+    def _meta(self, td, per_country):
+        p = Path(td) / "meta.json"
+        p.write_text(json.dumps({"per_country": per_country}))
+        return p
+
+    def test_no_alert_when_steady(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._meta(td, {"US": 800, "JP": 600})
+            alert, state = check_countries({}, p)
+        self.assertIsNone(alert)
+        self.assertEqual(state["countries"]["US"], 800)
+
+    def test_collapse_alert(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._meta(td, {"US": 100})
+            alert, _ = check_countries(
+                {"countries": {"US": 800, "JP": 600}}, p
+            )
+        self.assertIsNotNone(alert)
+        self.assertIn("-88%", alert)
+
+    def test_small_baseline_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._meta(td, {"US": 0})
+            alert, _ = check_countries(
+                {"countries": {"US": 50}}, p
+            )
+        self.assertIsNone(alert)
+
+    def test_disappeared_country_alerts(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._meta(td, {"DE": 5})
+            alert, _ = check_countries(
+                {"countries": {"DE": 300}}, p
+            )
+        self.assertIsNotNone(alert)
+
+    def test_missing_meta_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            alert, state = check_countries({}, Path(td) / "meta.json")
+        self.assertIsNone(alert)
+        self.assertEqual(state.get("countries"), {})
 
 
 class TestCheckSources(unittest.TestCase):
