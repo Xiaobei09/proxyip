@@ -73,7 +73,7 @@ class TestBuilders(unittest.TestCase):
     FAMILY_DATA = {
         "proxies": {
             "1.1.1.1:80#US": {"family": "ipv4"},
-            "2.2.2.2:80#JP": {"family": "ipv6"},
+            "2.2.2.2:80#JP": {"family": "dual"},
             "3.3.3.3:80#DE": {"family": "ipv6"},
             "4.4.4.4:80#FR": {"family": "unknown"},
         }
@@ -188,6 +188,9 @@ class TestMain(unittest.TestCase):
             self.assertEqual(stats["unique"], 110)
             self.assertEqual(stats["alive"], 205)
             self.assertEqual(stats["alive_rate"], 0.9762)
+            self.assertEqual(stats["family"],
+                             {"ipv4": 1, "ipv6": 1, "dual": 1, "unknown": 1})
+            self.assertEqual(stats["dual_stack"], 1)
             self.assertIn("age_s", stats)
             self.assertIn("updated_ago", stats)
             self.assertIn("stale", stats)

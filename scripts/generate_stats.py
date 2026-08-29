@@ -1135,6 +1135,7 @@ def main(argv: list[str] | None = None) -> int:
     quality_meta = read_json(data_dir / "quality" / "quality_meta.json")
     china_data = read_json(data_dir / "quality" / "china.json")
     family_data = read_json(data_dir / "quality" / "exit_family.json")
+    family_counts = dict(_count_by(family_data, "family"))
     entry_audit = read_json(data_dir / "quality" / "entry_audit.json")
     rep_data = read_json(data_dir / "quality" / "reputation.json")
     source_stats = read_json(data_dir / "quality" / "source_stats.json")
@@ -1176,8 +1177,8 @@ def main(argv: list[str] | None = None) -> int:
         "speed": meta.get("speed", {}),
         "speed_dist": meta.get("speed_dist", {}),
         "ip_type": quality_meta.get("by_type", {}),
-        "family": quality_meta.get("family", {}),
-        "dual_stack": quality_meta.get("dual_stack", 0),
+        "family": dict(family_counts),
+        "dual_stack": family_counts.get("dual", 0),
         "country_mismatch": quality_meta.get("country_mismatch", 0),
         "history_records": len(history),
         "alive_history_records": len(valid_history),
