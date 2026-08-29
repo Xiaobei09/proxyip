@@ -703,6 +703,7 @@ async def fetch_text_list(url: str) -> set[str]:
         )
     except Exception as exc:
         logging.debug("fetch_text_list %s: %s", url, exc)
+        logging.warning("fetch_text_list failed open for %s: %s", url, exc)
         return out
     for line in text.splitlines():
         line = line.strip()
@@ -795,8 +796,10 @@ async def fetch_static_lists(sources: list) -> dict:
         *(task for _name, task in mapping), return_exceptions=True
     )
     for (name, _task), res in zip(mapping, results):
-        if not isinstance(res, Exception):
-            out[name] = res
+        if isinstance(res, Exception):
+            logging.warning("static list source %s failed: %s", name, res)
+            continue
+        out[name] = res
     return out
 
 
