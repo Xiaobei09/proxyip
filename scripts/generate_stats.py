@@ -881,7 +881,10 @@ def collect_cn_summary(china_data: dict, valid_dir: Path) -> dict:
     )
     def _lines(*parts: str) -> int:
         p = valid_dir.joinpath(*parts)
-        return sum(1 for _ in p.open(encoding="utf-8")) if p.exists() else 0
+        if not p.exists():
+            return 0
+        with p.open(encoding="utf-8") as fh:
+            return sum(1 for _ in fh)
 
     return {
         "reachable": reachable,
