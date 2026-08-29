@@ -201,11 +201,40 @@ class TestLoadSource(unittest.TestCase):
                 raise OSError("boom")
             return self.zip_bytes
 
-        with unittest.mock.patch.object(dp, "download", side_effect=fake_download):
+        with unittest.mock.patch.object(dp, "download", side_effect=fake_download), \
+                unittest.mock.patch.object(dp.time, "sleep"):
             by_port, meta = dp.load_source(dp.SOURCE_URL, timeout=30)
-        self.assertEqual(calls["n"], 3)  # all.json x2 + zip fallback
+        self.assertEqual(calls["n"], 4)  # all.json x3 + zip fallback
         self.assertEqual(by_port["443"]["US"], ["1.1.1.1"])
         self.assertIsNone(meta)
+
+    def test_json_succeeds_after_two_retries(self):
+        calls = {"n": 0}
+
+        def fake_download(url, timeout):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise OSError("boom")
+            return self.json_bytes
+
+        with unittest.mock.patch.object(dp, "download", side_effect=fake_download), \
+                unittest.mock.patch.object(dp.time, "sleep"):
+            by_port, meta = dp.load_source(dp.SOURCE_URL, timeout=30)
+        self.assertEqual(calls["n"], 3)
+        self.assertIsNotNone(meta)
+
+    def test_both_sources_exhausted_raises(self):
+        calls = {"n": 0}
+
+        def fake_download(url, timeout):
+            calls["n"] += 1
+            raise OSError("boom")
+
+        with unittest.mock.patch.object(dp, "download", side_effect=fake_download), \
+                unittest.mock.patch.object(dp.time, "sleep"):
+            with self.assertRaises(OSError):
+                dp.load_source(dp.SOURCE_URL, timeout=30)
+        self.assertEqual(calls["n"], 6)  # all.json x3 + zip x3
 
     def test_explicit_json_url(self):
         with unittest.mock.patch.object(dp, "download", return_value=self.json_bytes) as m:
