@@ -928,5 +928,47 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "uncertain")
 
 
+class TestItdogFullPoolTargets(unittest.TestCase):
+    """itdog 目标集 = 去重后全量存活池（含 CF 启发式行）。历史上 CF 过滤
+    在池子 100% 带 -CF 时把主源锁死成空集，本测试保证不再复发。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            itdog_nodes=2,
+            itdog_batch_size=50,
+            itdog_concurrency=1,
+            itdog_pacing=0.0,
+            itdog_timeout=3,
+            itdog_task_timeout=3,
+        )
+
+    def test_cf_lines_are_targeted_and_deduped(self):
+        import unittest.mock as mock
+
+        items = [
+            (
+                "1.1.1.1:2087#\U0001F1FA\U0001F1F8US-10ms-20.07MB/s-GPT-CF",
+                "1.1.1.1:2087#US",
+                "1.1.1.1",
+                "2087",
+                "US",
+            ),
+            ("2.2.2.2:443#US-8ms", "2.2.2.2:443#US", "2.2.2.2", "443", "US"),
+            (
+                "1.1.1.1:2087#\U0001F1FA\U0001F1F8US-10ms-20.07MB/s-GPT-CF",
+                "1.1.1.1:2087#US",
+                "1.1.1.1",
+                "2087",
+                "US",
+            ),
+        ]
+        with mock.patch.object(ci, "itdog_fetch_nodes", return_value=[]):
+            res = ci.itdog_batch_run(items, self._args())
+        self.assertEqual(sorted(res), ["1.1.1.1:2087#US", "2.2.2.2:443#US"])
+        self.assertTrue(all(v["status"] == "error" for v in res.values()))
+
+
 if __name__ == "__main__":
     unittest.main()
