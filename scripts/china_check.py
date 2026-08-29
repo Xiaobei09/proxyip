@@ -43,7 +43,8 @@
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"。
 
 跨轮稳定性：写 china.json 前读取上一轮结果，per-key 维护连续可达轮数
-``streak``；上一轮 uncertain 的键在本轮采样置顶优先复检。
+``streak``；采样置顶上轮 reachable（续保复检，防覆盖波动把稳定 CN 键
+翻出池），其次上轮 uncertain（升格候选）优先复检。
 
 纯标准库（urllib / json / threading / concurrent.futures）。运行时告警不计入
 判定，仅记录 ``skipped``；单源失败不误判。
@@ -836,27 +837,49 @@ def annotate_cn_files(reachable_keys: set) -> None:
 # ------------------------------------------------------------ 主流程
 
 def run_measurements(sample, args) -> tuple[dict, set, set]:
-    """L2 并发单节点、itdog 批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
+    """L2 分两段并发（xxapi 全池免额候选 → check_host 稀缺配额只投决策键）、itdog
+    批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
     entries: dict = {}
     ch_limiter = RateLimiter(CH_WINDOW_SEC, CH_PER_WINDOW, CH_HOUR_CAP)
 
-    def l2(item):
+    def l2_xxapi(item):
+        """免额度源（xxapi 北京节点）全池扫描，先建立候选集。"""
         _, key, ip, port, _ = item
         try:
-            sources = {
-                "check_host": check_host_check(ip, port, ch_limiter, args.timeout, args.api_key),
-                "xxapi": xxapi_check(ip, port, args.timeout),
-            }
-            return key, sources
+            return key, {"xxapi": xxapi_check(ip, port, args.timeout)}
         except Exception as exc:
-            logging.debug("l2 check failed for %s: %s", key, exc)
-            return key, {"_error": {"status": "error", "ok": False, "ms": None}}
+            logging.debug("l2 xxapi failed for %s: %s", key, exc)
+            return key, {"xxapi": {"status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}}
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(l2, item) for item in sample]
+        futures = [pool.submit(l2_xxapi, item) for item in sample]
         for future in futures:
             key, sources = future.result()
             entries[key] = sources
+
+    def l2_check_host(item):
+        """稀缺配额源（check-host 呼和浩特节点 ~250/h）二次确认。"""
+        _, key, ip, port, _ = item
+        try:
+            return key, {
+                "check_host": check_host_check(ip, port, ch_limiter, args.timeout, args.api_key)
+            }
+        except Exception as exc:
+            logging.debug("l2 check_host failed for %s: %s", key, exc)
+            return key, {"check_host": {"status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}}
+
+    # check_host 配额有限（CH_HOUR_CAP），只投递到需要二次意见的键：
+    # xxapi 明确 fail 的键省略（无二次确认仍保守落 uncertain，不产生假阳性），
+    # 预算全部留给 xxapi ok / 临时性失败者——把「能不能确认」而不是「探测谁」放到首位。
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = [
+            pool.submit(l2_check_host, item)
+            for item in sample
+            if entries.get(item[1], {}).get("xxapi", {}).get("status") != "fail"
+        ]
+        for future in futures:
+            key, sources = future.result()
+            entries[key].update(sources)
 
     if not args.skip_itdog:
         for key, res in itdog_batch_run(sample, args).items():
@@ -957,7 +980,7 @@ def main(argv=None) -> int:
     args.tcpping_token = tcpping_token
 
     # 上一轮结果须在 write_json 覆盖 china.json 之前读取：
-    # 用于 streak 连续可达计数与 uncertain 键优先复检
+    # 用于 streak 连续可达计数与复检优先级（reachable 续保 > uncertain 升格）
     prev_data = read_json(CHINA_FILE)
     prev_entries = (
         prev_data.get("proxies", prev_data)
@@ -971,9 +994,16 @@ def main(argv=None) -> int:
         print(f"no sample lines from {used} (limit={args.limit})", file=sys.stderr)
         return 2
     # 上一轮 uncertain 的键稳定排序置顶（组内保持信誉降序），优先复检
+    # 上一轮 reachable（续保）优先，其次 uncertain（升格候选）最优先复检；
+    # check_host 稀缺配额按此顺序投递，防止覆盖波动把稳定 CN 键翻出池。
     def _was_uncertain(item) -> int:
         prev = prev_entries.get(item[1])
-        return 0 if isinstance(prev, dict) and prev.get("verdict") == "uncertain" else 1
+        if isinstance(prev, dict):
+            if prev.get("verdict") == "reachable":
+                return 0
+            if prev.get("verdict") == "uncertain":
+                return 1
+        return 2
     sample.sort(key=_was_uncertain)
     print(f"sample: {len(sample)} from {used}", file=sys.stderr)
     cf_count = sum(1 for item in sample if is_cf_heuristic(item[0]))

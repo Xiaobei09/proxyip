@@ -863,5 +863,70 @@ class TestGenerateCnSubset(unittest.TestCase):
         self.assertEqual(lines[0].split("#")[0], "2.2.2.2:443")
 
 
+class TestScarceQuotaAllocation(unittest.TestCase):
+    """check_host 稀缺配额（~250/h）只投递决策键：xxapi 明确 fail 者省略，
+    预算全部用于 xxapi ok / 临时性失败者 —— 提高「把 uncertain 翻成
+    reachable」的转换率，而不放宽判定杠。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            skip_itdog=True,
+            skip_itdog_tcping=True,
+            pingpe_limit=0,
+            workers=4,
+            timeout=5,
+            api_key="",
+        )
+
+    def test_check_host_only_probes_non_fail_xxapi(self):
+        import unittest.mock as mock
+
+        items = [
+            ("1.1.1.1:80#US", "1.1.1.1:80#US", "1.1.1.1", "80", "US"),
+            ("2.2.2.2:80#US", "2.2.2.2:80#US", "2.2.2.2", "80", "US"),
+            ("3.3.3.3:80#US", "3.3.3.3:80#US", "3.3.3.3", "80", "US"),
+        ]
+
+        def fake_xxapi(ip, port, timeout):
+            if ip == "3.3.3.3":
+                return {"status": "fail", "ok": False, "ms": None, "error": ""}
+            return {"status": "ok", "ok": True, "ms": float(port)}
+
+        def fake_check_host(ip, port, limiter, timeout, api_key):
+            return {"status": "ok", "ok": True, "ms": 1.0}
+
+        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
+            cc, "check_host_check", side_effect=fake_check_host
+        ) as mch:
+            entries, reachable, _ = cc.run_measurements(items, self._args())
+
+        probed = sorted(c.args[0] for c in mch.call_args_list)
+        self.assertEqual(probed, ["1.1.1.1", "2.2.2.2"])
+        self.assertEqual(set(reachable), {"1.1.1.1:80#US", "2.2.2.2:80#US"})
+        self.assertEqual(entries["3.3.3.3:80#US"]["verdict"], "uncertain")
+
+    def test_xxapi_error_still_gets_second_opinion(self):
+        import unittest.mock as mock
+
+        items = [("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")]
+
+        def fake_xxapi(ip, port, timeout):
+            return {"status": "error", "ok": False, "ms": None, "error": "http 500"}
+
+        def fake_check_host(ip, port, limiter, timeout, api_key):
+            return {"status": "ok", "ok": True, "ms": 5.0}
+
+        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
+            cc, "check_host_check", side_effect=fake_check_host
+        ) as mch:
+            entries, reachable, _ = cc.run_measurements(items, self._args())
+
+        self.assertEqual(len(mch.call_args_list), 1)
+        self.assertEqual(set(reachable), set())
+        self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "uncertain")
+
+
 if __name__ == "__main__":
     unittest.main()
