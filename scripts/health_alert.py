@@ -42,6 +42,9 @@ STATE_FILE = QUALITY_DIR / "alert_state.json"
 
 POOL_DROP_PCT = 30
 CN_DROP_PCT = 50
+CN_MIN_BASELINE = 20    # CN 上一轮基准 ≥ 此值才评估塌方
+COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
+COUNTRY_MIN_BASELINE = 60
 STALE_HOURS = 8
 SOURCE_DROP_PCT = 55       # 上游源 unique 相对近 8 轮中位数下降超此百分比触发
 SOURCE_MIN_SAMPLES = 8     # 至少积累这么多历史点才评估
@@ -119,11 +122,44 @@ def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple
     new_state["cn_reachable"] = cur
     new_state["cn_ts"] = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
     prev = (state or {}).get("cn_reachable")
-    if isinstance(prev, int) and prev > 20:
+    if isinstance(prev, int) and prev > CN_MIN_BASELINE:
         drop = (prev - cur) / prev * 100
         if drop >= drop_pct:
             return f"CN collapse: reachable {cur} vs {prev} (-{drop:.0f}%)", new_state
     return None, new_state
+
+
+def check_countries(
+    state: dict, meta_path: Path,
+    drop_pct: float = COUNTRY_DROP_PCT,
+    min_baseline: int = COUNTRY_MIN_BASELINE,
+) -> tuple[str | None, dict]:
+    """单国 alive 数相对上一轮快照骤降告警（区域性断网/上游掉源）。
+
+    上一轮基准 < ``min_baseline`` 的国家忽略；meta 缺失时静默。
+    """
+    meta = read_json(meta_path) or {}
+    cur = {
+        cc: int(c)
+        for cc, c in (meta.get("per_country") or {}).items()
+        if isinstance(c, (int, float))
+    }
+    new_state = dict(state or {})
+    new_state["countries"] = {
+        cc: int(c) for cc, c in sorted(cur.items())
+    }
+    alerts = []
+    prev = (state or {}).get("countries") or {}
+    for cc, before in prev.items():
+        if before < min_baseline:
+            continue
+        after = cur.get(cc, 0)
+        drop = (before - after) / before * 100
+        if drop >= drop_pct:
+            alerts.append(
+                f"country {cc} collapsed {before}->{after} (-{drop:.0f}%)"
+            )
+    return ("\n".join(alerts) if alerts else None), new_state
 
 
 def check_sources(
@@ -214,6 +250,11 @@ def main(argv: list[str] | None = None) -> int:
         alerts.append(a)
     a, new_state = check_cn(
         state or {}, root / "data" / "quality" / CHINA_FILE.name
+    )
+    if a:
+        alerts.append(a)
+    a, new_state = check_countries(
+        new_state, root / "data" / "valid" / "meta.json"
     )
     if a:
         alerts.append(a)
