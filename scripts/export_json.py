@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import DATA_DIR, VALID_DIR, parse_line, read_json  # noqa: E402
+from common import DATA_DIR, parse_line  # noqa: E402
 from common import write_text_if_changed  # noqa: E402
 
 

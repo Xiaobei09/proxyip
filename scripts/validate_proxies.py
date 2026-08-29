@@ -60,7 +60,7 @@ from common import (
     EXT_API_SOURCES,
     EXT_CHECK_FILE,
     INDEX_FILE,
-    MAX_HISTORY_RECORDS,
+MAX_HISTORY_RECORDS,
     PER_COUNTRY_LIMIT,
     SPEED_FILE,
     VALID_DIR,
@@ -93,6 +93,9 @@ WORKERS = 500
 RETRY_DELAY = 0.2
 EXT_TIMEOUT = 10
 EXT_WORKERS = 10
+
+QUICK_TIMEOUT = 2.0    # 预筛 TCP 连接超时（秒）
+QUICK_WORKERS = 300    # 预筛并发上限
 
 LATENCY_BUCKETS = [
     (0, 100),
@@ -497,6 +500,69 @@ def parse_entries(lines: list[str]) -> list[tuple[str, str, str]]:
             continue
         entries.append((ip, port, country))
     return entries
+
+
+def classify_quick_candidates(
+    entries: list[tuple[str, str, str]],
+    prev_alive_ipports: set[str],
+) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
+    """把 entries 分成（预连通候选，正常全检）。
+
+    候选 = 上一轮未存活的所有条目（raw 海量枯萎/新建节点）——先做廉价 TCP
+    连通性预筛；上一轮存活者直接走完整 TLS/测速流程。TCP 连不通的端口
+    必然无法提供 HTTPS 代理，跳过无损。
+    """
+    candidates, normal = [], []
+    for entry in entries:
+        eip = f"{entry[0]}:{entry[1]}"
+        if eip not in prev_alive_ipports:
+            candidates.append(entry)
+        else:
+            normal.append(entry)
+    return candidates, normal
+
+
+async def quick_prefilter_stale(
+    entries: list[tuple[str, str, str]],
+    prev_alive_ipports: set[str],
+    args: argparse.Namespace,
+) -> tuple[list[tuple[str, str, str]], int]:
+    """对上一轮未存活的条目做快速 TCP 连通预筛：通者并入全检，不通直接跳过。
+
+    返回（全检条目列表，跳过计数）。
+    """
+    candidates, normal = classify_quick_candidates(entries, prev_alive_ipports)
+    if not candidates:
+        return entries, 0
+    sem = asyncio.Semaphore(QUICK_WORKERS)
+    lock = asyncio.Lock()
+    skipped = 0
+
+    async def probe(entry: tuple[str, str, str]) -> None:
+        nonlocal skipped
+        ok = False
+        try:
+            async with sem:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(entry[0], int(entry[1])),
+                    args.quick_timeout,
+                )
+            ok = True
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        async with lock:
+            if ok:
+                normal.append(entry)
+            else:
+                skipped += 1
+
+    await asyncio.gather(*[probe(c) for c in candidates])
+    return normal, skipped
 
 
 async def open_conn(
@@ -1246,13 +1312,29 @@ async def run(args: argparse.Namespace) -> int:
     if args.limit > 0:
         entries = entries[: args.limit]
     total = len(entries)
-    print(f"Checking {total} proxies (timeout={args.timeout}s, workers={args.workers}) ...")
 
     # 上一轮存活集合须在 write_index 覆盖 index.json 之前读取
     prev_keys = load_prev_alive_keys()
+    prev_ipports = (
+        {k.split("#", 1)[0] for k in prev_keys if "#" in k} if prev_keys else set()
+    )
+    prefiltered = 0
+    if args.quick_prefilter:
+        entries, prefiltered = await quick_prefilter_stale(
+            entries, prev_ipports, args
+        )
+        if prefiltered:
+            print(
+                f"Quick prefilter: skipped {prefiltered} stale-dead entries "
+                f"(TCP probe failed)"
+            )
+    checked_input = len(entries)
+    print(f"Checking {checked_input} proxies (+{prefiltered} prefiltered, "
+          f"timeout={args.timeout}s, workers={args.workers}) ...")
+
     results, by_method, checked, elapsed, ext_stats = await check_entries(entries, args)
 
-    dead = checked - len(results)
+    dead = (checked - len(results)) + prefiltered
     latencies = [lat for _, _, _, _, lat, _, _ in results.values()]
     speeds = [sp for _, _, _, _, _, sp, _ in results.values() if sp is not None]
     print(
@@ -1305,6 +1387,7 @@ async def run(args: argparse.Namespace) -> int:
         "ts": now_ts(),
         "total": total,
         "checked": checked,
+        "prefiltered": prefiltered,
         "alive": len(results),
         "dead": dead,
         "elapsed_s": round(elapsed, 1),
@@ -1343,6 +1426,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-speed", action="store_true", help="Skip speed measurement")
     parser.add_argument("--adaptive-speed", action="store_true", default=True, help="Adapt download window to RTT (default: on)")
     parser.add_argument("--no-adaptive-speed", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--quick-prefilter", action="store_true", default=True,
+        help="Pre-probe entries not alive last run with a fast TCP connect "
+        "before the full TLS check; unreachable ports are skipped without "
+        "wasting the TLS timeout (default: on)",
+    )
+    parser.add_argument("--no-quick-prefilter", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--quick-timeout", type=float, default=QUICK_TIMEOUT,
+        help="TCP connect timeout for the quick prefilter (seconds)",
+    )
     parser.add_argument("-t", "--timeout", type=int, default=TIMEOUT, help="Per-proxy timeout (seconds)")
     parser.add_argument("-w", "--workers", type=int, default=WORKERS, help="Max concurrent checks")
     parser.add_argument("--limit", type=int, default=0, help="Max proxies to check (0 = all)")
@@ -1357,6 +1451,8 @@ def main(argv: list[str] | None = None) -> int:
         args.ext_check = False
     if args.no_adaptive_speed:
         args.adaptive_speed = False
+    if args.no_quick_prefilter:
+        args.quick_prefilter = False
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:

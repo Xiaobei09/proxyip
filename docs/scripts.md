@@ -40,6 +40,8 @@
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 | `--per-country-limit` | `_ltd` 输出每国条数 | 20 |
+| `--quick-prefilter` | 上一轮未存活的条目先做廉价 TCP 连通预筛：连不通（RAW 入口必然死）直接跳过，避免空耗 TLS 超时；通者再走全检 | 开 |
+| `--quick-timeout` | 预筛 TCP 连接超时（秒） | 2 |
 | `--ext-check` | 启用外部 API 多源验证（出口地理 + 双栈标注 + TLS 失败兜底） | 关 |
 | `--ext-timeout` | 外部 API 单源超时（秒） | 10 |
 | `--ext-workers` | 外部 API 并发上限 | 10 |

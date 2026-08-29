@@ -344,7 +344,6 @@ def write_good_files(
 
     # 细分目录：tiers/<tier>/{all.txt,<CC>.txt,sets/<name>.txt}
     # 先清理陈旧产物（组消失/档位清空后残留），再写当前代内容
-    import shutil
 
     tiers_root = valid_dir / "tiers"
     for tier, parts in tier_lines.items():
