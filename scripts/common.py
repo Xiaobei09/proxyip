@@ -346,7 +346,7 @@ def collect_txt_files(valid_dir: Path) -> list[Path]:
 
 def annotate_files(
     files: list[Path],
-    china_set: set[str],
+    china_sets: tuple[set[str], set[str]],
     family_map: dict[str, str],
     rep_map: dict[str, int],
     ip_type_map: dict[str, str],
@@ -354,6 +354,8 @@ def annotate_files(
     uptime_map: dict[str, int] | None = None,
 ) -> int:
     """Annotate all files with suffixes + classification, return lines changed.
+
+    ``china_sets`` 为 ``(cn_set, cnh_set)``，见 annotate_classify._build_china_sets。
 
     Imports ``fill_and_classify`` lazily from ``annotate_classify`` to avoid
     import cycles when this module is loaded at startup.
@@ -372,7 +374,7 @@ def annotate_files(
                 continue
             if line not in cache:
                 cache[line] = fill_and_classify(
-                    line, china_set, family_map, rep_map,
+                    line, china_sets, family_map, rep_map,
                     ip_type_map, exit_map, uptime_map,
                 )
             new_line = cache[line]
@@ -642,6 +644,47 @@ def rewrite_latency(line: str, ms: float | int | None) -> str:
     return out if n else line
 
 
+# ------------------------------------------------------- CN 视角速度估算
+# CN 清单的 ``MB/s`` 必须语义一致=大陆视角。免费大陆拨测（itdog/ping.pe/
+# tcpping.cn/check-host）只给 TCP 建连延迟、不提供吞吐量，故无法实测大陆
+# 速度——任何数值都必然是估算。为避免把海外 runner 实测速度冒充大陆体验
+# （两者路径不同，数值无代表性），CN 清单改用显式标记 ``≈XMB/s`` 的估算
+# 上限：以大陆 RTT 为参照推算单流 TCP 吞吐参考值，再与海外实测速度取小
+# （不号称超过节点真实出口带宽），其余情形删除速度 token 而非保留误导值。
+
+CN_SPEED_REF_MS = 60.0   # 参考 RTT（毫秒），对应 CN_SPEED_BASE_CAP
+CN_SPEED_BASE_CAP = 8.0  # cn_ms≈60ms 时的估算上限（MB/s）
+CN_SPEED_FLOOR = 0.4     # 估算下限（MB/s），防极端高延迟给出夸张小值
+
+_CN_SPEED_RAW_RE = re.compile(r"-(\d+(?:\.\d+)?)MB/s")
+
+
+def _rewrite_cn_speed(line: str, cn_ms: dict | None) -> str:
+    """CN 视图专用：把海外实测速度替换为大陆视角估算上限 ``≈XMB/s``。
+
+    - 无海外速度 → 删除该 token（无数据来源，宁缺勿假）
+    - 无大陆 RTT → 速度语义不明，删除（不再展示海外值）
+    - 有两者 → ``min(海外实测, 以 cn_ms 推算的单流参考上限)``，标记 ``≈``
+    """
+    if "#" not in line:
+        return line
+    m = _CN_SPEED_RAW_RE.search(line)
+    if not m:
+        return line
+    mbps = float(m.group(1))
+    key = line_to_key(line)
+    cn_rtt = (
+        cn_ms.get(key)
+        if isinstance(cn_ms, dict) and isinstance(cn_ms.get(key), (int, float))
+        else None
+    )
+    if not cn_rtt or cn_rtt <= 0:
+        return _CN_SPEED_RAW_RE.sub("", line, count=1)
+    cap = max(CN_SPEED_FLOOR, CN_SPEED_BASE_CAP * (CN_SPEED_REF_MS / cn_rtt))
+    est = round(min(mbps, cap), 1)
+    return _CN_SPEED_RAW_RE.sub(f"-≈{est}MB/s", line, count=1)
+
+
 # ------------------------------------------------------- 备注段规范（唯一出口）
 # 所有工作流追加/清理备注必须经由 normalize_note，禁止各自 ``line += "-TOK"``
 # 拼接——否则多 CI 并发写同一文件时段序漂移、旧 token 无限堆叠
@@ -652,6 +695,7 @@ _NOTE_TYPE_TOKENS = {"DC", "RES", "MOB", "PROXY"}
 _NOTE_TIER_TOKENS = {"fast", "mid", "slow"}
 _NOTE_FAMILY_TOKENS = {"V4", "V6", "DS"}
 _NOTE_SCORE_RE = re.compile(r"^\d{1,3}$")
+_NOTE_UPTIME_RE = re.compile(r"^U\d{1,3}$")
 _NOTE_LAT_RE = re.compile(r"^\d+ms$")
 _NOTE_SPEED_RE = re.compile(r"^\d+(?:\.\d+)?MB/s$")
 
@@ -674,6 +718,7 @@ def _is_known_note_token(s: str) -> bool:
         or _NOTE_STREAMING_RE.match(s) or s in _NOTE_TYPE_TOKENS
         or s == "CF" or s in _NOTE_TIER_TOKENS or s in _NOTE_FAMILY_TOKENS
         or s in ("CN", "CNH") or _NOTE_SCORE_RE.match(s)
+        or _NOTE_UPTIME_RE.match(s)
     )
 
 
@@ -701,7 +746,7 @@ def _parse_note_segs(note: str) -> dict | None:
     b: dict = {
         "lead": lead, "lat": None, "spd": None, "stream": [], "typ": None,
         "cf": False, "tier": None, "fam": None, "cn": False, "cnh": False,
-        "score": None, "other": [],
+        "score": None, "uptime": None, "other": [],
     }
     for s in segs:
         if _NOTE_LAT_RE.match(s):
@@ -725,6 +770,8 @@ def _parse_note_segs(note: str) -> dict | None:
             b["cnh"] = True
         elif _NOTE_SCORE_RE.match(s):
             b["score"] = s
+        elif _NOTE_UPTIME_RE.match(s):
+            b["uptime"] = s
         else:
             b["other"].append(s)
     return b
@@ -735,13 +782,13 @@ def _render_note(head: str, b: dict) -> str:
         b["lead"], b["lat"], b["spd"], *b["stream"],
         b["typ"], "CF" if b["cf"] else None, b["tier"], b["fam"],
         "CN" if (b["cn"] or b["cnh"]) else None,
-        "CNH" if b["cnh"] else None, b["score"],
+        "CNH" if b["cnh"] else None, b["score"], b["uptime"],
     ) if p]
     parts.extend(b["other"])
     return f"{head}#{'-'.join(parts)}"
 
 
-_NOTE_BUCKET_KEYS = ("type", "tier", "family", "score", "streaming", "cf", "cn")
+_NOTE_BUCKET_KEYS = ("type", "tier", "family", "score", "streaming", "cf", "cn", "uptime")
 _BUCKET_TO_KEY = {
     "type": "typ", "tier": "tier", "family": "fam", "score": "score",
     "streaming": "stream",
@@ -758,7 +805,7 @@ def _rebuild_note(line: str, clear: tuple = ()) -> str:
     # 既无延迟也无任何受管 token → 非验证池行（如裸 `#US`），不动
     if b["lat"] is None and not any(
         (b["spd"], b["stream"], b["typ"], b["tier"], b["fam"],
-         b["cn"], b["cnh"], b["score"], b["cf"])
+         b["cn"], b["cnh"], b["score"], b["cf"], b["uptime"])
     ):
         return line
     for bucket in clear:

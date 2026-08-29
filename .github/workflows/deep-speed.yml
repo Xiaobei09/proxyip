@@ -27,9 +27,9 @@ on:
         required: false
         default: "3"
       targets:
-        description: "目标列表：cdnjs,ovh,cf_trace"
+        description: "目标列表：cf_speed,cdnjs,ovh,cf_trace"
         required: false
-        default: "cdnjs,ovh"
+        default: "cf_speed,ovh"
 
 permissions:
   contents: write

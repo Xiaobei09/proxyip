@@ -322,6 +322,10 @@ def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
 
     ``level`` 反映证据强度：任一成功节点拿到 http_code → ``"http"``，
     仅 TCP 连通 → ``"tcp"``。
+
+    ``ok_nodes``/``nodes``/``ratio``：成功节点数与总节点数及比值——
+    供 merge_verdict 做"单节点假阳性"抑制（例如仅 1/18 大陆节点可达
+    不应独立支撑 reachable 判定）。
     """
     out: dict = {}
     for tn in range(1, n_targets + 1):
@@ -330,20 +334,26 @@ def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
         if not real:
             out[tn] = {"status": "error", "ok": False, "ms": None,
                        "error": "no records" if not recs else "node_error",
-                       "level": None}
+                       "level": None, "ok_nodes": 0, "nodes": 0,
+                       "ratio": None}
             continue
         oks = [(r, itdog_rec_ok(r)) for r in real]
         good = [(r, ok) for r, ok in oks if ok[0] is True]
         if good:
             mss = [ms for _, (_, ms, _lv) in good if ms]
             level = "http" if any(lv == "http" for _, (_o, _m, lv) in good) else "tcp"
-            out[tn] = {"status": "ok", "ok": True,
-                       "ms": round(min(mss), 1) if mss else None, "error": "",
-                       "level": level}
+            out[tn] = {
+                "status": "ok", "ok": True,
+                "ms": round(min(mss), 1) if mss else None, "error": "",
+                "level": level,
+                "ok_nodes": len(good), "nodes": len(real),
+                "ratio": round(len(good) / len(real), 3),
+            }
         else:
             out[tn] = {"status": "fail", "ok": False, "ms": None,
                        "error": f"unreachable ({len(real)} nodes)",
-                       "level": None}
+                       "level": None, "ok_nodes": 0, "nodes": len(real),
+                       "ratio": 0.0}
     return out
 
 

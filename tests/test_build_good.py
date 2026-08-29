@@ -70,13 +70,13 @@ class TestMaps(unittest.TestCase):
         }}
         self.assertEqual(bg.build_china_set(data), {"1.2.3.4:443#US"})
 
-    def test_is_cn_reachable_token_fallback(self):
+    def test_is_cn_reachable_current_only(self):
         china = {"1.2.3.4:443#US"}
         # judged reachable this run
         self.assertTrue(bg.is_cn_reachable(
             "1.2.3.4:443#US", "1.2.3.4:443#US-80ms", china))
-        # historical -CN annotation, absent from current verdicts
-        self.assertTrue(bg.is_cn_reachable(
+        # historical -CN annotation, absent from current verdicts → 不再兜底
+        self.assertFalse(bg.is_cn_reachable(
             "5.6.7.8:443#JP", "5.6.7.8:443#JP-80ms-CN-V6", china))
         # neither
         self.assertFalse(bg.is_cn_reachable(
@@ -141,12 +141,12 @@ class TestFilterRank(unittest.TestCase):
             ["9.0.0.3", "9.0.0.1", "9.0.0.2"],
         )
 
-    def test_historical_cn_token_accepted(self):
+    def test_historical_cn_token_rejected(self):
         lines = "7.7.7.7:443#DE-120ms-3.00MB/s-CN-V6-88\n"
-        # key absent from current china verdicts, line carries -CN
+        # key absent from current china verdicts：即使行带 -CN 也被拒（新策略）
         out = bg.filter_rank(lines, set(),
                              {"7.7.7.7:443#DE": {"score": 88, "risk": "low"}})
-        self.assertEqual(len(out), 1)
+        self.assertEqual(len(out), 0)
 
     def test_lines_kept_verbatim(self):
         line = "1.1.1.1:443#🇺🇸US-100ms-5.00MB/s-CN-V6-GPT-90"
@@ -260,7 +260,7 @@ class TestWriteGoodFiles(unittest.TestCase):
             "2.2.2.2:443#US-400ms-1.00MB/s-CN-slow-85\n"
             "3.3.3.3:443#JP-80ms-4.00MB/s-CN-mid-90\n"
         )
-        china = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
+        china = {"1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#JP"}
         rep = {k: {"score": 90, "risk": "low"} for k in
                ("1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#JP")}
         with tempfile.TemporaryDirectory() as tmp:

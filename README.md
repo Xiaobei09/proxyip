@@ -88,6 +88,13 @@ data/valid/sets/hot/all.txt                 # 热门国家集合（验证后）
 data/download/all.txt                       # 全量去重清单（未验证）
 ```
 
+> **关于"不同国家速度差异大"**：日常轮中的 MB/s 是小文件短窗口采样，同一 CDN
+> 本地化边缘下同国趋同、跨国差异明显属正常现象；需要精确对比时以
+> `data/output/chart_country_speed.svg`（各国中位速度）和深测
+> （`scripts/deep_speed.py`，默认 `speed.cloudflare.com` 25MB 大文件多流，
+> `cf_speed,ovh` 目标）为准——深测的意义是**在同一国家内拉开真实带宽差异**，
+> 而不是消除国家间线路差距（那是真实的主干网延迟/损耗，无法用节点选择抹平）。
+
 ## 中国大陆使用建议
 
 - **优先消费**：`data/valid/all_cn_stable.txt`（连续 ≥2 轮大陆可达，抗误判/churn）、

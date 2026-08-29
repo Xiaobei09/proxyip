@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from common import merge_note_tokens, normalize_note
+from common import _rewrite_cn_speed, merge_note_tokens, normalize_note
 
 
 class TestNormalizeNote(unittest.TestCase):
@@ -69,6 +69,53 @@ class TestNormalizeNote(unittest.TestCase):
     def test_unknown_segments_kept_at_end(self):
         line = "1.2.3.4:443#🇺🇸US-50ms-CN-XYZ"
         self.assertEqual(normalize_note(line), f"{line}")
+
+    def test_uptime_bucket_collapses_stacked(self):
+        """多轮累积的 -U<NN> 收敛为最右（最新）一条。"""
+        line = (
+            "1.2.3.4:443#🇺🇸US-50ms-5.00MB/s-DC-CF-mid-V4-CN-77"
+            "-U50-U33-U25-U20-U17-U18-U15-U14-U13-U16-U12-U11"
+        )
+        self.assertEqual(
+            normalize_note(line),
+            "1.2.3.4:443#🇺🇸US-50ms-5.00MB/s-DC-CF-mid-V4-CN-77-U11",
+        )
+
+    def test_uptime_merge_replaces_value(self):
+        line = "1.2.3.4:443#🇺🇸US-50ms-CN-77-U11"
+        self.assertEqual(
+            merge_note_tokens(line, "U92"),
+            "1.2.3.4:443#🇺🇸US-50ms-CN-77-U92",
+        )
+        # 同值幂等
+        self.assertEqual(
+            merge_note_tokens(line, "U11"),
+            "1.2.3.4:443#🇺🇸US-50ms-CN-77-U11",
+        )
+
+    def test_rewrite_cn_speed(self):
+        cn_ms = {"1.2.3.4:443#US": 236.4}
+        # 有大陆延迟：替换为估算 ≈（min(5.0, 8*60/236.4≈2.03)）
+        self.assertEqual(
+            _rewrite_cn_speed("1.2.3.4:443#US-42ms-5.00MB/s-fast-90", cn_ms),
+            "1.2.3.4:443#US-42ms-≈2.0MB/s-fast-90",
+        )
+        # 无大陆延迟观测 → 速度语义不明，删除 token
+        self.assertEqual(
+            _rewrite_cn_speed("2.2.2.2:443#US-42ms-5.00MB/s-fast-90", cn_ms),
+            "2.2.2.2:443#US-42ms-fast-90",
+        )
+        # 无速度 token：原样
+        self.assertEqual(
+            _rewrite_cn_speed("1.2.3.4:443#US-42ms-fast-90", cn_ms),
+            "1.2.3.4:443#US-42ms-fast-90",
+        )
+        # 大陆延迟低 → 参考上限高，海外实测仍为上限（min 语义）
+        cn_fast = {"1.2.3.4:443#US": 30.0}
+        self.assertEqual(
+            _rewrite_cn_speed("1.2.3.4:443#US-42ms-5.00MB/s-fast-90", cn_fast),
+            "1.2.3.4:443#US-42ms-≈5.0MB/s-fast-90",
+        )
 
     def test_idempotent_on_messy_real_lines(self):
         messy = (

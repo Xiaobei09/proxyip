@@ -100,6 +100,8 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("plain", "https://raw.githubusercontent.com/ChatBotPlus/cf-proxyips/main/list.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy%26country.txt"),
+    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy.txt"),
+    ("plain", "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt"),
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
 DEFAULT_EXTRA_PORT = "443"

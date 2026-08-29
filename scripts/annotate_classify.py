@@ -53,13 +53,22 @@ def speed_tier(note: str) -> str:
     return "slow"
 
 
-def _build_china_set(data: dict) -> set[str]:
-    """``china.json`` → set of keys with ``verdict == "reachable"``."""
-    result = set()
+def _build_china_sets(data: dict) -> tuple[set[str], set[str]]:
+    """``china.json`` → ``(cn_set, cnh_set)``。
+
+    - ``cn_set``：verdict == ``reachable``（-CN 归属，此集合内的行得 -CN）
+    - ``cnh_set``：level == ``http``（应用层确认，-CNH，不论 verdict）
+    """
+    cn_set: set[str] = set()
+    cnh_set: set[str] = set()
     for key, entry in data.get("proxies", {}).items():
+        if not isinstance(entry, dict):
+            continue
         if entry.get("verdict") == "reachable":
-            result.add(key)
-    return result
+            cn_set.add(key)
+        if entry.get("level") == "http":
+            cnh_set.add(key)
+    return cn_set, cnh_set
 
 
 def _build_family_map(data: dict) -> dict[str, str]:
@@ -101,7 +110,7 @@ def _build_exit_map(
 
 def fill_and_classify(
     line: str,
-    china_set: set[str],
+    china_sets: tuple[set[str], set[str]],
     family_map: dict[str, str],
     rep_map: dict[str, int],
     ip_type_map: dict[str, str],
@@ -110,9 +119,10 @@ def fill_and_classify(
 ) -> str:
     """Fill missing suffixes and append classification tokens.
 
-    All ``has_token`` checks use ``out`` (the evolving line) rather than the
-    original ``note``, so tokens appended during the same call are detected
-    and duplicates are prevented.
+    ``china_sets`` = ``(cn_set, cnh_set)``：-CN 严格只给当期 verdict 为
+    reachable 的 key；其余一律撤销（含历史累积的失效 -CN）；-CNH 按应用层
+    HTTP 确认集保留。其余 token 的 ``has_token`` 检查使用 ``out``（演进的
+    行）而非原始 ``note``，避免同调用内重复追加。
     """
     parsed = parse_line(line)
     if not parsed:
@@ -130,9 +140,17 @@ def fill_and_classify(
         if exit_cc:
             out = upsert_exit_region(out, exit_cc)
 
-    # CN token
-    if key in china_set and not has_token(out, "CN"):
-        out += "-CN"
+    # CN token（互斥桶：以当期可达判定为准，先清后设）。
+    # 历史实现只增不减——可达集随轮变动却从不移除失效的 -CN，
+    # 导致 all.txt 累积上万条过期标志（当前仅 112/13817 真可达）。
+    # 这里严格交战：不在当期 reachable 即撤销 -CN（及蕴含其上的 -CNH）；
+    # 应用层 HTTP 确认（-CNH）单独按 cnh_set 保留，不受 verdict 牵连。
+    cn_set, cnh_set = china_sets
+    out = clear_note_buckets(out, "cn")
+    if key in cn_set:
+        out = merge_note_tokens(out, "CN")
+    if key in cnh_set:
+        out = merge_note_tokens(out, "CNH")
 
     # V4 / V6 / DS（互斥桶：先清后设，权威源替换旧值）
     family = family_map.get(key, "")
@@ -162,11 +180,12 @@ def fill_and_classify(
     if tier != "unknown":
         out = merge_note_tokens(clear_note_buckets(out, "tier"), tier)
 
-    # uptime%（7d 存活率，取整；无观测则不加）
+    # uptime%（7d 存活率，取整；无观测则不加）。互斥桶：同一行只保留
+    # 最新一次探测的 U<NN>，旧值随 normalize_note 自动淘汰。
     if uptime_map:
         pct = uptime_map.get(key)
-        if pct is not None and not has_token(out, f"U{pct}"):
-            out += f"-U{pct}"
+        if pct is not None:
+            out = merge_note_tokens(out, f"U{pct}")
 
     return out
 
@@ -193,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     uptime_data = read_json(quality_dir / "uptime.json")
 
     # build maps
-    china_set = _build_china_set(china_data)
+    cn_set, cnh_set = _build_china_sets(china_data)
     family_map = _build_family_map(family_data)
     rep_map = _build_rep_map(rep_data)
     ip_type_map = _build_ip_type_map(ipinfo)
@@ -207,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     print(
-        f"Maps: cn={len(china_set)} family={len(family_map)} "
+        f"Maps: cn={len(cn_set)} cnh={len(cnh_set)} family={len(family_map)} "
         f"rep={len(rep_map)} "
         f"ip_type={len(ip_type_map)} exit={len(exit_map)} "
         f"uptime={len(uptime_map)}"
@@ -220,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     total = annotate_files(
-        files, china_set, family_map, rep_map, ip_type_map,
+        files, (cn_set, cnh_set), family_map, rep_map, ip_type_map,
         exit_map, uptime_map,
     )
     print(f"Done: {len(files)} files, {total} lines updated")
