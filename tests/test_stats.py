@@ -116,15 +116,14 @@ class TestBuilders(unittest.TestCase):
                 svg_ok(svg)
 
     def test_empty_inputs_placeholders(self):
-        self.assertIn("No data", gs.build_combo([], []))
-        self.assertIn("No latency/speed", gs.build_latency_speed({}))
-        self.assertIn("No data", gs.build_country({}))
-        self.assertIn("No set data", gs.build_sets({}))
-        self.assertIn("No CN data", gs.build_cn({}))
-        self.assertIn("No family data", gs.build_family({}))
-        self.assertIn("No reputation data", gs.build_rep({}))
-        self.assertIn("No source data", gs.build_source_avail({}))
-        self.assertIn("No source stats yet", gs.build_source_stats({}))
+        self.assertIn("暂无数据", gs.build_combo([], []))
+        self.assertIn("暂无延迟/速度", gs.build_latency_speed({}))
+        self.assertIn("暂无子集数据", gs.build_sets({}))
+        self.assertIn("暂无大陆可达性", gs.build_cn({}))
+        self.assertIn("暂无出口族数据", gs.build_family({}))
+        self.assertIn("暂无信誉分数据", gs.build_rep({}))
+        self.assertIn("暂无信誉源数据", gs.build_source_avail({}))
+        self.assertIn("暂无信誉源统计", gs.build_source_stats({}))
 
     def test_chart_latency_speed_has_bars_and_labels(self):
         svg = gs.build_latency_speed(self.META)
@@ -141,13 +140,13 @@ class TestBuilders(unittest.TestCase):
 
     def test_legend_shows_latest_value(self):
         svg = gs.build_combo(self.HISTORY, self.VALID_HISTORY)
-        self.assertIn("unique 110", svg)
-        self.assertIn("alive rate", svg)
+        self.assertIn("去重 110", svg)
+        self.assertIn("存活率", svg)
 
     def test_cn_chart_sorted_by_count(self):
         svg = gs.build_cn(self.CN_DATA)
         svg_ok(svg)
-        self.assertIn("reachable", svg)
+        self.assertIn("可达", svg)
         self.assertIn("uncertain", svg)
 
 

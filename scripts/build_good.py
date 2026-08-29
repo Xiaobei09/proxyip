@@ -42,7 +42,7 @@ from common import (
     LATENCY_RE,
     REPUTATION_FILE,
     SPEED_RE,
-    has_token,
+    
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
@@ -133,10 +133,13 @@ def build_cn_ms_map(data: dict) -> dict[str, float]:
 
 
 def is_cn_reachable(key: str | None, line: str, china_set: set[str]) -> bool:
-    """CN-reachable per repo convention: judged ``reachable`` this run, or
-    carrying a historical ``-CN`` annotation (same rule as ``all_cn.txt``).
+    """CN-reachable per repo convention: judged ``reachable`` this run only.
+
+    不在当期 `china.json` 可达集内的行即使历史带 ``-CN`` 也不收——
+    与 all_cn.txt 同策略（过期 -CN 不再兜底），消除失效标志残留。
+    参数 ``line`` 保留以兼容调用方签名。
     """
-    return key in china_set or has_token(line, "CN")
+    return key in china_set
 
 
 def filter_rank(

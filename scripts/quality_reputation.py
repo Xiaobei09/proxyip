@@ -47,6 +47,8 @@ FFRAUD_URL = "https://api.ffraud.com/public/ip/{ip}"
 FFRAUD_TIMEOUT = 8
 WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
 WHATISMYIP_TIMEOUT = 8
+IPWHOIS_URL = "https://ipwhois.app/json/{ip}"
+IPWHOIS_TIMEOUT = 8
 FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
@@ -116,6 +118,13 @@ WHATISMYIP_FLAG_PENALTIES = {
     "is_hosting": 15,
     "is_blacklisted": 30,
 }
+IPWHOIS_FLAG_PENALTIES = {
+    "anonymous": 10,
+    "proxy": 25,
+    "vpn": 30,
+    "tor": 45,
+    "hosting": 15,
+}
 STATIC_LIST_SCORES = {
     "abuse_list": 60,   # is_abuse（历史滥用，强信号）
     "ipsum": 55,        # is_listed（3+ 黑名单交叉确认）
@@ -142,13 +151,14 @@ REPUTATION_WEIGHTS = {
     "ip2location": 5,
     "vpn_asn": 3,
     "resproxy_asn": 2,
+    "ipwhois": 6,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
     "blackbox", "otx", "ipsum",
     "ipapi_is", "ipdata", "whatismyip", "dc_asn",
     "abuse_list", "vpn_asn", "resproxy_asn",
-    "proxycheck", "ip2location",
+    "proxycheck", "ip2location", "ipwhois",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -161,6 +171,7 @@ SOURCE_PACING = {
     "whatismyip": (6, 0.2),
     "proxycheck": (8, 0.2),
     "ip2location": (6, 0.2),
+    "ipwhois": (6, 0.2),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -539,6 +550,34 @@ def ip2location_lookup_sync(ip: str) -> dict | None:
     return {"is_proxy": bool(data.get("is_proxy"))}
 
 
+def ipwhois_lookup_sync(ip: str) -> dict | None:
+    """Free keyless ``ipwhois.app`` security flags + connection type."""
+    req = urllib.request.Request(
+        IPWHOIS_URL.format(ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=IPWHOIS_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict) or data.get("success") is False:
+        return None
+    conn = data.get("connection") or {}
+    sec = data.get("security")
+    sec = sec if isinstance(sec, dict) else {}
+    out = {
+        "security": {
+            k: bool(sec.get(k))
+            for k in ("anonymous", "proxy", "vpn", "tor", "hosting")
+        },
+        "connection_type": conn.get("type"),
+    }
+    asn = norm_asn(conn.get("asn"))
+    if asn:
+        out["asn"] = asn
+    if not any(out["security"].values()) and not conn.get("type") and not asn:
+        return None
+    return out
+
+
 async def fetch_text_list(url: str) -> set[str]:
     """Fetch a static list; any failure returns an empty set (fail-open)."""
     out: set[str] = set()
@@ -781,6 +820,17 @@ def source_score(name: str, signal) -> int | None:
         if not penalty:
             return None
         return max(0, min(100, 100 - penalty))
+    if name == "ipwhois":
+        sec = signal.get("security") if isinstance(
+            signal.get("security"), dict
+        ) else {}
+        penalty = sum(
+            amt for flag, amt in IPWHOIS_FLAG_PENALTIES.items()
+            if sec.get(flag)
+        )
+        if not penalty and not signal.get("asn"):
+            return None
+        return max(0, min(100, 100 - penalty))
     if name in STATIC_LIST_SCORES:
         flag = {
             "abuse_list": "is_abuse",
@@ -793,10 +843,308 @@ def source_score(name: str, signal) -> int | None:
     return None
 
 
+# --- 统一标记投票 (cross-source consensus) -------------------------------------
+# 语义维度：proxy/vpn/tor/hosting(数据中心)/mobile/abuse(滥用)/listed(黑名单
+# 列表)/scraper(抓取)/crawler(爬虫)/anonymous(匿名)。每个源对它有意见的维度
+# 投 +1/-1 票，投票权重 = REPUTATION_WEIGHTS[name]；正票总权重大于负票总权重
+# 才认定该维度为真，打平视为无结论（不扣分）。这替代了"每个源各自折算 0-100
+# 分再按权平均"的做法——一个 proxy 标记如今由多个源统一表决，单源误报会被群
+# 体否定，也避免了大权重的单源独断。
+FLAG_PENALTIES = {
+    "tor": 40,
+    "proxy": 28,
+    "vpn": 22,
+    "hosting": 10,
+    "abuse": 35,
+    "listed": 30,
+    "scraper": 12,
+    "crawler": 5,
+    "anonymous": 8,
+}
+_HOSTING_TYPES = ("hosting", "datacenter", "cloud")
+
+
+def _flag_opinions(name: str, signal) -> dict:
+    """``{family: bool}`` votes cast by one source; absent family = abstain."""
+    if not isinstance(signal, dict):
+        return {}
+    if name == "netcoffee":
+        opinions = {
+            "tor": signal.get("is_tor"),
+            "proxy": signal.get("is_proxy"),
+            "vpn": signal.get("is_vpn"),
+            "hosting": signal.get("is_datacenter"),
+            "mobile": signal.get("is_mobile"),
+            "crawler": signal.get("is_crawler"),
+            "abuse": signal.get("is_abuser"),
+        }
+        if (signal.get("company_type") or signal.get("asn_kind")) in \
+                _HOSTING_TYPES:
+            opinions["hosting"] = True
+        at = parse_abuser_score(signal.get("abuser_score"))
+        if at is not None and at >= ABUSER_SCORE_THRESHOLD:
+            opinions["abuse"] = True
+        return {f: v for f, v in opinions.items() if isinstance(v, bool)}
+    if name == "ncgy":
+        if signal.get("clean"):
+            return {f: False for f in ("tor", "proxy", "vpn", "hosting",
+                                       "anonymous")}
+        return {
+            f: v for f, v in {
+                "tor": signal.get("is_tor"),
+                "proxy": signal.get("is_proxy"),
+                "vpn": signal.get("is_vpn"),
+                "hosting": signal.get("is_hosting"),
+                "anonymous": signal.get("is_anonymous"),
+            }.items() if isinstance(v, bool)
+        }
+    if name == "ip-api":
+        return {
+            f: v for f, v in {
+                "proxy": signal.get("proxy"),
+                "hosting": signal.get("hosting"),
+                "mobile": signal.get("mobile"),
+            }.items() if isinstance(v, bool)
+        }
+    if name == "ipdata":
+        sec = signal.get("security") if isinstance(
+            signal.get("security"), dict
+        ) else {}
+        opinions = {
+            "proxy": bool(signal.get("is_proxy") or sec.get("proxy")),
+            "vpn": sec.get("vpn"),
+            "tor": sec.get("tor"),
+            "hosting": bool(signal.get("is_hosting") or sec.get("hosting")),
+            "anonymous": sec.get("anonymous"),
+        }
+        return {f: v for f, v in opinions.items() if isinstance(v, bool)}
+    if name == "getipintel":
+        return {}
+    if name == "ipapi_is":
+        opinions = {
+            "tor": signal.get("is_tor"),
+            "proxy": signal.get("is_proxy"),
+            "vpn": signal.get("is_vpn"),
+            "hosting": signal.get("is_datacenter"),
+            "mobile": signal.get("is_mobile"),
+            "crawler": signal.get("is_crawler"),
+            "abuse": signal.get("is_abuser"),
+        }
+        if (signal.get("company_type") or signal.get("asn_type")) in \
+                _HOSTING_TYPES:
+            opinions["hosting"] = True
+        for key in ("company_abuser_score", "asn_abuser_score"):
+            at = parse_abuser_score(signal.get(key))
+            if at is not None and at >= ABUSER_SCORE_THRESHOLD:
+                opinions["abuse"] = True
+        return {f: v for f, v in opinions.items() if isinstance(v, bool)}
+    if name == "ipquery":
+        return {
+            f: v for f, v in {
+                "tor": signal.get("is_tor"),
+                "proxy": signal.get("is_proxy"),
+                "vpn": signal.get("is_vpn"),
+                "hosting": signal.get("is_datacenter"),
+                "mobile": signal.get("is_mobile"),
+            }.items() if isinstance(v, bool)
+        }
+    if name == "ffraud":
+        opinions = {
+            "tor": signal.get("is_tor"),
+            "proxy": signal.get("is_proxy"),
+            "vpn": signal.get("is_vpn"),
+            "hosting": signal.get("is_hosting"),
+            "mobile": signal.get("is_mobile"),
+            "abuse": bool(signal.get("is_abuser") or
+                          signal.get("recent_abuse") or
+                          signal.get("is_residential_proxy")),
+        }
+        if (signal.get("connection_type") or "") == "hosting":
+            opinions["hosting"] = True
+        return {f: v for f, v in opinions.items() if isinstance(v, bool)}
+    if name == "whatismyip":
+        return {
+            f: v for f, v in {
+                "tor": signal.get("is_tor"),
+                "proxy": signal.get("is_proxy"),
+                "vpn": signal.get("is_vpn"),
+                "hosting": signal.get("is_hosting"),
+                "listed": signal.get("is_blacklisted"),
+            }.items() if isinstance(v, bool)
+        }
+    if name == "ipwhois":
+        sec = signal.get("security") if isinstance(
+            signal.get("security"), dict
+        ) else {}
+        opinions = {
+            "tor": sec.get("tor"),
+            "proxy": sec.get("proxy"),
+            "vpn": sec.get("vpn"),
+            "hosting": sec.get("hosting"),
+            "anonymous": sec.get("anonymous"),
+        }
+        if (signal.get("connection_type") or "").lower() in _HOSTING_TYPES:
+            opinions["hosting"] = True
+        return {f: v for f, v in opinions.items() if isinstance(v, bool)}
+    if name == "blackbox":
+        cls = signal.get("classification") or ""
+        if cls == "mobile":
+            return {"mobile": True}
+        if cls == "residential":
+            return {"tor": False, "proxy": False, "vpn": False,
+                    "hosting": False, "mobile": True}
+        if cls == "business":
+            return {"tor": False, "proxy": False, "vpn": False}
+        if cls in ("tor", "vpn", "privacy_relay", "hosting"):
+            return {
+                "tor": cls == "tor",
+                "proxy": cls == "privacy_relay",
+                "vpn": cls == "vpn",
+                "hosting": cls == "hosting",
+            }
+        return {}
+    if name == "otx":
+        if int(signal.get("pulse_count") or 0) > 0 or \
+           int(signal.get("reputation") or 0) < 0:
+            return {"listed": True}
+        return {}
+    if name == "proxycheck":
+        return {
+            f: v for f, v in {
+                "tor": signal.get("is_tor"),
+                "proxy": signal.get("is_proxy"),
+                "vpn": signal.get("is_vpn"),
+                "hosting": signal.get("is_hosting"),
+                "scraper": signal.get("is_scraper"),
+            }.items() if isinstance(v, bool)
+        }
+    if name == "ip2location":
+        if signal.get("is_proxy"):
+            return {"proxy": True}
+        return {}
+    if name == "abuse_list":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "ipsum":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "dc_asn":
+        return {"hosting": True} if signal.get("is_hosting") else {}
+    if name == "vpn_asn":
+        return {"vpn": True} if signal.get("is_vpn") else {}
+    if name == "resproxy_asn":
+        return {"proxy": True} if signal.get("is_proxy") else {}
+    return {}
+
+
+def consensus_flags(signals: dict, weights: dict) -> dict:
+    """Vote ``{family: bool|None}`` over all responding sources.
+
+    Positive votes outweigh negative votes (weighted majority); a tie yields
+    ``None`` (benefit of the doubt, family treated as not flagged).
+    """
+    votes: dict = {}
+    for name, signal in signals.items():
+        if not isinstance(signal, dict):
+            continue
+        for family, value in _flag_opinions(name, signal).items():
+            votes.setdefault(family, {})[name] = value
+    flags: dict = {}
+    for family, voters in votes.items():
+        pos = sum(
+            weights.get(name, 0) for name, v in voters.items() if v is True
+        )
+        neg = sum(
+            weights.get(name, 0) for name, v in voters.items() if v is False
+        )
+        if pos > neg:
+            flags[family] = True
+        elif neg > pos:
+            flags[family] = False
+        else:
+            flags[family] = None
+    return flags
+
+
+def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
+    """Continuous-risk sources → 0..100 penalty (flags handled by consensus)."""
+    if name == "netcoffee":
+        trust = signal.get("trust_score")
+        if isinstance(trust, (int, float)):
+            return round(max(0, min(100, 100 - trust)))
+        return None
+    if name == "getipintel":
+        prob = signal.get("probability")
+        if not isinstance(prob, (int, float)) or not 0 <= prob <= 1:
+            return None
+        return round(prob * 100)
+    if name == "otx":
+        rep = int(signal.get("reputation") or 0)
+        pulses = int(signal.get("pulse_count") or 0)
+        return min(rep * 5, 80) + min(pulses * 2, 20)
+    for key in ("risk_score", "fraud_score", "score", "risk"):
+        value = signal.get(key)
+        if isinstance(value, (int, float)):
+            return round(max(0, min(100, value)))
+    return None
+
+
+def continuous_penalty(
+    signals: dict, weights: dict
+) -> tuple[int | None, list[str]]:
+    """Weighted blend of numeric risk penalties over responding sources."""
+    parts = []
+    for name, signal in signals.items():
+        if not isinstance(signal, dict):
+            continue
+        penalty = _numeric_risk_penalty(name, signal)
+        if penalty is None:
+            continue
+        weight = weights.get(name, 0)
+        if weight > 0:
+            parts.append((weight, penalty, name))
+    if not parts:
+        return None, []
+    total = sum(w for w, _p, _n in parts)
+    merged = round(sum(w * p for w, p, _n in parts) / total)
+    return merged, [name for _w, _p, name in parts]
+
+
+def vote_reputation(
+    signals: dict, weights: dict
+) -> tuple[int | None, list[str], list[str], list[str]]:
+    """0-100 reputation from cross-source consensus + numeric risk blend.
+
+    Returns ``(score, responding, flagged, numeric_sources)``: ``flagged`` is
+    the ordered list of semantic families confirmed by majority vote;
+    ``numeric_sources`` are the sources contributing continuous risk.
+    """
+    responding = sorted(
+        (n for n, s in signals.items() if isinstance(s, dict))
+    )
+    if not responding:
+        return None, [], [], []
+    flags = consensus_flags(signals, weights)
+    penalty = sum(FLAG_PENALTIES.get(f, 0) for f, v in flags.items()
+                  if v is True)
+    numeric, numeric_sources = continuous_penalty(signals, weights)
+    if numeric is not None:
+        penalty += numeric
+    score = 100 - penalty
+    if flags.get("mobile") is True and not any(flags.get(f) for f in
+            ("proxy", "vpn", "tor", "listed", "abuse", "hosting")):
+        score += 5
+    score = max(0, min(100, round(score)))
+    flagged = sorted(f for f, v in flags.items() if v is True)
+    return score, responding, flagged, numeric_sources
+
+
 def weighted_reputation(
     signals: dict, weights: dict
 ) -> tuple[int | None, list[str]]:
-    """Weighted merge of per-source cleanliness scores over responding sources."""
+    """Weighted merge of per-source cleanliness scores over responding sources.
+
+    Legacy path retained for numeric-risk blending; the primary reputation
+    path is ``vote_reputation`` (cross-source flag consensus).
+    """
     parts = []
     for name, signal in signals.items():
         score = source_score(name, signal)
@@ -816,10 +1164,15 @@ def weighted_reputation(
 def compute_reputation(
     signals: dict, abuse: dict | None, weights: dict
 ) -> int | None:
-    """0-100 multi-source reputation; abuse score (100-score) takes precedence."""
+    """0-100 multi-source reputation; abuse score (100-score) takes precedence.
+
+    Primary path is ``vote_reputation`` (cross-source flag consensus +
+    continuous-risk blend); ``weighted_reputation`` is the legacy per-source
+    weighted merge kept for numeric labeling.
+    """
     if abuse and isinstance(abuse.get("score"), (int, float)):
         return max(0, min(100, 100 - round(abuse["score"])))
-    score, _sources = weighted_reputation(signals, weights)
+    score, _responding, _flagged, _numeric = vote_reputation(signals, weights)
     return score
 
 
@@ -1050,6 +1403,9 @@ async def lookup_all_risk(
     if "ip2location" in sources:
         w, d = pacing.get("ip2location", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ip2location", ip2location_lookup_sync, workers=w, delay=d))
+    if "ipwhois" in sources:
+        w, d = pacing.get("ipwhois", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("ipwhois", ipwhois_lookup_sync, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:

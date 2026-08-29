@@ -100,7 +100,7 @@ class TestIpTypeAndRisk(unittest.TestCase):
         )
         self.assertEqual(
             qc.derive_risk({"ip-api": {"proxy": True, "hosting": False}},
-                           None, w), "low"
+                           None, w), "medium"
         )
         self.assertEqual(
             qc.derive_risk({"ip-api": {"proxy": False, "hosting": False}},
@@ -161,8 +161,10 @@ class TestBuildIpinfo(unittest.TestCase):
         nc = {"9.9.9.9": {"netcoffee": {"trust_score": 42,
                                           "is_datacenter": True}}}
         info = qc.build_ipinfo_map(results, geo, {}, nc)["1.2.3.4:443#US"]
-        self.assertEqual(info["reputation"], 67)
+        # 连续风险 58 + 共识 hosting 标记 10 → 32
+        self.assertEqual(info["reputation"], 32)
         self.assertEqual(info["reputation_source"], "multi")
+        self.assertEqual(info["rep_flags"], ["hosting"])
         self.assertEqual(info["risk"], "medium")
         self.assertEqual(info["risk_flags"]["netcoffee"]["trust_score"], 42)
 
@@ -362,9 +364,11 @@ class TestReputation(unittest.TestCase):
 
     def test_netcoffee_flag_penalty(self):
         nc = {"netcoffee": {"is_abuser": True, "is_tor": True, "is_vpn": True}}
-        self.assertEqual(qc.compute_reputation(nc, None, self.W), 0)
+        # 共识标记：abuse 35 + tor 40 + vpn 22 = 97 → 3
+        self.assertEqual(qc.compute_reputation(nc, None, self.W), 3)
         nc = {"netcoffee": {"is_datacenter": True}}
-        self.assertEqual(qc.compute_reputation(nc, None, self.W), 85)
+        # 共识 hosting 标记 10 → 90
+        self.assertEqual(qc.compute_reputation(nc, None, self.W), 90)
 
     def test_source_score_per_source(self):
         self.assertEqual(
@@ -424,11 +428,73 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.weighted_reputation({}, self.W), (None, []))
 
     def test_ipapi_only(self):
+        # 共识一致：proxy 28 + hosting 10 → 62
         self.assertEqual(
             qc.compute_reputation(
-                {"ip-api": {"proxy": True, "hosting": True}}, None, self.W), 65
+                {"ip-api": {"proxy": True, "hosting": True}}, None, self.W), 62
         )
         self.assertIsNone(qc.compute_reputation({}, None, self.W))
+
+    def test_consensus_negation_vetoes_proxy(self):
+        """单源报 proxy 但他人明确说非代理 → 共识否定，不扣分。"""
+        sigs = {
+            "netcoffee": {"is_proxy": True},
+            "ip-api": {"proxy": False},
+            "ncgy": {"clean": True},
+        }
+        self.assertEqual(qc.compute_reputation(sigs, None, self.W), 100)
+        _, responding, flagged, _ = qc.vote_reputation(sigs, self.W)
+        self.assertEqual(flagged, [])
+        self.assertEqual(set(responding), {"ncgy", "netcoffee", "ip-api"})
+
+    def test_consensus_two_sources_agree_on_proxy(self):
+        """多源一致报 proxy → 统一扣分。"""
+        sigs = {
+            "netcoffee": {"is_proxy": True},
+            "proxycheck": {"is_proxy": True},
+        }
+        score, _r, flagged, _n = qc.vote_reputation(sigs, self.W)
+        self.assertEqual(score, 72)
+        self.assertEqual(flagged, ["proxy"])
+
+    def test_consensus_clean_source_abstains_on_unknown(self):
+        """ncgy clean 只否定它检查过的家族；对无关家族不投票。"""
+        sigs = {
+            "netcoffee": {"is_vpn": True, "is_tor": True},
+            "ncgy": {"clean": True},
+        }
+        score, _r, flagged, _n = qc.vote_reputation(sigs, self.W)
+        self.assertIn("vpn", flagged)
+        self.assertIn("tor", flagged)
+
+    def test_consensus_disagreement_tie_benefit_of_doubt(self):
+        # 权重相等的正负票打平 → 无结论，不扣分
+        sigs = {
+            "proxycheck": {"is_vpn": True, "is_proxy": True},
+            "ffraud": {"is_vpn": False, "is_proxy": False},
+        }
+        score, _r, flagged, _n = qc.vote_reputation(sigs, self.W)
+        self.assertEqual(flagged, [])
+        self.assertEqual(score, 100)
+
+    def test_ipwhois_source_score_and_vote(self):
+        self.assertEqual(qc.source_score(
+            "ipwhois", {"security": {"tor": True}}), 55)
+        self.assertIsNone(qc.source_score(
+            "ipwhois", {"security": {"proxy": False, "vpn": False,
+                                     "hosting": False, "tor": False,
+                                     "anonymous": False}}))
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"ipwhois": {"security": {"proxy": True}}}, self.W)
+        self.assertEqual(score, 72)
+        self.assertEqual(flagged, ["proxy"])
+
+    def test_mobile_bonus_only_when_otherwise_clean(self):
+        sigs = {"ip-api": {"proxy": False, "hosting": False, "mobile": True}}
+        self.assertEqual(qc.compute_reputation(sigs, None, self.W), 100)
+        sigs = {"ip-api": {"proxy": False, "hosting": True, "mobile": True}}
+        # 有 hosting 标记则不加成
+        self.assertEqual(qc.compute_reputation(sigs, None, self.W), 90)
 
     def test_reputation_risk_boundaries(self):
         self.assertEqual(qc.reputation_risk(0), "high")
@@ -1219,7 +1285,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms"
         result = fill_and_classify(
             line,
-            china_set={"1.2.3.4:443#US"},
+            china_sets=({"1.2.3.4:443#US"}, set()),
             family_map={},
             rep_map={},
             ip_type_map={},
@@ -1227,12 +1293,39 @@ class TestAnnotateClassify(unittest.TestCase):
         self.assertIn("-CN", result)
         self.assertTrue(result.endswith("-CN"))
 
+    def test_removes_stale_cn_token(self):
+        """行带历史 -CN，但当期 china.json 不再判定可达 → 撤销 -CN。"""
+        from annotate_classify import fill_and_classify
+        stale = "1.2.3.4:443#🇺🇸US-100ms-5.00MB/s-CN-V6-DC-77"
+        result = fill_and_classify(
+            stale,
+            china_sets=(set(), set()),
+            family_map={},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertNotIn("-CN", result)
+        self.assertTrue(result.endswith("-77"))
+
+    def test_keeps_cnh_by_http_level(self):
+        """应用层 HTTP 确认（cnh_set）即使 verdict 非 reachable 也保留。"""
+        from annotate_classify import fill_and_classify
+        line = "1.2.3.4:443#🇺🇸US-100ms-5.00MB/s-CNH"
+        result = fill_and_classify(
+            line,
+            china_sets=(set(), {"1.2.3.4:443#US"}),
+            family_map={},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertTrue(result.endswith("-CN-CNH"))
+
     def test_fill_family_token(self):
         from annotate_classify import fill_and_classify
         line = "1.2.3.4:443#🇺🇸US-100ms"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={"1.2.3.4:443#US": "ipv6"},
             rep_map={},
             ip_type_map={},
@@ -1245,7 +1338,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={},
@@ -1257,7 +1350,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={},
             ip_type_map={},
@@ -1266,7 +1359,7 @@ class TestAnnotateClassify(unittest.TestCase):
         self.assertTrue(result.endswith("-U92"))
         # 幂等
         again = fill_and_classify(
-            result, set(), {}, {}, {},
+            result, (set(), set()), {}, {}, {},
             uptime_map={"1.2.3.4:443#US": 92},
         )
         self.assertEqual(again, result)
@@ -1277,7 +1370,7 @@ class TestAnnotateClassify(unittest.TestCase):
         from annotate_classify import fill_and_classify
         result = fill_and_classify(
             "1.2.3.4:443#🇺🇸US-100ms",
-            set(), {}, {}, {}, None,
+            (set(), set()), {}, {}, {}, None,
         )
         self.assertIsNone(re.search(r"-U\d+", result))
 
@@ -1286,7 +1379,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms-5.5MB/s"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={},
             ip_type_map={"1.2.3.4:443#US": "DC"},
@@ -1300,7 +1393,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms-5.5MB/s-CN-V6-GPT-85-DC-fast"
         result = fill_and_classify(
             line,
-            china_set={"1.2.3.4:443#US"},
+            china_sets=({"1.2.3.4:443#US"}, set()),
             family_map={"1.2.3.4:443#US": "ipv6"},
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={"1.2.3.4:443#US": "DC"},
@@ -1313,7 +1406,7 @@ class TestAnnotateClassify(unittest.TestCase):
         # 幂等：再次处理不变
         self.assertEqual(fill_and_classify(
             result,
-            china_set={"1.2.3.4:443#US"},
+            china_sets=({"1.2.3.4:443#US"}, set()),
             family_map={"1.2.3.4:443#US": "ipv6"},
             rep_map={"1.2.3.4:443#US": 85},
             ip_type_map={"1.2.3.4:443#US": "DC"},
@@ -1326,21 +1419,21 @@ class TestAnnotateClassify(unittest.TestCase):
                    "-mid-GPT-CF-70-DC-fast-GPT-CF-62-RES-GPT-CF-70")
         result = fill_and_classify(
             stacked,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={},
             ip_type_map={},
         )
         self.assertEqual(
             result,
-            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-CF-fast-V6-CN-70",
+            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-CF-fast-V6-70",
         )
 
     def test_skip_no_cc_line(self):
         from annotate_classify import fill_and_classify
         line = "not-a-proxy-line"
         result = fill_and_classify(
-            line, set(), {}, {}, {}, {},
+            line, (set(), set()), {}, {}, {}, {},
         )
         self.assertEqual(result, line)
 
@@ -1349,7 +1442,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={},
             ip_type_map={},
@@ -1365,7 +1458,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US→LAX-100ms"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={},
             ip_type_map={},
@@ -1380,7 +1473,7 @@ class TestAnnotateClassify(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-100ms"
         result = fill_and_classify(
             line,
-            china_set=set(),
+            china_sets=(set(), set()),
             family_map={},
             rep_map={},
             ip_type_map={},

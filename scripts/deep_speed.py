@@ -7,8 +7,9 @@
 
 - 大样本（默认 20MB / 30s 上限），稳态窗口远大于 slow-start；
 - 多并发流（默认 3）聚合吞吐——高 BDP 链路单流吃不满带宽；
-- 多目标：``cdnjs``（CF 本地化路径，对照）与 ``ovh``（proof.ovh.net，
-  非CF大文件，暴露真实国际 transit 差距）。
+- 多目标：``cf_speed``（speed.cloudflare.com 大文件，CF 边缘本地化，主目标）、
+  ``cdnjs``（小型对照）与 ``ovh``（proof.ovh.net，非CF大文件，暴露真实国际
+  transit 差距）。
 
 结果写 ``data/quality/deep_speed.json``（keyed，含每流明细），不改动
 清单行备注——深测结论供人工/下游参考，与全局档位语义解耦。
@@ -47,6 +48,10 @@ from validate_proxies import (  # noqa: E402
 )
 
 TARGETS = {
+    # 大文件、CF 边缘本地化、多流聚合——深测的主目标。speed.cloudflare.com
+    # 的 /__down?bytes= 按需生成长度，稳态样本远大于小文件，国别差异反映
+    # 的是真实 transit 差距而非小样本抖动。
+    "cf_speed": ("speed.cloudflare.com", "/__down?bytes=25000000"),
     "cdnjs": ("cdnjs.cloudflare.com", "/ajax/libs/three.js/r128/three.js"),
     "ovh": ("proof.ovh.net", "/files/10Mb.dat"),
     "cf_trace": ("cloudflare.com", "/cdn-cgi/trace"),
@@ -87,7 +92,11 @@ async def probe_entry(
     args: argparse.Namespace,
     sem: asyncio.Semaphore,
 ) -> dict | None:
-    """单节点深测：TLS 延迟 + 每目标 ``--streams`` 路并发下载。"""
+    """单节点深测：TLS 延迟 + 每目标 ``--streams`` 路并发下载。
+
+    ``gather(return_exceptions=True)``：任何单流测速失败都不再向上抛——
+    此前异常会杀死整个并发任务组，进而中断整轮深测。
+    """
     out: dict = {}
     async with sem:
         t0 = time.monotonic()
@@ -109,13 +118,18 @@ async def probe_entry(
             samples = await asyncio.gather(*[
                 _one_stream(ip, port, host, path, cap_bytes, args)
                 for _ in range(args.streams)
-            ])
+            ], return_exceptions=True)
+            samples = [s if isinstance(s, float) else None for s in samples]
             out[name] = aggregate(list(samples))
     return out
 
 
 async def _one_stream(ip: str, port: str, host: str, path: str,
                       cap_bytes: int, args: argparse.Namespace) -> float | None:
+    """单流下载测速。任何异常（含 ``asyncio.IncompleteReadError``、TLS、
+    ``ValueError`` 等非 ConnectionError 的类型）都按失败处理——此前仅捕获
+    ``ConnectionError/OSError`` 导致 gather 抛异常拖垮整个深测任务。
+    """
     try:
         reader, writer = await open_conn(
             ip, port, args.timeout, ctx=_TLS_CTX, sni=host)
@@ -126,13 +140,13 @@ async def _one_stream(ip: str, port: str, host: str, path: str,
             reader, writer, host, path, cap_bytes, args.timeout,
             warmup_bytes=max(SPEED_WARMUP_BYTES, 1024 * 1024),
         )
-    except (ConnectionError, OSError):
+    except Exception:
         return None
     finally:
         try:
             writer.close()
             await writer.wait_closed()
-        except OSError:
+        except Exception:
             pass
 
 
@@ -186,7 +200,11 @@ async def main_async(args: argparse.Namespace) -> int:
     }
     results: dict[str, dict] = {}
     for task, (key, _ip, _port) in zip(tasks.keys(), entries):
-        res = await task
+        try:
+            res = await task
+        except Exception as exc:  # 单个节点异常不拖垮整轮
+            print(f"probe error for {key}: {exc}", file=sys.stderr)
+            res = None
         if res:
             results[key] = res
 

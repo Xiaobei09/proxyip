@@ -233,6 +233,37 @@ class TestMergeVerdict(unittest.TestCase):
         self.assertEqual(merged["verdict"], "skipped")
         self.assertIn("heuristic", merged["basis"])
 
+    def test_itdog_single_node_weak_ratio_uncertain(self):
+        """itdog 仅 1/18 节点可达（ratio≈0.06）→ 不得独立判定 reachable。"""
+        sources = {
+            "itdog": {"status": "ok", "ok": True, "ms": 200,
+                      "level": "tcp", "ok_nodes": 1, "nodes": 18,
+                      "ratio": 0.056},
+        }
+        merged = cc.merge_verdict(sources, cf=False)
+        self.assertEqual(merged["verdict"], "uncertain")
+
+    def test_itdog_good_ratio_reachable(self):
+        sources = {
+            "itdog": {"status": "ok", "ok": True, "ms": 90,
+                      "level": "http", "ok_nodes": 14, "nodes": 18,
+                      "ratio": 0.78},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+
+    def test_itdog_weak_plus_two_single_sources_reachable(self):
+        """弱 itdog 不能单独定论，但两路单节点源交叉仍可判 reachable。"""
+        sources = {
+            "itdog": {"status": "ok", "ok": True, "ms": 200,
+                      "ok_nodes": 1, "nodes": 18, "ratio": 0.056},
+            "check_host": {"status": "ok", "ok": True, "ms": 150},
+            "xxapi": {"status": "ok", "ok": True, "ms": 130},
+        }
+        # itdog 弱 + check_host/xxapi 双确认 → 仍走单节点交叉线
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+
 
 class TestAnnotations(unittest.TestCase):
     def test_has_cn_note(self):
@@ -251,9 +282,9 @@ class TestAnnotations(unittest.TestCase):
         text = "1.2.3.4:80#US-1ms\n5.6.7.8:80#US-2ms-CN\n9.9.9.9:80#US-3ms\n"
         reachable = {"1.2.3.4:80#US", "9.9.9.9:80#US"}
         cn_text, count = cc.generate_all_cn(text, reachable)
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 2)
         self.assertIn("1.2.3.4:80#US-1ms-CN", cn_text)
-        self.assertIn("5.6.7.8:80#US-2ms-CN", cn_text)
+        self.assertNotIn("5.6.7.8:80#US", cn_text)  # 历史 -CN 已不收
         self.assertIn("9.9.9.9:80#US-3ms-CN", cn_text)
 
     def test_generate_all_cn_full_pool_subset(self):
@@ -281,15 +312,17 @@ class TestAnnotations(unittest.TestCase):
         )
 
     def test_generate_all_cn_rewrites_latency_to_cn_rtt(self):
-        """CN 清单行内 ms 替换为大陆实测值（原海外 TLS 延迟不再展示）。"""
+        """CN 清单行内 ms 替换为大陆实测值，速度替换为大陆视角估算 ≈。"""
         text = "1.1.1.1:443#US-42ms-5.00MB/s-fast-90\n"
         reachable = {"1.1.1.1:443#US"}
         cn_ms = {"1.1.1.1:443#US": 236.4}
         cn_text, _n = cc.generate_all_cn(text, reachable, cn_ms)
-        self.assertIn("1.1.1.1:443#US-236ms-5.00MB/s-fast-CN-90", cn_text)
-        # 无大陆观测的行保留海外值
-        text2 = "2.2.2.2:443#US-77ms\n"
-        cn_text2, _n = cc.generate_all_cn(text2, {"2.2.2.2:443#US"}, cn_ms)
+        self.assertIn("1.1.1.1:443#US-236ms-≈2.0MB/s-fast-CN-90", cn_text)
+        # 无大陆观测的行：保留延迟（无替代），但速度无从推算 → 移除海外值
+        text2 = "2.2.2.2:443#US-77ms-3.00MB/s\n"
+        cn_text2, _n = cc.generate_all_cn(
+            text2, {"2.2.2.2:443#US"}, cn_ms, http_keys=set())
+        self.assertNotIn("3.00MB/s", cn_text2)
         self.assertIn("2.2.2.2:443#US-77ms-CN", cn_text2)
 
     def test_rewrite_latency_helper(self):
@@ -310,16 +343,16 @@ class TestAnnotations(unittest.TestCase):
         cn_text, _ = cc.generate_all_cn(text, reachable, cn_ms)
         lines = cn_text.strip().splitlines()
         # 有大陆延迟的排最前；缺失的按原序稳定垫底
-        # （3.3.3.3 带历史 -CN 也入池，与 2.2.2.2 同缺 ms，按原序在其后）
+        # （3.3.3.3 不在当期可达集 → 不再入池）
         self.assertEqual(lines[0].split("#")[0], "1.1.1.1:443")
         self.assertEqual(
             [l.split("#")[0] for l in lines[1:]],
-            ["2.2.2.2:443", "3.3.3.3:443"],
+            ["2.2.2.2:443"],
         )
 
     def test_generate_all_cn_no_map_keeps_pool_order(self):
         text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n"
-        reachable = set()
+        reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
         cn_text, count = cc.generate_all_cn(text, reachable)
         self.assertEqual(count, 2)
         self.assertEqual(
@@ -763,9 +796,9 @@ class TestGenerateAllCnHttpStrict(unittest.TestCase):
     def test_http_keys_annotated_cnh(self):
         text, n = cc.generate_all_cn(
             self.POOL, {"1.1.1.1:443#US"}, http_keys={"1.1.1.1:443#US"})
-        self.assertEqual(n, 2)
+        self.assertEqual(n, 1)
         self.assertIn("1.1.1.1:443#US-100ms-5MB/s-CN-CNH", text)
-        self.assertIn("2.2.2.2:443#US-200ms-1MB/s-CN", text)
+        self.assertNotIn("2.2.2.2:443#US", text)  # 历史 -CN 不再兜底
 
     def test_strict_skips_historical_cn(self):
         text, n = cc.generate_all_cn(self.POOL, set(), strict=True)
@@ -777,9 +810,10 @@ class TestGenerateAllCnHttpStrict(unittest.TestCase):
         self.assertEqual(lines[0].split("#")[0], "3.3.3.3:443")
         self.assertTrue(lines[0].endswith("-CN"))
 
-    def test_non_strict_keeps_historical_cn(self):
+    def test_non_strict_also_skips_historical_cn(self):
+        # 历史 -CN 兜底已彻底移除：strict=False 与非 strict 同策略
         _, n = cc.generate_all_cn(self.POOL, set(), strict=False)
-        self.assertEqual(n, 1)
+        self.assertEqual(n, 0)
 
 
 class TestGenerateCnSubset(unittest.TestCase):

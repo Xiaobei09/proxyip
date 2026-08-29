@@ -214,7 +214,8 @@ def load_history(path: Path) -> list[dict]:
 
 CSS_STYLE = (
     "<style>"
-    "text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}"
+    "text{font-family:system-ui,-apple-system,'Segoe UI',Roboto,"
+    "'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif}"
     ".g{stroke:#e8e8e8;stroke-width:1}"
     ".a{stroke:#999;stroke-width:1}"
     ".t{font-size:10px;fill:#666}"
@@ -236,7 +237,7 @@ def svg_head(width: int, height: int) -> str:
     )
 
 
-def empty_svg(height: int = HEIGHT, text: str = "No data yet") -> str:
+def empty_svg(height: int = HEIGHT, text: str = "暂无数据") -> str:
     return (
         svg_head(WIDTH, height)
         + f'<text class="em" x="{WIDTH / 2}" y="{height / 2}">'
@@ -624,22 +625,24 @@ def plot_grouped_vbars(
 def build_country(meta: dict) -> str:
     per_country = meta.get("per_country", {})
     items = sorted(per_country.items(), key=lambda kv: kv[1], reverse=True)[:15]
-    return plot_hbars(items, title="Alive proxies by country (top 15)")
+    return plot_hbars(items, title="各国家存活代理 Top15")
 
 
 def build_port(meta: dict) -> str:
     per_port = meta.get("per_port", {})
     items = [(p, per_port[p]) for p in sorted(per_port, key=lambda p: int(p))]
-    return plot_vbars(items, title="Alive proxies by port")
+    if not items:
+        return empty_svg(text="暂无按端口数据")
+    return plot_vbars(items, title="按端口统计存活代理")
 
 
 def build_churn(history: list[dict]) -> str:
     groups = [r.get("ts", "") for r in history]
     series = [
-        Series("added", COLOR_ADDED, groups, [r.get("added", 0) for r in history]),
-        Series("removed", COLOR_REMOVED, groups, [r.get("removed", 0) for r in history]),
+        Series("新增", COLOR_ADDED, groups, [r.get("added", 0) for r in history]),
+        Series("移除", COLOR_REMOVED, groups, [r.get("removed", 0) for r in history]),
     ]
-    return plot_grouped_vbars(groups, series, title="Added / removed per update")
+    return plot_grouped_vbars(groups, series, title="每次更新 新增 / 移除")
 
 
 def build_combo(history: list[dict], valid_history: list[dict]) -> str:
@@ -650,13 +653,13 @@ def build_combo(history: list[dict], valid_history: list[dict]) -> str:
         checked = r.get("checked", 0)
         pct.append(round(r.get("alive", 0) / checked * 100, 1) if checked else 0)
     series = [
-        Series("unique", COLOR_UNIQUE, u_ts, [r.get("unique", 0) for r in history]),
-        Series("alive", COLOR_ALIVE, v_ts, [r.get("alive", 0) for r in valid_history]),
-        Series("dead", COLOR_DEAD, v_ts, [r.get("dead", 0) for r in valid_history], dash="dash"),
-        Series("alive rate", COLOR_RATE, v_ts, pct, dash="dot", axis="r"),
+        Series("去重", COLOR_UNIQUE, u_ts, [r.get("unique", 0) for r in history]),
+        Series("存活", COLOR_ALIVE, v_ts, [r.get("alive", 0) for r in valid_history]),
+        Series("死亡", COLOR_DEAD, v_ts, [r.get("dead", 0) for r in valid_history], dash="dash"),
+        Series("存活率", COLOR_RATE, v_ts, pct, dash="dot", axis="r"),
     ]
     return plot_lines(
-        series, right_unit="%", title="Proxy count & alive rate"
+        series, right_unit="%", title="代理总量与存活率"
     )
 
 
@@ -664,7 +667,7 @@ def build_latency_speed(meta: dict) -> str:
     lat = meta.get("latency_dist", {})
     spd = meta.get("speed_dist", {})
     if not lat and not spd:
-        return empty_svg(text="No latency/speed data yet")
+        return empty_svg(text="暂无延迟/速度数据")
     panel_h = 180
     total_h = panel_h * 2 + MARGIN_T + MARGIN_B
     parts = [svg_head(WIDTH, total_h)]
@@ -772,8 +775,8 @@ def build_sets(meta: dict) -> str:
     sets_data = meta.get("sets", {})
     items = sorted(sets_data.items(), key=lambda kv: kv[1], reverse=True)
     if not items:
-        return empty_svg(text="No set data yet")
-    return plot_hbars(items, row_h=15, color=COLOR_PORT, title="Alive proxies by set")
+        return empty_svg(text="暂无子集数据")
+    return plot_hbars(items, row_h=15, color=COLOR_PORT, title="按子集统计存活代理")
 
 
 def _count_by(china_data: dict, field: str) -> list[tuple[str, int]]:
@@ -788,18 +791,33 @@ def _count_by(china_data: dict, field: str) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
 
 
+VERDICT_ZH = {
+    "reachable": "可达",
+    "uncertain": "不确定",
+    "unreachable": "不可达",
+    "pending": "待测",
+}
+
+
 def build_cn(china_data: dict) -> str:
     items = _count_by(china_data, "verdict")
     if not items:
-        return empty_svg(text="No CN data yet")
-    return plot_hbars(items, color=COLOR_SPEED, title="Mainland China reachability")
+        return empty_svg(text="暂无大陆可达性数据")
+    labels = [
+        (f"{VERDICT_ZH.get(cc, cc)} ({cc})", n) if cc in VERDICT_ZH
+        else (cc, n)
+        for cc, n in items
+    ]
+    return plot_hbars(
+        labels, color=COLOR_SPEED, title="中国大陆可达性判定"
+    )
 
 
 def build_family(family_data: dict) -> str:
     items = _count_by(family_data, "family")
     if not items:
-        return empty_svg(text="No family data yet")
-    return plot_hbars(items, color=COLOR_ALIVE, title="Exit IP family distribution")
+        return empty_svg(text="暂无出口族数据")
+    return plot_hbars(items, color=COLOR_ALIVE, title="出口 IP 族分布")
 
 
 def build_exit_cc(quality_dir: Path) -> str:
@@ -817,10 +835,10 @@ def build_exit_cc(quality_dir: Path) -> str:
         counts[cc] = counts.get(cc, 0) + 1
     items = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:15]
     if not items:
-        return empty_svg(text="No exit-country data yet")
+        return empty_svg(text="暂无出口国数据")
     return plot_hbars(
         items, color=COLOR_PORT,
-        title=f"Exit country top 15 (of {len(m)} observed)",
+        title=f"出口国 Top15（共观测 {len(m)}）",
     )
 
 
@@ -830,12 +848,12 @@ def build_entry_audit(audit_data: dict) -> str:
     total = audit_data.get("total", 0)
     items = sorted(summary.items(), key=lambda kv: kv[1], reverse=True)
     if not items:
-        return empty_svg(text="No entry-audit data yet")
+        return empty_svg(text="暂无入口标签审计数据")
     mism = summary.get("tag_mismatch", 0)
     return plot_hbars(
         items, color=COLOR_LATENCY,
-        title=f"Entry CC label audit (mismatch {mism}/{total} "
-              f"= {mism / max(total, 1) * 100:.1f}%)",
+        title=f"入口国家标签审计（不匹配 {mism}/{total} "
+              f"= {mism / max(total, 1) * 100:.1f}%）",
     )
 
 
@@ -844,8 +862,8 @@ def build_ip_type(quality_meta: dict) -> str:
     items = sorted(quality_meta.get("by_type", {}).items(),
                    key=lambda kv: kv[1], reverse=True)
     if not items:
-        return empty_svg(text="No IP-type data yet")
-    return plot_hbars(items, color=COLOR_STREAMING, title="IP type distribution")
+        return empty_svg(text="暂无 IP 类型数据")
+    return plot_hbars(items, color=COLOR_STREAMING, title="IP 类型分布")
 
 
 def collect_country_speed(valid_dir: Path) -> dict[str, dict]:
@@ -894,16 +912,20 @@ def build_country_speed(country_speed: dict[str, dict]) -> str:
         country_speed.items(), key=lambda kv: kv[1]["p50"], reverse=True
     )[:20]
     if not items:
-        return empty_svg(text="No speed data yet")
-    bars = [(f"{cc} {d['p50']}MB/s", int(round(d["p50"] * 100))) for cc, d in items]
+        return empty_svg(text="暂无速度数据")
+    # 真实 MB/s 直出（不再缩放 ×0.01）：条宽按最大值等比例，尾部数值即真实速度
+    bars = [(f"{cc}", round(d["p50"], 2)) for cc, d in items]
     svg = plot_hbars(bars, color=COLOR_SPEED,
-                     title="Median speed per country (value ×0.01 MB/s)")
+                     title="各国中位速度（MB/s）")
     # 追加区间注释行：在标题下方列出前 5 国的 IQR
     notes = " · ".join(
-        f"{cc}[{d['p25']}-{d['p75']}]n={d['n']}"
+        f"{cc} 样本{d['n']} 中位区间[{d['p25']}-{d['p75']}]"
         for cc, d in items[:5]
     )
-    return svg.replace("</svg>", f'<text class="e" x="8" y="14">{esc(notes)}</text></svg>')
+    return svg.replace(
+        "</svg>",
+        f'<text class="l" x="8" y="13">{esc(notes)}</text></svg>'
+    )
 
 
 def build_speed_spread(country_speed: dict[str, dict]) -> str:
@@ -913,17 +935,17 @@ def build_speed_spread(country_speed: dict[str, dict]) -> str:
         key=lambda kv: kv[1]["spread_pct"], reverse=True,
     )[:20]
     if not items:
-        return empty_svg(text="No spread data yet")
-    bars = [(f"{cc} n={d['n']}", d["spread_pct"]) for cc, d in items]
+        return empty_svg(text="暂无同国分化数据")
+    bars = [(f"{cc} 样本{d['n']}", d["spread_pct"]) for cc, d in items]
     return plot_hbars(bars, color=COLOR_BAR,
-                      title="Intra-country speed spread (IQR/median %)")
+                      title="同国内速度分化（四分位差/中位数 %）")
 
 
 def build_source_avail(rep_data: dict) -> str:
     """Combined chart: per-source coverage + sources-per-proxy distribution."""
     proxies = rep_data.get("proxies", {})
     if not proxies:
-        return empty_svg(text="No source data yet")
+        return empty_svg(text="暂无信誉源数据")
 
     source_counts: dict[str, int] = {}
     depth_counts: dict[int, int] = {}
@@ -936,7 +958,7 @@ def build_source_avail(rep_data: dict) -> str:
         depth_counts[len(srcs)] = depth_counts.get(len(srcs), 0) + 1
 
     if not source_counts:
-        return empty_svg(text="No source data yet")
+        return empty_svg(text="暂无信誉源数据")
 
     src_items = sorted(source_counts.items(), key=lambda x: -x[1])
     depth_items = [(str(k), v) for k, v in sorted(depth_counts.items())]
@@ -1014,12 +1036,12 @@ def build_source_stats(source_stats: dict) -> str:
     """Stacked horizontal bar chart: per-download-source unique vs overlap IPs."""
     sources = source_stats.get("sources", {})
     if not sources:
-        return empty_svg(text="No source stats yet")
+        return empty_svg(text="暂无信誉源统计")
 
     items = sorted(sources.items(), key=lambda kv: -kv[1].get("total", 0))
     n = len(items)
     if n == 0:
-        return empty_svg(text="No source stats yet")
+        return empty_svg(text="暂无信誉源统计")
 
     row_h = 22
     total_h = MARGIN_T + n * row_h + 12
@@ -1086,12 +1108,12 @@ def build_rep(rep_data: dict) -> str:
         b = int(score) // 10 * 10
         buckets[b] = buckets.get(b, 0) + 1
     if not buckets:
-        return empty_svg(text="No reputation data yet")
+        return empty_svg(text="暂无信誉分数据")
     items = [
         (f"{lo}-{lo + 9}", buckets.get(lo, 0))
         for lo in sorted(buckets)
     ]
-    return plot_vbars(items, color=COLOR_STREAMING, title="Reputation score distribution")
+    return plot_vbars(items, color=COLOR_STREAMING, title="信誉评分分布")
 
 
 def main(argv: list[str] | None = None) -> int:

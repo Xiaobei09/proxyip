@@ -83,6 +83,8 @@ from common import (
     read_json,
     request_follow,
     rewrite_latency,
+    clear_note_buckets,
+    _rewrite_cn_speed,
     write_json,
     write_text_if_changed,
     _note,
@@ -124,6 +126,7 @@ PINGPE_START_URL = "https://tcp.ping.pe/ajax_startTask_v1.php"
 PINGPE_RESULTS_URL = "https://tcp.ping.pe/ajax_getPingResults_v2.php"
 PINGPE_ORIGIN = "https://tcp.ping.pe"
 PINGPE_CN_MAJORITY = 7  # ≥7/13 大陆节点可达即判可达
+ITDOG_MIN_RATIO = 0.5   # itdog 系列单源确认所需的最小节点成功率（防单节点假阳性）
 PINGPE_MIN_REPORTED = 5  # 报告节点不足 → inconclusive，避免误判
 
 # tcpping.cn —— 多运营商，需站长签发的 token（缺则跳过）
@@ -512,7 +515,10 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
 
     - 至少 2 个独立方法确认 → reachable
     - 仅 1 个方法确认（非多节点源）→ uncertain（单点不可靠）
-    - 多节点源（ping.pe / itdog / itdog_tcping / tcpping）单独确认 → reachable（已有多节点交叉）
+    - 多节点源（ping.pe / itdog / itdog_tcping / tcpping）单独确认 → reachable，
+      但**要求该源节点成功率达阈值**（itdog 系列按 ``ratio``≥0.5；
+      ping.pe/tcpping 内部已是多数/60% 规则，视作满足）；比率过低的单源
+      判定 → uncertain（单节点假阳性抑制）
     - check_host 与 xxapi 均失败 → unreachable
     - 多节点源失败且所有单节点源也失败 → unreachable
     - 有确认源但也有失败源（冲突）→ uncertain（保守）
@@ -520,6 +526,9 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     - CF 启发式不再自动判可达，仅作为 basis 标注
     - ``level``：证据分级——任一成功源给出应用层（HTTP）确认 → "http"，
       仅传输层（TCP）确认 → "tcp"，无成功源 → None
+
+    比率字段约定：``ratio`` 存在且 < ``ITDOG_MIN_RATIO`` 视为"弱确认"，
+    不独立支撑 reachable；缺失（如单节点源）按 1.0 处理。
     """
     ok_sources = [name for name, r in sources.items() if r.get("ok")]
     fail_sources = [name for name, r in sources.items() if r["status"] == "fail"]
@@ -539,7 +548,16 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping", "itdog_tcping")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
 
-    if len(multi_ok) >= 1:
+    def strong_valid(source: str) -> bool:
+        """该多节点源是否能独立支撑 reachable（成功率达标）。"""
+        ratio = sources[source].get("ratio")
+        if ratio is None:
+            return True  # pingpe/tcpping 内部已实施多数/60% 规则
+        return ratio >= ITDOG_MIN_RATIO
+
+    strong_multi = [s for s in multi_ok if strong_valid(s)]
+
+    if len(strong_multi) >= 1:
         basis = ok_sources[:]
         if cf:
             basis.append("heuristic")
@@ -549,6 +567,12 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         if cf:
             basis.append("heuristic")
         return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
+    # 多节点源只有弱确认（如 itdog 仅 1/18 节点可达）→ 不能单独定论
+    if multi_ok:
+        basis = ok_sources[:]
+        if cf:
+            basis.append("heuristic")
+        return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     if ok_sources:
         basis = ok_sources[:]
         if cf:
@@ -714,13 +738,17 @@ def generate_all_cn(
     http_keys: set | None = None,
     strict: bool = False,
 ) -> tuple[str, int]:
-    """大陆可达清单：本次判可达或历史已带 ``-CN`` 的行（源为全量池文本）。
+    """大陆可达清单：仅本次判可达的行（源为全量池文本）。
 
     - ``http_keys``：应用层（HTTP）确认的 key 集合，对应行追加 ``-CNH``
-    - ``strict=True``：仅收当前集合，跳过历史 ``-CN`` 兜底（供 stable 清单）
+    - ``strict=True``：保留参数以兼容调用方（行为与假等同，均已不收历史兜底）
     - ``cn_ms``（``key -> 大陆实测毫秒``）提供时：
       * 行内延迟 token **替换为大陆实测 RTT**——CN 清单里 ``ms`` 的语义
         即"大陆使用者连接该节点的延迟"，而非海外 runner 的 TLS 延迟；
+      * 行内速度 token **替换为大陆视角估算** ``≈XMB/s``（大陆 RTT 推算
+        的单流参考上限与海外实测取小）。测不到大陆延迟的节点速度不得而知，
+        删除速度 token，避免海外测速冒充大陆体验——同一行内 ``MB/s``
+        的语义随清单而定（CN 清单=大陆视角）；
       * 按大陆延迟升序输出（对大陆使用者比海外延迟更有参考意义）；
         未测到延迟的行排在最后，同延迟保持原池顺序。
       缺省 ``None`` 时保持原池顺序、不改写延迟。
@@ -732,12 +760,13 @@ def generate_all_cn(
         key = line_to_key(line)
         if not key:
             continue
-        if key in reachable_keys or (not strict and has_cn_note(line)):
+        if key in reachable_keys:
             out = annotate_cn(line)
             if http_keys and key in http_keys:
                 out = annotate_cnh(out)
             if cn_ms:
                 out = rewrite_latency(out, cn_ms.get(key))
+                out = _rewrite_cn_speed(out, cn_ms)
             lines.append(out)
     lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
@@ -751,7 +780,8 @@ def generate_cn_subset(
     """按谓词过滤全量池文本，保持行原文；``keep(key, line)`` 为真则保留。
 
     排序规则同 :func:`generate_all_cn`（``cn_ms`` 升序，缺失垫底）；
-    ``cn_ms`` 提供时同样将行内延迟替换为大陆实测 RTT（CN 视图语义）。
+    ``cn_ms`` 提供时同样将行内延迟替换为大陆实测 RTT（CN 视图语义），
+    并将速度替换为大陆视角估算（``≈XMB/s``，见 :func:`generate_all_cn`）。
     """
     lines = []
     for line in pool_text.splitlines():
@@ -761,14 +791,22 @@ def generate_cn_subset(
         if not key:
             continue
         if keep(key, line):
-            out = rewrite_latency(line, cn_ms.get(key)) if cn_ms else line
+            out = line
+            if cn_ms:
+                out = rewrite_latency(out, cn_ms.get(key))
+                out = _rewrite_cn_speed(out, cn_ms)
             lines.append(out)
     lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
 
 
 def annotate_cn_files(reachable_keys: set) -> None:
-    """给 all.txt / all_ltd.txt 追加 ``-CN``（幂等，已带则跳过）。"""
+    """给 all.txt / all_ltd.txt 同步当期 -CN：可达 → 追加；不可达 → 撤销。
+
+    历史实现只增不减导致过期 -CN 累积（曾达 13817 条而真可达仅 112）。
+    改为以当期可达集为准的严格交战：key 在可达集内且未带 -CN 则补，
+    否则若带 -CN/-CNH 则清除（与 annotate_classify 同策略，幂等）。
+    """
     for name in ("all.txt", "all_ltd.txt"):
         path = VALID_DIR / name
         if not path.exists():
@@ -780,11 +818,16 @@ def annotate_cn_files(reachable_keys: set) -> None:
             if not line:
                 continue
             key = line_to_key(line)
-            if key and key in reachable_keys and not has_cn_note(line):
-                out.append(merge_note_tokens(line, "CN"))
+            if key and key in reachable_keys:
+                if not has_cn_note(line) and merge_note_tokens(line, "CN") != line:
+                    out.append(merge_note_tokens(line, "CN"))
+                    changed = True
+                    continue
+            elif has_cn_note(line) and clear_note_buckets(line, "cn") != line:
+                out.append(clear_note_buckets(line, "cn"))
                 changed = True
-            else:
-                out.append(line)
+                continue
+            out.append(line)
         if changed:
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text("\n".join(out) + "\n", encoding="utf-8")

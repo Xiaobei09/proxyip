@@ -102,11 +102,15 @@ def build_ipinfo_map(
             if abuse_item:
                 info["reputation_source"] = abuse_item.get("service")
             else:
-                _score, sources = weighted_reputation(signals, weights)
-                info["reputation_source"] = (
-                    sources[0] if len(sources) == 1 else "multi"
+                _score, responding, flagged, numeric = vote_reputation(
+                    signals, weights
                 )
-                info["risk_sources"] = sources
+                info["reputation_source"] = (
+                    responding[0] if len(responding) == 1 else "multi"
+                )
+                info["risk_sources"] = numeric
+                info["rep_sources"] = responding
+                info["rep_flags"] = flagged
         info["risk"] = derive_risk(signals, abuse_item, weights)
         info_map[res["key"]] = info
     return info_map
@@ -175,10 +179,12 @@ def build_reputation_map(
             res.get("exit_ip") or res["ip"], {}, risk_data, weights,
             include_ipapi=False,
         )
-        score, sources = weighted_reputation(signals, weights)
-        source = "multi" if len(sources) != 1 else (sources[0] if sources else None)
+        score, responding, flagged, numeric = vote_reputation(signals, weights)
         if score is None:
             continue
+        source = "multi" if len(responding) != 1 else (
+            responding[0] if responding else None
+        )
         # 深测带宽分量：最优目标 agg_mbps ≥50MB/s 记满分 +10，线性缩放，
         # 仅对已有信誉分的节点加成（深测是抽样，不产生幽灵分）
         bonus = 0
@@ -197,7 +203,9 @@ def build_reputation_map(
             "score": score,
             "risk": reputation_risk(score),
             "source": source,
-            "sources": sources,
+            "sources": responding,
+            "flags": flagged,
+            "numeric": numeric,
             **({"deep_bonus": bonus} if bonus else {}),
         }
     return rep_map
