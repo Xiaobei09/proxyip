@@ -76,7 +76,6 @@ from common import (
     VALID_DIR,
     has_token,
     is_cf_heuristic,
-    keyed_json,
     line_to_key,
     merge_note_tokens,
     parse_ltd_line,
@@ -1010,7 +1009,13 @@ def main(argv=None) -> int:
         f"flappers: {flappers}",
         file=sys.stderr,
     )
-    write_json(CHINA_FILE, keyed_json(entries))
+    write_json(
+        CHINA_FILE,
+        {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "proxies": entries,
+        },
+    )
 
     all_pool_text = load_cn_pool()
     cn_ms = {

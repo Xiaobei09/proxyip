@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import health_alert as ha  # noqa: E402
 from health_alert import (  # noqa: E402
     check_cn,
+    check_cn_stale,
     check_countries,
     check_pool,
     check_sources,
@@ -94,6 +95,39 @@ class TestCheckCn(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             alert, _ = check_cn({"cn_reachable": 10}, self.make_file(td, 1))
             self.assertIsNone(alert)  # prev ≤ 20 不触发
+
+
+class TestCheckCnStale(unittest.TestCase):
+    def make_file(self, td, ts: str | None, n=100):
+        proxies = {f"{i}:443#US": {"verdict": "reachable"} for i in range(n)}
+        p = Path(td) / "china.json"
+        data = {"proxies": proxies}
+        if ts is not None:
+            data["ts"] = ts
+        p.write_text(json.dumps(data))
+        return p
+
+    def test_old_cn_data_alerts(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self.make_file(td, _ts(20))
+            alert = check_cn_stale(p)
+        self.assertIsNotNone(alert)
+        self.assertIn("CN data stale", alert)
+
+    def test_fresh_cn_data_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self.make_file(td, _ts(1))
+            self.assertIsNone(check_cn_stale(p))
+
+    def test_missing_ts_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self.make_file(td, None)
+            self.assertIsNone(check_cn_stale(p))  # 旧格式无 ts 静默，待下次 CN 轮补充
+
+    def test_small_pool_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self.make_file(td, _ts(30), n=5)
+            self.assertIsNone(check_cn_stale(p))
 
 
 class TestCheckCountries(unittest.TestCase):
