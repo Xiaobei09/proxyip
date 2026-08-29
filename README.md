@@ -18,6 +18,7 @@
 ![Exit IP family](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_family.svg)
 ![Exit country top 15](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_exit.svg)
 ![Country speed distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_country_speed.svg)
+![Within-country speed spread](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_speed_spread.svg)
 ![Entry CC label audit](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_entry_audit.svg)
 ![IP type distribution](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_ip_type.svg)
 ![IP source availability](https://cdn.jsdelivr.net/gh/Xiaobei09/proxyip@main/data/output/chart_source_avail.svg)
@@ -198,6 +199,9 @@ data/valid/                              验证后代理数据
 data/valid/all.txt                       存活代理（按延迟排序）
 data/valid/all_ltd.txt                   限量版（每国最快 20 条，速度降序）
 data/valid/all_cn*.txt                   变体（cn、cn4、cn6、cn46、cn46_ltd 等）
+data/valid/all_cn_http.txt / all_cn_stable.txt   大陆可达可靠性子集（→http →stable 双等级）
+data/valid/good_verified.txt / good_stable.txt   可靠-good 变体（speed/uptime 可靠性分档）
+data/valid/tiers/<tier>/                 speed 分档目录（fast/mid/slow；good 全量镜像）
 data/valid/all_ipv4.txt                  出口为 IPv4 的代理清单（exit-family CI，双栈双入）
 data/valid/all_ipv6.txt                  出口为 IPv6 的代理清单（exit-family CI，双栈双入）
 data/valid/all_rep.txt                   信誉排行（按分数降序，质量 CI）
@@ -223,10 +227,14 @@ data/quality/quality_meta.json           质量检测汇总（质量 CI）
 data/quality/reputation.json             信誉分索引（0-100，质量 CI）
 data/quality/reputation_cache.json       信誉信号缓存（7 天 TTL）
 data/quality/external_check.json         外部 API 验证结果
+data/quality/deep_speed.json             深测结果（每周，keyed 含每流明细）
 data/quality/china.json                  大陆连通性检测明细（keyed，china-check CI）
 data/quality/exit_family.json            实际出口家族明细（keyed，含上游交叉验证，exit-family CI）
 data/quality/upstream_meta.json          上游 all.json 逐 IP 元数据（真实出口 clientIp / ASN / 地理 / colo）
 data/quality/source_stats.json           下载源统计（各源 IP 数与重叠）
+data/quality/source_history.json         各源逐轮 unique 覆盖快照（告警基线，最多 14 轮）
+data/quality/source_quality.json         源质量分析（来源依赖关系与来源质量打分）
+data/quality/entry_audit.json            入口国标签三方交叉审计结果
 data/quality/history.jsonl               更新历史记录（每行一条，最多 1000 条）
 
 data/output/                             展示输出
@@ -241,6 +249,12 @@ data/output/chart_sets.svg               各命名集合存活代理条形图
 data/output/chart_cn.svg                 大陆连通性 verdict 分布条形图
 data/output/chart_family.svg             实际出口 IP 家族分布条形图
 data/output/chart_source_avail.svg       IP 来源可用性图表
+data/output/chart_source_stats.svg       IP 来源统计图表
+data/output/chart_country_speed.svg      各国速度分布（p25–p75 区间）
+data/output/chart_speed_spread.svg       同国内速度分化（四分位差/中位数）
+data/output/chart_entry_audit.svg        入口国标签审计汇总
+data/output/chart_ip_type.svg            出口 IP 类型（机房/住宅/移动）分布
+data/output/chart_exit.svg               出口国家 top-15
 data/output/chart_rep.svg                信誉分分布条形图
 
 data/raw/<port>/<CC>.txt                 下载中间产物（不入库，可重建）
