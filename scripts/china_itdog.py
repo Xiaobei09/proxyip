@@ -3,7 +3,9 @@
 
 从 ``china_check`` 拆出的独立模块：抓取电信/联通/移动节点 → 提交批量
 HTTP 任务 → 经 ``wss://www.itdog.cn`` 轮询收集记录 → 聚合成源判定。
-仅依赖 ``common`` 的 ``UA``/``request_follow``/``is_cf_heuristic``。
+仅依赖 ``common`` 的 ``UA``/``request_follow``。目标集为去重后的全量
+存活池（含 Cloudflare 边缘行，它们恰是当代池子主体——CF 只是 basis
+标注，是否大陆可达仍须多点节点确认，这正是 itdog 的职责）。
 """
 
 import base64
@@ -20,7 +22,7 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
-from common import UA, is_cf_heuristic, request_follow
+from common import UA, request_follow
 
 ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
 ITDOG_TCPING_URL = "https://www.itdog.cn/batch_tcping/"
@@ -404,7 +406,7 @@ def itdog_batch_run(
     page_url: str = ITDOG_BATCH_URL,
     nodes_per_isp: int | None = None,
 ) -> dict:
-    """对非 CF 启发式目标分批跑 itdog，返回 ``{key: source_result}``。
+    """按去重后的全量存活池分批跑 itdog，返回 ``{key: source_result}``。
 
     ``page_url``/``nodes_per_isp`` 用于 batch_tcping 降级通道（更大节点池，
     纯 TCPING）；缺省走 batch_http。
@@ -413,7 +415,7 @@ def itdog_batch_run(
     seen: set = set()
     for item in sample:
         line, key, ip, port, _ = item
-        if is_cf_heuristic(line) or key in seen:
+        if key in seen:
             continue
         seen.add(key)
         targets.append((key, f"{ip}:{port}"))
