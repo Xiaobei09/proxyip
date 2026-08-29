@@ -81,7 +81,7 @@
 
 - TLS 直连（Cloudflare 边缘）测活，备注 `CF`
 - **滚动可用率**：质量链每轮运行后由 `uptime.py` 更新 `node_seen.json`/`uptime.json`，注解链为节点追加 `-U<NN>` 备注
-- **深测带宽加成**：`deep_speed.json` 的最优目标 `agg_mbps` 线性加成分数（封顶 +10，仅对已有信誉分节点生效）
+- **深测带宽加成**：`deep_speed.json` 的最优目标 `agg_mbps` 线性加成分数（封顶 +10，仅对已有信誉分节点生效）；深测数据超过 10 天（`DEEP_SPEED_TTL_DAYS`）视为过期，不再参与加分
 - **出口 IP 解析**：信誉/地理/滥用查询使用真实出口 IP——优先外部探测回显，其次 `exit_family.json` 实测，兜底代理自身 IP（见 logic.md §4.0）
 - 批量查出口 IP 地理（`ip-api.com/batch`）与 ASN/IP 类型
 
