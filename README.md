@@ -133,14 +133,14 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
 
 - **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `uptime.py`（滚动可用率）→ `annotate_classify.py` 之后由专职 build-good 工作流重建 good 清单（含 `_uptime` 可靠性变体）→ stats 工作流统一渲染图表并执行 `export_json.py` + `health_alert.py`→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `uptime.py`（滚动可用率）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 之后由专职 build-good 工作流重建 good 清单（含 `_uptime` 可靠性变体）→ stats 工作流统一渲染图表并执行 `export_json.py` + `health_alert.py`→ 有变更则自动提交并推送
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；滥用分 key 经 secrets 注入 `ABUSEIPDB_KEY`/`IPQS_KEY`（未配置自动跳过）
 - **说明**：主更新每 2 小时重写 `data/valid/*.txt`，但会保留旧行已有备注（流媒体/出口/信誉/`-CN`），故质量/大陆连通性标注可跨重生成存续；仅新增存活行在下次质量/连通性 CI 前暂缺备注，属独立 CI 固有节奏
 
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每次 `Quality check` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ `build_good.py`（重建综合最优 good 清单）→ `generate_stats.py`（更新图表含 CN 数据）→ 有变更则自动提交并推送
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe 分层判定）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
 - **细节**：作业超时 180 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流提交经 `.github/scripts/commit_data.sh`——只提交本 job
   实际写入的文件（mtime 标记），push 冲突时其余文件对齐 origin，
