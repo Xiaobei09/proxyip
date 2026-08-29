@@ -4,11 +4,13 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import health_alert as ha  # noqa: E402
 from health_alert import (  # noqa: E402
     check_cn,
     check_countries,
@@ -147,6 +149,65 @@ class TestCheckCountries(unittest.TestCase):
             )
         self.assertIsNone(alert)
         self.assertEqual(state["countries"], {"US": 800})
+
+
+def _build_stale_root(td: str, ts_ago_hours: float = 9) -> Path:
+    root = Path(td) / "root"
+    (root / "data" / "valid").mkdir(parents=True)
+    (root / "data" / "quality").mkdir(parents=True)
+    (root / "data" / "quality" / "alert_state.json").write_text("{}\n")
+    (root / "data" / "valid" / "history.jsonl").write_text(
+        json.dumps({"ts": _ts(ts_ago_hours), "alive": 100}) + "\n"
+    )
+    return root
+
+
+class TestAlertRepeatSuppression(unittest.TestCase):
+    def setUp(self):
+        self.ts = datetime.now(timezone.utc).timestamp()
+
+    def _run(self, root: Path, notify: unittest.mock.Mock) -> int:
+        with unittest.mock.patch.object(ha.time, "time", return_value=self.ts):
+            return ha.main(["--data-dir", str(root)])
+
+    def test_identical_alert_suppressed_within_cooldown(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td)
+            notify = unittest.mock.Mock()
+            with unittest.mock.patch.object(ha, "notify", notify):
+                self.assertEqual(self._run(root, notify), 0)
+                self.assertEqual(notify.call_count, 1)
+                self.assertEqual(self._run(root, notify), 0)
+                self.assertEqual(notify.call_count, 1)  # 冷却内抑制
+
+    def test_resends_after_cooldown(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td)
+            notify = unittest.mock.Mock()
+            with unittest.mock.patch.object(ha, "notify", notify):
+                self._run(root, notify)
+                self.ts += ha.ALERT_REPEAT_COOLDOWN_S + 1
+                self._run(root, notify)
+            self.assertEqual(notify.call_count, 2)
+
+    def test_no_state_no_spurious_persist(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td, ts_ago_hours=0)
+            notify = unittest.mock.Mock()
+            with unittest.mock.patch.object(ha, "notify", notify):
+                rc = self._run(root, notify)
+            self.assertEqual(rc, 0)
+            self.assertEqual(notify.call_count, 0)
+            state = json.loads(
+                (root / "data" / "quality" / "alert_state.json").read_text()
+            )
+            self.assertNotIn("last_alert_at", state)
+
+    def test_fingerprint_stable_and_order_insensitive(self):
+        self.assertEqual(
+            ha._alert_fingerprint(["b", "a"]),
+            ha._alert_fingerprint(["a", "b"]),
+        )
 
 
 class TestCheckSources(unittest.TestCase):

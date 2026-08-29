@@ -24,10 +24,12 @@ Exit code is always 0 unless ``--strict`` (alerts → exit 1 for CI gating).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import statistics
 import sys
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +48,7 @@ CN_MIN_BASELINE = 20    # CN 上一轮基准 ≥ 此值才评估塌方
 COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
 COUNTRY_MIN_BASELINE = 60
 STALE_HOURS = 8
+ALERT_REPEAT_COOLDOWN_S = 6 * 3600  # 相同告警组合的重复投递冷却
 SOURCE_DROP_PCT = 55       # 上游源 unique 相对近 8 轮中位数下降超此百分比触发
 SOURCE_MIN_SAMPLES = 8     # 至少积累这么多历史点才评估
 SOURCE_MIN_SIZE = 500      # 历史中位数 ≥ 此规模的源才告警（过滤小源噪音）
@@ -227,6 +230,22 @@ def notify(alerts: list[str]) -> bool:
         return False
 
 
+def _alert_fingerprint(alerts: list[str]) -> str:
+    return hashlib.md5(
+        "|".join(sorted(alerts)).encode("utf-8")
+    ).hexdigest()
+
+
+def _suppress_repeat(state: dict, alerts: list[str]) -> bool:
+    """同一告警组合在冷却窗口内不再重复投递（防长时间故障刷屏 webhook）。"""
+    last_at = state.get("last_alert_at")
+    if not isinstance(last_at, (int, float)):
+        return False
+    if state.get("last_alert_hash") != _alert_fingerprint(alerts):
+        return False
+    return (time.time() - last_at) < ALERT_REPEAT_COOLDOWN_S
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -267,7 +286,12 @@ def main(argv: list[str] | None = None) -> int:
         alerts.append(a)
 
     if alerts:
-        notify(alerts)
+        if _suppress_repeat(state or {}, alerts):
+            print("health: alerts unchanged, suppressed repeat", file=sys.stderr)
+        else:
+            notify(alerts)
+            new_state["last_alert_hash"] = _alert_fingerprint(alerts)
+            new_state["last_alert_at"] = time.time()
     write_state(new_state, root / "data" / "quality" / "alert_state.json")
     print(f"health: {'ALERT ' + str(len(alerts)) if alerts else 'ok'}")
     return 1 if args.strict and alerts else 0
