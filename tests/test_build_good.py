@@ -335,6 +335,21 @@ class TestWriteGoodFiles(unittest.TestCase):
             self.assertEqual(stats["all_good"], 0)
             self.assertEqual((valid / "all_good.txt").read_text(), "")
 
+    def test_main_stamps_good_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            (data_dir / "valid").mkdir(parents=True)
+            (data_dir / "quality").mkdir(parents=True)
+            rc = bg.main(["--data-dir", str(data_dir)])
+            self.assertEqual(rc, 0)
+            meta = json.loads(
+                (data_dir / "quality" / "good_meta.json").read_text()
+            )
+            self.assertIn("file_count", meta)
+            self.assertIn("proxy_count", meta)
+            self.assertIsInstance(meta["ts"], str)  # ISO 时间戳已落盘
+            self.assertGreater(len(meta["ts"]), 10)
+
 
 if __name__ == "__main__":
     unittest.main()
