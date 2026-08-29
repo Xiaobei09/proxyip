@@ -77,23 +77,26 @@ jobs:
 
       - name: Deep probe
         run: |
-          CC="${{ github.event.inputs.cc }}"
-          SRC="${{ github.event.inputs.source }}"
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          # github.event.inputs 仅在 workflow_dispatch 存在；schedule 触发会
+          # 展开为空串，直塞 argparse 会因缺参崩溃——统一按事件源装配默认值。
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CC="${{ github.event.inputs.cc }}"
+            SRC="${{ github.event.inputs.source }}"
+            LIMIT="${{ github.event.inputs.limit }}"
+            BYTES="${{ github.event.inputs.bytes_mb }}"
+            STREAMS="${{ github.event.inputs.streams }}"
+            TARGETS="${{ github.event.inputs.targets }}"
+          else
             CC="${{ steps.pick.outputs.cc }}"
             SRC=""
+            LIMIT=30; BYTES=20; STREAMS=3; TARGETS="cf_speed,ovh"
           fi
-          ARGS=""
-          if [ -n "$SRC" ]; then
-            ARGS="$ARGS --source $SRC"
-          else
-            ARGS="$ARGS --cc '$CC'"
-          fi
-          eval python scripts/deep_speed.py $ARGS \
-            --limit ${{ github.event.inputs.limit }} \
-            --bytes-mb ${{ github.event.inputs.bytes_mb }} \
-            --streams ${{ github.event.inputs.streams }} \
-            --targets '${{ github.event.inputs.targets }}'
+          args=()
+          [ -n "$SRC" ] && args+=( --source "$SRC" )
+          [ -n "$CC" ] && args+=( --cc "$CC" )
+          args+=( --limit "$LIMIT" --bytes-mb "$BYTES" --streams "$STREAMS" \
+                  --targets "$TARGETS" )
+          python scripts/deep_speed.py "${args[@]}"
 
       - name: Commit changes
         run: |
