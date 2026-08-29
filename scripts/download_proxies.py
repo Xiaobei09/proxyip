@@ -638,6 +638,22 @@ def write_source_attribution(
     print(f"Wrote source attribution for {len(ip_source_map)} entries")
 
 
+def _fetch_retry(url: str, timeout: int, attempts: int) -> bytes:
+    """Download ``url`` with linear-backoff retries; raise on final failure."""
+    for attempt in range(attempts):
+        try:
+            return download(url, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001
+            if attempt == attempts - 1:
+                raise
+            print(
+                f"{url} attempt {attempt + 1}/{attempts} failed ({exc}); "
+                f"retrying in {1.5 * (attempt + 1):.1f}s",
+                file=sys.stderr,
+            )
+            time.sleep(1.5 * (attempt + 1))
+
+
 def load_source(url: str, timeout: int) -> tuple[dict, dict | None]:
     """Download the source, preferring ``all.json`` with a zip fallback.
 
@@ -645,55 +661,66 @@ def load_source(url: str, timeout: int) -> tuple[dict, dict | None]:
     zip archive was used (no upstream metadata available).
     """
     if url == SOURCE_URL:
-        for attempt in range(2):
-            try:
-                content = download(ALL_JSON_URL, timeout=timeout)
-                return extract_json(content)
-            except Exception as exc:  # noqa: BLE001
-                if attempt == 0:
-                    print(f"all.json attempt {attempt + 1} failed ({exc}); retrying",
-                          file=sys.stderr)
-                else:
-                    print(f"all.json failed ({exc}); falling back to zip",
-                          file=sys.stderr)
-        content = download(SOURCE_URL, timeout=timeout)
+        try:
+            content = _fetch_retry(ALL_JSON_URL, timeout, attempts=3)
+            return extract_json(content)
+        except Exception as exc:  # noqa: BLE001
+            print(f"all.json failed ({exc}); falling back to zip",
+                  file=sys.stderr)
+        content = _fetch_retry(SOURCE_URL, timeout, attempts=3)
         return extract(content), None
-    content = download(url, timeout=timeout)
     if url.endswith(".json"):
-        return extract_json(content)
-    return extract(content), None
+        return extract_json(_fetch_retry(url, timeout, attempts=3))
+    return extract(_fetch_retry(url, timeout, attempts=2)), None
 
 
 def lookup_countries(ips: list[str], timeout: int, delay: float) -> dict[str, str]:
     """Best-effort batch ``ip-api.com/batch`` countryCode lookup.
 
-    Returns ``{ip: countryCode}``; stops at the first failed batch (the rest is
-    left as ``ALL`` for later enrichment by the validation stage).
+    Returns ``{ip: countryCode}``. 每批单独重试 ``retries`` 次（线性退避），
+    终失败只跳过该批继续后续批次（网络抖动时不至于整源放弃国籍填充）。
     """
     found: dict[str, str] = {}
+    fields = ["status", "query", "countryCode"]
     for start in range(0, len(ips), IPAPI_BATCH_SIZE):
-        chunk = [{"query": ip} for ip in ips[start:start + IPAPI_BATCH_SIZE]]
-        try:
-            req = urllib.request.Request(
-                IPAPI_BATCH_URL,
-                data=json.dumps(chunk).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "proxyip-updater/1.0",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            for item in data:
-                if isinstance(item, dict) and item.get("status") == "success":
-                    q, cc = item.get("query"), item.get("countryCode")
-                    if isinstance(q, str) and isinstance(cc, str) and cc:
-                        found[q] = cc
-        except Exception as exc:  # noqa: BLE001
-            print(f"ip-api batch failed ({exc}); skipping country fill",
-                  file=sys.stderr)
-            break
+        chunk = [
+            {"query": ip, "fields": fields}
+            for ip in ips[start:start + IPAPI_BATCH_SIZE]
+        ]
+        seen: list | None = None
+        retries = 2
+        for attempt in range(retries + 1):
+            try:
+                req = urllib.request.Request(
+                    IPAPI_BATCH_URL,
+                    data=json.dumps(chunk).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "proxyip-updater/1.0",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    seen = json.loads(
+                        resp.read().decode("utf-8", errors="replace")
+                    )
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt == retries:
+                    print(
+                        f"ip-api batch @{start} failed ({exc}); skipping "
+                        f"country fill for {len(chunk)} IPs",
+                        file=sys.stderr,
+                    )
+                else:
+                    time.sleep(delay * (attempt + 1))
+        if not isinstance(seen, list):
+            continue
+        for item in seen:
+            if isinstance(item, dict) and item.get("status") == "success":
+                q, cc = item.get("query"), item.get("countryCode")
+                if isinstance(q, str) and isinstance(cc, str) and cc:
+                    found[q] = cc
         if start + IPAPI_BATCH_SIZE < len(ips):
             time.sleep(delay)
     return found
