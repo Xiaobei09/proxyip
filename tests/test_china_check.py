@@ -988,6 +988,41 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
         self.assertEqual(set(reachable), {"1.1.1.1:80#US", "2.2.2.2:80#US"})
 
 
+class TestItdogBreakerSkipsPacing(unittest.TestCase):
+    """断路器跳闸后剩余 batch 应直接短路返回，不再空转 _pace 等待——
+    只对真正要发请求的任务付节奏 http:// 间隔。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            itdog_nodes=2,
+            itdog_batch_size=5,
+            itdog_concurrency=4,
+            itdog_pacing=0.01,
+        )
+
+    def test_tripped_batches_dont_pace(self):
+        import unittest.mock as mock
+
+        items = [
+            (f"10.{i}.0.1:443#US", f"10.{i}.0.1:443#US",
+             f"10.{i}.0.1", "443", "US")
+            for i in range(1, 201)
+        ]
+        with mock.patch.object(ci, "itdog_fetch_nodes", return_value=[1, 2]), \
+             mock.patch.object(ci, "itdog_task",
+                               side_effect=lambda batch, *a, **k: {
+                                   key: {"status": "error", "ok": False,
+                                         "ms": None, "error": "boom", "nodes": 0}
+                                   for key, _ in batch
+                               }), \
+             mock.patch.object(ci, "_pace") as mpace:
+            ci.itdog_batch_run(items, self._args())
+
+        # 40 个 batch，连续 8 败即跳闸；跳闸后的批不再 _pace
+        self.assertLess(mpace.call_count, 40)
+
+
 class TestItdogFullPoolTargets(unittest.TestCase):
     """itdog 目标集 = 去重后全量存活池（含 CF 启发式行）。历史上 CF 过滤
     在池子 100% 带 -CF 时把主源锁死成空集，本测试保证不再复发。"""
