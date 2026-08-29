@@ -441,12 +441,12 @@ def itdog_batch_run(
                     state["tripped"] = True
 
     def run(batch):
-        _pace(args.itdog_pacing)
         with state_lock:
             tripped = state["tripped"]
         if tripped:
             return {key: {"status": "error", "ok": False, "ms": None, "error": "itdog breaker"}
                     for key, _ in batch}
+        _pace(args.itdog_pacing)
         res = itdog_task(batch, node_ids, args, page_url)
         mark(any(r["status"] in ("ok", "fail") for r in res.values()))
         return res
