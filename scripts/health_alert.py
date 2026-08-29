@@ -45,6 +45,7 @@ STATE_FILE = QUALITY_DIR / "alert_state.json"
 POOL_DROP_PCT = 30
 CN_DROP_PCT = 50
 CN_MIN_BASELINE = 20    # CN 上一轮基准 ≥ 此值才评估塌方
+CN_STALE_HOURS = 12     # china.json 超过此年龄且曾有可达样本 → CN 链疑似静默停机
 COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
 COUNTRY_MIN_BASELINE = 60
 STALE_HOURS = 8
@@ -130,6 +131,27 @@ def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple
         if drop >= drop_pct:
             return f"CN collapse: reachable {cur} vs {prev} (-{drop:.0f}%)", new_state
     return None, new_state
+
+
+def check_cn_stale(
+    cn_file: Path, hours: float = CN_STALE_HOURS, min_reachable: int = CN_MIN_BASELINE
+) -> str | None:
+    """china.json 时效告警：CN 专链静默失败时总体数据仍新鲜、check_cn
+    快照对比恒等，只有此检查能暴露 ''CN 数据已停止刷新''。"""
+    data = read_json(cn_file) or {}
+    ts = data.get("ts")
+    proxies = data.get("proxies") or {}
+    reachable = sum(
+        1
+        for v in proxies.values()
+        if isinstance(v, dict) and v.get("verdict") == "reachable"
+    )
+    if not isinstance(ts, str) or reachable < min_reachable:
+        return None
+    age_h = (_now() - _ts(ts)).total_seconds() / 3600
+    if age_h > hours:
+        return f"CN data stale: china.json {age_h:.1f}h old (> {hours}h)"
+    return None
 
 
 def check_countries(
@@ -282,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
     if a:
         alerts.append(a)
     a = check_sources(root / "data" / "quality" / "source_history.json")
+    if a:
+        alerts.append(a)
+    a = check_cn_stale(root / "data" / "quality" / CHINA_FILE.name)
     if a:
         alerts.append(a)
 
