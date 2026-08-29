@@ -228,8 +228,8 @@ data/quality/reputation.json             信誉分索引（0-100，质量 CI）
 data/quality/reputation_cache.json       信誉信号缓存（7 天 TTL）
 data/quality/external_check.json         外部 API 验证结果
 data/quality/deep_speed.json             深测结果（每周，keyed 含每流明细）
-data/quality/china.json                  大陆连通性检测明细（keyed，china-check CI）
-data/quality/exit_family.json            实际出口家族明细（keyed，含上游交叉验证，exit-family CI）
+data/quality/china.json                  大陆连通性检测明细（keyed，顶层含 ts，china-check CI）
+data/quality/exit_family.json            实际出口家族明细（keyed，含上游交叉验证，顶层含 ts，exit-family CI）
 data/quality/upstream_meta.json          上游 all.json 逐 IP 元数据（真实出口 clientIp / ASN / 地理 / colo）
 data/quality/source_stats.json           下载源统计（各源 IP 数与重叠）
 data/quality/source_history.json         各源逐轮 unique 覆盖快照（告警基线，最多 14 轮）
