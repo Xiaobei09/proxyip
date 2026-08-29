@@ -5,8 +5,10 @@ import asyncio
 import json
 import sys
 import time
+import tempfile
 import unittest
 import unittest.mock
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -1668,6 +1670,43 @@ class TestReorgCountry(unittest.TestCase):
             # Should have →EG marker, NOT rewritten CC
             self.assertIn("→EG", eg_lines[0])
             self.assertIn("#\U0001F1E6\U0001F1E8CA→EG", eg_lines[0])
+
+
+class TestFreshDeepSpeed(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="qcfresh_"))
+        patcher = unittest.mock.patch.object(qc, "QUALITY_DIR", self.dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _write(self, payload):
+        (self.dir / "deep_speed.json").write_text(
+            json.dumps(payload, ensure_ascii=False)
+        )
+
+    def test_fresh_epoch_ts_returns(self):
+        self._write({"ts": time.time(), "proxies": {"k": {"a": 1}}})
+        self.assertIsNotNone(qc.read_fresh_deep_speed())
+
+    def test_fresh_iso_ts_returns(self):
+        self._write({"generated_at": datetime.now(timezone.utc).isoformat()})
+        self.assertIsNotNone(qc.read_fresh_deep_speed())
+
+    def test_stale_iso_ts_returns_none(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=12)).isoformat()
+        self._write({"generated_at": old, "proxies": {"k": {"a": 1}}})
+        self.assertIsNone(qc.read_fresh_deep_speed())
+
+    def test_missing_ts_returns_none(self):
+        self._write({"proxies": {"k": {"a": 1}}})
+        self.assertIsNone(qc.read_fresh_deep_speed())
+
+    def test_invalid_ts_returns_none(self):
+        self._write({"generated_at": "not-a-date"})
+        self.assertIsNone(qc.read_fresh_deep_speed())
+
+    def test_missing_file_returns_none(self):
+        self.assertIsNone(qc.read_fresh_deep_speed())
 
 
 class TestExternalCheck(unittest.TestCase):

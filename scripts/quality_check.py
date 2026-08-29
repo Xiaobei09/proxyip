@@ -40,6 +40,7 @@ import asyncio
 import logging
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 from common import *  # noqa: F401,F403  (paths + shared helpers + regex + classify_ip)
@@ -158,6 +159,33 @@ def resolve_exit_ips(results: dict, fam_map: dict) -> dict:
             + ", ".join(f"{k}={n_src[k]}" for k in sorted(n_src))
         )
     return results
+
+
+DEEP_SPEED_TTL_DAYS = 10
+
+
+def read_fresh_deep_speed(max_age_days: float = DEEP_SPEED_TTL_DAYS) -> dict | None:
+    """读 ``deep_speed.json``，超过 ``max_age_days`` 视为过期返回 ``None``。
+
+    深测每周跑一次；若长时间停摆，陈旧带宽数据不应继续充当信誉加分来源。
+    """
+    deep = read_json(QUALITY_DIR / "deep_speed.json")
+    if not deep:
+        return None
+    ts = deep.get("ts") or deep.get("generated_at")
+    if not ts:
+        return None
+    try:
+        if isinstance(ts, (int, float)):  # epoch 秒
+            stamp = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+        else:  # ISO-8601
+            stamp = datetime.fromisoformat(
+                ts.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+    except (ValueError, OSError, OverflowError):
+        return None
+    age_days = (datetime.now(timezone.utc) - stamp).total_seconds() / 86400
+    return deep if age_days <= max_age_days else None
 
 
 def build_reputation_map(
@@ -472,7 +500,7 @@ async def run(args: argparse.Namespace) -> int:
     )
     rep_map = build_reputation_map(
         results, risk_data, args.reputation_weights,
-        deep_speed=read_json(QUALITY_DIR / "deep_speed.json"),
+        deep_speed=read_fresh_deep_speed(),
     )
 
     annotations = build_annotations(results, rep_map)
