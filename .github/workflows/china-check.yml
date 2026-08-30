@@ -23,7 +23,7 @@ jobs:
   check:
     name: Mainland-China reachability
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     env:
       CHINA_CHECK_API_KEY: ${{ secrets.CHINA_CHECK_API_KEY }}
       TCPPING_CN_TOKEN: ${{ secrets.TCPPING_CN_TOKEN }}
@@ -66,7 +66,16 @@ jobs:
 
       - name: China reachability check
         if: steps.gate.outputs.skip != 'true'
-        run: python scripts/china_check.py --source data/valid/all.txt --limit 0
+        run: >-
+          python scripts/china_check.py
+          --source data/valid/all.txt --limit 0
+          --tcptest-limit -1 --tcptest-concurrency 12
+          --coffee-limit -1 --coffee-concurrency 24
+          --pingloc-limit 500 --pingloc-concurrency 8
+          --antping-limit 500 --antping-concurrency 6
+          --tcpingcn-limit 500 --tcpingcn-concurrency 6
+          --chinaz-limit 500 --chinaz-concurrency 6
+          --pingpe-limit 150
 
       - name: Annotate and classify
         if: steps.gate.outputs.skip != 'true'
