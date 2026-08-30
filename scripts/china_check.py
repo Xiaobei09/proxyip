@@ -19,8 +19,6 @@
 
 检测分层（均为无账号/免登录）：
 
-- L1 启发式（零网络）：行备注已带 ``CF``（Cloudflare 边缘 tls 代理）记录 heuristic 源，
-  但不自动判 reachable——CF 启发式仅作为 basis 标注，需其他源确认。
 - L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 18 节点
   （电信/联通/移动各 6，池子 ~80/ISP，跨省等距采样），经 WebSocket 收结果，
   TCP 连通即判可达；节点返回 http_code>0 时计应用层确认（level=http）——
@@ -81,7 +79,6 @@ from common import (
     VALID_ALL_LTD_FILE,
     VALID_DIR,
     has_token,
-    is_cf_heuristic,
     line_to_key,
     merge_note_tokens,
     parse_ltd_line,
@@ -1349,7 +1346,7 @@ def chinaz_check(ip: str, port: str, timeout: float) -> dict:
 
 # ------------------------------------------------------------ 判定合成
 
-def merge_verdict(sources: dict, cf: bool) -> dict:
+def merge_verdict(sources: dict) -> dict:
     """跨源合成大陆可达性判定。
 
     - 至少 2 个独立方法确认 → reachable
@@ -1362,7 +1359,6 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     - 多节点源失败且所有单节点源也失败 → unreachable
     - 有确认源但也有失败源（冲突）→ uncertain（保守）
     - 全部为错误/跳过 → skipped（不误判）
-    - CF 启发式不再自动判可达，仅作为 basis 标注
     - ``level``：证据分级——任一成功源给出应用层（HTTP）确认 → "http"，
       仅传输层（TCP）确认 → "tcp"，无成功源 → None
 
@@ -1406,24 +1402,16 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
 
     if len(strong_multi) >= 1:
         basis = ok_sources[:]
-        if cf:
-            basis.append("heuristic")
         return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
     if len(single_ok) >= 2:
         basis = ok_sources[:]
-        if cf:
-            basis.append("heuristic")
         return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
     # 多节点源只有弱确认（如 itdog 仅 1/18 节点可达）→ 不能单独定论
     if multi_ok:
         basis = ok_sources[:]
-        if cf:
-            basis.append("heuristic")
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     if ok_sources:
         basis = ok_sources[:]
-        if cf:
-            basis.append("heuristic")
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     if "check_host" in fail_sources and "xxapi" in fail_sources:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
@@ -1436,19 +1424,13 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
         return {"verdict": "uncertain", "basis": fail_sources, "ms": None, "level": None}
-    basis = []
-    if cf:
-        basis.append("heuristic")
-    return {"verdict": "skipped", "basis": basis, "ms": None, "level": None}
+    return {"verdict": "skipped", "basis": [], "ms": None, "level": None}
 
 
-def needs_probe(entries: dict, key: str, line: str) -> bool:
+def needs_probe(entries: dict, key: str) -> bool:
     """仅对仍未定论的键继续投递多节点源：uncertain/无判定才扫；
     reachable/unreachable 已定论，避免浪费免费源配额反复探测死键。"""
-    return merge_verdict(
-        entries.get(key, {}),
-        is_cf_heuristic(line),
-    )["verdict"] in ("uncertain", "skipped")
+    return merge_verdict(entries.get(key, {}))["verdict"] in ("uncertain", "skipped")
 
 
 def has_cn_note(line: str) -> bool:
@@ -1479,13 +1461,11 @@ def load_sample(source: Path, limit: int) -> tuple[list, Path]:
 
 def build_entry(item, sources: dict) -> dict:
     _, key, ip, port, cc = item
-    cf = is_cf_heuristic(item[0])
-    merged = merge_verdict(sources, cf)
+    merged = merge_verdict(sources)
     return {
         "ip": ip,
         "port": port,
         "cc": cc,
-        "cf_heuristic": cf,
         "verdict": merged["verdict"],
         "basis": merged["basis"],
         "ms": merged["ms"],
@@ -1881,7 +1861,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         )
     if tcptest_uuids:
         tcptest_candidates = [
-            item for item in sample if needs_probe(entries, item[1], item[0])
+            item for item in sample if needs_probe(entries, item[1])
         ]
         limit = getattr(args, "tcptest_limit", 0)
         if limit is None or limit < 0:
@@ -1909,7 +1889,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     coffee_limit = getattr(args, "coffee_limit", 0)
     if coffee_limit != 0:
         coffee_candidates = [
-            item for item in sample if needs_probe(entries, item[1], item[0])
+            item for item in sample if needs_probe(entries, item[1])
         ]
         if coffee_limit is None or coffee_limit < 0:
             coffee_limit = len(coffee_candidates)
@@ -1929,7 +1909,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     def _pending_cands():
         return [
-            item for item in sample if needs_probe(entries, item[1], item[0])
+            item for item in sample if needs_probe(entries, item[1])
         ]
 
     # 新增四源多节点复核（全部无 key、大陆多节点）：pingloc（HTTP+SSE）、
@@ -1998,7 +1978,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
     # 优先给它派活能最大化「翻正」概率。顺序仍保持 sample 优先级排序。
     pingpe_candidates = [
-        item for item in sample if needs_probe(entries, item[1], item[0])
+        item for item in sample if needs_probe(entries, item[1])
     ]
     _run_pingpe_slots(
         pingpe_candidates[: args.pingpe_limit],
@@ -2017,8 +1997,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     for item in sample:
         line, key, ip, port, cc = item
         sources = entries[key]
-        cf = is_cf_heuristic(line)
-        merged = merge_verdict(sources, cf)
+        merged = merge_verdict(sources)
         entries[key] = build_entry(item, sources)
         entries[key]["verdict"] = merged["verdict"]
         entries[key]["basis"] = merged["basis"]
@@ -2034,7 +2013,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="china_check.py",
-        description="大陆连通性检测（启发式 CF + itdog 批量 + check-host.cc + xxapi.cn + ping.pe [+ tcpping.cn]）",
+        description="大陆连通性检测（itdog 批量 + check-host.cc + xxapi.cn + ping.pe [+ tcpping.cn]）",
     )
     parser.add_argument("--source", type=Path, default=REP_RANK_FILE,
                         help=f"输入清单（默认 {REP_RANK_FILE.name}，缺失回退 all_ltd.txt）")
@@ -2132,8 +2111,6 @@ def main(argv=None) -> int:
         return 2
     sample.sort(key=_was_uncertain)
     print(f"sample: {len(sample)} from {used}", file=sys.stderr)
-    cf_count = sum(1 for item in sample if is_cf_heuristic(item[0]))
-    print(f"cf heuristic: {cf_count}", file=sys.stderr)
 
     if args.dry_run:
         print("dry-run: no network, no writes", file=sys.stderr)

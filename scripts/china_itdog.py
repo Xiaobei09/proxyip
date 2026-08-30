@@ -4,8 +4,7 @@
 从 ``china_check`` 拆出的独立模块：抓取电信/联通/移动节点 → 提交批量
 HTTP 任务 → 经 ``wss://www.itdog.cn`` 轮询收集记录 → 聚合成源判定。
 仅依赖 ``common`` 的 ``UA``/``request_follow``。目标集为去重后的全量
-存活池（含 Cloudflare 边缘行，它们恰是当代池子主体——CF 只是 basis
-标注，是否大陆可达仍须多点节点确认，这正是 itdog 的职责）。
+存活池（含 Cloudflare 边缘行，它们恰是当代池子主体）。
 """
 
 import base64

@@ -5,7 +5,7 @@ scripts.
 Holds the ``data/`` layout constants, the tiny line/HTTP/JSON helpers that
 the entry-point scripts used to import from each other (``download_proxies``
 for paths, ``quality_check`` for helpers, ``china_check`` for
-``request_follow``/``is_cf_heuristic``), the common regex patterns
+``request_follow``), the common regex patterns
 (``EXIT_REGION_RE``, ``LATENCY_RE``, ``SPEED_RE``), and shared I/O
 utilities (``read_json``, ``load_sample``, ``collect_txt_files``,
 ``annotate_files``).
@@ -706,9 +706,9 @@ def normalize_note(line: str) -> str:
     """解析备注段并按规范顺序重建（幂等，全仓库唯一的后缀处理器）。
 
     规范顺序：`入口CC[→出口CC] - 延迟 - 速度 - 流媒体(并集去重) - 类型 -
-    CF边缘标 - 速度档 - 家族 - CN/CNH - 信誉分 - 未知段(保序垫底)`。
-    单值桶（类型/档位/家族/分数）取最右（最新）；`CF` 为独立维度（出现过
-    即保留，与出口类型正交）；流媒体桶取并集；CNH 蕴含 CN。未识别的行原样返回。
+    - 速度档 - 家族 - CN/CNH - 信誉分 - 未知段(保序垫底)`。
+    单值桶（类型/档位/家族/分数）取最右（最新）；流媒体桶取并集；CNH 蕴含 CN。
+    未识别的行原样返回。
     """
     return _rebuild_note(line)
 
@@ -718,7 +718,7 @@ def _is_known_note_token(s: str) -> bool:
     return bool(
         _NOTE_LAT_RE.match(s) or _NOTE_SPEED_RE.match(s)
         or _NOTE_STREAMING_RE.match(s) or s in _NOTE_TYPE_TOKENS
-        or s == "CF" or s in _NOTE_TIER_TOKENS or s in _NOTE_FAMILY_TOKENS
+        or s in _NOTE_TIER_TOKENS or s in _NOTE_FAMILY_TOKENS
         or s in ("CN", "CNH") or _NOTE_SCORE_RE.match(s)
         or _NOTE_UPTIME_RE.match(s)
     )
@@ -747,7 +747,7 @@ def _parse_note_segs(note: str) -> dict | None:
     segs = _flatten_segs(segs[1:])
     b: dict = {
         "lead": lead, "lat": None, "spd": None, "stream": [], "typ": None,
-        "cf": False, "tier": None, "fam": None, "cn": False, "cnh": False,
+        "tier": None, "fam": None, "cn": False, "cnh": False,
         "score": None, "uptime": None, "other": [],
     }
     for s in segs:
@@ -760,8 +760,6 @@ def _parse_note_segs(note: str) -> dict | None:
                 b["stream"].append(s)
         elif s in _NOTE_TYPE_TOKENS:
             b["typ"] = s
-        elif s == "CF":
-            b["cf"] = True
         elif s in _NOTE_TIER_TOKENS:
             b["tier"] = s
         elif s in _NOTE_FAMILY_TOKENS:
@@ -775,6 +773,8 @@ def _parse_note_segs(note: str) -> dict | None:
         elif _NOTE_UPTIME_RE.match(s):
             b["uptime"] = s
         else:
+            if s == "CF":
+                continue  # 已废弃的死标记：池子全为 CF 边缘端口，恒真无信息量，归一化时丢弃
             b["other"].append(s)
     return b
 
@@ -782,7 +782,7 @@ def _parse_note_segs(note: str) -> dict | None:
 def _render_note(head: str, b: dict) -> str:
     parts = [p for p in (
         b["lead"], b["lat"], b["spd"], *b["stream"],
-        b["typ"], "CF" if b["cf"] else None, b["tier"], b["fam"],
+        b["typ"], b["tier"], b["fam"],
         "CN" if (b["cn"] or b["cnh"]) else None,
         "CNH" if b["cnh"] else None, b["score"], b["uptime"],
     ) if p]
@@ -790,7 +790,7 @@ def _render_note(head: str, b: dict) -> str:
     return f"{head}#{'-'.join(parts)}"
 
 
-_NOTE_BUCKET_KEYS = ("type", "tier", "family", "score", "streaming", "cf", "cn", "uptime")
+_NOTE_BUCKET_KEYS = ("type", "tier", "family", "score", "streaming", "cn", "uptime")
 _BUCKET_TO_KEY = {
     "type": "typ", "tier": "tier", "family": "fam", "score": "score",
     "streaming": "stream",
@@ -807,7 +807,7 @@ def _rebuild_note(line: str, clear: tuple = ()) -> str:
     # 既无延迟也无任何受管 token → 非验证池行（如裸 `#US`），不动
     if b["lat"] is None and not any(
         (b["spd"], b["stream"], b["typ"], b["tier"], b["fam"],
-         b["cn"], b["cnh"], b["score"], b["cf"], b["uptime"])
+         b["cn"], b["cnh"], b["score"], b["uptime"])
     ):
         return line
     for bucket in clear:
@@ -824,7 +824,7 @@ def _rebuild_note(line: str, clear: tuple = ()) -> str:
 
 
 def clear_note_buckets(line: str, *buckets: str) -> str:
-    """删除给定互斥桶（type/tier/family/score/streaming/cf/cn）的既有 token。
+    """删除给定互斥桶（type/tier/family/score/streaming/cn）的既有 token。
 
     权威数据源写入前先清桶再追加（merge_note_tokens），避免新旧值并存。
     """
@@ -841,11 +841,6 @@ def merge_note_tokens(line: str, *tokens: str) -> str:
         if not has_token(note, tok):
             out += "-" + tok
     return normalize_note(out)
-
-
-def is_cf_heuristic(line: str) -> bool:
-    """行备注是否带 ``-CF``（Cloudflare 边缘标记，用于检测时记录 heuristic 源）。"""
-    return has_token(_note(line), "CF")
 
 
 

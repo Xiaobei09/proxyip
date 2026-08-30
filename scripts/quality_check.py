@@ -23,10 +23,10 @@ under ``data/quality/``:
 
 All proxies use the TLS (Cloudflare edge) method: direct TLS connections with
 SNI routing. Only Cloudflare-fronted hosts are reachable. The exit is the edge
-itself and is tagged ``CF``.
+itself.
 
 Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
-lines as ``-<type>-<rep>``, e.g. ``1.2.3.4:443#US-120ms-0.44MB/s-CF-72``.
+lines as ``-<type>-<rep>``, e.g. ``1.2.3.4:443#US-120ms-0.44MB/s-72``.
 (流媒体解锁检查已移除——历史行上的 NF/D+/YT/MX/PV/GPT token 由
 normalize_note 作为遗留段继续容忍解析，但不再产生新观测。) When the exit
 region is known it is inserted right after the entry country code as
@@ -129,7 +129,7 @@ def build_annotation(stream_toks: str, type_toks: str) -> str:
 
 
 # 旧 QC 后缀清理已由 common.normalize_note 统一接管（含流媒体并集、
-# 类型/档位/家族/分数取最右、CF 独立维度），此处不再单独实现。
+# 类型/档位/家族/分数取最右），此处不再单独实现。
 
 
 def resolve_exit_ips(results: dict, fam_map: dict) -> dict:
@@ -351,7 +351,7 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
 def build_annotations(results: dict, rep_map: dict) -> dict[str, str]:
     annotations: dict[str, str] = {}
     for res in results.values():
-        ann = build_annotation("", "CF")
+        ann = ""
         rep = rep_map.get(res["key"])
         if rep:
             ann = build_annotation(ann, str(rep["score"]))

@@ -18,27 +18,6 @@ CN_LINE = "1.2.3.4:2087#\U0001F1FA\U0001F1F8US-10ms-20.07MB/s-GPT-CF"
 US_LINE = "5.6.7.8:443#\U0001F1FA\U0001F1F8US-8ms-5.86MB/s"
 
 
-class TestHeuristic(unittest.TestCase):
-    def test_cf_detected(self):
-        self.assertTrue(cc.is_cf_heuristic(CN_LINE))
-
-    def test_non_cf_rejected(self):
-        self.assertFalse(cc.is_cf_heuristic(US_LINE))
-
-    def test_cf_only_line(self):
-        self.assertTrue(cc.is_cf_heuristic("9.9.9.9:80#US-1ms-CF"))
-
-    def test_cf_line_with_exit_arrow(self):
-        self.assertTrue(cc.is_cf_heuristic("9.9.9.9:80#US\u2192NRT-1ms-CF"))
-
-    def test_all_line_note(self):
-        line = "9.9.9.9:80#ALL-120ms-0.44MB/s-CF"
-        self.assertEqual(cc._note(line), "-120ms-0.44MB/s-CF")
-        self.assertTrue(cc.is_cf_heuristic(line))
-
-    def test_no_annotation(self):
-        self.assertFalse(cc.is_cf_heuristic("1.2.3.4:80#US"))
-
 
 class TestParseCheckHost(unittest.TestCase):
     def test_ok_report(self):
@@ -185,7 +164,7 @@ class TestMergeVerdict(unittest.TestCase):
             "check_host": {"status": "ok", "ok": True, "ms": 180},
             "xxapi": {"status": "ok", "ok": True, "ms": 120},
         }
-        merged = cc.merge_verdict(sources, cf=False)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["ms"], 120.0)
 
@@ -194,7 +173,7 @@ class TestMergeVerdict(unittest.TestCase):
             "check_host": {"status": "ok", "ok": True, "ms": 180},
             "xxapi": {"status": "error", "ok": False, "ms": None},
         }
-        merged = cc.merge_verdict(sources, cf=False)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "uncertain")
 
     def test_both_l2_fail_unreachable(self):
@@ -202,7 +181,7 @@ class TestMergeVerdict(unittest.TestCase):
             "check_host": {"status": "fail", "ok": False, "ms": None},
             "xxapi": {"status": "fail", "ok": False, "ms": None},
         }
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_pingpe_fail_plus_l2_fail(self):
         sources = {
@@ -210,30 +189,29 @@ class TestMergeVerdict(unittest.TestCase):
             "xxapi": {"status": "ok", "ok": True, "ms": 90},
             "pingpe": {"status": "fail", "ok": False, "ms": None},
         }
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_single_fail_uncertain(self):
         sources = {
             "check_host": {"status": "fail", "ok": False, "ms": None},
             "xxapi": {"status": "error", "ok": False, "ms": None},
         }
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_all_error_skipped(self):
         sources = {
             "check_host": {"status": "error", "ok": False, "ms": None},
             "xxapi": {"status": "error", "ok": False, "ms": None},
         }
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "skipped")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
 
     def test_heuristic_only_uncertain(self):
         sources = {
             "check_host": {"status": "error", "ok": False, "ms": None},
             "xxapi": {"status": "error", "ok": False, "ms": None},
         }
-        merged = cc.merge_verdict(sources, cf=True)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "skipped")
-        self.assertIn("heuristic", merged["basis"])
 
     def test_itdog_single_node_weak_ratio_uncertain(self):
         """itdog 仅 1/18 节点可达（ratio≈0.06）→ 不得独立判定 reachable。"""
@@ -242,7 +220,7 @@ class TestMergeVerdict(unittest.TestCase):
                       "level": "tcp", "ok_nodes": 1, "nodes": 18,
                       "ratio": 0.056},
         }
-        merged = cc.merge_verdict(sources, cf=False)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "uncertain")
 
     def test_itdog_good_ratio_reachable(self):
@@ -252,7 +230,7 @@ class TestMergeVerdict(unittest.TestCase):
                       "ratio": 0.78},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+            cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_itdog_weak_plus_two_single_sources_reachable(self):
         """弱 itdog 不能单独定论，但两路单节点源交叉仍可判 reachable。"""
@@ -264,7 +242,7 @@ class TestMergeVerdict(unittest.TestCase):
         }
         # itdog 弱 + check_host/xxapi 双确认 → 仍走单节点交叉线
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+            cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_tcptest_good_ratio_reachable(self):
         """tcptest（多节点 TCP）成功率高 → 单源独立判 reachable。"""
@@ -274,9 +252,9 @@ class TestMergeVerdict(unittest.TestCase):
                         "ratio": 0.8},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+            cc.merge_verdict(sources)["verdict"], "reachable")
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["level"], "tcp")
+            cc.merge_verdict(sources)["level"], "tcp")
 
     def test_tcptest_weak_ratio_uncertain(self):
         """tcptest 仅少数节点可达（ratio 低）→ 不得单源定论。"""
@@ -288,7 +266,7 @@ class TestMergeVerdict(unittest.TestCase):
             "xxapi": {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+            cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_tcptest_fail_plus_l2_fail_unreachable(self):
         """tcptest 全节点失败 + check_host/xxapi 失败 → unreachable。"""
@@ -299,7 +277,7 @@ class TestMergeVerdict(unittest.TestCase):
             "xxapi": {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+            cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_new_multi_sources_strong_reachable(self):
         """新增四源（pingloc/antping/tcpingcn/chinaz）达标 → 独立判 reachable。"""
@@ -314,7 +292,7 @@ class TestMergeVerdict(unittest.TestCase):
                         "ok_nodes": 45, "nodes": 50, "ratio": 0.90}),
         ]):
             self.assertEqual(
-                cc.merge_verdict({name: src}, cf=False)["verdict"],
+                cc.merge_verdict({name: src})["verdict"],
                 "reachable", msg=f"{name} strong → reachable")
 
     def test_chinaz_degenerate_sample_not_strong(self):
@@ -324,7 +302,7 @@ class TestMergeVerdict(unittest.TestCase):
                        "ok_nodes": 1, "nodes": 1, "ratio": 1.0},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+            cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_new_multi_fail_combos_unreachable(self):
         """新源多节点失败 + 单节点失败 → unreachable；两大节点失败也 → unreachable。"""
@@ -342,7 +320,7 @@ class TestMergeVerdict(unittest.TestCase):
         ]
         for sources in cases:
             self.assertEqual(
-                cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+                cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_coffee_strong_reachable(self):
         sources = {
@@ -350,7 +328,7 @@ class TestMergeVerdict(unittest.TestCase):
                        "ok_nodes": 15, "nodes": 18, "ratio": 0.83},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+            cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_coffee_degenerate_not_strong(self):
         sources = {
@@ -358,7 +336,7 @@ class TestMergeVerdict(unittest.TestCase):
                        "ok_nodes": 1, "nodes": 18, "ratio": 0.056},
         }
         self.assertEqual(
-            cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+            cc.merge_verdict(sources)["verdict"], "uncertain")
 
 
 class TestAnnotations(unittest.TestCase):
@@ -1076,24 +1054,24 @@ class TestItdogMergeVerdict(unittest.TestCase):
 
     def test_itdog_ok_reachable(self):
         sources = {"itdog": self._s("ok"), "check_host": self._s("error")}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_itdog_fail_alone_uncertain(self):
         sources = {"itdog": self._s("fail"), "check_host": self._s("error")}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_itdog_fail_plus_checkhost_fail(self):
         sources = {"itdog": self._s("fail"), "check_host": self._s("fail")}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_pingpe_fail_plus_itdog_fail(self):
         sources = {"pingpe": self._s("fail"), "itdog": self._s("fail")}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_itdog_rate_limited_neutral(self):
         sources = {"itdog": {"status": "rate_limited", "ok": False, "ms": None},
                    "check_host": {"status": "error", "ok": False, "ms": None}}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "skipped")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
 
 
 class TestMergeVerdictLevel(unittest.TestCase):
@@ -1106,24 +1084,24 @@ class TestMergeVerdictLevel(unittest.TestCase):
             "itdog": self._src("ok", "http"),
             "check_host": self._src("error"),
         }
-        merged = cc.merge_verdict(sources, cf=False)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["level"], "http")
 
     def test_tcp_only_level(self):
         sources = {"itdog": self._src("ok", "tcp")}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["level"], "tcp")
+        self.assertEqual(cc.merge_verdict(sources)["level"], "tcp")
 
     def test_no_ok_sources_level_none(self):
         sources = {"check_host": self._src("fail"), "xxapi": self._src("fail")}
-        merged = cc.merge_verdict(sources, cf=False)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "unreachable")
         self.assertIsNone(merged["level"])
 
     def test_sources_without_level_field(self):
         # 旧格式源（无 level 字段）不报错，按 tcp 计
         sources = {"itdog": {"status": "ok", "ok": True, "ms": 10}}
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["level"], "tcp")
+        self.assertEqual(cc.merge_verdict(sources)["level"], "tcp")
 
     def test_itdog_tcping_is_multi_node_source(self):
         # batch_http 失败 + batch_tcping 单独 ok → reachable（多节点源）
@@ -1131,7 +1109,7 @@ class TestMergeVerdictLevel(unittest.TestCase):
             "itdog": self._src("fail"),
             "itdog_tcping": self._src("ok", "tcp"),
         }
-        merged = cc.merge_verdict(sources, cf=False)
+        merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["basis"], ["itdog_tcping"])
 
@@ -1140,7 +1118,7 @@ class TestMergeVerdictLevel(unittest.TestCase):
             "itdog_tcping": self._src("fail"),
             "check_host": self._src("fail"),
         }
-        self.assertEqual(cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
 
 class TestWriteContract(unittest.TestCase):
@@ -1591,8 +1569,7 @@ class TestItdogTcpingFallbackGuard(unittest.TestCase):
 
 
 class TestItdogFullPoolTargets(unittest.TestCase):
-    """itdog 目标集 = 去重后全量存活池（含 CF 启发式行）。历史上 CF 过滤
-    在池子 100% 带 -CF 时把主源锁死成空集，本测试保证不再复发。"""
+    """itdog 目标集 = 去重后全量存活池。同一 (ip,port) 多行只测一次。"""
 
     def _args(self):
         from types import SimpleNamespace
