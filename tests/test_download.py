@@ -92,7 +92,7 @@ class TestWriteOutputs(unittest.TestCase):
         dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
         by_port = {
             "443": {"US": ["1.1.1.1", "2.2.2.2"], "JP": ["3.3.3.3"]},
-            "80": {"US": ["9.9.9.9"]},
+            "8443": {"US": ["9.9.9.9"]},
         }
         stats, all_entries = dp.write_outputs(by_port, per_country_limit=1)
         self.assertEqual(stats["__total__"], 4)
@@ -100,12 +100,32 @@ class TestWriteOutputs(unittest.TestCase):
         self.assertEqual(stats["__countries__"], 2)
         self.assertEqual(stats["__ports__"], 2)
         us_lines = (dp.COUNTRIES_DIR / "US.txt").read_text().splitlines()
-        self.assertEqual(us_lines, ["1.1.1.1:443#US", "2.2.2.2:443#US", "9.9.9.9:80#US"])
+        self.assertEqual(us_lines, ["1.1.1.1:443#US", "2.2.2.2:443#US", "9.9.9.9:8443#US"])
         # all.txt ip-sorted
-        self.assertEqual(all_entries, ["1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#JP", "9.9.9.9:80#US"])
+        self.assertEqual(all_entries, ["1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#JP", "9.9.9.9:8443#US"])
         # per-country limit ltd
         ltd = (dp.ALL_LTD_FILE).read_text().splitlines()
         self.assertEqual(ltd, ["1.1.1.1:443#US", "3.3.3.3:443#JP"])
+
+    def test_non_cf_edge_ports_dropped(self):
+        import tempfile
+
+        base = Path(tempfile.mkdtemp(prefix="dp_"))
+        for k in self.orig:
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        by_port = {
+            "443": {"US": ["1.1.1.1"]},
+            "8080": {"US": ["7.7.7.7"]},
+            "999": {"DE": ["8.8.8.8"]},
+        }
+        stats, all_entries = dp.write_outputs(by_port, per_country_limit=0)
+        self.assertNotIn("8080", stats)
+        self.assertEqual(len(all_entries), 1)
+        self.assertEqual(all_entries, ["1.1.1.1:443#US"])
 
     def test_no_ltd_when_limit_zero(self):
         import tempfile
@@ -572,27 +592,17 @@ class TestWriteSourceAttribution(unittest.TestCase):
 
 
 class TestProxyMirrorSources(unittest.TestCase):
-    def test_five_mirror_sources(self):
-        self.assertEqual(len(dp.PROXY_MIRROR_SOURCES), 5)
-
     def test_mirror_sources_parse_ipport_lines(self):
-        for url in dp.PROXY_MIRROR_SOURCES:
-            by_port = dp.extract_plain(b"1.2.3.4:8080\n5.6.7.8:443\n")
-            self.assertEqual(by_port["8080"]["ALL"], ["1.2.3.4"])
-            self.assertEqual(by_port["443"]["ALL"], ["5.6.7.8"])
+        by_port = dp.extract_plain(b"1.2.3.4:8080\n5.6.7.8:443\n")
+        self.assertEqual(by_port["8080"]["ALL"], ["1.2.3.4"])
+        self.assertEqual(by_port["443"]["ALL"], ["5.6.7.8"])
 
     def test_source_label_mapping(self):
-        self.assertEqual(dp.source_label(dp.PROXY_MIRROR_SOURCES[3]),
-                         "proxyscrape")
-        self.assertEqual(
-            dp.source_label(
-                "https://raw.githubusercontent.com/monosans/proxy-list/"
-                "main/proxies/http.txt"),
-            "monosans")
         self.assertEqual(dp.source_label("https://x/a.txt"), "a")
+        self.assertEqual(dp.source_label("https://x/proxies/http.txt"), "http")
 
-    def test_load_extras_with_mirror_url(self):
-        url = dp.PROXY_MIRROR_SOURCES[3]
+    def test_load_extras_with_url(self):
+        url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
 
         def fake_fetch(u, timeout):
             self.assertEqual(u, url)
