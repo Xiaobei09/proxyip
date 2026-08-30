@@ -1921,10 +1921,11 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ]
             # 若主通道连节点列表都没取到（上游被墙/验证码墙的整站性失败），
             # tcping 同站同墙，兜底只会再空转一轮——直接跳过。注意只统计
-            # 本轮真正过 itdog 的键（无 itdog 记录的已定论键不得算作成功）。
+            # 本轮真正过 itdog 的键（无 itdog 记录的已定论键不得算作成功），
+            # 且要求至少出现过 1 次 ok（全 fail 也是被投毒站点的特征——真活的
+            # 大陆可达键不可能整批 0 ok，全 fail 时同站的 tcping 一样是死路）。
             node_fetch_ok = any(
-                entries.get(key, {}).get("itdog", {}).get("status")
-                not in ("error", "rate_limited")
+                entries.get(key, {}).get("itdog", {}).get("status") == "ok"
                 for _, key, _, _, _ in _itdog_cands
             ) if _itdog_cands else False
             if pending and node_fetch_ok:
