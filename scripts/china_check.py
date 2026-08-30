@@ -1915,17 +1915,18 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
         if not getattr(args, "skip_itdog_tcping", False):
             pending = [
-                item for item in sample
+                item for item in _itdog_cands
                 if entries.get(item[1], {}).get("itdog", {}).get("status")
                 in ("error", "rate_limited")
             ]
             # 若主通道连节点列表都没取到（上游被墙/验证码墙的整站性失败），
-            # tcping 同站同墙，兜底只会再空转一轮——直接跳过。
+            # tcping 同站同墙，兜底只会再空转一轮——直接跳过。注意只统计
+            # 本轮真正过 itdog 的键（无 itdog 记录的已定论键不得算作成功）。
             node_fetch_ok = any(
                 entries.get(key, {}).get("itdog", {}).get("status")
                 not in ("error", "rate_limited")
-                for _, key, _, _, _ in sample
-            )
+                for _, key, _, _, _ in _itdog_cands
+            ) if _itdog_cands else False
             if pending and node_fetch_ok:
                 print(
                     f"itdog_tcping fallback: {len(pending)} targets",

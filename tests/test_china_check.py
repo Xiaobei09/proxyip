@@ -1553,14 +1553,14 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
 
 class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
     """itdog 批量代价高：只投仍未定论的键；双免额已定论（≥2 ok / ≥2 fail）
-    的键不得再进 itdog 复核。"""
+    的键不得再进 itdog 复核，且 batch_tcping 兜底按节点拉取状态触发。"""
 
     def _args(self):
         from types import SimpleNamespace
 
         return SimpleNamespace(
             skip_itdog=False,
-            skip_itdog_tcping=True,
+            skip_itdog_tcping=False,
             pingpe_limit=0,
             workers=4,
             timeout=5,
@@ -1597,6 +1597,60 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
             cc.run_measurements([decided, pending], self._args())
 
         self.assertEqual(seen.get("keys"), ["10.3.0.1:80#US"])
+
+    def test_tcping_fallback_skipped_when_itdog_fully_down(self):
+        """itdog 主通道整站失败（全 error）时不得空转 batch_tcping 兜底；
+        已定论键（无 itdog 记录）不得被误算作「节点拉取成功」。"""
+        import unittest.mock as mock
+
+        decided = ("10.4.0.1:80#US", "10.4.0.1:80#US", "10.4.0.1", "80", "US")
+        stuck = ("10.5.0.1:80#US", "10.5.0.1:80#US", "10.5.0.1", "80", "US")
+
+        def fake_itdog(sample, args, page_url=None, **kw):
+            # 整站被墙：每个目标都只返回 error（无节点列表已取得）
+            return {key: {"status": "error", "ok": False, "ms": None, "error": "no itdog nodes"}
+                    for _, key, _, _, _ in sample}
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "ok", "ok": True, "ms": 1.0}), \
+             mock.patch.object(cc, "jkapi_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": "x"}), \
+             mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog) as mib:
+            cc.run_measurements([decided, stuck], self._args())
+
+        self.assertEqual(len(mib.call_args_list), 1)  # 只有一次 batch_http，无 tcping 兜底
+
+    def test_tcping_fallback_runs_when_nodes_fetched(self):
+        """itdog 节点拉取成功（部分 ok）且部分键 error → 走 batch_tcping 兜底。"""
+        import unittest.mock as mock
+
+        a = ("10.6.0.1:80#US", "10.6.0.1:80#US", "10.6.0.1", "80", "US")
+        b = ("10.7.0.1:80#US", "10.7.0.1:80#US", "10.7.0.1", "80", "US")
+
+        def fake_itdog(sample, args, page_url=None, **kw):
+            out = {}
+            for _, key, _, _, _ in sample:
+                out[key] = ({"status": "ok", "ok": True, "ms": 5.0, "ratio": 0.9, "nodes": 12}
+                            if key == a[1] else
+                            {"status": "error", "ok": False, "ms": None, "error": "rl"})
+            return out
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "ok", "ok": True, "ms": 1.0}), \
+             mock.patch.object(cc, "jkapi_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": "x"}), \
+             mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog) as mib:
+            entries, _, _ = cc.run_measurements([a, b], self._args())
+
+        calls = [c for c in mib.call_args_list]
+        self.assertEqual(len(calls), 2)
+        page_urls = [c.kwargs.get("page_url") for c in calls]
+        self.assertIn(cc.ITDOG_TCPING_URL, page_urls)
+        fallback = next(c for c in calls if c.kwargs.get("page_url") == cc.ITDOG_TCPING_URL)
+        self.assertEqual([key for _, key, _, _, _ in fallback.args[0]],
+                         ["10.7.0.1:80#US"])
 
 
 class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
