@@ -60,8 +60,35 @@ def itdog_parse_nodes(html: str, per_isp: int) -> list[str]:
 
 
 def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> list[str]:
-    """拉取当前节点列表（节点 id 会轮换，必须每次运行现取）。"""
-    hdrs = {"User-Agent": UA, "Referer": "https://www.itdog.cn/"}
+    """拉取当前节点列表（节点 id 会轮换，必须每次运行现取）。
+
+    itdog.cn 对无头/GitHub 出口有指纹与会话风控：先 warmup 首页换 Cookie，
+    再用完整浏览器指纹请求批量页。风控放行则返回节点 id 列表，否则 []。
+    """
+    hdrs = {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                  "image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://www.itdog.cn/",
+        "Upgrade-Insecure-Requests": "1",
+        "sec-ch-ua": '"Google Chrome";v="125", "Chromium";v="125", "Not/A)Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+    }
+    try:
+        _, rh, _ = request_follow(
+            "https://www.itdog.cn/", {"User-Agent": UA}, 20
+        )
+        cookie = rh.get("Set-Cookie", "").split(";")[0]
+        if cookie:
+            hdrs["Cookie"] = cookie
+    except Exception as exc:
+        logging.debug("itdog warmup: %s", exc)
     for _ in range(2):
         try:
             _, _, body = request_follow(page_url, hdrs, 20)
