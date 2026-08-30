@@ -53,6 +53,9 @@
 """
 
 import argparse
+import base64
+import hashlib
+import http.cookiejar
 import json
 import logging
 import os
@@ -99,6 +102,7 @@ from china_itdog import (
     ITDOG_TASK_TIMEOUT,
     ITDOG_TCPING_NODES_PER_ISP,
     ITDOG_TCPING_URL,
+    _WebSocket,
     itdog_batch_run,
 )
 
@@ -145,6 +149,60 @@ TCPTEST_LIMIT_DEFAULT = 150  # 每轮复核的键数上限（免费源节流）
 TCPTEST_CONCURRENCY = 4  # 有界并发（每键端到端 ~2-6s）
 TCPTEST_POLL_DEADLINE = 30.0
 TCPTEST_REQ_TIMEOUT = 12
+MULTI_MIN_NODES = 5  # 多节点源至少报告 5 个节点才可作强确认（防限流残缺样本退化）
+
+# ip.net.coffee —— 免费大陆多节点 ICMP ping（REST，GET+轮询），无需 key：
+# GET /api/ping/start?host=IP&user_ip=unknown&node=n01..n20 → 命中缓存直返
+# results；未命中返回 request_id，轮询 GET /api/ping/result/{rid} 直到各节点
+# 就绪。节点 ~18 个（n01/n08 常离线自动跳过），每节点 4 发 ICMP。
+# 注意：仅测主机存活（ICMP），不测 TCP 端口 —— 作为多节点源单独确认可达，
+# 端口层结论仍以 tcptest/itdog 等 TCP 源为准（ratio 大节点优势消除单点抖动）。
+COFFEE_URL = "https://ip.net.coffee/api"
+COFFEE_NODES = 10      # 每键请求的节点数（从固定池里取）
+COFFEE_POOL = [f"n{i:02d}" for i in range(1, 21)]
+COFFEE_CONCURRENCY = 16  # 有界并发（空闲量大，ICMP 单键 ~0.1-1s）
+COFFEE_POLL_DEADLINE = 20.0
+COFFEE_REQ_TIMEOUT = 12
+COFFEE_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节点 ICMP 优势）
+
+# pingloc.com —— 免费大陆多节点 ping/tcp_ping（纯 HTTP + SSE，零鉴权），无 key：
+# GET /api/v1/node/items 拿节点列表 → POST /api/v1/task/create 建任务拿 token →
+# GET /api/v1/task/exec?token=... 收 SSE 流式逐节点结果（error_code 0=成功）。
+# 注意 tcp_ping 固定端口 80（UI 无自定义端口，传 port 键会被忽略）。
+PINGLOC_URL = "https://www.pingloc.com/api/v1"
+PINGLOC_REQ_TIMEOUT = 15
+PINGLOC_NODE_TIMEOUT = 20.0
+
+# antping.com —— 免费大陆多节点 ping/tcp（JWT + WebSocket 推送），无 key：
+# GET /geek/network-tools-service/auth/publicKey 拿 JWT → 连 wss://antping.com/ws/
+# 发 {"token":jwt,"code":3|4,"data":"ip[:port]","dns":"","retry":false,
+#     "network":"1,2,3,4,5"}（3=ping 4=tcp-ppin；network 1电信2联通3移动4多线5海外）
+# → 收 code:200 帧,每节点一条;可达 = status==200 且 speed>0。全部节点免费测。
+ANTPING_URL = "https://antping.com/geek"
+ANTPING_WS = "wss://antping.com/ws/"
+ANTPING_REQ_TIMEOUT = 12
+ANTPING_WS_IDLE = 30.0
+
+# tcping.cn —— 免费大陆多节点 tcping（SHA-256 PoW + WS 鉴权），无 key：
+# GET /api/probe/page 拿挑战 {r,s,ts,d(=difficulty)} → 纯 Python 算
+# request_hash=sha256(cl)/yc(9轮)/bc(pow-salt) → 暴力搜 nonce 使
+# sha256(f"{r}\n{salt}\n{request_hash}\n{nonce}") 前 d 位为 0 →
+# POST /api/probe/task（body 含 r/ts/p/nonce）拿 {k,r,u} → 连 wss:{u} 发
+# {"k":..,"r":..} → 收 hello/start/result/complete 逐节点结果（rtt_avg）。
+TCPINGCN_URL = "https://www.tcping.cn"
+TCPINGCN_REQ_TIMEOUT = 15
+TCPINGCN_POW_DIFFICULTY = 15
+TCPINGCN_WS_IDLE = 40.0
+
+# ping.chinaz.com —— 免费大陆多节点 ping（服务端渲染 token + WS），无 key：
+# GET https://ping.chinaz.com/<host> 拿壳页（let token=...; serverList 53 节点）
+# → 连 wss://tooldata.chinaz.com/pingwebsocket 发 {"keyword":host,"token":token}
+# → 收 code:1 单节点结果帧(timeMs/tTL)，code:10002 帧即结束。
+CHINAZ_URL = "https://ping.chinaz.com"
+CHINAZ_WS = "wss://tooldata.chinaz.com/pingwebsocket"
+CHINAZ_REQ_TIMEOUT = 15
+CHINAZ_WS_IDLE = 40.0
+CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
 
 # itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
 
@@ -718,6 +776,574 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str]) -> 
     }
 
 
+def coffee_check(ip: str, timeout: float, nodes: list[str] | None = None) -> dict:
+    """ip.net.coffee 单键多节点 ICMP 探测（GET + 轮询）。
+
+    返回 source_result 同构字典：``{status, ok, ms, error, level, ok_nodes,
+    nodes, ratio}``。节点成功 = 该节点至少 1 发 ICMP 应答（``["OK", ...]``），
+    ``ms`` 取成功节点最小 RTT。仅 ICMP 主机存活 → ``level="icmp"``。
+    """
+    node_ids = nodes or COFFEE_POOL
+    qs = "&".join(f"node={n}" for n in node_ids)
+    url = f"{COFFEE_URL}/ping/start?host={ip}&user_ip=unknown&{qs}"
+    try:
+        status, _, resp = request_follow(
+            url, {"User-Agent": UA, "Accept": "application/json"}, COFFEE_REQ_TIMEOUT
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status == 429:
+        return {"status": "rate_limited", "ok": False, "ms": None,
+                "error": "rate limited", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"start http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad start json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    results = payload.get("results")
+    if payload.get("cached") and isinstance(results, dict):
+        return _coffee_aggregate(results)
+    rid = payload.get("request_id")
+    if not rid:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no request_id", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    deadline = time.monotonic() + COFFEE_POLL_DEADLINE
+    while time.monotonic() < deadline:
+        time.sleep(2.0)
+        try:
+            status, _, resp = request_follow(
+                f"{COFFEE_URL}/ping/result/{rid}",
+                {"User-Agent": UA, "Accept": "application/json"}, COFFEE_REQ_TIMEOUT
+            )
+        except Exception:
+            continue
+        if status != 200:
+            continue
+        try:
+            payload = json.loads(resp.decode("utf-8", "replace"))
+        except json.JSONDecodeError:
+            continue
+        results = payload.get("results")
+        if isinstance(results, dict) and any(v is not None for v in results.values()):
+            return _coffee_aggregate(results)
+    return {"status": "error", "ok": False, "ms": None,
+            "error": "poll timeout", "level": None,
+            "ok_nodes": 0, "nodes": 0, "ratio": None}
+
+
+def _coffee_aggregate(results: dict) -> dict:
+    """聚合 coffee 结果：results = {node: [[["OK", ms, ip], ...]]}。"""
+    ok_nodes = 0
+    ms_values: list[float] = []
+    for node, rounds in results.items():
+        if not isinstance(rounds, list) or not rounds:
+            continue
+        node_ok = False
+        for probe in rounds[0]:
+            if isinstance(probe, (list, tuple)) and probe and probe[0] == "OK":
+                node_ok = True
+                if len(probe) > 1 and isinstance(probe[1], (int, float)) and probe[1] > 0:
+                    ms_values.append(probe[1])
+                break
+        if node_ok:
+            ok_nodes += 1
+    nodes = len([n for n in results if isinstance(results[n], list) and results[n]])
+    if ok_nodes:
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(ms_values), 1) if ms_values else None,
+            "error": "", "level": "icmp",
+            "ok_nodes": ok_nodes, "nodes": nodes,
+            "ratio": round(ok_nodes / nodes, 3) if nodes else None,
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"icmp unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0 if nodes else None,
+    }
+
+
+def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
+    """pingloc.com 单键多节点探测（纯 HTTP + SSE，零鉴权）。
+
+    ``method``: "ping"（ICMP）或 "tcp_ping"（固定端口 80 的 TCP）。返回
+    source_result 同构字典；节点成功 = SSE 回调 ``error_code==0`` 且有
+    ``latency``。应用层/tcp 层分别给 ``level``；``ms`` 取成功节点最小 RTT。
+    """
+    try:
+        status, _, resp = request_follow(
+            f"{PINGLOC_URL}/node/items",
+            {"User-Agent": UA, "Accept": "application/json"},
+            timeout,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"nodes http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        nodes = json.loads(resp.decode("utf-8", "replace")).get("data", [])
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad nodes json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not nodes:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no pingloc nodes", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        status, _, resp = request_follow(
+            f"{PINGLOC_URL}/task/create",
+            {"User-Agent": UA, "Accept": "application/json",
+             "Content-Type": "application/json"},
+            timeout, method="POST",
+            data=json.dumps({
+                "host": ip, "method": method, "dns": "",
+                "isp": [], "is_continue": False,
+            }).encode("utf-8"),
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"create http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        token = json.loads(resp.decode("utf-8", "replace")).get("data", {}).get("token")
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad create json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not token:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no token", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        req = urllib.request.Request(
+            f"{PINGLOC_URL}/task/exec?token={urllib.parse.quote(token)}",
+            headers={"User-Agent": UA, "Accept": "text/event-stream"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout + PINGLOC_NODE_TIMEOUT) as resp:
+            chunks = b""
+            while True:
+                got = resp.read(65536)
+                if not got:
+                    break
+                chunks += got
+            sse = chunks.decode("utf-8", "replace")
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    for block in sse.split("\n\n"):
+        payload = None
+        for line in block.splitlines():
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+        if not payload:
+            continue
+        try:
+            ev = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("error_code") == 0 and isinstance(ev.get("latency"), (int, float)):
+            totals += 1
+            ok_nodes += 1
+            if ev.get("latency", 0) > 0:
+                ms_values.append(ev["latency"])
+        elif "callback" in block and ev.get("error_code") is not None:
+            totals += 1
+    nodes = totals or len(nodes)
+    if ok_nodes:
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(ms_values), 1) if ms_values else None,
+            "error": "", "level": "tcp" if method == "tcp_ping" else "icmp",
+            "ok_nodes": ok_nodes, "nodes": nodes,
+            "ratio": round(ok_nodes / nodes, 3),
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
+    }
+
+
+def antping_check(ip: str, port: str, timeout: float) -> dict:
+    """antping.com 单键多节点探测（JWT + WebSocket）。
+
+    code 3 = PING（ICMP）、4 = TCP-PING（IP:port）。全部网络分组免费可测。
+    节点成功 = ``status==200 且 speed>0``；``ms`` 取成功节点最小 speed。
+    """
+    try:
+        status, _, resp = request_follow(
+            f"{ANTPING_URL}/network-tools-service/auth/publicKey",
+            {"User-Agent": UA, "app-id": "2", "Accept": "application/json",
+             "Referer": "https://antping.com/ping"},
+            ANTPING_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"auth http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        jwt = json.loads(resp.decode("utf-8", "replace")).get("data")
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad auth json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not jwt:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no jwt", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    code = 4 if port else 3
+    target = f"{ip}:{port}" if port else ip
+    try:
+        ws = _WebSocket(ANTPING_WS, timeout=ANTPING_WS_IDLE)
+        ws.send_text(json.dumps({
+            "token": jwt, "code": code, "data": target,
+            "dns": "", "retry": False, "network": "1,2,3,4,5",
+        }, ensure_ascii=False))
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    results: list[dict] = []
+    deadline = time.monotonic() + ANTPING_WS_IDLE
+    while time.monotonic() < deadline:
+        try:
+            ws.settimeout(max(1.0, deadline - time.monotonic()))
+            kind, msg = ws.read()
+        except Exception as e:
+            break
+        if kind in ("err", "close", "closed"):
+            break
+        if kind == "timeout":
+            break
+        if not isinstance(msg, dict):
+            continue
+        data = msg.get("data")
+        if isinstance(data, dict) and data.get("cmd") == code:
+            results.append(data)
+    ws.close()
+    ok = [r for r in results if r.get("status") == 200 and (r.get("speed") or 0) > 0]
+    nodes = len(results) or 1
+    if ok:
+        mss = [r["speed"] for r in ok if r.get("speed")]
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(mss), 1), "error": "",
+            "level": "tcp" if code == 4 else "icmp",
+            "ok_nodes": len(ok), "nodes": nodes,
+            "ratio": round(len(ok) / nodes, 3),
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
+    }
+
+
+def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
+    """tcping.cn 单键多节点 TCP 探测（SHA-256 PoW + WS 鉴权，纯 Python）。
+
+    PoW 是标准 SHA-256（与前端逐字节一致，difficulty 15 ~0.3-0.5s），无 wasm/
+    无 JS 依赖。节点成功 = ``rtt_avg>0``。传输层 → ``level="tcp"``。
+    """
+    cookie = _tcpingcn_page_cookie()
+    try:
+        page = _tcpingcn_get(f"{TCPINGCN_URL}/api/probe/page", cookie=cookie)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(page, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad page json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    r, s, ts = page.get("r"), page.get("s"), page.get("ts")
+    d = page.get("d") or TCPINGCN_POW_DIFFICULTY
+    if not all((r, s, ts)):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no challenge", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    u = {"type": "tcping", "host": ip, "port": int(port or 0),
+         "scope": "global", "region": "all", "ip_type": 1,
+         "dns_server": "", "dns_record_type": "", "slow": False}
+    request_hash = _tcpcn_b64url_sha256(_tcpcn_cl(u))
+    p = _tcpcn_yc(r, s, u, ts, request_hash)
+    salt = _tcpcn_bc(r, s, request_hash)
+    try:
+        nonce, _ = _tcpcn_pow_solve(r, salt, request_hash, d)
+    except RuntimeError as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    u2 = dict(u, r=r, ts=int(ts), p=p, nonce=nonce,
+              via="0", user_agent="", method="", referer="", cookie="")
+    try:
+        task = _tcpingcn_post(f"{TCPINGCN_URL}/api/probe/task", u2, cookie=cookie)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(task, dict) or not task.get("k") or not task.get("u"):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no task", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ws_url = f"wss://www.tcping.cn{task['u']}"
+    try:
+        ws = _WebSocket(ws_url, timeout=TCPINGCN_WS_IDLE)
+        ws.send_text(json.dumps({"k": task["k"], "r": task["r"]}))
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    rows: list[dict] = []
+    deadline = time.monotonic() + TCPINGCN_WS_IDLE
+    while time.monotonic() < deadline:
+        try:
+            ws.settimeout(max(1.0, deadline - time.monotonic()))
+            kind, msg = ws.read()
+        except Exception as e:
+            break
+        if kind in ("err", "close", "closed"):
+            break
+        if kind == "timeout":
+            break
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("event") == "result":
+            data = msg.get("data") or {}
+            if isinstance(data, dict):
+                rows.append(data)
+        elif msg.get("event") == "complete":
+            break
+    ws.close()
+    ok = [r for r in rows if (r.get("rtt_avg") or 0) > 0]
+    nodes = len(rows)
+    if ok:
+        mss = [r["rtt_avg"] for r in ok if r.get("rtt_avg")]
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(mss), 1), "error": "",
+            "level": "tcp", "ok_nodes": len(ok), "nodes": nodes,
+            "ratio": round(len(ok) / nodes, 3) if nodes else None,
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0 if nodes else None,
+    }
+
+
+def _tcpingcn_page_cookie() -> str:
+    cj = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    op.open(urllib.request.Request(
+        f"{TCPINGCN_URL}/ping", headers={"User-Agent": UA}), timeout=TCPINGCN_REQ_TIMEOUT)
+    return "; ".join(f"{c.name}={c.value}" for c in cj)
+
+
+def _tcpingcn_get(url: str, cookie: str = "") -> object:
+    headers = {"User-Agent": UA, "Accept": "application/json",
+               "Referer": f"{TCPINGCN_URL}/ping"}
+    if cookie:
+        headers["Cookie"] = cookie
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=TCPINGCN_REQ_TIMEOUT) as resp:
+        return json.loads(resp.read())
+
+
+def _tcpingcn_post(url: str, body: dict, cookie: str = "") -> object:
+    headers = {"User-Agent": UA, "Accept": "application/json",
+               "Referer": f"{TCPINGCN_URL}/ping",
+               "Content-Type": "application/json",
+               "Origin": TCPINGCN_URL, "X-Requested-With": "XMLHttpRequest"}
+    if cookie:
+        headers["Cookie"] = cookie
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=TCPINGCN_REQ_TIMEOUT) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}")
+
+
+def _tcpcn_b64url_sha256(s: str) -> str:
+    return base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()\
+        .replace("+", "-").replace("/", "_").rstrip("=")
+
+
+def _tcpcn_f2(typ: str, host: str) -> str:
+    h = host.strip()
+    if typ == "http":
+        return h
+    h = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", h)
+    h = re.sub(r"^[^@/]*@", "", h)
+    return re.split(r"[/?#]", h)[0].rstrip("/")
+
+
+def _tcpcn_d2(o: dict) -> dict:
+    i = dict(o)
+    i["type"] = str(i.get("type", "")).strip().lower()
+    i["host"] = _tcpcn_f2(i.get("type"), o.get("host", ""))
+    i["region"] = str(i.get("region", "")).strip().lower()
+    i["method"] = str(i.get("method", "")).strip().upper()
+    i["dns_server"] = str(i.get("dns_server", "")).strip()
+    i["dns_record_type"] = str(i.get("dns_record_type", "")).strip().upper()
+    i["via"] = str(i.get("via", "")).strip()
+    return i
+
+
+def _tcpcn_cl(o: dict) -> str:
+    i = _tcpcn_d2(o)
+    return "\n".join([
+        i["type"] or "", i["host"] or "", str(o.get("port") or 0),
+        o.get("scope") or "", i["region"] or "", str(o.get("ip_type") or 0),
+        i.get("user_agent") or "", i["method"] or "", i.get("referer") or "",
+        i.get("cookie") or "", i["dns_server"] or "",
+        i["dns_record_type"] or "", i["via"] or str(o.get("node_id") or 0),
+    ])
+
+
+def _tcpcn_yc(r: str, s: str, u: dict, ts: int, request_hash: str) -> str:
+    f = request_hash or _tcpcn_b64url_sha256(_tcpcn_cl(u))
+    v = f"{r}|{s}|{f}|{ts}"
+    out = []
+    for w in range(9):
+        x = _tcpcn_b64url_sha256(f"tcping.cn:browser-proof:v2|{w}|{v}")
+        v = f"{x}|{v[::-1]}"
+        if w in (2, 5, 8):
+            out.append(x)
+    return "".join(out)
+
+
+def _tcpcn_bc(r: str, s: str, request_hash: str) -> str:
+    return _tcpcn_b64url_sha256(f"tcping.cn:pow-salt:v1|{r}|{s}|{request_hash}")
+
+
+def _tcpcn_pow_solve(challenge_id, salt, request_hash, difficulty) -> tuple[str, float]:
+    c = f"{challenge_id}\n{salt}\n{request_hash}\n"
+    nbits = int(difficulty or TCPINGCN_POW_DIFFICULTY)
+    t0 = time.monotonic()
+    for e in range(5_000_000):
+        hb = hashlib.sha256((c + str(e)).encode()).digest()
+        if _tcpcn_check_zero_bits(hb, nbits):
+            return str(e), time.monotonic() - t0
+    raise RuntimeError("pow timeout")
+
+
+def _tcpcn_check_zero_bits(hb: bytes, nbits: int) -> bool:
+    full, rem = divmod(nbits, 8)
+    for b in hb[:full]:
+        if b != 0:
+            return False
+    if rem:
+        return hb[full] >> (8 - rem) == 0
+    return True
+
+
+def chinaz_check(ip: str, port: str, timeout: float) -> dict:
+    """ping.chinaz.com 单键多节点 ping（服务端渲染 token + WS，零登录）。
+
+    壳页 GET 拿 token + serverList；仅发 1 条 WS 注册消息；code:1 帧为单节点
+    结果（timeMs/tTL）。节点成功 = ``timeMs`` 可解析数值。ICMP → level="icmp"。
+    ``port`` 参数在 chinaz 无效（该工具只做 ping），保留为接口一致。
+    """
+    try:
+        status, headers, resp = request_follow(
+            f"{CHINAZ_URL}/{ip}",
+            {"User-Agent": UA}, timeout,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"page http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    html = resp.decode("utf-8", "replace")
+    m = re.search(r'let\s+token\s*=\s*"([^"]+)"', html)
+    if not m:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no token", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    token = m.group(1)
+    try:
+        ws = _WebSocket(CHINAZ_WS, timeout=CHINAZ_WS_IDLE)
+        ws.send_text(json.dumps({"keyword": ip, "token": token}))
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    deadline = time.monotonic() + CHINAZ_WS_IDLE
+    while time.monotonic() < deadline:
+        try:
+            ws.settimeout(max(1.0, deadline - time.monotonic()))
+            kind, msg = ws.read()
+        except Exception as e:
+            break
+        if kind in ("err", "close", "closed"):
+            break
+        if kind == "timeout":
+            break
+        if not isinstance(msg, dict):
+            continue
+        code = msg.get("code")
+        if code == 1:
+            totals += 1
+            try:
+                tms = float(msg.get("timeMs"))
+                if tms > 0:
+                    ok_nodes += 1
+                    ms_values.append(tms)
+            except (TypeError, ValueError):
+                pass
+        elif code == 10002:
+            break
+    ws.close()
+    nodes = totals
+    if ok_nodes:
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(ms_values), 1), "error": "",
+            "level": "icmp", "ok_nodes": ok_nodes, "nodes": nodes,
+            "ratio": round(ok_nodes / nodes, 3) if nodes else None,
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0 if nodes else None,
+    }
+
+
 # ------------------------------------------------------------ 判定合成
 
 def merge_verdict(sources: dict, cf: bool) -> dict:
@@ -755,14 +1381,22 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     else:
         level = None
 
-    multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest")]
+    multi_ok = [s for s in ok_sources if s in (
+        "pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest", "coffee",
+        "pingloc", "antping", "tcpingcn", "chinaz")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
 
     def strong_valid(source: str) -> bool:
-        """该多节点源是否能独立支撑 reachable（成功率达标）。"""
+        """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
         ratio = sources[source].get("ratio")
         if ratio is None:
             return True  # pingpe/tcpping 内部已实施多数/60% 规则
+        if (sources[source].get("nodes") or 0) < MULTI_MIN_NODES:
+            return False  # 残缺样本（限流/连接中断）不作强确认，防退化为单点假阳性
+        if source == "coffee":
+            return ratio >= COFFEE_MIN_RATIO
+        if source == "chinaz":
+            return ratio >= CHINAZ_MIN_RATIO
         return ratio >= ITDOG_MIN_RATIO
 
     strong_multi = [s for s in multi_ok if strong_valid(s)]
@@ -790,17 +1424,12 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     if "check_host" in fail_sources and "xxapi" in fail_sources:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
-    if "pingpe" in fail_sources and any(
-        s in fail_sources for s in ("check_host", "xxapi", "itdog", "itdog_tcping")
-    ):
-        return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
-    if "itdog" in fail_sources and any(
-        s in fail_sources for s in ("check_host", "xxapi", "pingpe")
-    ):
-        return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
-    if "itdog_tcping" in fail_sources and any(
-        s in fail_sources for s in ("check_host", "xxapi", "pingpe")
-    ):
+    # 多节点源整站失败 + 任一单节点源也失败 → 足够置信判 unreachable
+    multi_failed = [s for s in fail_sources if s in (
+        "itdog", "itdog_tcping", "pingpe", "tcptest", "coffee",
+        "pingloc", "antping", "tcpingcn", "chinaz")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "xxapi")]
+    if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
         return {"verdict": "uncertain", "basis": fail_sources, "ms": None, "level": None}
@@ -808,6 +1437,15 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     if cf:
         basis.append("heuristic")
     return {"verdict": "skipped", "basis": basis, "ms": None, "level": None}
+
+
+def needs_probe(entries: dict, key: str, line: str) -> bool:
+    """仅对仍未定论的键继续投递多节点源：uncertain/无判定才扫；
+    reachable/unreachable 已定论，避免浪费免费源配额反复探测死键。"""
+    return merge_verdict(
+        entries.get(key, {}),
+        is_cf_heuristic(line),
+    )["verdict"] in ("uncertain", "skipped")
 
 
 def has_cn_note(line: str) -> bool:
@@ -1085,6 +1723,63 @@ def _run_tcptest_slots(
             fut.result()
 
 
+def _run_coffee_slots(
+    candidates: list, entries: dict, timeout: float, concurrency: int
+) -> None:
+    """ip.net.coffee 多节点 ICMP 复核（免费 GET+轮询，空闲量大、单键快）。
+    每键在 concurrency 有界并发下探测主机存活，作为附加多节点确认源。"""
+
+    def work(item) -> None:
+        _, key, ip, _, _ = item
+        entries[key]["coffee"] = coffee_check(ip, timeout)
+        if entries[key]["coffee"].get("status") == "error":
+            # 快速冲掉偶发超时：再试一次
+            entries[key]["coffee"] = coffee_check(ip, timeout, COFFEE_POOL[:6])
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(work, item) for item in candidates]
+        for fut in futures:
+            fut.result()
+
+
+def _run_ws_source_slots(
+    candidates: list, entries: dict, timeout: float, source: str, concurrency: int
+) -> None:
+    """JWT/WS 或 PoW/WS 类源的多键并发复核（antping / tcpingcn / chinaz）。
+
+    每个源按 ``candidates`` 前段投递；只写 ``entries[key][source]``。"""
+    fn = {
+        "antping": lambda ip, port: antping_check(ip, port, timeout),
+        "tcpingcn": lambda ip, port: tcpingcn_check(ip, port, timeout),
+        "chinaz": lambda ip, port: chinaz_check(ip, "", timeout),
+    }[source]
+
+    def work(item) -> None:
+        _, key, ip, port, _ = item
+        entries[key][source] = fn(ip, port)
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(work, item) for item in candidates]
+        for fut in futures:
+            fut.result()
+
+
+def _run_pingloc_slots(
+    candidates: list, entries: dict, timeout: float, concurrency: int
+) -> None:
+    """pingloc.com 纯 HTTP+SSE 多节点复核（ICMP ping；其 tcp_ping 固定端口 80，
+    与代理真实端口不符，故只用作 ICMP 主机存活确认）。"""
+
+    def work(item) -> None:
+        _, key, ip, _, _ = item
+        entries[key]["pingloc"] = pingloc_check(ip, timeout, method="ping")
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(work, item) for item in candidates]
+        for fut in futures:
+            fut.result()
+
+
 def run_measurements(sample, args) -> tuple[dict, set, set]:
     """L2 分两段并发（xxapi 全池免额候选 → check_host 稀缺配额只投决策键）、itdog
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
@@ -1172,23 +1867,24 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # tcptest.cn 多节点 TCP 复核（免费 REST，节点列表进程内缓存）：只投
     # 「当前尚未被判可达」的键，先于 ping.pe（贵）跑，确认过的键会让位。
+    # --tcptest-limit -1 表示全池未定键全覆盖（uncertain/错误健全部扫过，
+    # 让每个键都有资格走向 reachable 或 unreachable 定论）。
     tcptest_nodes = []
     tcptest_uuids = []
-    if getattr(args, "tcptest_limit", 0) > 0:
+    if getattr(args, "tcptest_limit", 0) != 0:
         tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
         tcptest_uuids = tcptest_pick_nodes(
             tcptest_nodes, getattr(args, "tcptest_nodes", TCPTEST_NODES)
         )
     if tcptest_uuids:
         tcptest_candidates = [
-            item for item in sample
-            if merge_verdict(
-                entries.get(item[1], {}),
-                is_cf_heuristic(item[0]),
-            )["verdict"] != "reachable"
+            item for item in sample if needs_probe(entries, item[1], item[0])
         ]
+        limit = getattr(args, "tcptest_limit", 0)
+        if limit is None or limit < 0:
+            limit = len(tcptest_candidates)
         _run_tcptest_slots(
-            tcptest_candidates[: args.tcptest_limit],
+            tcptest_candidates[:limit],
             entries,
             args.timeout,
             tcptest_uuids,
@@ -1196,7 +1892,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         )
         print(
             f"tcptest review: {time.monotonic() - _t0:.1f}s "
-            f"({len(tcptest_uuids)} nodes)",
+            f"({len(tcptest_candidates)} targets, {len(tcptest_uuids)} nodes)",
             file=sys.stderr,
         )
     else:
@@ -1205,16 +1901,101 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             file=sys.stderr,
         )
 
+    # ip.net.coffee 多节点 ICMP 复核（免费、空闲量大）：全池未定键横扫，
+    # 为主机存活提供独立多节点证据（端口层以 tcptest/itdog 等 TCP 源为准）。
+    coffee_limit = getattr(args, "coffee_limit", 0)
+    if coffee_limit != 0:
+        coffee_candidates = [
+            item for item in sample if needs_probe(entries, item[1], item[0])
+        ]
+        if coffee_limit is None or coffee_limit < 0:
+            coffee_limit = len(coffee_candidates)
+        _run_coffee_slots(
+            coffee_candidates[:coffee_limit],
+            entries,
+            args.timeout,
+            getattr(args, "coffee_concurrency", COFFEE_CONCURRENCY),
+        )
+        print(
+            f"coffee review: {time.monotonic() - _t0:.1f}s "
+            f"({len(coffee_candidates)} targets)",
+            file=sys.stderr,
+        )
+    else:
+        print("coffee review: skipped (limit=0)", file=sys.stderr)
+
+    def _pending_cands():
+        return [
+            item for item in sample if needs_probe(entries, item[1], item[0])
+        ]
+
+    # 新增四源多节点复核（全部无 key、大陆多节点）：pingloc（HTTP+SSE）、
+    # antping（JWT+WS）、tcpingcn（PoW+WS 纯 TCP）、chinaz（token+WS 纯 ICMP）。
+    # 各自按 --<name>-limit 投递（默认 -1=全部未定键，0=跳过）；均为多节点源，
+    # 达标即可独立判 reachable，整站失败也可与单节点源联动判 unreachable。
+
+    pingloc_limit = getattr(args, "pingloc_limit", 0)
+    if pingloc_limit != 0:
+        cands = _pending_cands()
+        if pingloc_limit is None or pingloc_limit < 0:
+            pingloc_limit = len(cands)
+        _run_pingloc_slots(
+            cands[:pingloc_limit], entries, args.timeout,
+            getattr(args, "pingloc_concurrency", 8),
+        )
+        print(f"pingloc review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("pingloc review: skipped (limit=0)", file=sys.stderr)
+
+    antping_limit = getattr(args, "antping_limit", 0)
+    if antping_limit != 0:
+        cands = _pending_cands()
+        if antping_limit is None or antping_limit < 0:
+            antping_limit = len(cands)
+        _run_ws_source_slots(
+            cands[:antping_limit], entries, args.timeout, "antping",
+            getattr(args, "antping_concurrency", 8),
+        )
+        print(f"antping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("antping review: skipped (limit=0)", file=sys.stderr)
+
+    tcpingcn_limit = getattr(args, "tcpingcn_limit", 0)
+    if tcpingcn_limit != 0:
+        cands = _pending_cands()
+        if tcpingcn_limit is None or tcpingcn_limit < 0:
+            tcpingcn_limit = len(cands)
+        _run_ws_source_slots(
+            cands[:tcpingcn_limit], entries, args.timeout, "tcpingcn",
+            getattr(args, "tcpingcn_concurrency", 6),
+        )
+        print(f"tcpingcn review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("tcpingcn review: skipped (limit=0)", file=sys.stderr)
+
+    chinaz_limit = getattr(args, "chinaz_limit", 0)
+    if chinaz_limit != 0:
+        cands = _pending_cands()
+        if chinaz_limit is None or chinaz_limit < 0:
+            chinaz_limit = len(cands)
+        _run_ws_source_slots(
+            cands[:chinaz_limit], entries, args.timeout, "chinaz",
+            getattr(args, "chinaz_concurrency", 6),
+        )
+        print(f"chinaz review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("chinaz review: skipped (limit=0)", file=sys.stderr)
+
     # ping.pe 多节点复核（串行、贵）只投「当前尚未被 itdog/单节点源确认可达」
     # 的键：已由 itdog 多点达标判 reachable 的不再浪费名额，把有限槽位让给
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
     # 优先给它派活能最大化「翻正」概率。顺序仍保持 sample 优先级排序。
     pingpe_candidates = [
-        item for item in sample
-        if merge_verdict(
-            entries.get(item[1], {}),
-            is_cf_heuristic(item[0]),
-        )["verdict"] != "reachable"
+        item for item in sample if needs_probe(entries, item[1], item[0])
     ]
     _run_pingpe_slots(
         pingpe_candidates[: args.pingpe_limit],
@@ -1261,11 +2042,31 @@ def main(argv=None) -> int:
     parser.add_argument("--pingpe-concurrency", type=int, default=PINGPE_CONCURRENCY,
                         help=f"ping.pe 并发复核数（默认 {PINGPE_CONCURRENCY}）")
     parser.add_argument("--tcptest-limit", type=int, default=TCPTEST_LIMIT_DEFAULT,
-                        help=f"tcptest.cn 多节点复核条数（默认 {TCPTEST_LIMIT_DEFAULT}；0=跳过）")
+                        help=f"tcptest.cn 多节点复核条数（默认 {TCPTEST_LIMIT_DEFAULT}；0=跳过；-1=全部未定键）")
     parser.add_argument("--tcptest-concurrency", type=int, default=TCPTEST_CONCURRENCY,
                         help=f"tcptest.cn 并发复核数（默认 {TCPTEST_CONCURRENCY}）")
     parser.add_argument("--tcptest-nodes", type=int, default=TCPTEST_NODES,
                         help=f"tcptest.cn 每键采样节点数（默认 {TCPTEST_NODES}）")
+    parser.add_argument("--coffee-limit", type=int, default=0,
+                        help="ip.net.coffee 单节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--coffee-concurrency", type=int, default=COFFEE_CONCURRENCY,
+                        help=f"ip.net.coffee 并发复核数（默认 {COFFEE_CONCURRENCY}）")
+    parser.add_argument("--pingloc-limit", type=int, default=0,
+                        help="pingloc.com 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--pingloc-concurrency", type=int, default=8,
+                        help="pingloc.com 并发复核数（默认 8）")
+    parser.add_argument("--antping-limit", type=int, default=0,
+                        help="antping.com 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--antping-concurrency", type=int, default=8,
+                        help="antping.com 并发复核数（默认 8）")
+    parser.add_argument("--tcpingcn-limit", type=int, default=0,
+                        help="tcping.cn 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--tcpingcn-concurrency", type=int, default=6,
+                        help="tcping.cn 并发复核数（默认 6）")
+    parser.add_argument("--chinaz-limit", type=int, default=0,
+                        help="ping.chinaz.com 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--chinaz-concurrency", type=int, default=6,
+                        help="ping.chinaz.com 并发复核数（默认 6）")
     parser.add_argument("--workers", type=int, default=WORKERS_DEFAULT,
                         help=f"L2 并发上限（默认 {WORKERS_DEFAULT}）")
     parser.add_argument("-t", "--timeout", type=float, default=TIMEOUT_DEFAULT,

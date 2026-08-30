@@ -301,6 +301,65 @@ class TestMergeVerdict(unittest.TestCase):
         self.assertEqual(
             cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
 
+    def test_new_multi_sources_strong_reachable(self):
+        """新增四源（pingloc/antping/tcpingcn/chinaz）达标 → 独立判 reachable。"""
+        for idx, (name, src) in enumerate([
+            ("pingloc", {"status": "ok", "ok": True, "ms": 30, "level": "tcp",
+                         "ok_nodes": 12, "nodes": 12, "ratio": 1.0}),
+            ("antping", {"status": "ok", "ok": True, "ms": 20, "level": "tcp",
+                         "ok_nodes": 150, "nodes": 160, "ratio": 0.94}),
+            ("tcpingcn", {"status": "ok", "ok": True, "ms": 15, "level": "tcp",
+                          "ok_nodes": 150, "nodes": 160, "ratio": 0.94}),
+            ("chinaz", {"status": "ok", "ok": True, "ms": 40, "level": "icmp",
+                        "ok_nodes": 45, "nodes": 50, "ratio": 0.90}),
+        ]):
+            self.assertEqual(
+                cc.merge_verdict({name: src}, cf=False)["verdict"],
+                "reachable", msg=f"{name} strong → reachable")
+
+    def test_chinaz_degenerate_sample_not_strong(self):
+        """多节点源残片样本（<MULTI_MIN_NODES 节点）不得当强确认。"""
+        sources = {
+            "chinaz": {"status": "ok", "ok": True, "ms": 40, "level": "icmp",
+                       "ok_nodes": 1, "nodes": 1, "ratio": 1.0},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+
+    def test_new_multi_fail_combos_unreachable(self):
+        """新源多节点失败 + 单节点失败 → unreachable；两大节点失败也 → unreachable。"""
+        cases = [
+            {"tcpingcn": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                          "nodes": 160, "ratio": 0.0},
+             "check_host": {"status": "fail", "ok": False, "ms": None}},
+            {"antping": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                         "nodes": 160, "ratio": 0.0},
+             "chinaz": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                        "nodes": 50, "ratio": 0.0}},
+            {"pingloc": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                         "nodes": 12, "ratio": 0.0},
+             "xxapi": {"status": "fail", "ok": False, "ms": None}},
+        ]
+        for sources in cases:
+            self.assertEqual(
+                cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
+
+    def test_coffee_strong_reachable(self):
+        sources = {
+            "coffee": {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
+                       "ok_nodes": 15, "nodes": 18, "ratio": 0.83},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+
+    def test_coffee_degenerate_not_strong(self):
+        sources = {
+            "coffee": {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
+                       "ok_nodes": 1, "nodes": 18, "ratio": 0.056},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+
 
 class TestAnnotations(unittest.TestCase):
     def test_has_cn_note(self):
@@ -637,6 +696,260 @@ class TestItdogAggregate(unittest.TestCase):
     def test_node_error_only_error(self):
         records = [{"task_num": 1, "node_id": "a", "type": "node_error"}]
         self.assertEqual(ci.itdog_aggregate(records, 1)[1]["status"], "error")
+
+
+class TestNewMultiSources(unittest.TestCase):
+    """新增四源适配器单测（全部 mock HTTP/WS，不触网）。"""
+
+    class _FakeWS:
+        """模拟 _WebSocket：预置若干 (kind, msg) 帧，耗尽后 timeout。"""
+
+        def __init__(self, frames):
+            self._frames = list(frames)
+            self.sent = []
+            self.closed = False
+
+        def send_text(self, payload):
+            self.sent.append(payload)
+
+        def settimeout(self, t):
+            pass
+
+        def read(self):
+            if self._frames:
+                kind, msg = self._frames.pop(0)
+                return kind, msg
+            return "timeout", None
+
+        def close(self):
+            self.closed = True
+
+    class _FakeCtx:
+        """模拟 urlopen 上下文管理器：read 先返回 body 一次，之后返回 b""。"""
+
+        def __init__(self, body):
+            self._body = body
+            self._done = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n=-1):
+            if self._done:
+                return b""
+            self._done = True
+            return self._body
+
+    def _wrap_urlopen(self, body):
+        """把 body 包成假 urlopen 上下文管理器（read 有穷尽）。"""
+        return self._FakeCtx(body)
+
+    def _wrap_nodes_urlopen(self, body):
+        return self._FakeCtx(body)
+
+    def test_pingloc_http_ok(self):
+        nodes = mock.MagicMock(
+            __enter__=mock.MagicMock(return_value=mock.MagicMock(
+                read=mock.MagicMock(return_value=json.dumps({"data": [
+                    {"id": "n1"}, {"id": "n2"}]}).encode()))),
+            __exit__=mock.MagicMock(return_value=False),
+        )
+        # exec 的 urlopen 返回完整 SSE 流
+        sse = (
+            "event: start\ndata: {}\n\n"
+            "event: callback\ndata: "
+            + json.dumps({"node_id": "n1", "latency": 12.4, "ip": "1.2.3.4",
+                          "error_code": 0}) + "\n\n"
+            "event: callback\ndata: "
+            + json.dumps({"node_id": "n2", "latency": None, "ip": "1.2.3.4",
+                          "error_code": 111}) + "\n\n"
+            "event: done\ndata: {}\n\n"
+        ).encode()
+        exec_resp = self._wrap_urlopen(sse)
+        calls = {"node": True}
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/api/v1/node/items"):
+                return 200, {}, json.dumps({"data": [{"id": "n1"}, {"id": "n2"}]}).encode()
+            return 200, {}, json.dumps({"data": {"token": "task_abc"}}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake) as mrf, \
+             mock.patch.object(cc.urllib.request, "urlopen", return_value=exec_resp):
+            out = cc.pingloc_check("1.2.3.4", 10, method="ping")
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 1)
+        self.assertEqual(out["ms"], 12.4)
+        self.assertEqual(out["level"], "icmp")
+
+    def test_pingloc_all_fail(self):
+        sse = (
+            "event: callback\ndata: "
+            + json.dumps({"node_id": "n1", "latency": None, "ip": "1.2.3.4",
+                          "error_code": 2}) + "\n\n"
+            "event: callback\ndata: "
+            + json.dumps({"node_id": "n2", "latency": None, "ip": "1.2.3.4",
+                          "error_code": 2}) + "\n\n"
+        ).encode()
+        exec_resp = self._wrap_urlopen(sse)
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/node/items"):
+                return 200, {}, json.dumps({"data": [{"id": "n1"}, {"id": "n2"}]}).encode()
+            return 200, {}, json.dumps({"data": {"token": "task_abc"}}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake) as mrf, \
+             mock.patch.object(cc.urllib.request, "urlopen", return_value=exec_resp):
+            out = cc.pingloc_check("1.2.3.4", 10, method="ping")
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+
+    def test_pingloc_no_nodes(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, json.dumps({"data": []}).encode())):
+            out = cc.pingloc_check("1.2.3.4", 10)
+        self.assertEqual(out["status"], "error")
+
+    def test_pingloc_no_token(self):
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/node/items"):
+                return 200, {}, json.dumps({"data": [{"id": "n1"}]}).encode()
+            return 200, {}, json.dumps({"data": {}}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.pingloc_check("1.2.3.4", 10)
+        self.assertEqual(out["status"], "error")
+
+    def _seed_antping(self, frames):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {},
+                                             json.dumps({"data": "jwt.token.xyz"}).encode())), \
+             mock.patch.object(cc, "_WebSocket",
+                               return_value=self._FakeWS(frames)):
+            return cc.antping_check("1.2.3.4", "443", 10)
+
+    def test_antping_tcp_all_ok(self):
+        frames = [
+            ("evt", {"data": {"cmd": 4, "status": 200, "speed": 10}}),
+            ("evt", {"data": {"cmd": 4, "status": 200, "speed": 20}}),
+            ("evt", {"data": {"cmd": 4, "status": 200, "speed": 15}}),
+        ]
+        out = self._seed_antping(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 3)
+        self.assertEqual(out["ms"], 10)
+        self.assertEqual(out["level"], "tcp")
+
+    def test_antping_ping_mixed(self):
+        frames = [
+            ("evt", {"data": {"cmd": 3, "status": 200, "speed": 30}}),
+            ("evt", {"data": {"cmd": 3, "status": 500, "speed": 0}}),
+        ]
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {},
+                                             json.dumps({"data": "jwt.x"}).encode())), \
+             mock.patch.object(cc, "_WebSocket",
+                               return_value=self._FakeWS(frames)):
+            out = cc.antping_check("1.2.3.4", "", 10)  # 无端口 → ICMP
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 1)
+        self.assertEqual(out["level"], "icmp")
+
+    def test_antping_no_jwt(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, json.dumps({"data": None}).encode())):
+            out = cc.antping_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "error")
+
+    def test_antping_all_fail(self):
+        frames = [
+            ("evt", {"data": {"cmd": 4, "status": 503, "speed": 0}}),
+            ("evt", {"data": {"cmd": 4, "status": 408, "speed": 0}}),
+        ]
+        out = self._seed_antping(frames)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+
+    def _seed_tcpingcn(self, rows):
+        page = {"r": "r1", "s": "salt1", "ts": "123456", "d": 0}
+        task = {"k": "task-k", "r": "r-task", "u": "/api/ws/probe"}
+
+        with mock.patch.object(cc, "_tcpingcn_page_cookie", return_value="c=1"), \
+             mock.patch.object(cc, "_tcpingcn_get",
+                               return_value=page) as mg, \
+             mock.patch.object(cc, "_tcpcn_pow_solve",
+                               return_value=("42", 0.1)) as mp, \
+             mock.patch.object(cc, "_tcpingcn_post",
+                               return_value=task) as mpost, \
+             mock.patch.object(cc, "_WebSocket",
+                               return_value=self._FakeWS(rows)):
+            return cc.tcpingcn_check("1.2.3.4", "80", 10)
+
+    def test_tcpingcn_all_ok(self):
+        rows = [
+            ("evt", {"event": "hello", "data": {}}),
+            ("evt", {"event": "result", "data": {"rtt_avg": 8.4}}),
+            ("evt", {"event": "result", "data": {"rtt_avg": 12.0}}),
+            ("evt", {"event": "complete", "data": {}}),
+        ]
+        out = self._seed_tcpingcn(rows)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["ms"], 8.4)
+        self.assertEqual(out["level"], "tcp")
+
+    def test_tcpingcn_all_fail(self):
+        rows = [
+            ("evt", {"event": "result", "data": {"rtt_avg": 0}}),
+            ("evt", {"event": "result", "data": {"rtt_avg": None}}),
+            ("evt", {"event": "complete", "data": {}}),
+        ]
+        out = self._seed_tcpingcn(rows)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+
+    def test_tcpingcn_no_challenge(self):
+        with mock.patch.object(cc, "_tcpingcn_page_cookie", return_value=""), \
+             mock.patch.object(cc, "_tcpingcn_get", return_value={"d": 0}):
+            out = cc.tcpingcn_check("1.2.3.4", "80", 10)
+        self.assertEqual(out["status"], "error")
+
+    def test_tcpingcn_pow_zero_bits(self):
+        # 16 位清 0 → 头 2 字节为 0
+        self.assertTrue(cc._tcpcn_check_zero_bits(b"\x00\x00\x01", 16))
+        self.assertFalse(cc._tcpcn_check_zero_bits(b"\x00\x01\x00", 16))
+        # 12 位清 0 → 头 1 字节为 0 且第 2 字节高 4 位为 0
+        self.assertTrue(cc._tcpcn_check_zero_bits(b"\x00\x0f", 12))
+        self.assertFalse(cc._tcpcn_check_zero_bits(b"\x00\xf0", 12))
+
+    def _wrap_chinaz(self, frames):
+        html = b'<html>let token = "tok_abc";</html>'
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, html)) as mr, \
+             mock.patch.object(cc, "_WebSocket",
+                               return_value=self._FakeWS(frames)):
+            return cc.chinaz_check("1.2.3.4", "", 10)
+
+    def test_chinaz_mixed(self):
+        frames = [
+            ("evt", {"code": 3, "data": []}),
+            ("evt", {"code": 1, "timeMs": "25.5"}),
+            ("evt", {"code": 1, "timeMs": "-1"}),
+            ("evt", {"code": 10002, "data": {"remain": 100}}),
+        ]
+        out = self._wrap_chinaz(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 1)
+        self.assertEqual(out["nodes"], 2)
+        self.assertEqual(out["level"], "icmp")
+
+    def test_chinaz_no_token(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, b"<html>no token</html>")):
+            out = cc.chinaz_check("1.2.3.4", "", 10)
+        self.assertEqual(out["status"], "error")
 
 
 class TestTcptestSource(unittest.TestCase):
