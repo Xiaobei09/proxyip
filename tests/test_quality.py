@@ -283,7 +283,7 @@ class TestAnnotation(unittest.TestCase):
         self.assertTrue(changed)
         lines = out.splitlines()
         self.assertTrue(lines[0].endswith("-NF(US)-DC"))
-        self.assertTrue(lines[1].endswith("-GPT-CF"))
+        self.assertTrue(lines[1].endswith("-GPT"))
         self.assertFalse(lines[2].endswith("-"))
 
     def test_annotate_text_with_exits(self):
@@ -295,7 +295,7 @@ class TestAnnotation(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(
             out.strip(),
-            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s-GPT-CF",
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s-GPT",
         )
         out2, changed2 = qc.annotate_text(out, annotations)
         self.assertFalse(changed2)
@@ -1189,7 +1189,7 @@ class TestReputationFiles(unittest.TestCase):
         s_rep = (sdir / "rep.txt").read_text(encoding="utf-8").splitlines()
         self.assertTrue(s_rep[0].startswith("1.2.3.4:443"))
         self.assertTrue(s_rep[1].startswith("5.6.7.8:8443"))
-        self.assertTrue(s_rep[1].endswith("-GPT-CF"))
+        self.assertTrue(s_rep[1].endswith("-GPT"))
         self.assertFalse((sdir / "ltd.txt").exists())
 
 
@@ -1217,16 +1217,16 @@ class TestAnnotateNestedValidFiles(unittest.TestCase):
         annotations = {"1.2.3.4:443#US": "GPT-CF"}
         qc.annotate_valid_files(annotations)
         self.assertTrue(
-            (cdir / "all.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+            (cdir / "all.txt").read_text(encoding="utf-8").endswith("-GPT\n")
         )
         self.assertTrue(
-            (cdir / "ltd.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+            (cdir / "ltd.txt").read_text(encoding="utf-8").endswith("-GPT\n")
         )
         self.assertTrue(
-            (sdir / "all.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+            (sdir / "all.txt").read_text(encoding="utf-8").endswith("-GPT\n")
         )
         self.assertFalse(
-            (sdir / "rep.txt").read_text(encoding="utf-8").endswith("-GPT-CF\n")
+            (sdir / "rep.txt").read_text(encoding="utf-8").endswith("-GPT\n")
         )
 
 
@@ -1471,7 +1471,7 @@ class TestAnnotateClassify(unittest.TestCase):
         )
         self.assertEqual(
             result,
-            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-CF-fast-V6-70",
+            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-fast-V6-70",
         )
 
     def test_skip_no_cc_line(self):

@@ -15,7 +15,7 @@ class TestNormalizeNote(unittest.TestCase):
             normalize_note(
                 "1.1.1.1:443#🇺🇸US→US-17ms-22.70MB/s-CN-V6-mid-fast-DC-GPT-CF-69"
             ),
-            "1.1.1.1:443#🇺🇸US→US-17ms-22.70MB/s-GPT-DC-CF-fast-V6-CN-69",
+            "1.1.1.1:443#🇺🇸US→US-17ms-22.70MB/s-GPT-DC-fast-V6-CN-69",
         )
 
     def test_collapses_historical_snapshots(self):
@@ -26,7 +26,7 @@ class TestNormalizeNote(unittest.TestCase):
         )
         self.assertEqual(
             normalize_note(stacked),
-            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-CF-fast-V6-CN-70",
+            "1.2.3.4:443#🇺🇸US→US-21ms-25.23MB/s-GPT-RES-fast-V6-CN-70",
         )
 
     def test_rightmost_wins_single_value_buckets(self):
@@ -78,7 +78,7 @@ class TestNormalizeNote(unittest.TestCase):
         )
         self.assertEqual(
             normalize_note(line),
-            "1.2.3.4:443#🇺🇸US-50ms-5.00MB/s-DC-CF-mid-V4-CN-77-U11",
+            "1.2.3.4:443#🇺🇸US-50ms-5.00MB/s-DC-mid-V4-CN-77-U11",
         )
 
     def test_uptime_merge_replaces_value(self):
@@ -134,7 +134,7 @@ class TestMergeNoteTokens(unittest.TestCase):
         )
         self.assertEqual(
             out,
-            "5.6.7.8:443#🇺🇸US-27ms-27.78MB/s-GPT-DC-CF-fast-V6-CN-80",
+            "5.6.7.8:443#🇺🇸US-27ms-27.78MB/s-GPT-DC-fast-V6-CN-80",
         )
 
     def test_idempotent(self):
