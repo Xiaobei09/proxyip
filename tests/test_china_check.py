@@ -1593,33 +1593,41 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
         with mock.patch.object(cc, "xxapi_check",
                                return_value={"status": "ok", "ok": True, "ms": 1.0}), \
              mock.patch.object(cc, "jkapi_check", side_effect=fake_jkapi), \
+             mock.patch.object(cc, "check_host_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": "q"}), \
              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
             cc.run_measurements([decided, pending], self._args())
 
         self.assertEqual(seen.get("keys"), ["10.3.0.1:80#US"])
 
     def test_tcping_fallback_skipped_when_itdog_fully_down(self):
-        """itdog 主通道整站失败（全 error）时不得空转 batch_tcping 兜底；
+        """itdog 整站失败（全 error 或被投毒全 fail）时不得空转 batch_tcping 兜底；
         已定论键（无 itdog 记录）不得被误算作「节点拉取成功」。"""
         import unittest.mock as mock
 
         decided = ("10.4.0.1:80#US", "10.4.0.1:80#US", "10.4.0.1", "80", "US")
-        stuck = ("10.5.0.1:80#US", "10.5.0.1:80#US", "10.5.0.1", "80", "US")
+        for poisoned_status in ("error", "fail"):
+            stuck = ("10.8.0.1:80#US", "10.8.0.1:80#US", "10.8.0.1", "80", "US")
 
-        def fake_itdog(sample, args, page_url=None, **kw):
-            # 整站被墙：每个目标都只返回 error（无节点列表已取得）
-            return {key: {"status": "error", "ok": False, "ms": None, "error": "no itdog nodes"}
-                    for _, key, _, _, _ in sample}
+            def fake_itdog(sample, args, page_url=None, **kw):
+                # 整站被墙/投毒：每个目标都只返回 error/fail，无任何 ok
+                return {key: {"status": poisoned_status, "ok": False,
+                              "ms": None, "error": "no itdog nodes"}
+                        for _, key, _, _, _ in sample}
 
-        with mock.patch.object(cc, "xxapi_check",
-                               return_value={"status": "ok", "ok": True, "ms": 1.0}), \
-             mock.patch.object(cc, "jkapi_check",
-                               return_value={"status": "error", "ok": False,
-                                             "ms": None, "error": "x"}), \
-             mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog) as mib:
-            cc.run_measurements([decided, stuck], self._args())
+            with mock.patch.object(cc, "xxapi_check",
+                                   return_value={"status": "ok", "ok": True, "ms": 1.0}), \
+                 mock.patch.object(cc, "jkapi_check",
+                                   return_value={"status": "error", "ok": False,
+                                                 "ms": None, "error": "x"}), \
+                 mock.patch.object(cc, "check_host_check",
+                                   return_value={"status": "error", "ok": False,
+                                                 "ms": None, "error": "q"}), \
+                 mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog) as mib:
+                cc.run_measurements([decided, stuck], self._args())
 
-        self.assertEqual(len(mib.call_args_list), 1)  # 只有一次 batch_http，无 tcping 兜底
+            self.assertEqual(len(mib.call_args_list), 1)  # 只有一次 batch_http，无 tcping 兜底
 
     def test_tcping_fallback_runs_when_nodes_fetched(self):
         """itdog 节点拉取成功（部分 ok）且部分键 error → 走 batch_tcping 兜底。"""
@@ -1641,6 +1649,9 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
              mock.patch.object(cc, "jkapi_check",
                                return_value={"status": "error", "ok": False,
                                              "ms": None, "error": "x"}), \
+             mock.patch.object(cc, "check_host_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": "q"}), \
              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog) as mib:
             entries, _, _ = cc.run_measurements([a, b], self._args())
 
