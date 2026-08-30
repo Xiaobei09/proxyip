@@ -822,6 +822,27 @@ class TestNewMultiSources(unittest.TestCase):
             out = cc.pingloc_check("1.2.3.4", 10)
         self.assertEqual(out["status"], "error")
 
+    def test_pingloc_data_null(self):
+        # 上游 data 键存在但为 null：先前 pattern
+        # ``.get("data", {}).get("token")`` 会对 None 调 .get 崩溃（CI 失败）。
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/node/items"):
+                return 200, {}, json.dumps({"data": [{"id": "n1"}]}).encode()
+            return 200, {}, json.dumps({"data": None}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.pingloc_check("1.2.3.4", 10)
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(out["error"], "no token")
+
+    def test_pingloc_nodes_null(self):
+        # 节点列表 data 为 null：不得抛异常，走 "no pingloc nodes" 错误分支。
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, json.dumps({"data": None}).encode())):
+            out = cc.pingloc_check("1.2.3.4", 10)
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(out["error"], "no pingloc nodes")
+
     def _seed_antping(self, frames):
         with mock.patch.object(cc, "request_follow",
                                return_value=(200, {},
