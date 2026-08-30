@@ -6,11 +6,11 @@ on:
     # 独立心跳：每小时一轮（与 update-proxies 的 :00 错开到 :11）。
     # streak 依赖"连续多轮可达"，此前仅挂在 quality-check 成功之后，
     # 任一上游失败或 IP 长期未变更都会冻结 stable 累积——故必须独立定时。
-    # 与链式触发并存时由竞态检查去重（旧排队运行自动让位最新）。
+    # 不再挂 workflow_run 链：实测 GitHub 在 cron 命中时若本工作流仍有
+    # in_progress run 就不会再起新 run（旧 run 安然跑完）；而 workflow_run
+    # 触发的新 run 会取消上一个 in_progress run（观测 3 次），导致
+    # probe 永远跑不完、china.json 冻结。纯 schedule 驱动即可。
     - cron: "11 * * * *"
-  workflow_run:
-    workflows: ["Quality check"]
-    types: [completed]
 
 permissions:
   contents: write
@@ -69,12 +69,12 @@ jobs:
         run: >-
           python scripts/china_check.py
           --source data/valid/all.txt --limit 0
-          --tcptest-limit -1 --tcptest-concurrency 20
-          --coffee-limit -1 --coffee-concurrency 40
-          --pingloc-limit 1000 --pingloc-concurrency 12
-          --antping-limit 800 --antping-concurrency 8
-          --tcpingcn-limit 800 --tcpingcn-concurrency 8
-          --chinaz-limit 800 --chinaz-concurrency 8
+          --tcptest-limit 800 --tcptest-concurrency 20
+          --coffee-limit 1200 --coffee-concurrency 40
+          --pingloc-limit 600 --pingloc-concurrency 12
+          --antping-limit 500 --antping-concurrency 8
+          --tcpingcn-limit 400 --tcpingcn-concurrency 8
+          --chinaz-limit 400 --chinaz-concurrency 8
           --pingpe-limit 300
 
       - name: Annotate and classify
