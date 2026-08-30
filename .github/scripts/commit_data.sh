@@ -13,7 +13,7 @@
 set -uo pipefail
 MSG="${1:?usage: commit_data.sh <message>}"
 MARKER=".jobstart"
-EXCL='^(data/raw/|data/download/|data/diff/)'
+EXCL='^(data/raw/|data/diff/)'
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
