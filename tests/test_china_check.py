@@ -1476,6 +1476,129 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "uncertain")
 
 
+class TestSlotRunnerCrashIsolation(unittest.TestCase):
+    """任一复核源单键异常不得拖垮整轮（真实事故：tcpingcn cookie 超时
+    未被捕获 → 4h50m 探测全部作废）。所有槽位 runner 须把异常写为 error 源。"""
+
+    def _args(self, limits: bool = True):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            skip_itdog=True,
+            skip_itdog_tcping=True,
+            pingpe_limit=1,
+            workers=4,
+            timeout=5,
+            api_key="",
+            tcpping_token="",
+            tcptest_limit=1 if limits else 0,
+            tcptest_concurrency=2,
+            tcptest_nodes=2,
+            coffee_limit=1 if limits else 0,
+            coffee_concurrency=2,
+            pingloc_limit=1 if limits else 0,
+            pingloc_concurrency=2,
+            antping_limit=1 if limits else 0,
+            antping_concurrency=2,
+            tcpingcn_limit=1 if limits else 0,
+            tcpingcn_concurrency=2,
+            chinaz_limit=1 if limits else 0,
+            chinaz_concurrency=2,
+        )
+
+    def _item(self, i: int = 0):
+        ip = f"10.{i}.0.1"
+        return (f"{ip}:80#US", f"{ip}:80#US", ip, "80", "US")
+
+    def _boom(self, *a, **k):
+        raise RuntimeError("boom")
+
+    def _ok(self, *a, **k):
+        return {"status": "error", "ok": False, "ms": None, "error": "stub"}
+
+    def test_each_slot_runner_isolates_exceptions(self):
+        import unittest.mock as mock
+
+        item = self._item(1)
+        patches = [
+            mock.patch.object(cc, "tcptest_check", side_effect=self._boom),
+            mock.patch.object(cc, "coffee_check", side_effect=self._boom),
+            mock.patch.object(cc, "pingloc_check", side_effect=self._boom),
+            mock.patch.object(cc, "antping_check", side_effect=self._boom),
+            mock.patch.object(cc, "tcpingcn_check", side_effect=self._boom),
+            mock.patch.object(cc, "chinaz_check", side_effect=self._boom),
+            mock.patch.object(cc, "pingpe_check", side_effect=self._boom),
+            mock.patch.object(cc, "tcpping_check", side_effect=self._boom),
+            mock.patch.object(cc, "xxapi_check",
+                              return_value={"status": "ok", "ok": True, "ms": 1.0}),
+            mock.patch.object(cc, "jkapi_check", side_effect=self._boom),
+            # check_host 也走槽位；抛异常同样须被隔离（l2_check_host 已有守卫）
+            mock.patch.object(cc, "check_host_check", side_effect=self._boom),
+            mock.patch.object(cc, "itdog_batch_run", return_value={}),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            entries, _, _ = cc.run_measurements([item], self._args())
+        finally:
+            for p in patches:
+                p.stop()
+        srcs = entries[item[1]]["sources"]
+        for name in ("tcptest", "coffee", "pingloc", "antping", "tcpingcn",
+                     "chinaz", "pingpe", "check_host"):
+            self.assertEqual(srcs[name]["status"], "error")
+        # 全部错误 → 不误判（skipped/uncertain），且流程未中断
+        self.assertIn(entries[item[1]]["verdict"], ("uncertain", "skipped"))
+
+
+class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
+    """itdog 批量代价高：只投仍未定论的键；双免额已定论（≥2 ok / ≥2 fail）
+    的键不得再进 itdog 复核。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            skip_itdog=False,
+            skip_itdog_tcping=True,
+            pingpe_limit=0,
+            workers=4,
+            timeout=5,
+            api_key="",
+            tcpping_token="",
+            itdog_nodes=2,
+            itdog_batch_size=5,
+            itdog_concurrency=2,
+            itdog_pacing=0.0,
+            itdog_timeout=10,
+            itdog_tcping_nodes=2,
+        )
+
+    def test_itdog_sees_only_undecided_keys(self):
+        import unittest.mock as mock
+
+        decided = ("10.2.0.1:80#US", "10.2.0.1:80#US", "10.2.0.1", "80", "US")
+        pending = ("10.3.0.1:80#US", "10.3.0.1:80#US", "10.3.0.1", "80", "US")
+        seen = {}
+
+        def fake_itdog(sample, args, **kwargs):
+            seen["keys"] = [key for _, key, _, _, _ in sample]
+            return {}
+
+        def fake_jkapi(ip, port, timeout):
+            if ip == "10.2.0.1":
+                return {"status": "ok", "ok": True, "ms": 1.0}
+            return {"status": "error", "ok": False, "ms": None, "error": "x"}
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "ok", "ok": True, "ms": 1.0}), \
+             mock.patch.object(cc, "jkapi_check", side_effect=fake_jkapi), \
+             mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
+            cc.run_measurements([decided, pending], self._args())
+
+        self.assertEqual(seen.get("keys"), ["10.3.0.1:80#US"])
+
+
 class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
     """ping.pe 复核（贵、串行）只投当前尚未判 reachable 的键：
     已由 itdog 多点达标确认的键不再占用复核槽位。"""

@@ -111,7 +111,7 @@ LIMIT_DEFAULT = 250
 PINGPE_LIMIT_DEFAULT = 300
 PINGPE_CONCURRENCY = 6  # ping.pe L3 有界并发（每键端到端 ~20-40s，串行太慢）
 PINGPE_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
-WORKERS_DEFAULT = 16
+WORKERS_DEFAULT = 32  # L2 免额单节点源并发（xxapi ~50qps / jkapi 免额，实测 32 无 429）
 TIMEOUT_DEFAULT = 10
 POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
@@ -1730,10 +1730,15 @@ def _run_pingpe_slots(
 
     def work(item) -> None:
         _, key, ip, port, _ = item
-        entries[key]["pingpe"] = pingpe_check(ip, port, timeout)
-        tcpping = tcpping_check(ip, port, tcpping_token, timeout)
-        if tcpping["status"] != "skipped":
-            entries[key]["tcpping"] = tcpping
+        try:
+            entries[key]["pingpe"] = pingpe_check(ip, port, timeout)
+            tcpping = tcpping_check(ip, port, tcpping_token, timeout)
+            if tcpping["status"] != "skipped":
+                entries[key]["tcpping"] = tcpping
+        except Exception as exc:
+            logging.debug("pingpe failed for %s: %s", key, exc)
+            entries.setdefault(key, {})["pingpe"] = {
+                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
         time.sleep(PINGPE_SLOT_GAP)
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
@@ -1751,7 +1756,12 @@ def _run_tcptest_slots(
 
     def work(item) -> None:
         _, key, ip, port, _ = item
-        entries[key]["tcptest"] = tcptest_check(ip, port, timeout, node_uuids)
+        try:
+            entries[key]["tcptest"] = tcptest_check(ip, port, timeout, node_uuids)
+        except Exception as exc:
+            logging.debug("tcptest failed for %s: %s", key, exc)
+            entries.setdefault(key, {})["tcptest"] = {
+                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -1767,10 +1777,15 @@ def _run_coffee_slots(
 
     def work(item) -> None:
         _, key, ip, _, _ = item
-        entries[key]["coffee"] = coffee_check(ip, timeout)
-        if entries[key]["coffee"].get("status") == "error":
-            # 快速冲掉偶发超时：再试一次
-            entries[key]["coffee"] = coffee_check(ip, timeout, COFFEE_POOL[:6])
+        try:
+            entries[key]["coffee"] = coffee_check(ip, timeout)
+            if entries[key]["coffee"].get("status") == "error":
+                # 快速冲掉偶发超时：再试一次
+                entries[key]["coffee"] = coffee_check(ip, timeout, COFFEE_POOL[:6])
+        except Exception as exc:
+            logging.debug("coffee failed for %s: %s", key, exc)
+            entries.setdefault(key, {})["coffee"] = {
+                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -1792,7 +1807,12 @@ def _run_ws_source_slots(
 
     def work(item) -> None:
         _, key, ip, port, _ = item
-        entries[key][source] = fn(ip, port)
+        try:
+            entries[key][source] = fn(ip, port)
+        except Exception as exc:
+            logging.debug("%s failed for %s: %s", source, key, exc)
+            entries.setdefault(key, {})[source] = {
+                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -1808,7 +1828,12 @@ def _run_pingloc_slots(
 
     def work(item) -> None:
         _, key, ip, _, _ = item
-        entries[key]["pingloc"] = pingloc_check(ip, timeout, method="ping")
+        try:
+            entries[key]["pingloc"] = pingloc_check(ip, timeout, method="ping")
+        except Exception as exc:
+            logging.debug("pingloc failed for %s: %s", key, exc)
+            entries.setdefault(key, {})["pingloc"] = {
+                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -1881,8 +1906,12 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     )
 
     if not args.skip_itdog:
-        for key, res in itdog_batch_run(sample, args).items():
-            entries.setdefault(key, {})["itdog"] = res
+        # itdog 批量代价高（批任务端到端慢），只投仍未定论的键；已由
+        # 双免额单节点源定论的键（≥2 ok / ≥2 fail）跳过其复核。
+        _itdog_cands = [item for item in sample if needs_probe(entries, item[1])]
+        if _itdog_cands:
+            for key, res in itdog_batch_run(_itdog_cands, args).items():
+                entries.setdefault(key, {})["itdog"] = res
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
         if not getattr(args, "skip_itdog_tcping", False):
             pending = [
