@@ -8,8 +8,8 @@
 - ``data/quality/china.json``  — 逐条检测明细（keyed，``{"proxies": {...}}``；
   含合成 verdict、证据分级 ``level`` 与连续可达轮数 ``streak``）
 - ``data/valid/all_cn.txt``  — 全量大陆可达清单（源为 ``data/valid/all.txt`` 全量存活池，
-  仅含判定 reachable 或已带 ``-CN`` 的行；回退 all_ltd.txt；按大陆实测延迟升序；
-  应用层确认行追加 ``-CNH``）
+  仅含本轮判定 reachable 的行（严格活清单，历史累积 ``-CN`` 不再自动纳入）；回退 all_ltd.txt；
+  按大陆实测延迟升序；应用层确认行追加 ``-CNH``）
 - ``data/valid/all_cn_http.txt`` — 应用层（HTTP）确认子集：本轮 level=http 或历史
   已带 ``-CNH`` 的行
 - ``data/valid/all_cn_stable.txt`` — 跨轮稳定子集：连续 ≥2 轮 reachable 且
@@ -109,8 +109,8 @@ from china_itdog import (
 FALLBACK_SOURCE = DEFAULT_SOURCE
 
 LIMIT_DEFAULT = 250
-PINGPE_LIMIT_DEFAULT = 200
-PINGPE_CONCURRENCY = 4  # ping.pe L3 有界并发（每键端到端 ~20-40s，串行太慢）
+PINGPE_LIMIT_DEFAULT = 300
+PINGPE_CONCURRENCY = 6  # ping.pe L3 有界并发（每键端到端 ~20-40s，串行太慢）
 PINGPE_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
 WORKERS_DEFAULT = 16
 TIMEOUT_DEFAULT = 10
@@ -146,7 +146,7 @@ TCPPING_URL = "https://tcpping.cn/ping_api"
 TCPTEST_URL = "https://www.tcptest.cn/api/v1"
 TCPTEST_NODES = 10      # 每任务采样的节点数（跨省跨运营商均衡）
 TCPTEST_LIMIT_DEFAULT = 150  # 每轮复核的键数上限（免费源节流）
-TCPTEST_CONCURRENCY = 4  # 有界并发（每键端到端 ~2-6s）
+TCPTEST_CONCURRENCY = 8  # 有界并发（每键端到端 ~2-6s）
 TCPTEST_POLL_DEADLINE = 30.0
 TCPTEST_REQ_TIMEOUT = 12
 MULTI_MIN_NODES = 5  # 多节点源至少报告 5 个节点才可作强确认（防限流残缺样本退化）
@@ -160,7 +160,7 @@ MULTI_MIN_NODES = 5  # 多节点源至少报告 5 个节点才可作强确认（
 COFFEE_URL = "https://ip.net.coffee/api"
 COFFEE_NODES = 10      # 每键请求的节点数（从固定池里取）
 COFFEE_POOL = [f"n{i:02d}" for i in range(1, 21)]
-COFFEE_CONCURRENCY = 16  # 有界并发（空闲量大，ICMP 单键 ~0.1-1s）
+COFFEE_CONCURRENCY = 24  # 有界并发（空闲量大，ICMP 单键 ~0.1-1s）
 COFFEE_POLL_DEADLINE = 20.0
 COFFEE_REQ_TIMEOUT = 12
 COFFEE_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节点 ICMP 优势）
@@ -518,8 +518,8 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
             payload = json.loads(body.decode("utf-8", "replace"))
         except Exception as e:
             return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120], "count": 0, "ok_count": 0}
-        if payload.get("ok"):
-            stream_id = payload.get("data", {}).get("stream_id")
+        if isinstance(payload, dict) and payload.get("ok"):
+            stream_id = (payload.get("data") or {}).get("stream_id")
             break
         time.sleep(5)
     if not stream_id:
@@ -894,8 +894,9 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
                 "error": f"nodes http {status}", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     try:
-        nodes = json.loads(resp.decode("utf-8", "replace")).get("data", [])
-    except json.JSONDecodeError:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+        nodes = payload.get("data", []) if isinstance(payload, dict) else []
+    except (json.JSONDecodeError, TypeError):
         return {"status": "error", "ok": False, "ms": None,
                 "error": "bad nodes json", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
@@ -923,8 +924,10 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
                 "error": f"create http {status}", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     try:
-        token = json.loads(resp.decode("utf-8", "replace")).get("data", {}).get("token")
-    except json.JSONDecodeError:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        token = data.get("token") if isinstance(data, dict) else None
+    except (json.JSONDecodeError, TypeError, AttributeError):
         return {"status": "error", "ok": False, "ms": None,
                 "error": "bad create json", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
