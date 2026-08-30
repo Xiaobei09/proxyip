@@ -31,9 +31,11 @@
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+ `xxapi.cn`
   （北京节点，免 key）。
 - L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
-  可选 `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
+  `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
+  判定）；可选 `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）；`ping.chinaz.com`
-  （表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）。
+  （表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）；
+  `tcping.cn`（PoW + 私有 WS 授权，纯 Python 无法收结果）。
 
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/tcpping）任一 ok → reachable；
@@ -133,6 +135,16 @@ PINGPE_MIN_REPORTED = 5  # 报告节点不足 → inconclusive，避免误判
 
 # tcpping.cn —— 多运营商，需站长签发的 token（缺则跳过）
 TCPPING_URL = "https://tcpping.cn/ping_api"
+
+# tcptest.cn —— 免费大陆多节点 TCP 探测（REST），无需 key/token：
+# POST /api/v1/tasks 建任务（type=tcping，target=ip:port），轮询任务状态后
+# 拉取逐节点结果。节点池 ~146 个（全国各运营商），为强多节点确认源。
+TCPTEST_URL = "https://www.tcptest.cn/api/v1"
+TCPTEST_NODES = 10      # 每任务采样的节点数（跨省跨运营商均衡）
+TCPTEST_LIMIT_DEFAULT = 150  # 每轮复核的键数上限（免费源节流）
+TCPTEST_CONCURRENCY = 4  # 有界并发（每键端到端 ~2-6s）
+TCPTEST_POLL_DEADLINE = 30.0
+TCPTEST_REQ_TIMEOUT = 12
 
 # itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
 
@@ -510,6 +522,202 @@ def tcpping_check(ip: str, port: str, token: str, timeout: float) -> dict:
     return parse_tcpping(payload)
 
 
+# ------------------------------------------------------------ tcptest.cn 多节点源
+
+_tcptest_nodes_cache: tuple[float, list[dict]] | None = None
+
+
+def tcptest_fetch_nodes(
+    timeout: float, max_nodes: int = 800, force: bool = False
+) -> list[dict]:
+    """拉取 tcptest.cn 在线节点列表（带页游标翻页），进程内缓存。
+
+    返回 ``[{uuid, name, operator, city, display_location, ...}]``，仅含
+    ``enabled=true`` 且 ``runtime_state=online`` 的节点；失败返回 []。
+    """
+    global _tcptest_nodes_cache
+    if not force and _tcptest_nodes_cache is not None:
+        return _tcptest_nodes_cache[1]
+    nodes: list[dict] = []
+    after = "0"
+    seen = 0
+    while seen < max_nodes:
+        url = f"{TCPTEST_URL}/nodes?after={after}&limit=500"
+        try:
+            status, _, resp = request_follow(
+                url, {"User-Agent": UA, "Accept": "application/json"}, timeout
+            )
+        except Exception as e:
+            logging.debug("tcptest nodes: %s", e)
+            break
+        if status != 200:
+            logging.debug("tcptest nodes http %s", status)
+            break
+        try:
+            payload = json.loads(resp.decode("utf-8", "replace"))
+        except json.JSONDecodeError:
+            break
+        batch = payload.get("nodes", [])
+        nodes.extend(batch)
+        seen += len(batch)
+        if payload.get("has_more") and payload.get("next_cursor"):
+            after = str(payload["next_cursor"])
+            if str(after) == "0":
+                break
+        else:
+            break
+    online = [
+        n for n in nodes
+        if n.get("enabled") and n.get("runtime_state") == "online"
+    ]
+    _tcptest_nodes_cache = (time.monotonic(), online)
+    return online
+
+
+def tcptest_pick_nodes(nodes: list[dict], count: int) -> list[str]:
+    """按运营商均衡采样 ``count`` 个节点的 uuid（跨省跨 ISP，避免扎堆）。"""
+    if not nodes:
+        return []
+    by_isp: dict[str, list[dict]] = {}
+    for n in nodes:
+        isp = n.get("operator") or "?"
+        by_isp.setdefault(isp, []).append(n)
+    picked: list[str] = []
+    used = set()
+    order = sorted(by_isp.items(), key=lambda kv: len(kv[1]), reverse=True)
+    while len(picked) < count and sum(len(v) for _, v in order) > 0:
+        for _, bucket in order:
+            if not bucket:
+                continue
+            n = bucket.pop(0)
+            uid = n.get("uuid")
+            if not uid or uid in used:
+                continue
+            used.add(uid)
+            picked.append(uid)
+            if len(picked) >= count:
+                break
+    return picked
+
+
+def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str]) -> dict:
+    """tcptest.cn 单键 TCP 多点探测：建任务 → 轮询 → 逐节点结果聚合。
+
+    返回与 itdog_aggregate 同构的 source_result：
+    ``{status, ok, ms, error, level, ok_nodes, nodes, ratio}``。
+    节点成功 = 直连 TCP 握手成功（``success==true`` 且 ``connected==true``），
+    ``ms`` 取成功节点最小 RTT。整个探测为传输层 → ``level="tcp"``。
+    """
+    if not node_uuids:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no nodes", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    target = f"[{ip}]:{port}" if ":" in ip and not ip.startswith("[") else f"{ip}:{port}"
+    body = {
+        "type": "tcping",
+        "target": target,
+        "node_filter": {"node_uuids": node_uuids[:TCPTEST_NODES]},
+    }
+    try:
+        status, _, resp = request_follow(
+            f"{TCPTEST_URL}/tasks",
+            {"User-Agent": UA, "Accept": "application/json",
+             "Content-Type": "application/json"},
+            TCPTEST_REQ_TIMEOUT, method="POST",
+            data=json.dumps(body).encode("utf-8"),
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status == 429:
+        return {"status": "rate_limited", "ok": False, "ms": None,
+                "error": "rate limited", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status not in (200, 201, 202):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"create task http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        task = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad task json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    tid = task.get("id")
+    if not tid:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no task id", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    deadline = time.monotonic() + TCPTEST_POLL_DEADLINE
+    total = task.get("expected_results") or len(node_uuids)
+    while time.monotonic() < deadline:
+        try:
+            status, _, resp = request_follow(
+                f"{TCPTEST_URL}/tasks/{tid}",
+                {"User-Agent": UA, "Accept": "application/json"},
+                TCPTEST_REQ_TIMEOUT,
+            )
+        except Exception:
+            time.sleep(1.0)
+            continue
+        if status != 200:
+            break
+        try:
+            state = json.loads(resp.decode("utf-8", "replace")).get("state")
+        except json.JSONDecodeError:
+            break
+        if state in ("succeeded", "failed", "cancelled"):
+            break
+        time.sleep(1.0)
+    try:
+        status, _, resp = request_follow(
+            f"{TCPTEST_URL}/tasks/{tid}/results",
+            {"User-Agent": UA, "Accept": "application/json"},
+            TCPTEST_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"results http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        results = json.loads(resp.decode("utf-8", "replace")).get("results", [])
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad results json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    real = [r for r in results if isinstance(r, dict)]
+    ok = [
+        r for r in real
+        if r.get("success") is True
+        and (r.get("data") or {}).get("connected") is True
+    ]
+    nodes = len(real) or len(node_uuids) or (total or len(node_uuids))
+    if not real:
+        nodes = total or len(node_uuids)
+    if ok:
+        mss = [r["data"].get("avg_ms") or r["data"].get("duration_ms")
+               for r in ok
+               if isinstance(r.get("data"), dict)]
+        valids = [m for m in mss if isinstance(m, (int, float)) and m > 0]
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(valids), 1) if valids else None,
+            "error": "", "level": "tcp",
+            "ok_nodes": len(ok), "nodes": nodes,
+            "ratio": round(len(ok) / nodes, 3),
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({len(real)} nodes)",
+        "level": None, "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
+    }
+
+
 # ------------------------------------------------------------ 判定合成
 
 def merge_verdict(sources: dict, cf: bool) -> dict:
@@ -547,7 +755,7 @@ def merge_verdict(sources: dict, cf: bool) -> dict:
     else:
         level = None
 
-    multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping", "itdog_tcping")]
+    multi_ok = [s for s in ok_sources if s in ("pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
 
     def strong_valid(source: str) -> bool:
@@ -860,6 +1068,23 @@ def _run_pingpe_slots(
             fut.result()
 
 
+def _run_tcptest_slots(
+    candidates: list, entries: dict, timeout: float,
+    node_uuids: list[str], concurrency: int,
+) -> None:
+    """tcptest.cn 多节点 TCP 复核（免费 REST，端到端 ~2-6s/键）。节点列表
+    进程内缓存，只取一次；每键在 concurrency 有界并发下建任务并轮询结果。"""
+
+    def work(item) -> None:
+        _, key, ip, port, _ = item
+        entries[key]["tcptest"] = tcptest_check(ip, port, timeout, node_uuids)
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(work, item) for item in candidates]
+        for fut in futures:
+            fut.result()
+
+
 def run_measurements(sample, args) -> tuple[dict, set, set]:
     """L2 分两段并发（xxapi 全池免额候选 → check_host 稀缺配额只投决策键）、itdog
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
@@ -945,6 +1170,41 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         file=sys.stderr,
     )
 
+    # tcptest.cn 多节点 TCP 复核（免费 REST，节点列表进程内缓存）：只投
+    # 「当前尚未被判可达」的键，先于 ping.pe（贵）跑，确认过的键会让位。
+    tcptest_nodes = []
+    tcptest_uuids = []
+    if getattr(args, "tcptest_limit", 0) > 0:
+        tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
+        tcptest_uuids = tcptest_pick_nodes(
+            tcptest_nodes, getattr(args, "tcptest_nodes", TCPTEST_NODES)
+        )
+    if tcptest_uuids:
+        tcptest_candidates = [
+            item for item in sample
+            if merge_verdict(
+                entries.get(item[1], {}),
+                is_cf_heuristic(item[0]),
+            )["verdict"] != "reachable"
+        ]
+        _run_tcptest_slots(
+            tcptest_candidates[: args.tcptest_limit],
+            entries,
+            args.timeout,
+            tcptest_uuids,
+            getattr(args, "tcptest_concurrency", TCPTEST_CONCURRENCY),
+        )
+        print(
+            f"tcptest review: {time.monotonic() - _t0:.1f}s "
+            f"({len(tcptest_uuids)} nodes)",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "tcptest review: skipped (no nodes or limit=0)",
+            file=sys.stderr,
+        )
+
     # ping.pe 多节点复核（串行、贵）只投「当前尚未被 itdog/单节点源确认可达」
     # 的键：已由 itdog 多点达标判 reachable 的不再浪费名额，把有限槽位让给
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
@@ -1000,6 +1260,12 @@ def main(argv=None) -> int:
                         help=f"ping.pe 多节点复核条数（有界并发小样本；默认 {PINGPE_LIMIT_DEFAULT}）")
     parser.add_argument("--pingpe-concurrency", type=int, default=PINGPE_CONCURRENCY,
                         help=f"ping.pe 并发复核数（默认 {PINGPE_CONCURRENCY}）")
+    parser.add_argument("--tcptest-limit", type=int, default=TCPTEST_LIMIT_DEFAULT,
+                        help=f"tcptest.cn 多节点复核条数（默认 {TCPTEST_LIMIT_DEFAULT}；0=跳过）")
+    parser.add_argument("--tcptest-concurrency", type=int, default=TCPTEST_CONCURRENCY,
+                        help=f"tcptest.cn 并发复核数（默认 {TCPTEST_CONCURRENCY}）")
+    parser.add_argument("--tcptest-nodes", type=int, default=TCPTEST_NODES,
+                        help=f"tcptest.cn 每键采样节点数（默认 {TCPTEST_NODES}）")
     parser.add_argument("--workers", type=int, default=WORKERS_DEFAULT,
                         help=f"L2 并发上限（默认 {WORKERS_DEFAULT}）")
     parser.add_argument("-t", "--timeout", type=float, default=TIMEOUT_DEFAULT,

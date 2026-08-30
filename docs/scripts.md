@@ -179,14 +179,17 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 - **L1 启发式（零网络）**：行备注已带 `-CF`（Cloudflare 边缘 tls 代理）记录 heuristic 源，但不自动判 reachable——CF 启发式仅作为 basis 标注，需其他源确认
 - **L2 itdog.cn 批量实测（主源）**：每任务 5 目标 × 电信/联通/移动各 2 节点（共 6 节点），经 WebSocket 收结果，TCP 连通即判可达
-- **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**保守判定：多节点源（pingpe/itdog）单独确认 → reachable；单节点源 ≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
-- **L3 多节点复核（串行小样本）**：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive），只投「当前尚未被 itdog/单节点源判可达」的键，不浪费槽位在已确认键上；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
+- **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**保守判定：多节点源（pingpe/itdog/tcptest）单独确认 → reachable；单节点源 ≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
+- **L3 多节点复核（有界并发小样本）**：`tcptest.cn`（免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP `ip:port` 直连，节点成功率达 50% 即判可达）先于 ping.pe 跑——免费、端到端 ~2-6s/键，确认过的键自动让位；随后 `ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive），只投「当前尚未被 itdog/单节点源判可达」的键；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all_rep.txt` |
 | `--limit` | 按信誉降序采样条数（0=全部） | 250 |
 | `--pingpe-limit` | ping.pe 多节点复核条数（有界并发） | 200 |
+| `--tcptest-limit` | tcptest.cn 多节点复核条数（0=跳过） | 150 |
+| `--tcptest-concurrency` | tcptest.cn 并发复核数 | 4 |
+| `--tcptest-nodes` | tcptest.cn 每键采样节点数 | 10 |
 | `--workers` | L2 并发上限 | 16 |
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | check-host.cc key（读 `CHINA_CHECK_API_KEY`） | 空 |
