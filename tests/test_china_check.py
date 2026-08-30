@@ -1,10 +1,12 @@
 """Tests for china_check.py pure functions."""
 
 import hashlib
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -263,6 +265,41 @@ class TestMergeVerdict(unittest.TestCase):
         # itdog 弱 + check_host/xxapi 双确认 → 仍走单节点交叉线
         self.assertEqual(
             cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+
+    def test_tcptest_good_ratio_reachable(self):
+        """tcptest（多节点 TCP）成功率高 → 单源独立判 reachable。"""
+        sources = {
+            "tcptest": {"status": "ok", "ok": True, "ms": 60,
+                        "level": "tcp", "ok_nodes": 8, "nodes": 10,
+                        "ratio": 0.8},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "reachable")
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["level"], "tcp")
+
+    def test_tcptest_weak_ratio_uncertain(self):
+        """tcptest 仅少数节点可达（ratio 低）→ 不得单源定论。"""
+        sources = {
+            "tcptest": {"status": "ok", "ok": True, "ms": 200,
+                        "level": "tcp", "ok_nodes": 1, "nodes": 10,
+                        "ratio": 0.1},
+            "check_host": {"status": "error", "ok": False, "ms": None},
+            "xxapi": {"status": "error", "ok": False, "ms": None},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "uncertain")
+
+    def test_tcptest_fail_plus_l2_fail_unreachable(self):
+        """tcptest 全节点失败 + check_host/xxapi 失败 → unreachable。"""
+        sources = {
+            "tcptest": {"status": "fail", "ok": False, "ms": None,
+                        "ok_nodes": 0, "nodes": 10, "ratio": 0.0},
+            "check_host": {"status": "fail", "ok": False, "ms": None},
+            "xxapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(
+            cc.merge_verdict(sources, cf=False)["verdict"], "unreachable")
 
 
 class TestAnnotations(unittest.TestCase):
@@ -600,6 +637,103 @@ class TestItdogAggregate(unittest.TestCase):
     def test_node_error_only_error(self):
         records = [{"task_num": 1, "node_id": "a", "type": "node_error"}]
         self.assertEqual(ci.itdog_aggregate(records, 1)[1]["status"], "error")
+
+
+class TestTcptestSource(unittest.TestCase):
+    def test_pick_nodes_spreads_operator(self):
+        nodes = []
+        for i in range(12):
+            nodes.append({"uuid": f"u{i}", "operator": f"isp{i % 3}",
+                          "city": f"c{i}"})
+        picked = cc.tcptest_pick_nodes(nodes, 6)
+        self.assertEqual(len(picked), 6)
+        # 同运营商不重复（运营商均衡）
+        self.assertEqual(len(set(picked)), 6)
+
+    def test_pick_nodes_caps_at_count(self):
+        nodes = [{"uuid": f"u{i}", "operator": "a"} for i in range(20)]
+        self.assertEqual(len(cc.tcptest_pick_nodes(nodes, 10)), 10)
+
+    def test_pick_nodes_empty(self):
+        self.assertEqual(cc.tcptest_pick_nodes([], 5), [])
+
+    def test_fetch_nodes_caches(self):
+        payload = {
+            "has_more": False, "next_cursor": "0",
+            "nodes": [
+                {"uuid": "a", "enabled": True, "runtime_state": "online"},
+                {"uuid": "b", "enabled": True, "runtime_state": "offline"},
+                {"uuid": "c", "enabled": False, "runtime_state": "online"},
+            ],
+        }
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, json.dumps(payload).encode())) as m:
+            cc._tcptest_nodes_cache = None
+            nodes = cc.tcptest_fetch_nodes(5)
+        self.assertEqual([n["uuid"] for n in nodes], ["a"])
+        # 缓存命中 → 不再发请求
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=AssertionError) as m2:
+            nodes2 = cc.tcptest_fetch_nodes(5)
+        self.assertEqual(len(nodes2), 1)
+        cc._tcptest_nodes_cache = None
+
+    def test_fetch_nodes_paginates(self):
+        pages = [
+            {"has_more": True, "next_cursor": "22",
+             "nodes": [{"uuid": "a", "enabled": True, "runtime_state": "online"}]},
+            {"has_more": False, "next_cursor": "0",
+             "nodes": [{"uuid": "b", "enabled": True, "runtime_state": "online"}]},
+        ]
+        def fake(url, headers, timeout, method="GET", data=None):
+            return 200, {}, json.dumps(pages.pop(0)).encode()
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            cc._tcptest_nodes_cache = None
+            nodes = cc.tcptest_fetch_nodes(5)
+        self.assertEqual([n["uuid"] for n in nodes], ["a", "b"])
+        cc._tcptest_nodes_cache = None
+
+    def test_check_all_ok(self):
+        resp = json.dumps({"id": "t1"}).encode()
+        state = json.dumps({"state": "succeeded"}).encode()
+        results = json.dumps({"results": [
+            {"success": True, "data": {"connected": True, "avg_ms": 12.5}},
+            {"success": True, "data": {"connected": True, "avg_ms": 20.0}},
+        ]}).encode()
+        states = [resp, state, results]
+        def fake(url, headers, timeout, method="GET", data=None):
+            return 200, {}, states.pop(0)
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1", "u2"])
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["ms"], 12.5)
+        self.assertEqual(out["level"], "tcp")
+
+    def test_check_all_fail(self):
+        resp = json.dumps({"id": "t1"}).encode()
+        state = json.dumps({"state": "failed"}).encode()
+        results = json.dumps({"results": [
+            {"success": False, "data": {"connected": False}},
+            {"success": False, "data": {"connected": False}},
+        ]}).encode()
+        states = [resp, state, results]
+        def fake(url, headers, timeout, method="GET", data=None):
+            return 200, {}, states.pop(0)
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1", "u2"])
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ratio"], 0.0)
+
+    def test_check_create_rate_limited(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(429, {}, b"{}")):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1"])
+        self.assertEqual(out["status"], "rate_limited")
+
+    def test_check_no_nodes_error(self):
+        out = cc.tcptest_check("1.2.3.4", "443", 10, [])
+        self.assertEqual(out["status"], "error")
 
 
 class TestItdogMergeVerdict(unittest.TestCase):
