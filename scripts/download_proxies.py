@@ -14,8 +14,11 @@ files is used as a fallback so scheduled runs never break.
 A set of Cloudflare 反代 (reverse-proxy) sources from :data:`EXTRA_SOURCES`
 is also fetched and merged (port/country bucket aware); entries without a country
 tag get one via a best-effort ``ip-api.com/batch`` lookup (``#ALL`` otherwise).
-Free mainline ``ip:port`` mirrors from :data:`PROXY_MIRROR_SOURCES` are fetched
-the same way. Per-source failures are non-fatal and never break a scheduled run.
+The merged pool is constrained to the Cloudflare edge ports :data:`CF_EDGE_PORTS`
+(``443/8443/2053/2083/2087/2096``) and excludes Cloudflare-owned AS13335 IPs,
+so the output doubles as a non-Cloudflare connection pool usable from
+``connect()`` inside Cloudflare Workers (where connecting to CF IP ranges is
+blocked). Per-source failures are non-fatal and never break a scheduled run.
 
 Each run also archives the added/removed entries versus the previous committed
 list into ``data/diff/`` and records the change counts in ``data/quality/history.jsonl``.
@@ -97,6 +100,10 @@ SMALL_SETS: dict[str, list[str]] = {
 #   plain —— ``ip:port(#note)?`` 行（note 可为国家码或中文名）
 #   ip    —— 裸 ``ip(#note)?`` 行（无端口，统一按 DEFAULT_EXTRA_PORT）
 #   csv   —— ``IP,port,区域,延迟`` 表（区域为机场码或国家码）
+#
+# 维护目标是「非 Cloudflare AS13335 + Cloudflare 边缘常用端口」的可直连
+# 连接池（用于 Cloudflare Worker `connect()` 等自建链路）。因此：不收录
+# Cloudflare 官方边缘 IP（AS13335，Workers 出站 TCP 禁止连接 CF IP 网段）。
 EXTRA_SOURCES: list[tuple[str, str]] = [
     ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/fdip.txt"),
     ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/vlid.txt"),
@@ -105,26 +112,14 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy%26country.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy.txt"),
-    ("plain", "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt"),
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
+# Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
+# 全链路输出只保留这些端口，其余桶一律丢弃。
+CF_EDGE_PORTS = frozenset({"443", "8443", "2053", "2083", "2087", "2096"})
 DEFAULT_EXTRA_PORT = "443"
 
-# 全免费主线 ``ip:port`` 代理镜像源（行式，与主源同构；各自失败非致命）：
-PROXY_MIRROR_SOURCES: list[str] = [
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
-    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=ipport&format=text",
-    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
-]
-
 SOURCE_LABELS: dict[str, str] = {
-    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=ipport&format=text": "proxyscrape",
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt": "monosans",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt": "speedx",
-    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt": "shiftytr",
-    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt": "roosterkid",
 }
 
 
@@ -399,6 +394,12 @@ def merge_by_port(base: dict, extra: dict) -> dict:
 
 def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> tuple[dict, set]:
     print("[3/3] Writing output files ...")
+    # 只维护 Cloudflare 边缘常用端口：其余端口桶（来自 zip 回退或 extra 源
+    # 的普通代理端口）一律丢弃，保证产物可作 Worker connect() 连接池。
+    by_port = {
+        port: countries for port, countries in by_port.items()
+        if port in CF_EDGE_PORTS
+    }
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     stats: dict[str, int] = {}
     total = 0
@@ -943,13 +944,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--no-extra-sources", action="store_true",
-        help="Skip the built-in extra CF reverse-proxy and mirror sources",
+        help="Skip the built-in extra CF reverse-proxy sources",
     )
     args = parser.parse_args(argv)
 
     extra_sources = list(EXTRA_SOURCES)
     if not args.no_extra_sources:
-        extra_sources.extend(("plain", u) for u in PROXY_MIRROR_SOURCES)
         for spec in args.extra_source:
             kind, sep, url = spec.partition(",")
             if not sep or not url or not kind:
