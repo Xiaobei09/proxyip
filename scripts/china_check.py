@@ -26,8 +26,10 @@
 - L2 itdog batch_tcping 补测（降级通道）：batch_http 对某目标失败/被限时，
   改用 `batch_tcping` 纯 TCPING 复测——节点池大得多（每 ISP ~75-88 个，
   默认取 6×3=18 节点），结果记为独立多节点源 ``itdog_tcping``。
-- L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+ `xxapi.cn`
-  （北京节点，免 key）。
+- L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+
+  `xxapi.cn`（北京节点，免 key）+ `jkapi.com/zz_tcping`（浙江宁波电信，
+  免 key）——两只免额单节点源独力即可双确认（single_ok≥2→reachable），
+  check-host 的 250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
   判定）；可选 `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
@@ -38,7 +40,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/tcpping）任一 ok → reachable；
   单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
-  check_host + xxapi 均 fail → unreachable；
+  check_host / xxapi / jkapi 单节点源 ≥2 个 fail → unreachable；
   pingpe/itdog fail + 任一其他源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"。
 
@@ -124,6 +126,13 @@ CH_HOUR_CAP = 250
 
 # xxapi.cn —— 北京服务器（免 key）
 XXAPI_URL = "https://v2.xxapi.cn/api/tcping"
+
+# jkapi.com（无铭 API）zz_tcping —— 浙江宁波电信 1 节点（免 key，纯文本报告）。
+# 单节点大陆实测，返回平均延迟 ms；目标不可达返回「所有测试均失败」。
+# 与 xxapi 同属免费无限额单节点源，二者联手即可绕开 check-host 的 250/h 配额
+# 独立完成双源确认（merge_verdict 单节点源 ≥2 ok → reachable）。
+JKAPI_URL = "https://jkapi.com/api/zz_tcping"
+JKAPI_TIMEOUT = 8.0  # 拉低单次超时上限：免额源不应拖慢整池 L2
 
 # ping.pe —— 约 13 个大陆节点，需走 antiflood + start_token 流程
 PINGPE_URL = "https://tcp.ping.pe/{host}"
@@ -262,6 +271,50 @@ def parse_check_host_report(payload) -> dict:
         "ms": None,
         "error": str(c.get("errortext") or "unreachable")[:120],
     }
+
+
+def parse_jkapi(text: str) -> dict:
+    """``jkapi.com zz_tcping`` 纯文本报告 → ``{"status", "ok", "ms", "error"}``。
+
+    成功报告形如::
+
+        === TCPing测试报告 ===
+        目标地址: 223.5.5.5 (223.5.5.5)
+        目标端口: 443
+        最快延迟: 9.65 ms
+        ...
+        平均延迟: 10.95 ms
+        测试节点:浙江宁波电信
+
+    目标不可达统一返回「所有测试均失败，请检查目标可用性」。
+    """
+    if "TCPing测试报告" in text:
+        m = re.search(r"平均延迟:\s*([0-9.]+)\s*ms", text)
+        if m:
+            return {"status": "ok", "ok": True, "ms": float(m.group(1)), "error": ""}
+        return {"status": "inconclusive", "ok": False, "ms": None,
+                "error": "report without avg latency"}
+    if "所有测试均失败" in text:
+        return {"status": "fail", "ok": False, "ms": None, "error": "unreachable"}
+    return {"status": "inconclusive", "ok": False, "ms": None,
+            "error": "unrecognized text"}
+
+
+def jkapi_check(ip: str, port: str, timeout: float) -> dict:
+    """jkapi 单节点实测（浙江宁波电信，免 key）。不抛未捕获异常。"""
+    url = f"{JKAPI_URL}?host={ip}&port={port}"
+    try:
+        status, _, resp = request_follow(
+            url, {"User-Agent": UA}, min(timeout, JKAPI_TIMEOUT)
+        )
+    except urllib.error.HTTPError as e:
+        return {"status": "rate_limited" if e.code == 429 else "error",
+                "ok": False, "ms": None, "error": f"http {e.code}"}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120]}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"http {status}"}
+    return parse_jkapi(resp.decode("utf-8", "replace"))
 
 
 def parse_xxapi(payload) -> dict:
@@ -1355,7 +1408,7 @@ def merge_verdict(sources: dict) -> dict:
       但**要求该源节点成功率达阈值**（itdog 系列按 ``ratio``≥0.5；
       ping.pe/tcpping 内部已是多数/60% 规则，视作满足）；比率过低的单源
       判定 → uncertain（单节点假阳性抑制）
-    - check_host 与 xxapi 均失败 → unreachable
+    - 单节点源（check_host/xxapi/jkapi）≥2 个失败 → unreachable
     - 多节点源失败且所有单节点源也失败 → unreachable
     - 有确认源但也有失败源（冲突）→ uncertain（保守）
     - 全部为错误/跳过 → skipped（不误判）
@@ -1383,7 +1436,7 @@ def merge_verdict(sources: dict) -> dict:
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest", "coffee",
         "pingloc", "antping", "tcpingcn", "chinaz")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "xxapi")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -1413,13 +1466,13 @@ def merge_verdict(sources: dict) -> dict:
     if ok_sources:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
-    if "check_host" in fail_sources and "xxapi" in fail_sources:
+    # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
+    single_failed = [s for s in fail_sources if s in ("check_host", "xxapi", "jkapi")]
+    if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
-    # 多节点源整站失败 + 任一单节点源也失败 → 足够置信判 unreachable
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "pingpe", "tcptest", "coffee",
         "pingloc", "antping", "tcpingcn", "chinaz")]
-    single_failed = [s for s in fail_sources if s in ("check_host", "xxapi")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
@@ -1771,13 +1824,17 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     _t0 = time.monotonic()
 
     def l2_xxapi(item):
-        """免额度源（xxapi 北京节点）全池扫描，先建立候选集。"""
+        """免额单节点源（xxapi 北京 + jkapi 宁波电信）全池扫描，先建立候选集。"""
         _, key, ip, port, _ = item
-        try:
-            return key, {"xxapi": xxapi_check(ip, port, args.timeout)}
-        except Exception as exc:
-            logging.debug("l2 xxapi failed for %s: %s", key, exc)
-            return key, {"xxapi": {"status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}}
+        out = {}
+        for name, fn in (("xxapi", xxapi_check), ("jkapi", jkapi_check)):
+            try:
+                out[name] = fn(ip, port, args.timeout)
+            except Exception as exc:
+                logging.debug("l2 %s failed for %s: %s", name, key, exc)
+                out[name] = {"status": "error", "ok": False, "ms": None,
+                             "error": str(exc)[:120]}
+        return key, out
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(l2_xxapi, item) for item in sample]
@@ -1796,14 +1853,24 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             logging.debug("l2 check_host failed for %s: %s", key, exc)
             return key, {"check_host": {"status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}}
 
-    # check_host 配额有限（CH_HOUR_CAP），只投递到需要二次意见的键：
-    # xxapi 明确 fail 的键省略（无二次确认仍保守落 uncertain，不产生假阳性），
-    # 预算全部留给 xxapi ok / 临时性失败者——把「能不能确认」而不是「探测谁」放到首位。
+    # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
+    # - xxapi/jkapi 都已 ok → 双免额单节点源已独立确认可达，稀配额直接让位
+    # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
+    # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        def _needs_ch(entry: dict) -> bool:
+            x = entry.get("xxapi") or {}
+            j = entry.get("jkapi") or {}
+            if x.get("status") == "ok" and j.get("status") == "ok":
+                return False
+            if x.get("status") == "fail" or j.get("status") == "fail":
+                return False
+            return True
+
         futures = [
             pool.submit(l2_check_host, item)
             for item in sample
-            if entries.get(item[1], {}).get("xxapi", {}).get("status") != "fail"
+            if _needs_ch(entries.get(item[1], {}))
         ]
         for future in futures:
             key, sources = future.result()
@@ -2013,7 +2080,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="china_check.py",
-        description="大陆连通性检测（itdog 批量 + check-host.cc + xxapi.cn + ping.pe [+ tcpping.cn]）",
+        description="大陆连通性检测（itdog 批量 + check-host.cc + xxapi.cn + jkapi.com + ping.pe [+ tcpping.cn]）",
     )
     parser.add_argument("--source", type=Path, default=REP_RANK_FILE,
                         help=f"输入清单（默认 {REP_RANK_FILE.name}，缺失回退 all_ltd.txt）")
