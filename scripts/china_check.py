@@ -1909,9 +1909,12 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         # itdog 批量代价高（批任务端到端慢），只投仍未定论的键；已由
         # 双免额单节点源定论的键（≥2 ok / ≥2 fail）跳过其复核。
         _itdog_cands = [item for item in sample if needs_probe(entries, item[1])]
-        if _itdog_cands:
+        try:
             for key, res in itdog_batch_run(_itdog_cands, args).items():
                 entries.setdefault(key, {})["itdog"] = res
+        except Exception as exc:
+            logging.debug("itdog batch failed: %s", exc)
+            print(f"itdog batch failed (skipped): {exc}", file=sys.stderr)
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
         if not getattr(args, "skip_itdog_tcping", False):
             pending = [
@@ -1933,14 +1936,19 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     f"itdog_tcping fallback: {len(pending)} targets",
                     file=sys.stderr,
                 )
-                for key, res in itdog_batch_run(
-                    pending,
-                    args,
-                    page_url=ITDOG_TCPING_URL,
-                    nodes_per_isp=getattr(args, "itdog_tcping_nodes", 0)
-                    or ITDOG_TCPING_NODES_PER_ISP,
-                ).items():
-                    entries.setdefault(key, {})["itdog_tcping"] = res
+                try:
+                    for key, res in itdog_batch_run(
+                        pending,
+                        args,
+                        page_url=ITDOG_TCPING_URL,
+                        nodes_per_isp=getattr(args, "itdog_tcping_nodes", 0)
+                        or ITDOG_TCPING_NODES_PER_ISP,
+                    ).items():
+                        entries.setdefault(key, {})["itdog_tcping"] = res
+                except Exception as exc:
+                    logging.debug("itdog_tcping fallback failed: %s", exc)
+                    print(f"itdog_tcping fallback failed (skipped): {exc}",
+                          file=sys.stderr)
     print(
         f"itdog phases: {time.monotonic() - _t0:.1f}s",
         file=sys.stderr,
