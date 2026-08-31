@@ -111,7 +111,7 @@ LIMIT_DEFAULT = 250
 PINGPE_LIMIT_DEFAULT = 300
 PINGPE_CONCURRENCY = 6  # ping.pe L3 有界并发（每键端到端 ~20-40s，串行太慢）
 PINGPE_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
-WORKERS_DEFAULT = 32  # L2 免额单节点源并发（xxapi ~50qps / jkapi 免额，实测 32 无 429）
+WORKERS_DEFAULT = 48  # L2 免额单节点源并发（实测 0-64 两源均无 429；48 处 xxapi 超时略增但 error 走确认链路）
 TIMEOUT_DEFAULT = 10
 POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
@@ -1849,7 +1849,11 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     _t0 = time.monotonic()
 
     def l2_xxapi(item):
-        """免额单节点源（xxapi 北京 + jkapi 宁波电信）全池扫描，先建立候选集。"""
+        """免额单节点源（xxapi 北京 + jkapi 宁波电信）全池扫描，先建立候选集。
+
+        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：两个源放进同池最多干到
+        池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=48
+        实测两源均无 429），保键级数据一致性仍用逐键两源落盘。"""
         _, key, ip, port, _ = item
         out = {}
         for name, fn in (("xxapi", xxapi_check), ("jkapi", jkapi_check)):
