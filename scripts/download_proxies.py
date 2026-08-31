@@ -802,6 +802,24 @@ def enrich_countries(
     return moved
 
 
+def _fetch_extra_retry(url: str, timeout: int, attempts: int = 2) -> bytes:
+    """Fetch an extra source with a bounded number of retries.
+
+    Mirrors already chain on ``raw.githubusercontent.com``; this adds a
+    restart on transient failures so a single hiccup (e.g. the keyless IPDB
+    API having no mirror path) doesn't drop a whole source for a round.
+    """
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return fetch(url, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(1.0 * (attempt + 1))
+    raise last  # type: ignore[misc]
+
+
 def load_extras(
     sources: list, timeout: int
 ) -> tuple[dict, set[str], dict[str, set[str]]]:
@@ -820,7 +838,7 @@ def load_extras(
         return by_port, extra_all_ips, source_ip_sets
 
     def parse_source(kind: str, url: str) -> dict:
-        content = fetch(url, timeout=timeout)
+        content = _fetch_extra_retry(url, timeout=timeout)
         if kind == "plain":
             return extract_plain(content)
         if kind == "ip":

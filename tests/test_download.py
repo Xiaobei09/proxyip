@@ -625,6 +625,41 @@ class TestProxyMirrorSources(unittest.TestCase):
         self.assertIn("9.9.9.9", source_ip_sets[url])
 
 
+class TestFetchExtraRetry(unittest.TestCase):
+    def test_succeeds_after_transient_failure(self):
+        calls = {"n": 0}
+
+        def flaky(url, timeout):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise TimeoutError("transient")
+            return b"1.2.3.4\n"
+
+        with unittest.mock.patch.object(dp, "fetch", side_effect=flaky):
+            out = dp._fetch_extra_retry("http://x/ip", 10, attempts=3)
+        self.assertEqual(out, b"1.2.3.4\n")
+        self.assertEqual(calls["n"], 3)
+
+    def test_raises_after_attempts_exhausted(self):
+        calls = {"n": 0}
+
+        def down(url, timeout):
+            calls["n"] += 1
+            raise OSError("down")
+
+        with unittest.mock.patch.object(dp, "fetch", side_effect=down):
+            with self.assertRaises(OSError):
+                dp._fetch_extra_retry("http://x/ip", 10, attempts=2)
+        self.assertEqual(calls["n"], 2)
+
+    def test_no_retry_on_success(self):
+        with unittest.mock.patch.object(
+            dp, "fetch", return_value=b"9.9.9.9\n"
+        ):
+            out = dp._fetch_extra_retry("http://x/ip", 10, attempts=3)
+        self.assertEqual(out, b"9.9.9.9\n")
+
+
 if __name__ == "__main__":
     unittest.main()
 
