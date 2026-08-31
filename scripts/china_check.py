@@ -2355,10 +2355,14 @@ def main(argv=None) -> int:
                         reachable.add(k)
                         fallback_keys.add(k)
         else:
-            # 本轮未采样：原样并入，标注 fallback 保留溯源
+            # 本轮未采样：原样并入，标注 fallback 保留溯源。
+            # streak 清零：本轮未复测，不得虚报"连续可达"（stable 计算在合并
+            # 前、不会混入；这里再显式清 0 防止 china.json 消费者误读）；\
+            # 保留来源 sources/last_ok_ts 供下一轮兜底资格与大陆读数追溯。
             dup = dict(p)
             dup["verdict"] = "reachable"
             dup["fallback"] = True
+            dup["streak"] = 0
             entries[k] = dup
             reachable.add(k)
             fallback_keys.add(k)
