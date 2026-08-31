@@ -479,50 +479,51 @@ class TestAnnotations(unittest.TestCase):
             ["2.2.2.2:443"],
         )
 
-    def test_select_cn_fast_gates_by_mainland_ms(self):
-        """CN 清单延迟门槛：大陆视角 RTT ≤ cap 才准入；无数值/0/超限键剔除。"""
-        entries = {
-            "1.1.1.1:80#US": {"ms": 25.0},   # 大陆
-            "2.2.2.2:80#US": {"ms": 149.9},  # 临界（≤150 保留）
-            "3.3.3.3:80#US": {"ms": 151.0},  # 越限
-            "4.4.4.4:80#US": {"ms": 250.0},  # 海外尾
-            "5.5.5.5:80#US": {},             # 无数值 ms
-            "6.6.6.6:80#US": {"ms": 0},      # 无效
-            "7.7.7.7:80#US": {"ms": 300},    # 另一个越限键
-        }
-        keys = set(entries)
-        out = cc.select_cn_fast(entries, keys, 150.0)
-        self.assertEqual(out, {"1.1.1.1:80#US", "2.2.2.2:80#US"})
+    def test_cn_display_ms_prefers_trusted_l2_over_noise(self):
+        """CN 展示延迟优先可信大陆探测；L3 复核源 1ms 噪声不得冒充真实值。"""
+        import common
 
-    def test_select_cn_fast_disabled_with_none(self):
-        """``cap=None`` 不引入延迟门槛（向后兼容：全部保留）。"""
-        entries = {"9.9.9.9:80#US": {"ms": 500.0}, "a:a::1:80#US": {}}
-        self.assertEqual(cc.select_cn_fast(entries, set(entries), None),
-                         set(entries))
-        self.assertEqual(cc.select_cn_fast(entries, set(entries), float("inf")),
-                         set(entries))
-
-    def test_select_cn_fast_ignores_l3_noise_sources(self):
-        """大陆门槛只看可信托管源（xxapi/jkapi/check_host）的 ok RTT：
-        L3 复核源（如 antping 回 1ms）不得证明大陆性。"""
-        entries = {
-            # L2 慢（234ms）但 antping 报 1ms —— 噪声不救场，剔除
-            "a.a.a.a:80#US": {"sources": {
+        cases = {
+            # antping 1ms vs xxapi 234ms → 取 234（大陆视角）
+            "1.1.1.1:443#US": {"ms": 1, "sources": {
                 "xxapi": {"status": "ok", "ms": 234.0},
                 "antping": {"status": "ok", "ms": 1}}},
-            # L2 快（35ms）且 antping 报 1ms —— 以 L2 为准，保留
-            "b.b.b.b:80#US": {"sources": {
+            # xxapi 35 / jkapi 80 → 取 35（多大陆源取最小）
+            "2.2.2.2:443#US": {"sources": {
                 "xxapi": {"status": "ok", "ms": 35.0},
-                "antping": {"status": "ok", "ms": 1}}},
-            # jkapi error + xxapi 120ms ≤ 150 → 保留
-            "c.c.c.c:80#US": {"sources": {
-                "jkapi": {"status": "error", "ms": None},
-                "xxapi": {"status": "ok", "ms": 120.0}}},
-            # 只有 L3（tcptest），无大陆探测 → 无法证明，剔除
-            "d.d.d.d:80#US": {"sources": {"tcptest": {"status": "ok", "ms": 5}}},
+                "jkapi": {"status": "ok", "ms": 80.0}}},
+            # 无大陆探测，回退合并 ms
+            "3.3.3.3:443#US": {"ms": 42, "sources": {
+                "tcptest": {"status": "ok", "ms": 42}}},
+            # 无 sources 老条目：用 entry ms
+            "4.4.4.4:443#US": {"ms": 88},
+            # 噪声且无 valid ms → None（不展示伪造值）
+            "5.5.5.5:443#US": {"ms": 0, "sources": {"antping": {"status": "ok", "ms": 1}}},
+            # merged ms 被 1ms 污染，但 tcptest 有 88ms 可信读数 → 取 88
+            "6.6.6.6:443#US": {"ms": 1, "sources": {
+                "antping": {"status": "ok", "ms": 1},
+                "tcptest": {"status": "ok", "ms": 88.0}}},
         }
-        out = cc.select_cn_fast(entries, set(entries), 150.0)
-        self.assertEqual(out, {"b.b.b.b:80#US", "c.c.c.c:80#US"})
+        got = {k: common.cn_display_ms(v) for k, v in cases.items()}
+        self.assertEqual(got, {
+            "1.1.1.1:443#US": 234.0,
+            "2.2.2.2:443#US": 35.0,
+            "3.3.3.3:443#US": 42,
+            "4.4.4.4:443#US": 88,
+            "5.5.5.5:443#US": None,
+            "6.6.6.6:443#US": 88.0,
+        })
+
+    def test_generate_all_cn_keeps_full_reachable_pool(self):
+        """CN 清单保持完整：全可达键都保留，即使其延迟很慢（噪声也必须上路）。"""
+        text = "1.1.1.1:443#US-234ms-CN\n2.2.2.2:443#US-1ms-CN\n3.3.3.3:443#US-8ms\n"
+        reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US", "3.3.3.3:443#US"}
+        cn_text, count = cc.generate_all_cn(text, reachable, {
+            "1.1.1.1:443#US": 234.0, "2.2.2.2:443#US": 35.0, "3.3.3.3:443#US": 8.0,
+        })
+        self.assertEqual(count, 3)
+        for k in reachable:
+            self.assertIn(k, cn_text)
 
     def test_generate_all_cn_no_map_keeps_pool_order(self):
         text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n"

@@ -88,6 +88,7 @@ from common import (
     request_follow,
     rewrite_latency,
     clear_note_buckets,
+    cn_display_ms,
     cn_l2_ms,
     cn_mainland_ok,
     CN_LATENCY_CAP_MS,
@@ -1547,8 +1548,9 @@ def annotate_cnh(line: str) -> str:
 STREAK_GAP_TOLERANCE_S = 3 * 3600  # 连续轮时间窗：基线观测早于此视为中断
 FLIP_FORGIVE_STREAK = 4  # 连续可达达此轮数后清零 flip（稳定恢复赦免历史抖动）
 STABLE_MAX_FLIP = 1  # stable 准入：历史翻转次数上限（排除慢性抖动源）
-# CN 清单延迟门槛（见 common.CN_LATENCY_CAP_MS / common.cn_mainland_ok）：
-# 可达 ≠ 大陆，大陆视角 RTT 超门槛的海外/边缘键不得进 all_cn* 与 CN good-tier。
+# CN 清单延迟语义（common.cn_display_ms / cn_l2_ms）：每行展示大陆视角读数，
+# 绝不让 L3 复核源的 1ms 噪声冒充真实延迟。CN 清单保持完整（全可达集），
+# --cn-latency-cap 只用于信息性 cn_mainland 打标，不砍清单。
 
 
 def apply_streak(
@@ -1618,21 +1620,6 @@ def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
         )
     )
     return [line for _i, line in indexed]
-
-
-def select_cn_fast(entries: dict, keys: set, cap: float | None) -> set:
-    """CN 清单延迟门槛子集：大陆视角 RTT 须落在 ``cap`` 内的键才进 CN 清单。
-
-    判定用 common.cn_l2_ms 取可信大陆探测（xxapi/jkapi/check_host）最小 ok
-    RTT，L3 复核源的 1ms 噪声不会污染；语义与 build_good.build_china_set
-    共用 common.cn_mainland_ok 单一入口。``cap=None/inf`` 表示不过滤。
-    """
-    if cap is None or cap == float("inf"):
-        return set(keys)
-    return {
-        k for k in keys
-        if cn_mainland_ok(cn_l2_ms(entries.get(k)), cap)
-    }
 
 
 def generate_all_cn(
@@ -2271,11 +2258,14 @@ def main(argv=None) -> int:
     for e in entries.values():
         if isinstance(e, dict):
             e["cn_mainland"] = cn_mainland_ok(cn_l2_ms(e), args.cn_latency_cap)
-    cn_fast = select_cn_fast(entries, reachable, args.cn_latency_cap)
+    cn_ms_covered = sum(
+        1 for e in entries.values()
+        if isinstance(e, dict) and cn_l2_ms(e) is not None
+    )
     print(
         f"reachable: {len(reachable)} uncertain: {len(uncertain)} "
         f"http-verified: {len(http_keys)} stable(>=2 runs): {len(stable_keys)} "
-        f"flappers: {flappers} cn-fast(<={args.cn_latency_cap}ms): {len(cn_fast)}",
+        f"flappers: {flappers} cn-l2-ms: {cn_ms_covered}/{len(entries)}",
         file=sys.stderr,
     )
     write_json(
@@ -2287,26 +2277,28 @@ def main(argv=None) -> int:
     )
 
     all_pool_text = load_cn_pool()
+    # CN 清单展示用大陆延迟图：优先可信大陆探测（xxapi/jkapi/check_host），
+    # 无读数时回退 entry 合并 ms —— 绝不让 L3 复核源的 1ms 噪声冒充真实延迟。
     cn_ms = {
-        key: entry["ms"]
+        key: cn_display_ms(entry)
         for key, entry in entries.items()
-        if isinstance(entry, dict) and isinstance(entry.get("ms"), (int, float))
+        if isinstance(entry, dict) and cn_display_ms(entry) is not None
     }
     cn_text, cn_count = generate_all_cn(
-        all_pool_text, cn_fast, cn_ms, http_keys=http_keys & cn_fast
+        all_pool_text, reachable, cn_ms, http_keys=http_keys
     )
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
     http_text, http_count = generate_cn_subset(
         all_pool_text,
-        lambda k, l: (k in http_keys or has_token(_note(l), "CNH")) and k in cn_fast,
+        lambda k, l: k in http_keys or has_token(_note(l), "CNH"),
         cn_ms,
     )
     if http_text:
         write_text_if_changed(VALID_ALL_CN_HTTP_FILE, http_text)
     stable_text, stable_count = generate_cn_subset(
         all_pool_text,
-        lambda k, l: k in stable_keys and k in cn_fast,
+        lambda k, l: k in stable_keys,
         cn_ms,
     )
     if stable_text:

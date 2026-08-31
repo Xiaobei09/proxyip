@@ -63,25 +63,37 @@ class TestMaps(unittest.TestCase):
         self.assertEqual(m, {"1.2.3.4:443#US": {"score": 88, "risk": "low"}})
 
     def test_build_china_set(self):
-        """CN 池 = 可达 ∧ 大陆视角延迟簇（cn_mainland 打标 / 老数据 ms 回退）。"""
+        """CN 池 = 当期全可达集（清单保持完整，不按延迟精简）。"""
         data = {"proxies": {
-            "1.2.3.4:443#US": {"verdict": "reachable", "cn_mainland": True},    # 打标大陆
-            "5.6.7.8:443#JP": {"verdict": "reachable", "cn_mainland": False},   # 打标非大陆
-            "7.7.7.7:443#US": {"verdict": "reachable", "ms": 25},               # 老 JSON 回退：快
-            "8.8.8.8:443#US": {"verdict": "reachable", "ms": 218},              # 老 JSON 回退：越限
-            "0.0.0.1:443#US": {"verdict": "reachable"},                         # 无 ms 不可证大陆 → 剔除
-            "9.9.9.9:443#JP": {"verdict": "unreachable", "cn_mainland": True},  # 不可达不计
+            "1.2.3.4:443#US": {"verdict": "reachable", "ms": 218},
+            "5.6.7.8:443#JP": {"verdict": "reachable", "ms": 1},   # 噪声 ms 不剔除
+            "0.0.0.1:443#US": {"verdict": "reachable"},            # 无数值 ms 也保留
+            "7.7.7.7:443#US": {"verdict": "unreachable"},
             "6.6.6.6:443#DE": {"verdict": "uncertain"},
         }}
         self.assertEqual(bg.build_china_set(data),
-                         {"1.2.3.4:443#US", "7.7.7.7:443#US"})
+                         {"1.2.3.4:443#US", "5.6.7.8:443#JP", "0.0.0.1:443#US"})
 
     def test_build_china_set_no_verdict(self):
         """verdict 缺失视为非可达（CN 池只收当期可达）。"""
         data = {"proxies": {
-            "3.3.3.3:443#US": {"ms": 20, "cn_mainland": True},
+            "3.3.3.3:443#US": {"ms": 20},
         }}
         self.assertEqual(bg.build_china_set(data), set())
+
+    def test_build_cn_ms_map_prefers_trusted_l2(self):
+        """延迟图优先可信大陆探测，L3 复核源的 1ms 噪声不得覆盖真实 L2 读数。"""
+        data = {"proxies": {
+            # antping 1ms vs xxapi 234ms → 取 234（大陆视角）
+            "1.1.1.1:443#US": {"verdict": "reachable", "ms": 1, "sources": {
+                "xxapi": {"status": "ok", "ms": 234.0},
+                "antping": {"status": "ok", "ms": 1}}},
+            # 无大陆探测，回退合并 ms
+            "2.2.2.2:443#US": {"verdict": "reachable", "ms": 42, "sources": {
+                "tcptest": {"status": "ok", "ms": 42}}},
+        }}
+        m = bg.build_cn_ms_map(data)
+        self.assertEqual(m, {"1.1.1.1:443#US": 234.0, "2.2.2.2:443#US": 42})
 
     def test_is_cn_reachable_current_only(self):
         china = {"1.2.3.4:443#US"}

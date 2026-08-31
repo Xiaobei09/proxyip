@@ -43,8 +43,7 @@ from common import (
     LATENCY_RE,
     REPUTATION_FILE,
     SPEED_RE,
-    cn_l2_ms,
-    cn_mainland_ok,
+    cn_display_ms,
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
@@ -118,29 +117,26 @@ def build_rep_map(data: dict) -> dict[str, dict]:
 
 
 def build_china_set(data: dict) -> set[str]:
-    """``china.json`` → CN 池（大陆视角延迟簇，非"可达"全集）。
+    """``china.json`` -> 当期全可达集。
 
-    可达 ≠ 大陆：扫描可达池大头是大陆节点能连通的海外/边缘键（中位 ~218ms）。
-    CN good-tier 语义与 all_cn.txt 一致=大陆使用者实测延迟，故只收
-    ``cn_mainland`` 为真（china_check 按 common.CN_LATENCY_CAP_MS 打标）的键；
-    旧 JSON 无数值打标时回退到 ms 直判，保证过渡期与重复数据一致。
+    CN good-tier 与 all_cn.txt 口径一致：清单保持完整（全可达集，≥1 万），
+    不按延迟门槛精简；延迟/速度语义交给 cn_display_ms —— 每行展示大陆视角
+    实测读数而非海外 TLS 值。
     """
     result: set[str] = set()
     for key, entry in data.get("proxies", {}).items():
-        if not (isinstance(entry, dict) and entry.get("verdict") == "reachable"):
-            continue
-        tag = entry.get("cn_mainland")
-        if tag is True or (tag is None and cn_mainland_ok(cn_l2_ms(entry))):
+        if isinstance(entry, dict) and entry.get("verdict") == "reachable":
             result.add(key)
     return result
 
 
 def build_cn_ms_map(data: dict) -> dict[str, float]:
-    """``china.json`` -> ``{key: mainland-measured ms}`` (numeric only)."""
+    """``china.json`` -> ``{key: 大陆实测 ms}``（优先可信探测，过滤噪声）。"""
     result: dict[str, float] = {}
     for key, entry in data.get("proxies", {}).items():
-        if isinstance(entry, dict) and isinstance(entry.get("ms"), (int, float)):
-            result[key] = entry["ms"]
+        ms = cn_display_ms(entry)
+        if ms is not None:
+            result[key] = ms
     return result
 
 

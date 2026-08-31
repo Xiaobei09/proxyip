@@ -661,9 +661,9 @@ CN_SPEED_FLOOR = 0.4     # 估算下限（MB/s），防极端高延迟给出夸�
 # CN 清单延迟门槛（单一事实来源，china_check 与 build_good 共用）：
 # 可达 ≠ 大陆——大陆节点实测 jkapi/xxapi 扫描的可达池中位 ~218ms，大头是
 # 海外/边缘机房（大陆节点能 TCP 连通而已）。CN 清单 ``ms`` 语义 = 大陆使用者
-# 实测延迟，故只有大陆视角 RTT ≤ 门槛的键才算 CN 池。实测（L2 源读数，剔除
-# L3 复核源 1ms 噪声后）：≤100ms ≈ 319（纯大陆簇），≤150ms ≈ 808（大陆+边界）。
-# 默认 150 保量、砍掉 218ms/267ms(p90/p95) 大尾；--cn-latency-cap 可调（inf 关）。
+# 实测延迟，故 CN 清单每行只应展示大陆视角读数。注意：此门槛与 cn_mainland
+# 打标只是"信息性/可选"——CN 清单保持完整（全可达集≥1万），不加 gating 精简。
+# 默认 150 仅用于打标参考（纯度档 100≈319、150≈808 供人了解规模），不砍清单。
 CN_LATENCY_CAP_MS = 150.0
 
 # 可作大陆延迟证据的探测源：xxapi（北京）/ jkapi（宁波）/ check_host（呼市）
@@ -691,6 +691,29 @@ def cn_l2_ms(entry) -> float | None:
             if isinstance(m, (int, float)) and m > 0:
                 best = m if best is None else min(best, m)
     return best
+
+
+def cn_display_ms(entry) -> float | None:
+    """CN 清单展示用大陆延迟：优先可信大陆探测（cn_l2_ms），无读数时在全部
+    ok 源中取最小「可信」RTT（≥2ms，过滤 L3 复核源的 1ms 噪声），再回退
+    entry 合并 ms。避免 1ms 冒充真实延迟；真伪都查不到返回 None。"""
+    if not isinstance(entry, dict):
+        return None
+    ms = cn_l2_ms(entry)
+    if ms is not None and ms >= 2.0:
+        return ms
+    best = None
+    sources = entry.get("sources")
+    if isinstance(sources, dict):
+        for r in sources.values():
+            if (isinstance(r, dict) and r.get("status") == "ok"
+                    and isinstance(r.get("ms"), (int, float))
+                    and r["ms"] >= 2.0):
+                best = r["ms"] if best is None else min(best, r["ms"])
+    if best is not None:
+        return best
+    m = entry.get("ms")
+    return m if isinstance(m, (int, float)) and m >= 2.0 else None
 
 
 def cn_mainland_ok(ms, cap: float | None = None) -> bool:
