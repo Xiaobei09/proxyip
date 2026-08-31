@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import (
+    _rewrite_cn_speed,
     CHINA_FILE,
     DATA_DIR,
     EXIT_FAMILY_FILE,
@@ -51,6 +52,7 @@ from common import (
     note_tier,
     parse_line,
     read_json,
+    rewrite_latency,
     write_json,
     write_text_if_changed,
 )
@@ -148,6 +150,22 @@ def is_cn_reachable(key: str | None, line: str, china_set: set[str]) -> bool:
     参数 ``line`` 保留以兼容调用方签名。
     """
     return key in china_set
+
+
+def to_cn_view(lines: list[str], cn_ms: dict | None) -> list[str]:
+    """CN 视图：行内 ms 换成大陆实测（可信探测优先），速度换 ``≈XMB/s`` 估算。
+
+    与 all_cn.txt 同口径（common.cn_display_ms / _rewrite_cn_speed），
+    保证"每个 CN 文件用大陆延迟和速度"；无读数键速度 token 删除而非冒充。
+    ``cn_ms`` 为空时原样返回。
+    """
+    if not cn_ms:
+        return lines
+    return [
+        _rewrite_cn_speed(rewrite_latency(ln, cn_ms.get(k)), cn_ms)
+        if (k := line_to_key(ln)) else ln
+        for ln in lines
+    ]
 
 
 def filter_rank(
@@ -286,7 +304,10 @@ def write_good_files(
     uptime_keys = load_uptime_keys()
     tier_lines: dict[str, list[tuple[str, Path]]] = {t: [] for t in TIER_TOKENS}
 
-    def emit(base: Path, lines: list[str], tier_name: str | None = None) -> int:
+    def emit(base: Path, lines: list[str], tier_name: str | None = None,
+             cn_view: bool = False) -> int:
+        if cn_view:
+            lines = to_cn_view(lines, cn_ms)
         n = write_good_file(base, lines)
         for suffix, keys in (
             ("_verified", speed_keys),
@@ -348,6 +369,7 @@ def write_good_files(
                     pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
                 ),
                 tier_name=rel,
+                cn_view=(group_dir.name == "CN" or group_dir.name.startswith("cn")),
             )
 
     # 细分目录：tiers/<tier>/{all.txt,<CC>.txt,sets/<name>.txt}
