@@ -95,6 +95,21 @@ class TestMaps(unittest.TestCase):
         m = bg.build_cn_ms_map(data)
         self.assertEqual(m, {"1.1.1.1:443#US": 234.0, "2.2.2.2:443#US": 42})
 
+    def test_to_cn_view_rewrites_mainland_latency_and_speed(self):
+        """CN 视图：ms 用大陆实测、速度用 ≈XMB/s，噪声/无读数键诚实处理。"""
+        lines = [
+            "7.7.7.7:443#US→US-6ms-116.99MB/s-RES-fast-V4-CN-100-U16",
+            "8.8.8.8:443#JP→JP-30ms-1.00MB/s-RES-mid-V4-CN-99-U16",
+        ]
+        cn_ms = {"7.7.7.7:443#US": 234.0, "8.8.8.8:443#JP": 35.0}
+        out = bg.to_cn_view(lines, cn_ms)
+        self.assertIn("7.7.7.7:443#US→US-234ms-", out[0])     # 大陆 234 非海外 6
+        self.assertIn("≈", out[0])                            # 速度标记 ≈ 估算
+        self.assertIn("8.8.8.8:443#JP→JP-35ms-", out[1])
+        self.assertIn("≈", out[1])
+        # 无 cn_ms → 原样
+        self.assertEqual(bg.to_cn_view(lines, None), lines)
+
     def test_is_cn_reachable_current_only(self):
         china = {"1.2.3.4:443#US"}
         # judged reachable this run

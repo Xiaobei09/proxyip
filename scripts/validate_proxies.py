@@ -56,6 +56,8 @@ import urllib.request
 from common import (
     ALL_FILE,
     CHINA_FILE,
+    _rewrite_cn_speed,
+    cn_display_ms,
     EXIT_FAMILY_FILE,
     EXT_API_SOURCES,
     EXT_CHECK_FILE,
@@ -424,9 +426,11 @@ def load_cn_reachable(path: Path | None = None) -> set[str]:
 
 
 def load_cn_ms(path: Path | None = None) -> dict[str, float]:
-    """``china.json`` 中 reachable 条目的 ``key -> 大陆实测毫秒`` 映射。
+    """``china.json`` 的 ``key -> 大陆实测毫秒`` 映射（仅 reachable 条目）。
 
-    供 CN 系分组视图把行内延迟替换为大陆 RTT；缺失/损坏 → 空 dict。
+    值取 ``common.cn_display_ms``（可信大陆探测优先、L3 复核源 1ms 噪声
+    必须 ≥2ms 才作数），与 all_cn.txt/CN good-tier 同口径。供 CN 系分组视图
+    把行内延迟替换为大陆 RTT；缺失/损坏 → 空 dict。
     """
     path = path or CHINA_FILE
     if not path.exists():
@@ -444,8 +448,8 @@ def load_cn_ms(path: Path | None = None) -> dict[str, float]:
     for key, meta in proxies.items():
         if not isinstance(meta, dict) or meta.get("verdict") != "reachable":
             continue
-        ms = meta.get("ms")
-        if isinstance(ms, (int, float)) and ms > 0:
+        ms = cn_display_ms(meta)
+        if ms is not None:
             out[key] = float(ms)
     return out
 
@@ -906,8 +910,11 @@ def write_valid_outputs(
         ——CN 视图里 ``ms`` 的语义是"大陆使用者连接该节点的延迟"，而非
         海外 runner 的 TLS 延迟；无大陆观测的行保留海外值。
         """
-        cn_view = name == "cn" or name.startswith("cn_") or \
-            name in ("cn4", "cn6", "cn46")
+        cn_view = (
+            name == "cn"
+            or name.startswith("cn_") or name.startswith("all_cn")
+            or name in ("cn4", "cn6", "cn46", "all_cn4", "all_cn6", "all_cn46")
+        )
         path = directory / f"{name}.txt"
         if entries:
             body = []
@@ -915,6 +922,7 @@ def write_valid_outputs(
                 text = line(e)
                 if cn_view and cn_ms:
                     text = rewrite_latency(text, cn_ms.get(e))
+                    text = _rewrite_cn_speed(text, cn_ms)
                 body.append(text)
             write_text_if_changed(path, "\n".join(body) + "\n")
         elif path.exists():
