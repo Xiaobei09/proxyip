@@ -43,7 +43,7 @@ from common import (
     LATENCY_RE,
     REPUTATION_FILE,
     SPEED_RE,
-    
+    cn_mainland_ok,
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
@@ -117,10 +117,19 @@ def build_rep_map(data: dict) -> dict[str, dict]:
 
 
 def build_china_set(data: dict) -> set[str]:
-    """``china.json`` -> set of keys with ``verdict == "reachable"``."""
+    """``china.json`` → CN 池（大陆视角延迟簇，非"可达"全集）。
+
+    可达 ≠ 大陆：扫描可达池大头是大陆节点能连通的海外/边缘键（中位 ~218ms）。
+    CN good-tier 语义与 all_cn.txt 一致=大陆使用者实测延迟，故只收
+    ``cn_mainland`` 为真（china_check 按 common.CN_LATENCY_CAP_MS 打标）的键；
+    旧 JSON 无数值打标时回退到 ms 直判，保证过渡期与重复数据一致。
+    """
     result: set[str] = set()
     for key, entry in data.get("proxies", {}).items():
-        if isinstance(entry, dict) and entry.get("verdict") == "reachable":
+        if not (isinstance(entry, dict) and entry.get("verdict") == "reachable"):
+            continue
+        tag = entry.get("cn_mainland")
+        if tag is True or (tag is None and cn_mainland_ok(entry.get("ms"))):
             result.add(key)
     return result
 

@@ -88,6 +88,8 @@ from common import (
     request_follow,
     rewrite_latency,
     clear_note_buckets,
+    cn_mainland_ok,
+    CN_LATENCY_CAP_MS,
     _rewrite_cn_speed,
     write_json,
     write_text_if_changed,
@@ -1544,13 +1546,8 @@ def annotate_cnh(line: str) -> str:
 STREAK_GAP_TOLERANCE_S = 3 * 3600  # 连续轮时间窗：基线观测早于此视为中断
 FLIP_FORGIVE_STREAK = 4  # 连续可达达此轮数后清零 flip（稳定恢复赦免历史抖动）
 STABLE_MAX_FLIP = 1  # stable 准入：历史翻转次数上限（排除慢性抖动源）
-# CN 清单延迟门槛：可达 ≠ 大陆。可达键里大量是"大陆节点能连通的海外/边缘机房"
-# （实测中位数 ~218ms）。all_cn* 清单的 ms 语义是"大陆使用者实际延迟"，
-# 因此只有大陆视角 RTT 落在该门槛内的可达键才应进入 CN 清单。
-CN_LATENCY_CAP_MS = 100.0  # CN 清单延迟门槛：可达 ≠ 大陆（实测中位 ~218ms 的
-# 海外/边缘批次）。大陆视角 RTT ≤ 门槛才进 all_cn*。实测：≤100ms ≈ 677（真大陆
-# 簇，含疆藏纵深），100~160ms 是 HK/边界机房（对北京/宁波 ~130-160ms，读起来
-# 仍非大陆延迟），160ms+ 废话多。默认 100 保真；--cn-latency-cap 可调（inf 关闭）
+# CN 清单延迟门槛（见 common.CN_LATENCY_CAP_MS / common.cn_mainland_ok）：
+# 可达 ≠ 大陆，大陆视角 RTT 超门槛的海外/边缘键不得进 all_cn* 与 CN good-tier。
 
 
 def apply_streak(
@@ -1625,17 +1622,15 @@ def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
 def select_cn_fast(entries: dict, keys: set, cap: float | None) -> set:
     """CN 清单延迟门槛子集：大陆视角 RTT 须落在 ``cap`` 内的键才进 CN 清单。
 
-    ``entries[key]["ms"]`` 是 build_entry 决出的最优 ok 源 RTT（大陆视角）。
-    无数值 ms 或 0 的键无法证明大陆性，按快外理；``cap=None/inf`` 表示不过滤。
+    语义与 build_good.build_china_set 共用 common.cn_mainland_ok（单一事实
+    来源）；``cap=None/inf`` 表示不过滤（全部保留）。
     """
     if cap is None or cap == float("inf"):
         return set(keys)
     return {
         k for k in keys
         if isinstance(entries.get(k), dict)
-        and isinstance(entries[k].get("ms"), (int, float))
-        and entries[k]["ms"] > 0
-        and entries[k]["ms"] <= cap
+        and cn_mainland_ok(entries[k].get("ms"), cap)
     }
 
 
@@ -2272,6 +2267,9 @@ def main(argv=None) -> int:
         1 for e in entries.values()
         if isinstance(e, dict) and e.get("flip", 0) > STABLE_MAX_FLIP
     )
+    for e in entries.values():
+        if isinstance(e, dict):
+            e["cn_mainland"] = cn_mainland_ok(e.get("ms"), args.cn_latency_cap)
     cn_fast = select_cn_fast(entries, reachable, args.cn_latency_cap)
     print(
         f"reachable: {len(reachable)} uncertain: {len(uncertain)} "

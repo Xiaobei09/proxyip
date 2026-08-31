@@ -658,6 +658,25 @@ CN_SPEED_REF_MS = 60.0   # 参考 RTT（毫秒），对应 CN_SPEED_BASE_CAP
 CN_SPEED_BASE_CAP = 8.0  # cn_ms≈60ms 时的估算上限（MB/s）
 CN_SPEED_FLOOR = 0.4     # 估算下限（MB/s），防极端高延迟给出夸张小值
 
+# CN 清单延迟门槛（单一事实来源，china_check 与 build_good 共用）：
+# 可达 ≠ 大陆——大陆节点实测 jkapi/xxapi 扫描的可达池中位 ~218ms，大头是
+# 海外/边缘机房（大陆节点能 TCP 连通而已）。CN 清单 ``ms`` 语义 = 大陆使用者
+# 实测延迟，故只有大陆视角 RTT ≤ 门槛的键才算 CN 池。实测 ≤100ms ≈ 677（真大陆
+# 簇，含疆藏纵深），100~160ms 是 HK/边界机房（对北京/宁波仍 130~160ms），
+# 160ms+ 表达不出大陆体验。默认 100：保真优先；--cn-latency-cap 可上调（inf 关）。
+CN_LATENCY_CAP_MS = 100.0
+
+
+def cn_mainland_ok(ms, cap: float | None = None) -> bool:
+    """大陆视角 RTT 是否落在大陆簇（≤ cap）。无数值/非正按非大陆。"""
+    if cap is None or cap == float("inf"):
+        cap = CN_LATENCY_CAP_MS
+    return bool(
+        isinstance(ms, (int, float))
+        and ms > 0
+        and ms <= cap
+    )
+
 _CN_SPEED_RAW_RE = re.compile(r"-(\d+(?:\.\d+)?)MB/s")
 
 
