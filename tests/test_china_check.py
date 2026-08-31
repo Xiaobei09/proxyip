@@ -2056,5 +2056,56 @@ class TestItdogFullPoolTargets(unittest.TestCase):
         self.assertTrue(all(v["status"] == "error" for v in res.values()))
 
 
+class TestComputeFallbackMerge(unittest.TestCase):
+
+    def _prev(self, *keys):
+        return {k: {"verdict": "reachable", "streak": 2, "sources": {}} for k in keys}
+
+    def test_uncertain_no_fail_merged(self):
+        # 上轮可达、本轮 uncertain 且无失败源 → 合并回 reachable + fallback, streak 保留(当轮已标 0)
+        prev = self._prev("a:443#US", "b:443#US", "c:443#US")
+        entries = {
+            "a:443#US": {"verdict": "uncertain", "sources": {"xxapi": {"status": "error"}}},
+            "b:443#US": {"verdict": "uncertain", "sources": {"xxapi": {"status": "fail"}}},
+            "c:443#US": {"verdict": "reachable", "sources": {}},  # 本轮已确证
+        }
+        reachable = {"c:443#US"}
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, {"a:443#US"})      # b 有失败源不兜底
+        self.assertEqual(entries["a:443#US"]["verdict"], "reachable")
+        self.assertTrue(entries["a:443#US"]["fallback"])
+        self.assertIn("a:443#US", reachable)
+        self.assertNotIn("b:443#US", reachable)  # 被证伪，绝不兜底
+
+    def test_unsampled_copy_streak_zero(self):
+        # 本轮完全未采样 → 复制并入，fallback=true 且 streak 清零
+        prev = {"a:443#US": {"verdict": "reachable", "streak": 4, "sources": {"xxapi": {"status": "ok"}}}}
+        entries = {}
+        reachable = set()
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, {"a:443#US"})
+        self.assertIn("a:443#US", reachable)
+        self.assertEqual(entries["a:443#US"]["verdict"], "reachable")
+        self.assertTrue(entries["a:443#US"]["fallback"])
+        self.assertEqual(entries["a:443#US"]["streak"], 0)  # 未复测不虚报连续
+        self.assertEqual(entries["a:443#US"]["sources"], {"xxapi": {"status": "ok"}})
+
+    def test_noreachable_prev_not_merged(self):
+        prev = {"a:443#US": {"verdict": "offline", "streak": 5}}
+        entries = {"a:443#US": {"verdict": "uncertain", "sources": {}}}
+        reachable = set()
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, set())
+        self.assertNotIn("a:443#US", reachable)
+
+    def test_already_reachable_unchanged(self):
+        prev = self._prev("a:443#US")
+        entries = {"a:443#US": {"verdict": "reachable", "sources": {}}}
+        reachable = {"a:443#US"}
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, set())
+        self.assertNotIn("fallback", entries["a:443#US"])
+
+
 if __name__ == "__main__":
     unittest.main()
