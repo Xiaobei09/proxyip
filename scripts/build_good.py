@@ -43,6 +43,7 @@ from common import (
     LATENCY_RE,
     REPUTATION_FILE,
     SPEED_RE,
+    cn_l2_ms,
     cn_mainland_ok,
     line_to_key,
     load_china_stable_keys,
@@ -129,7 +130,7 @@ def build_china_set(data: dict) -> set[str]:
         if not (isinstance(entry, dict) and entry.get("verdict") == "reachable"):
             continue
         tag = entry.get("cn_mainland")
-        if tag is True or (tag is None and cn_mainland_ok(entry.get("ms"))):
+        if tag is True or (tag is None and cn_mainland_ok(cn_l2_ms(entry))):
             result.add(key)
     return result
 
