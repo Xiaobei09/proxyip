@@ -2202,6 +2202,55 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     return entries, reachable, uncertain
 
 
+def compute_fallback_merge(
+    entries: dict,
+    prev_entries: dict,
+    reachable: set,
+) -> set:
+    """判定层兜底合并（纯函数，便于单测）。
+
+    上轮可达、本轮仅因源配额/调度抖动落入 uncertain（或干脆未被采样）且
+    **无任何失败源**的键，合并回 verdict=reachable 并标注 fallback=true，
+    streak 清 0（未复测不虚报连续可达）。发生在中国 check 写 china.json 之前，
+    使 build_good/annotate/all_cn.txt 全从 china.json 单一事实源读到同一集合，
+    并把 reachable 计入返回后的集合。
+
+    就地修改 ``entries``/``reachable`` 并返回 fallback 键集合。
+    """
+    fallback_keys: set[str] = set()
+    for k, p in prev_entries.items():
+        if not (isinstance(p, dict) and p.get("verdict") == "reachable"):
+            continue
+        cur = entries.get(k)
+        if isinstance(cur, dict):
+            if cur.get("verdict") not in ("reachable", "uncertain"):
+                continue
+            s = cur.get("sources") or {}
+            fails = sum(
+                1 for r in s.values()
+                if isinstance(r, dict) and r.get("status") == "fail"
+            )
+            if cur.get("verdict") == "reachable" or fails == 0:
+                if cur.get("verdict") != "reachable":
+                    cur["verdict"] = "reachable"
+                    cur["fallback"] = True
+                    reachable.add(k)
+                    fallback_keys.add(k)
+        else:
+            # 本轮未采样：原样并入，标注 fallback 保留溯源。
+            # streak 清零：本轮未复测，不得虚报"连续可达"（stable 计算在合并
+            # 前、不会混入；这里再显式清 0 防止 china.json 消费者误读）；\
+            # 保留 sources/last_ok_ts 供下一轮兜底资格与大陆读数追溯。
+            dup = dict(p)
+            dup["verdict"] = "reachable"
+            dup["fallback"] = True
+            dup["streak"] = 0
+            entries[k] = dup
+            reachable.add(k)
+            fallback_keys.add(k)
+    return fallback_keys
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="china_check.py",
@@ -2336,36 +2385,7 @@ def main(argv=None) -> int:
     # ≥ MIN_CN_POOL、不减可达 IP。此合并发生在中国 check **写 influ china.json 之前**，
     # 故 build_good/annotate 与 all_cn.txt 全从 china.json 单一事实源读到同一集合，
     # 彻底消除"all_cn.txt 有而 all.txt/CN 分组找不到来源"的口径分裂。
-    fallback_keys: set[str] = set()
-    for k, p in prev_entries.items():
-        if not (isinstance(p, dict) and p.get("verdict") == "reachable"):
-            continue
-        cur = entries.get(k)
-        if isinstance(cur, dict):
-            if cur.get("verdict") in ("reachable", "uncertain"):
-                s = cur.get("sources") or {}
-                fails = sum(
-                    1 for r in s.values()
-                    if isinstance(r, dict) and r.get("status") == "fail"
-                )
-                if cur.get("verdict") == "reachable" or fails == 0:
-                    if cur.get("verdict") != "reachable":
-                        cur["verdict"] = "reachable"
-                        cur["fallback"] = True
-                        reachable.add(k)
-                        fallback_keys.add(k)
-        else:
-            # 本轮未采样：原样并入，标注 fallback 保留溯源。
-            # streak 清零：本轮未复测，不得虚报"连续可达"（stable 计算在合并
-            # 前、不会混入；这里再显式清 0 防止 china.json 消费者误读）；\
-            # 保留来源 sources/last_ok_ts 供下一轮兜底资格与大陆读数追溯。
-            dup = dict(p)
-            dup["verdict"] = "reachable"
-            dup["fallback"] = True
-            dup["streak"] = 0
-            entries[k] = dup
-            reachable.add(k)
-            fallback_keys.add(k)
+    fallback_keys = compute_fallback_merge(entries, prev_entries, reachable)
     for e in entries.values():
         if isinstance(e, dict):
             e["cn_mainland"] = cn_mainland_ok(cn_l2_ms(e), args.cn_latency_cap)
