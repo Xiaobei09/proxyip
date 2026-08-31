@@ -1544,6 +1544,13 @@ def annotate_cnh(line: str) -> str:
 STREAK_GAP_TOLERANCE_S = 3 * 3600  # 连续轮时间窗：基线观测早于此视为中断
 FLIP_FORGIVE_STREAK = 4  # 连续可达达此轮数后清零 flip（稳定恢复赦免历史抖动）
 STABLE_MAX_FLIP = 1  # stable 准入：历史翻转次数上限（排除慢性抖动源）
+# CN 清单延迟门槛：可达 ≠ 大陆。可达键里大量是"大陆节点能连通的海外/边缘机房"
+# （实测中位数 ~218ms）。all_cn* 清单的 ms 语义是"大陆使用者实际延迟"，
+# 因此只有大陆视角 RTT 落在该门槛内的可达键才应进入 CN 清单。
+CN_LATENCY_CAP_MS = 150.0  # CN 清单延迟门槛：可达 ≠ 大陆（实测中位 ~218ms 的
+# 海外/边缘批次）；大陆视角 RTT ≤ 门槛才进 all_cn*。实测：150ms 保留 ~1.6k，
+# 剔掉 180ms+ 大尾。大陆纵深（含疆藏）典型 ≤120ms，150 不误伤。可用
+# --cn-latency-cap 调（inf 关闭）
 
 
 def apply_streak(
@@ -1613,6 +1620,23 @@ def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
         )
     )
     return [line for _i, line in indexed]
+
+
+def select_cn_fast(entries: dict, keys: set, cap: float | None) -> set:
+    """CN 清单延迟门槛子集：大陆视角 RTT 须落在 ``cap`` 内的键才进 CN 清单。
+
+    ``entries[key]["ms"]`` 是 build_entry 决出的最优 ok 源 RTT（大陆视角）。
+    无数值 ms 或 0 的键无法证明大陆性，按快外理；``cap=None/inf`` 表示不过滤。
+    """
+    if cap is None or cap == float("inf"):
+        return set(keys)
+    return {
+        k for k in keys
+        if isinstance(entries.get(k), dict)
+        and isinstance(entries[k].get("ms"), (int, float))
+        and entries[k]["ms"] > 0
+        and entries[k]["ms"] <= cap
+    }
 
 
 def generate_all_cn(
@@ -2187,6 +2211,8 @@ def main(argv=None) -> int:
                         help="只输出计划，不做任何网络请求与写盘")
     parser.add_argument("--skip-pingpe", action="store_true",
                         help="跳过 ping.pe 多节点复核（本地快速冒烟用）")
+    parser.add_argument("--cn-latency-cap", type=float, default=CN_LATENCY_CAP_MS,
+                        help=f"CN 清单大陆视角 RTT 门槛（默认 {CN_LATENCY_CAP_MS}ms；inf 关闭）")
     args = parser.parse_args(argv)
 
     api_key = args.api_key or os_environ("CHINA_CHECK_API_KEY")
@@ -2246,10 +2272,11 @@ def main(argv=None) -> int:
         1 for e in entries.values()
         if isinstance(e, dict) and e.get("flip", 0) > STABLE_MAX_FLIP
     )
+    cn_fast = select_cn_fast(entries, reachable, args.cn_latency_cap)
     print(
         f"reachable: {len(reachable)} uncertain: {len(uncertain)} "
         f"http-verified: {len(http_keys)} stable(>=2 runs): {len(stable_keys)} "
-        f"flappers: {flappers}",
+        f"flappers: {flappers} cn-fast(<={args.cn_latency_cap}ms): {len(cn_fast)}",
         file=sys.stderr,
     )
     write_json(
@@ -2266,19 +2293,21 @@ def main(argv=None) -> int:
         for key, entry in entries.items()
         if isinstance(entry, dict) and isinstance(entry.get("ms"), (int, float))
     }
-    cn_text, cn_count = generate_all_cn(all_pool_text, reachable, cn_ms, http_keys=http_keys)
+    cn_text, cn_count = generate_all_cn(
+        all_pool_text, cn_fast, cn_ms, http_keys=http_keys & cn_fast
+    )
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
     http_text, http_count = generate_cn_subset(
         all_pool_text,
-        lambda k, l: k in http_keys or has_token(_note(l), "CNH"),
+        lambda k, l: (k in http_keys or has_token(_note(l), "CNH")) and k in cn_fast,
         cn_ms,
     )
     if http_text:
         write_text_if_changed(VALID_ALL_CN_HTTP_FILE, http_text)
     stable_text, stable_count = generate_cn_subset(
         all_pool_text,
-        lambda k, l: k in stable_keys,
+        lambda k, l: k in stable_keys and k in cn_fast,
         cn_ms,
     )
     if stable_text:
