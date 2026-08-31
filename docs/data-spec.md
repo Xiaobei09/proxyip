@@ -269,7 +269,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/all_cn.txt`
 
-**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 或历史已带 `-CN` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。逐条检测明细见 `china.json`。
+**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。**清单保持完整（全可达集，正常水平 ≥1 万），不按大陆延迟门槛精简**。每行的 ms 为大陆视角读数（`common.cn_display_ms`：可信大陆探测源 xxapi/jkapi/checkhost 优先，L3 复核源 1ms 噪声不落地），速度 token 同步改写为 `≈XMB/s` 大陆视角估算。逐条检测明细见 `china.json`；落地自带健康自检（行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，见 `check_cn_health`）。
 
 ### `data/valid/all_cn_http.txt` / `data/valid/all_cn_stable.txt`
 

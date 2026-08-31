@@ -293,9 +293,15 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
   可能整国无 `fast`——请配合组内相对最优 `good_top.txt` 使用。
 - **延迟 `ms`** 分两种视图：
   * CN 系清单（`all_cn*`、各国/各集合 `cn*.txt`）：行内 ms 已替换为
-    **大陆实测 RTT**（china.json 的 itdog/checkhost/xxapi/pingpe 观测），
-    即大陆使用者连接该节点的真实延迟；
+    **大陆实测 RTT**——优先取可信大陆探测源（xxapi 北京 / jkapi 宁波 /
+    checkhost 呼市）的 ok 最小 RTT，无读数时在全部 ok 源中取 ≥2ms 的最小
+    可信值再回退行内值，杜绝 L3 复核源 1ms 噪声冒充真实延迟（见
+    `common.cn_display_ms`）。速度 token 同步改写为大陆视角估算
+    `≈XMB/s`（海外实测与按大陆 RTT 推算的单流上限取小）；
   * 其他清单（`all.txt`、国家全量等）：ms 为海外 runner 的 TLS 握手延迟。
+- CN 系清单**保持完整**：`all_cn*` 与 CN good-tier 收录当期全可达集
+  （正常水平 ≥1 万），不按大陆延迟门槛精简；下落即有运行时自检
+  （`check_cn_health`）保证行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，不达标告警。
 - 大陆**带宽**目前无法实测（第三方探测仅提供延迟/可达性），故不存在
   "CN 测速"；挑选高带宽节点请看海外 MB/s + `good_top`，选低延迟请看
   CN 清单的 ms 排序。
