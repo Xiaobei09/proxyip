@@ -2330,6 +2330,38 @@ def main(argv=None) -> int:
         1 for e in entries.values()
         if isinstance(e, dict) and e.get("flip", 0) > STABLE_MAX_FLIP
     )
+    # 历史兜底（判定层合并）：上轮可达、本轮仅因源配额/抖动落入 uncertain（或
+    # 干脆未被本轮采样）且**无任何失败源**的键，标记回 reachable（fallback=true）。
+    # 依据：无 ≥2 失败源证伪，只是"没来得及确认"，而用户硬约束要求 CN 全量池
+    # ≥ MIN_CN_POOL、不减可达 IP。此合并发生在中国 check **写 influ china.json 之前**，
+    # 故 build_good/annotate 与 all_cn.txt 全从 china.json 单一事实源读到同一集合，
+    # 彻底消除"all_cn.txt 有而 all.txt/CN 分组找不到来源"的口径分裂。
+    fallback_keys: set[str] = set()
+    for k, p in prev_entries.items():
+        if not (isinstance(p, dict) and p.get("verdict") == "reachable"):
+            continue
+        cur = entries.get(k)
+        if isinstance(cur, dict):
+            if cur.get("verdict") in ("reachable", "uncertain"):
+                s = cur.get("sources") or {}
+                fails = sum(
+                    1 for r in s.values()
+                    if isinstance(r, dict) and r.get("status") == "fail"
+                )
+                if cur.get("verdict") == "reachable" or fails == 0:
+                    if cur.get("verdict") != "reachable":
+                        cur["verdict"] = "reachable"
+                        cur["fallback"] = True
+                        reachable.add(k)
+                        fallback_keys.add(k)
+        else:
+            # 本轮未采样：原样并入，标注 fallback 保留溯源
+            dup = dict(p)
+            dup["verdict"] = "reachable"
+            dup["fallback"] = True
+            entries[k] = dup
+            reachable.add(k)
+            fallback_keys.add(k)
     for e in entries.values():
         if isinstance(e, dict):
             e["cn_mainland"] = cn_mainland_ok(cn_l2_ms(e), args.cn_latency_cap)
@@ -2359,36 +2391,18 @@ def main(argv=None) -> int:
         for key, entry in entries.items()
         if isinstance(entry, dict) and cn_display_ms(entry) is not None
     }
-    # 历史兜底：上一轮可达、本轮落入 uncertain（非被 ≥2 失败源证伪）的键。
-    # 维持 CN 全量清单 ≥ MIN_CN_POOL（用户硬约束），吸收源配额/调度抖动导致
-    # 单轮确认率回落的波动，不让"没来得及确认"变成"清单缩水"。
-    fallback_keys = {
-        k
-        for k, p in prev_entries.items()
-        if (
-            isinstance(p, dict)
-            and p.get("verdict") == "reachable"
-            and k not in entries
-        ) or (
-            isinstance(p, dict)
-            and p.get("verdict") == "reachable"
-            and isinstance(entries.get(k), dict)
-            and entries[k].get("verdict") == "uncertain"
-        )
-    }
     # 兜底键未复测，无当轮读数：从其上一轮 entry 补大陆延迟（历史同源读数，
     # 比海外 TLS 更贴近大陆视角；实在无读数则保持"不伪饰、删除速度"）。
     if fallback_keys:
         for k in fallback_keys:
             if k not in cn_ms:
-                m = prev_entries[k]
+                m = prev_entries.get(k)
                 if isinstance(m, dict):
                     v = cn_display_ms(m)
                     if v is not None:
                         cn_ms[k] = v
     cn_text, cn_count = generate_all_cn(
         all_pool_text, reachable, cn_ms, http_keys=http_keys,
-        fallback_keys=fallback_keys,
     )
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)

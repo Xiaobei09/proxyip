@@ -243,9 +243,12 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
   假象、与真实代理/隧道延迟无关且反直觉地极小。`cn_display_ms` 回退时显式剔除
   chinaz，且回退 entry 合并 ms 时拒绝 ≤2ms（该值可能正是被 ICMP 污染的合并结果），
   宁缺勿假——避免产出 `US-2ms` 之类失真行。
-- **CN 全量清单兜底 ≥1 万**：当轮 reachable 若非因证伪（≥2 失败源）而是因源
-  配额/调度抖动落入 uncertain 时，上一轮可达键作为历史兜底保留进 all_cn.txt，
-  维持全量池规模（用户硬约束），兜底行仍经大陆延迟/速度重写，与当期一致。
+- **CN 全量清单兜底 ≥1 万（判定层合并，单一事实源）**：上轮可达、本轮仅因源
+  配额/调度抖动落入 uncertain（或未被采样）且**无任何失败源**的键，在写
+  china.json 前合并回 ``verdict=reachable`` 并标注 ``fallback:true``。因此
+  build_good/annotate/all_cn.txt 全从 china.json 读到**同一集合**，杜绝
+  "all_cn.txt 有而 all.txt/CN 分组找不到来源"的口径分裂，且维持全量池规模
+  （用户硬约束），兜底行仍经大陆延迟/速度重写。
 
 ## 6. 出口 IP 家族检测（exit_family.py）
 
