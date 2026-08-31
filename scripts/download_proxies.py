@@ -121,6 +121,8 @@ CF_EDGE_PORTS = frozenset({"443", "8443", "2053", "2083", "2087", "2096"})
 DEFAULT_EXTRA_PORT = "443"
 
 SOURCE_LABELS: dict[str, str] = {
+    "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
+    "https://ipdb.api.030101.xyz/?type=bestproxy": "ipdb_bestproxy",
 }
 
 
