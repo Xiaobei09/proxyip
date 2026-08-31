@@ -6,7 +6,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from common import _rewrite_cn_speed, merge_note_tokens, normalize_note
+from common import (
+    _cn_fallback_ms,
+    _rewrite_cn_speed,
+    cn_display_ms,
+    cn_l2_ms,
+    merge_note_tokens,
+    normalize_note,
+)
 
 
 class TestNormalizeNote(unittest.TestCase):
@@ -124,6 +131,68 @@ class TestNormalizeNote(unittest.TestCase):
         )
         once = normalize_note(messy)
         self.assertEqual(once, normalize_note(once))
+
+
+class TestCnDisplayMs(unittest.TestCase):
+    """cn_display_ms / cn_l2_ms / _cn_fallback_ms 的大陆延迟"宁缺勿假"契约。
+
+    过滤 1~2ms ICMP/TCP 噪声冒充真实代理延迟；真实大陆 L2 探测本身 >=2 时
+    优先采用。"""
+
+    def test_l2_min_over_ok_vantages(self):
+        e = {"sources": {
+            "xxapi": {"status": "ok", "ms": 40},
+            "jkapi": {"status": "ok", "ms": 55},
+            "check_host": {"status": "ok", "ms": 30},
+        }}
+        self.assertEqual(cn_l2_ms(e), 30.0)
+
+    def test_l2_ignores_non_ok_and_nonpositive(self):
+        e = {"sources": {
+            "xxapi": {"status": "fail", "ms": 10},
+            "jkapi": {"status": "ok", "ms": 0},
+            "check_host": {"status": "ok", "ms": 22},
+        }}
+        self.assertEqual(cn_l2_ms(e), 22.0)
+
+    def test_l2_candidate_below_two_falls_to_fallback(self):
+        e = {"sources": {
+            "xxapi": {"status": "ok", "ms": 1.5},
+            "coffee": {"status": "ok", "ms": 30},  # 非 ICMP 可信 TCP RTT
+        }}
+        self.assertEqual(cn_display_ms(e), 30.0)
+
+    def test_l2_two_or_above_wins(self):
+        e = {"sources": {
+            "xxapi": {"status": "ok", "ms": 2.0},
+            "coffee": {"status": "ok", "ms": 30},
+        }}
+        self.assertEqual(cn_display_ms(e), 2.0)
+
+    def test_no_l2_uses_min_trusted_tcp_fallback(self):
+        e = {"sources": {
+            "chinaz": {"status": "ok", "ms": 1.0},    # 纯 ICMP 噪声，剔除
+            "coffee": {"status": "ok", "ms": 45},
+            "tcpingcn": {"status": "ok", "ms": 12},
+        }}
+        self.assertEqual(cn_display_ms(e), 12.0)
+
+    def test_fallback_accepts_exactly_two(self):
+        e = {"sources": {"coffee": {"status": "ok", "ms": 2.0}}}
+        self.assertEqual(_cn_fallback_ms(e, e["sources"]), 2.0)
+
+    def test_fallback_rejects_sub_two_noise(self):
+        e = {"sources": {"coffee": {"status": "ok", "ms": 1.8}}}
+        self.assertIsNone(_cn_fallback_ms(e, e["sources"]))
+
+    def test_legacy_entry_without_sources_uses_ms(self):
+        self.assertEqual(cn_l2_ms({"ms": 88.0}), 88.0)
+        self.assertIsNone(cn_l2_ms({"ms": -1}))
+        self.assertIsNone(cn_display_ms({}))
+
+    def test_nothing_usable_returns_none(self):
+        e = {"sources": {"chinaz": {"status": "ok", "ms": 1.0}}}
+        self.assertIsNone(cn_display_ms(e))
 
 
 class TestMergeNoteTokens(unittest.TestCase):
