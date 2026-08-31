@@ -479,6 +479,29 @@ class TestAnnotations(unittest.TestCase):
             ["2.2.2.2:443"],
         )
 
+    def test_select_cn_fast_gates_by_mainland_ms(self):
+        """CN 清单延迟门槛：大陆视角 RTT ≤ cap 才准入；无数值/0/超限键剔除。"""
+        entries = {
+            "1.1.1.1:80#US": {"ms": 25.0},   # 大陆
+            "2.2.2.2:80#US": {"ms": 149.9},  # 临界（≤150 保留）
+            "3.3.3.3:80#US": {"ms": 151.0},  # 越限
+            "4.4.4.4:80#US": {"ms": 250.0},  # 海外尾
+            "5.5.5.5:80#US": {},             # 无数值 ms
+            "6.6.6.6:80#US": {"ms": 0},      # 无效
+            "7.7.7.7:80#US": {"ms": 300},    # 另一个越限键
+        }
+        keys = set(entries)
+        out = cc.select_cn_fast(entries, keys, 150.0)
+        self.assertEqual(out, {"1.1.1.1:80#US", "2.2.2.2:80#US"})
+
+    def test_select_cn_fast_disabled_with_none(self):
+        """``cap=None`` 不引入延迟门槛（向后兼容：全部保留）。"""
+        entries = {"9.9.9.9:80#US": {"ms": 500.0}, "a:a::1:80#US": {}}
+        self.assertEqual(cc.select_cn_fast(entries, set(entries), None),
+                         set(entries))
+        self.assertEqual(cc.select_cn_fast(entries, set(entries), float("inf")),
+                         set(entries))
+
     def test_generate_all_cn_no_map_keeps_pool_order(self):
         text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n"
         reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
