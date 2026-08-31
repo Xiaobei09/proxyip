@@ -502,6 +502,28 @@ class TestAnnotations(unittest.TestCase):
         self.assertEqual(cc.select_cn_fast(entries, set(entries), float("inf")),
                          set(entries))
 
+    def test_select_cn_fast_ignores_l3_noise_sources(self):
+        """大陆门槛只看可信托管源（xxapi/jkapi/check_host）的 ok RTT：
+        L3 复核源（如 antping 回 1ms）不得证明大陆性。"""
+        entries = {
+            # L2 慢（234ms）但 antping 报 1ms —— 噪声不救场，剔除
+            "a.a.a.a:80#US": {"sources": {
+                "xxapi": {"status": "ok", "ms": 234.0},
+                "antping": {"status": "ok", "ms": 1}}},
+            # L2 快（35ms）且 antping 报 1ms —— 以 L2 为准，保留
+            "b.b.b.b:80#US": {"sources": {
+                "xxapi": {"status": "ok", "ms": 35.0},
+                "antping": {"status": "ok", "ms": 1}}},
+            # jkapi error + xxapi 120ms ≤ 150 → 保留
+            "c.c.c.c:80#US": {"sources": {
+                "jkapi": {"status": "error", "ms": None},
+                "xxapi": {"status": "ok", "ms": 120.0}}},
+            # 只有 L3（tcptest），无大陆探测 → 无法证明，剔除
+            "d.d.d.d:80#US": {"sources": {"tcptest": {"status": "ok", "ms": 5}}},
+        }
+        out = cc.select_cn_fast(entries, set(entries), 150.0)
+        self.assertEqual(out, {"b.b.b.b:80#US", "c.c.c.c:80#US"})
+
     def test_generate_all_cn_no_map_keeps_pool_order(self):
         text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n"
         reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}

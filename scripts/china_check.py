@@ -88,6 +88,7 @@ from common import (
     request_follow,
     rewrite_latency,
     clear_note_buckets,
+    cn_l2_ms,
     cn_mainland_ok,
     CN_LATENCY_CAP_MS,
     _rewrite_cn_speed,
@@ -1622,15 +1623,15 @@ def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
 def select_cn_fast(entries: dict, keys: set, cap: float | None) -> set:
     """CN 清单延迟门槛子集：大陆视角 RTT 须落在 ``cap`` 内的键才进 CN 清单。
 
-    语义与 build_good.build_china_set 共用 common.cn_mainland_ok（单一事实
-    来源）；``cap=None/inf`` 表示不过滤（全部保留）。
+    判定用 common.cn_l2_ms 取可信大陆探测（xxapi/jkapi/check_host）最小 ok
+    RTT，L3 复核源的 1ms 噪声不会污染；语义与 build_good.build_china_set
+    共用 common.cn_mainland_ok 单一入口。``cap=None/inf`` 表示不过滤。
     """
     if cap is None or cap == float("inf"):
         return set(keys)
     return {
         k for k in keys
-        if isinstance(entries.get(k), dict)
-        and cn_mainland_ok(entries[k].get("ms"), cap)
+        if cn_mainland_ok(cn_l2_ms(entries.get(k)), cap)
     }
 
 
@@ -2269,7 +2270,7 @@ def main(argv=None) -> int:
     )
     for e in entries.values():
         if isinstance(e, dict):
-            e["cn_mainland"] = cn_mainland_ok(e.get("ms"), args.cn_latency_cap)
+            e["cn_mainland"] = cn_mainland_ok(cn_l2_ms(e), args.cn_latency_cap)
     cn_fast = select_cn_fast(entries, reachable, args.cn_latency_cap)
     print(
         f"reachable: {len(reachable)} uncertain: {len(uncertain)} "
