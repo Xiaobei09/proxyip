@@ -1551,7 +1551,11 @@ def annotate_cnh(line: str) -> str:
     return merge_note_tokens(line, "CNH")
 
 
-STREAK_GAP_TOLERANCE_S = 3 * 3600  # 连续轮时间窗：基线观测早于此视为中断
+STREAK_GAP_TOLERANCE_S = 6 * 3600  # 连续轮时间窗：基线观测早于此视为中断。
+# GitHub schedule 实测每 ~2.5-4h 才实际起一轮（cron 队列抖动 + 同 workflow
+# 去重），3h 容差会被反复击穿、每一轮都把 streak 清零 → stable 永远攒不起来
+# （实测 02:56→06:37 相隔 3h40m 即全体重置）。6h 容差吸收调度抖动：轮间
+# 间隔可容忍跳过一到两班，同时仍能在长时间停更时如实降温。
 FLIP_FORGIVE_STREAK = 4  # 连续可达达此轮数后清零 flip（稳定恢复赦免历史抖动）
 STABLE_MAX_FLIP = 1  # stable 准入：历史翻转次数上限（排除慢性抖动源）
 # CN 清单延迟语义（common.cn_display_ms / cn_l2_ms）：每行展示大陆视角读数，
