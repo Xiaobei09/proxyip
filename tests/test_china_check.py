@@ -588,6 +588,25 @@ class TestAnnotations(unittest.TestCase):
         self.assertNotIn("-1ms-", text)            # 噪声不得以任何形式落地
         self.assertEqual(cc.cn_health_report(text), {"count": 3, "no_ms": 0, "junk_ms": 0})
 
+    def test_generate_all_cn_fallback_keeps_pool_volume(self):
+        """契约回归：当期 reachable 跌到 1 万以下时，fallback_keys 把上轮可达、
+        本轮无失败源的键保留进 CN 清单，维持用户硬约束（全量池 ≥ MIN_CN_POOL）。"""
+        import common
+        pool = "1.2.3.4:80#US-80ms-5MB/s-fast-90\n"
+        # 本轮判定失败：reachable 为空集（模拟全源抖动/配额导致整批 uncertain）
+        reachable = set()
+        fallback = {"1.2.3.4:80#US"}
+        # 大陆读数来自上一轮 entry
+        cn_ms = {"1.2.3.4:80#US": 200.0}
+        text, n = cc.generate_all_cn(pool, reachable, cn_ms, fallback_keys=fallback)
+        self.assertEqual(n, 1)
+        self.assertIn("1.2.3.4:80#US-200ms-≈2.4MB/s", text)
+        self.assertIn("-CN", text)
+        self.assertEqual(cc.cn_health_report(text), {"count": 1, "no_ms": 0, "junk_ms": 0})
+        # 无 fallback 时（old 行为）→ 空清单
+        text0, n0 = cc.generate_all_cn(pool, reachable, cn_ms)
+        self.assertEqual(n0, 0)
+
     def test_generate_all_cn_keeps_full_reachable_pool(self):
         """CN 清单保持完整：全可达键都保留，即使其延迟很慢（噪声也必须上路）。"""
         text = "1.1.1.1:443#US-234ms-CN\n2.2.2.2:443#US-1ms-CN\n3.3.3.3:443#US-8ms\n"
