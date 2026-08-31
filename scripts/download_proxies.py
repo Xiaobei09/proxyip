@@ -982,7 +982,15 @@ def main(argv: list[str] | None = None) -> int:
         extra_sources = []
 
     try:
-        by_port, meta_map = load_source(args.url, timeout=args.timeout)
+        try:
+            by_port, meta_map = load_source(args.url, timeout=args.timeout)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"Primary source failed ({exc}); proceeding with extra sources "
+                "only",
+                file=sys.stderr,
+            )
+            by_port, meta_map = {}, None
         main_ips = _collect_all_ips(by_port)
         extra, extra_all_ips, source_ip_sets = load_extras(
             extra_sources, timeout=args.timeout
@@ -992,6 +1000,11 @@ def main(argv: list[str] | None = None) -> int:
             moved = enrich_countries(by_port, extra_all_ips, timeout=args.timeout)
             if moved:
                 print(f"Filled country for {moved} extra-source IPs via ip-api")
+        # 空池保护：所有来源都拿不到代理时拒绝覆写（避免把既有连接池清空）。
+        if not any(by_port.values()):
+            raise RuntimeError(
+                "no proxies from any source; refusing to truncate the pool"
+            )
         all_ips = _collect_all_ips(by_port)
         source_stats = _build_source_stats(main_ips, source_ip_sets, all_ips)
         src_stats_file = SOURCE_STATS_FILE
