@@ -514,6 +514,25 @@ class TestAnnotations(unittest.TestCase):
             "6.6.6.6:443#US": 88.0,
         })
 
+    def test_cn_health_report_counts_junk_and_no_ms(self):
+        """清单自检：行数 / ≥2ms 之外必属噪声或缺失，须精确计数。"""
+        text = (
+            "1.2.3.4:443#US→US-35ms-≈3.1MB/s-CN\n"
+            "5.6.7.8:443#US→US-1ms-≈1MB/s-CN\n"     # 噪声 1ms
+            "0.0.0.1:443#US→US-2ms-≈1MB/s-CN\n"     # ≤2ms 边界算噪声
+            "9.9.9.9:443#US→US-78.5ms-≈1MB/s-CN\n"
+            "7.7.7.7:443#US→US-≈1MB/s-CN\n"         # 无 ms
+        )
+        self.assertEqual(cc.cn_health_report(text),
+                         {"count": 5, "no_ms": 1, "junk_ms": 2})
+
+    def test_check_cn_health_warns_on_small_pool(self, ):
+        """池 <1 万须告警（完整池底线），达标则静默返回报告。"""
+        good = "1.2.3.4:443#US→US-35ms-≈3.1MB/s-CN\n" * 10002
+        self.assertEqual(cc.check_cn_health(good)["count"], 10002)
+        small = "1.2.3.4:443#US→US-35ms-≈1MB/s-CN\n" * 9999
+        self.assertEqual(cc.check_cn_health(small)["count"], 9999)
+
     def test_generate_all_cn_keeps_full_reachable_pool(self):
         """CN 清单保持完整：全可达键都保留，即使其延迟很慢（噪声也必须上路）。"""
         text = "1.1.1.1:443#US-234ms-CN\n2.2.2.2:443#US-1ms-CN\n3.3.3.3:443#US-8ms\n"

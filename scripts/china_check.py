@@ -1691,6 +1691,62 @@ def generate_cn_subset(
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
 
 
+# 大陆清单健康下限：清单须保持完整（正常水平 ≥1 万可达键）。
+MIN_CN_POOL = 10000
+# 大陆延迟的最小可信读数：互联网真实 RTT 一向 ≥ ~2ms（同机房直连也难低于
+# 个位数），≤2ms 即是 L3 复核源 1ms 噪声（antping 等）漏网的信号。
+CN_MIN_CREDIBLE_MS = 2.0
+
+
+def cn_health_report(cn_text: str) -> dict[str, int]:
+    """清单自检：``{count, no_ms, junk_ms}``。
+
+    - ``count``：总行数（完整池规模）；
+    - ``no_ms``：无 ms token 的行数（漏重写信令）；
+    - ``junk_ms``：ms ≤ CN_MIN_CREDIBLE_MS 的行数（噪声侵入信令）。
+
+    供主流程在落地后即时自检并告警，防止"清单被裁 / 1ms 假延迟回归"。
+    """
+    count = no_ms = junk_ms = 0
+    for line in cn_text.splitlines():
+        if not line.strip():
+            continue
+        count += 1
+        m = next(
+            (t[:-2] for t in line.split("-") if t.endswith("ms")),
+            None,
+        )
+        if not m or not m.replace(".", "").isdigit():
+            no_ms += 1
+        elif float(m) <= CN_MIN_CREDIBLE_MS:
+            junk_ms += 1
+    return {"count": count, "no_ms": no_ms, "junk_ms": junk_ms}
+
+
+def check_cn_health(cn_text: str, min_count: int = MIN_CN_POOL) -> dict[str, int]:
+    """落地即自检：不达标打告警（失败即暴露，不静默）。返回报告。"""
+    report = cn_health_report(cn_text)
+    if report["count"] < min_count:
+        print(
+            f"WARNING: all_cn.txt too small ({report['count']} < {min_count}) — "
+            f"pool shrank or reachability collapsed; check pool/verdicts",
+            file=sys.stderr,
+        )
+    if report["junk_ms"]:
+        print(
+            f"WARNING: {report['junk_ms']} lines with ms <= "
+            f"{CN_MIN_CREDIBLE_MS:g}ms (L3 noise leaked into CN lists)",
+            file=sys.stderr,
+        )
+    if report["no_ms"]:
+        print(
+            f"WARNING: {report['no_ms']} lines missing ms token "
+            f"(reachable keys without any credible mainland reading)",
+            file=sys.stderr,
+        )
+    return report
+
+
 def annotate_cn_files(reachable_keys: set) -> None:
     """给 all.txt / all_ltd.txt 同步当期 -CN：可达 → 追加；不可达 → 撤销。
 
@@ -2304,9 +2360,12 @@ def main(argv=None) -> int:
     if stable_text:
         write_text_if_changed(VALID_ALL_CN_STABLE_FILE, stable_text)
     annotate_cn_files(reachable)
+    cn_report = check_cn_health(cn_text)
     print(
         f"all_cn.txt: {cn_count} lines; all_cn_http.txt: {http_count}; "
-        f"all_cn_stable.txt: {stable_count}; china.json: {len(entries)} entries",
+        f"all_cn_stable.txt: {stable_count}; china.json: {len(entries)} entries; "
+        f"health: count={cn_report['count']} no_ms={cn_report['no_ms']} "
+        f"junk_ms(<=2ms)={cn_report['junk_ms']}",
         file=sys.stderr,
     )
     return 0
