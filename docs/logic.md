@@ -219,8 +219,10 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 写 `china.json` 前读取上一轮结果：
 
 - **streak**：per-key 连续可达轮数（reachable 且上轮也 reachable 且
-  观测间隔 ≤3h → 累加；否则清零/置 1）。`last_ok_ts` 记录最近可达时间，
-  用于时间窗判定——即使 china.json 被并发提交短暂回滚，连续计数不丢
+  观测间隔 ≤6h → 累加；否则清零/置 1）。容差取 6h 因 GitHub schedule
+  实测每 ~2.5-4h 才实际起一轮，过紧会让 streak 每轮清零、stable 永不累积。
+  `last_ok_ts` 记录最近可达时间，用于时间窗判定——即使 china.json 被
+  并发提交短暂回滚，连续计数不丢
 - **uncertain 优先复检**：上一轮 uncertain 的键在本轮采样中稳定排序置顶
   （limit 截断时优先覆盖）
 
