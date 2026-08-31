@@ -601,6 +601,16 @@ class TestProxyMirrorSources(unittest.TestCase):
         self.assertEqual(dp.source_label("https://x/a.txt"), "a")
         self.assertEqual(dp.source_label("https://x/proxies/http.txt"), "http")
 
+    def test_ipdb_api_source_labels(self):
+        self.assertEqual(
+            dp.source_label("https://ipdb.api.030101.xyz/?type=proxy"),
+            "ipdb_proxy",
+        )
+        self.assertEqual(
+            dp.source_label("https://ipdb.api.030101.xyz/?type=bestproxy"),
+            "ipdb_bestproxy",
+        )
+
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
 
