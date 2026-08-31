@@ -234,6 +234,11 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 - `data/valid/all_cn_http.txt`：应用层确认子集（本轮 level=http 或历史已带 `-CNH`）
 - `data/valid/all_cn_stable.txt`：跨轮稳定子集（连续 ≥2 轮 reachable，不含历史兜底）
 - `data/valid/*.txt`：可达者追加 `-CN` 备注
+- **CN 视图行内指标统一大陆口径**：validate_proxies 的 `cn*`/`all_cn*` 分组与
+  build_good 的 CN 集合（`sets/cn*`、`countries/CN`）写出的行，`ms` 均替换为
+  `common.cn_display_ms`（可信大陆探测优先、L3 复核源 ≤2ms 噪声不作数）、
+  `速度` 替换为 `≈XMB/s` 大陆估算——与 `all_cn.txt` 完全同源同口径，杜绝
+  "海外 6ms/117MB/s 冒充大陆速度"的陈旧视图；无大陆读数的键速度 token 删除。
 
 ## 6. 出口 IP 家族检测（exit_family.py）
 
