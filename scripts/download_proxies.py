@@ -112,6 +112,7 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy%26country.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy.txt"),
+    ("ip", "https://ipdb.api.030101.xyz/?type=proxy"),
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
