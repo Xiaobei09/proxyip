@@ -533,6 +533,38 @@ class TestAnnotations(unittest.TestCase):
         small = "1.2.3.4:443#US→US-35ms-≈1MB/s-CN\n" * 9999
         self.assertEqual(cc.check_cn_health(small)["count"], 9999)
 
+    def test_cn_lists_full_pool_noise_sanitized_end_to_end(self):
+        """契约回归：CN 清单保持全可达池，且 1ms 噪声经 cn_display_ms 消毒。
+
+        组合 generate_all_cn + cn_display_ms，覆盖用户可见性质：慢键保留（不因
+        延迟被砍）、噪声 ms 不落地、速度估算与诚实读数联动。"""
+        import common
+
+        pool = (
+            "167.88.160.144:8443#US→US-88ms-≈1MB/s-DC-V4\n"   # 噪声源(antping 1ms) vs L2 234
+            "8.8.8.8:443#DE→DE-30ms-≈1MB/s-GPT-V4\n"          # L2 35ms
+            "2.2.2.2:443#US→US-10ms-≈1MB/s-RES-V4\n"          # 无 L2，回退 42ms
+        )
+        entries = {
+            "167.88.160.144:8443#US": {"verdict": "reachable", "sources": {
+                "xxapi": {"status": "ok", "ms": 234.0},
+                "antping": {"status": "ok", "ms": 1}}},
+            "8.8.8.8:443#DE": {"verdict": "reachable", "sources": {
+                "xxapi": {"status": "ok", "ms": 35.0}}},
+            "2.2.2.2:443#US": {"verdict": "reachable", "ms": 42, "sources": {
+                "tcptest": {"status": "ok", "ms": 42}}},
+        }
+        all_keys = set(entries)
+        cn_ms = {k: common.cn_display_ms(e) for k, e in entries.items()
+                 if common.cn_display_ms(e) is not None}
+        text, n = cc.generate_all_cn(pool, all_keys, cn_ms)
+        self.assertEqual(n, 3)                     # 全达保留，未被延迟砍掉
+        self.assertIn("167.88.160.144:8443#US→US-234ms", text)   # 234 非 1
+        self.assertIn("8.8.8.8:443#DE→DE-35ms", text)
+        self.assertIn("2.2.2.2:443#US→US-42ms", text)
+        self.assertNotIn("-1ms-", text)            # 噪声不得以任何形式落地
+        self.assertEqual(cc.cn_health_report(text), {"count": 3, "no_ms": 0, "junk_ms": 0})
+
     def test_generate_all_cn_keeps_full_reachable_pool(self):
         """CN 清单保持完整：全可达键都保留，即使其延迟很慢（噪声也必须上路）。"""
         text = "1.1.1.1:443#US-234ms-CN\n2.2.2.2:443#US-1ms-CN\n3.3.3.3:443#US-8ms\n"
