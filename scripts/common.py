@@ -671,6 +671,10 @@ CN_LATENCY_CAP_MS = 150.0
 # ms 语义不一、常回 1ms 噪声，只适合佐证可达，不够格当大陆延迟证据。
 _CHINA_VANTAGE_SOURCES = ("xxapi", "jkapi", "check_host")
 
+# chinaz 为 **纯 ICMP ping**（proxyip 不可达的"到 IP 边缘路由"延迟，常说 1~8ms，
+# 与真实代理/隧道延迟无关，反直觉地极小）。绝不用它冒充大陆延迟；回退时剔除。
+_CN_ICMP_ONLY_SOURCES = ("chinaz",)
+
 
 def cn_l2_ms(entry) -> float | None:
     """大陆视角探测的最小 ok RTT（xxapi/jkapi/check_host）。
@@ -693,10 +697,28 @@ def cn_l2_ms(entry) -> float | None:
     return best
 
 
+def _cn_fallback_ms(entry, sources: dict) -> float | None:
+    """无大陆 L2 读数时的回退延迟：在**非 ICMP** 的 ok 源中取最小可信 RTT。
+
+    排除 chinaz 等纯 ICMP 源——其 1~8ms 只是到国内 IP 边缘的 ping 假象，
+    远低于真实代理/隧道延迟，用它会产出 ``US-2ms`` 之类失真行。仅传输层以外
+    的 TCP/TLS 源（tcptest/coffee/tcpingcn 等）才是真实代理延迟的上界证据。
+    """
+    best = None
+    for name, r in sources.items():
+        if name in _CN_ICMP_ONLY_SOURCES:
+            continue
+        if (isinstance(r, dict) and r.get("status") == "ok"
+                and isinstance(r.get("ms"), (int, float))
+                and r["ms"] >= 2.0):
+            best = r["ms"] if best is None else min(best, r["ms"])
+    return best
+
+
 def cn_display_ms(entry) -> float | None:
-    """CN 清单展示用大陆延迟：优先可信大陆探测（cn_l2_ms），无读数时在全部
-    ok 源中取最小「可信」RTT（≥2ms，过滤 L3 复核源的 1ms 噪声），再回退
-    entry 合并 ms。避免 1ms 冒充真实延迟；真伪都查不到返回 None。"""
+    """CN 清单展示用大陆延迟：优先可信大陆探测（cn_l2_ms），无读数时在
+    **非 ICMP** ok 源中取最小可信 RTT（过滤 1~8ms ICMP 噪声），再回退 entry
+    合并 ms。避免 1ms/2ms 冒充真实延迟；真伪都查不到返回 None。"""
     if not isinstance(entry, dict):
         return None
     ms = cn_l2_ms(entry)
@@ -705,15 +727,14 @@ def cn_display_ms(entry) -> float | None:
     best = None
     sources = entry.get("sources")
     if isinstance(sources, dict):
-        for r in sources.values():
-            if (isinstance(r, dict) and r.get("status") == "ok"
-                    and isinstance(r.get("ms"), (int, float))
-                    and r["ms"] >= 2.0):
-                best = r["ms"] if best is None else min(best, r["ms"])
+        best = _cn_fallback_ms(entry, sources)
     if best is not None:
         return best
     m = entry.get("ms")
-    return m if isinstance(m, (int, float)) and m >= 2.0 else None
+    # 回退 entry 合并 ms 时同样拒绝 ≤2ms（strict > 2.0）：该值可能是被
+    # ICMP/噪声源污染的合并结果（唯一 ok 是 chinaz 2ms 时 entry.ms 也被
+    # 算成 2），宁缺勿假——真实大陆代理延迟不可能低到 2ms。
+    return m if isinstance(m, (int, float)) and m > 2.0 else None
 
 
 def cn_mainland_ok(ms, cap: float | None = None) -> bool:

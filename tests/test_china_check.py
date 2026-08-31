@@ -416,6 +416,19 @@ class TestAnnotations(unittest.TestCase):
         self.assertNotIn("5.6.7.8:80#US", cn_text)  # 历史 -CN 已不收
         self.assertIn("9.9.9.9:80#US-3ms-CN", cn_text)
 
+    def test_generate_all_cn_fallback_keys_keeps_history(self):
+        """上一轮可达、本轮 uncertain 的键经 fallback 保留，维持 CN 清单 ≥1 万。"""
+        text = "1.2.3.4:80#US-42ms-5.00MB/s-fast-90\n"
+        reachable = set()
+        fallback = {"1.2.3.4:80#US"}
+        cn_ms = {"1.2.3.4:80#US": 236.4}
+        cn_text, count = cc.generate_all_cn(
+            text, reachable, cn_ms=cn_ms, fallback_keys=fallback
+        )
+        self.assertEqual(count, 1)
+        # 兜底行同样走大陆延迟/速度重写，与当期一致
+        self.assertIn("1.2.3.4:80#US-236ms-≈2.0MB/s-fast-CN-90", cn_text)
+
     def test_generate_all_cn_full_pool_subset(self):
         # 全量池文本里非限量（超出每国 20 条）的行同样进入 all_cn.txt
         text = "\n".join(f"10.{i}.0.{i}:80#US-{i}ms" for i in range(1, 30)) + "\n"
@@ -503,6 +516,14 @@ class TestAnnotations(unittest.TestCase):
             "6.6.6.6:443#US": {"ms": 1, "sources": {
                 "antping": {"status": "ok", "ms": 1},
                 "tcptest": {"status": "ok", "ms": 88.0}}},
+            # 唯一 ok 为 chinaz（纯 ICMP）且给 2ms 假象 → 不得冒充大陆延迟；
+            # entry 合并 ms 亦被 2ms 污染 → None（宁缺勿假）
+            "7.7.7.7:443#US": {"ms": 2, "sources": {
+                "chinaz": {"status": "ok", "ms": 2.0}}},
+            # chinaz 假象 + tcptest 真实 174ms → 取 174（非 2）
+            "8.8.8.8:443#US": {"sources": {
+                "chinaz": {"status": "ok", "ms": 2.0},
+                "tcptest": {"status": "ok", "ms": 174.8}}},
         }
         got = {k: common.cn_display_ms(v) for k, v in cases.items()}
         self.assertEqual(got, {
@@ -512,6 +533,8 @@ class TestAnnotations(unittest.TestCase):
             "4.4.4.4:443#US": 88,
             "5.5.5.5:443#US": None,
             "6.6.6.6:443#US": 88.0,
+            "7.7.7.7:443#US": None,
+            "8.8.8.8:443#US": 174.8,
         })
 
     def test_cn_health_report_counts_junk_and_no_ms(self):

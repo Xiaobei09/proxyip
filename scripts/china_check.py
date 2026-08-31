@@ -1638,11 +1638,17 @@ def generate_all_cn(
     cn_ms: dict | None = None,
     http_keys: set | None = None,
     strict: bool = False,
+    fallback_keys: set | None = None,
 ) -> tuple[str, int]:
-    """大陆可达清单：仅本次判可达的行（源为全量池文本）。
+    """大陆可达清单：本次判可达的行（源为全量池文本）。
 
     - ``http_keys``：应用层（HTTP）确认的 key 集合，对应行追加 ``-CNH``
     - ``strict=True``：保留参数以兼容调用方（行为与假等同，均已不收历史兜底）
+    - ``fallback_keys``：**历史兜底集合**——上一轮可达、本轮仅因源配额/抖动
+      落入 uncertain（而非被 ≥2 失败源证伪）的键。CN 全量清单维持
+      ≥ MIN_CN_POOL（用户硬约束，避免单次调度/源异常把可达池削到 1 万以下）；
+      这些键本就是近期稳定可达，清单语义为"可达集合快照"，非本轮活体确认，
+      故保留既诚实又守规模。兜底行仍经大陆延迟/速度重写，与当期一致。
     - ``cn_ms``（``key -> 大陆实测毫秒``）提供时：
       * 行内延迟 token **替换为大陆实测 RTT**——CN 清单里 ``ms`` 的语义
         即"大陆使用者连接该节点的延迟"，而非海外 runner 的 TLS 延迟；
@@ -1654,6 +1660,9 @@ def generate_all_cn(
         未测到延迟的行排在最后，同延迟保持原池顺序。
       缺省 ``None`` 时保持原池顺序、不改写延迟。
     """
+    keep = set(reachable_keys)
+    if fallback_keys:
+        keep |= set(fallback_keys)
     lines = []
     for line in pool_text.splitlines():
         if not line.strip():
@@ -1661,7 +1670,7 @@ def generate_all_cn(
         key = line_to_key(line)
         if not key:
             continue
-        if key in reachable_keys:
+        if key in keep:
             out = annotate_cn(line)
             if http_keys and key in http_keys:
                 out = annotate_cnh(out)
@@ -2350,8 +2359,36 @@ def main(argv=None) -> int:
         for key, entry in entries.items()
         if isinstance(entry, dict) and cn_display_ms(entry) is not None
     }
+    # 历史兜底：上一轮可达、本轮落入 uncertain（非被 ≥2 失败源证伪）的键。
+    # 维持 CN 全量清单 ≥ MIN_CN_POOL（用户硬约束），吸收源配额/调度抖动导致
+    # 单轮确认率回落的波动，不让"没来得及确认"变成"清单缩水"。
+    fallback_keys = {
+        k
+        for k, p in prev_entries.items()
+        if (
+            isinstance(p, dict)
+            and p.get("verdict") == "reachable"
+            and k not in entries
+        ) or (
+            isinstance(p, dict)
+            and p.get("verdict") == "reachable"
+            and isinstance(entries.get(k), dict)
+            and entries[k].get("verdict") == "uncertain"
+        )
+    }
+    # 兜底键未复测，无当轮读数：从其上一轮 entry 补大陆延迟（历史同源读数，
+    # 比海外 TLS 更贴近大陆视角；实在无读数则保持"不伪饰、删除速度"）。
+    if fallback_keys:
+        for k in fallback_keys:
+            if k not in cn_ms:
+                m = prev_entries[k]
+                if isinstance(m, dict):
+                    v = cn_display_ms(m)
+                    if v is not None:
+                        cn_ms[k] = v
     cn_text, cn_count = generate_all_cn(
-        all_pool_text, reachable, cn_ms, http_keys=http_keys
+        all_pool_text, reachable, cn_ms, http_keys=http_keys,
+        fallback_keys=fallback_keys,
     )
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
