@@ -2074,6 +2074,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(fb, {"a:443#US"})      # b 有失败源不兜底
         self.assertEqual(entries["a:443#US"]["verdict"], "reachable")
         self.assertTrue(entries["a:443#US"]["fallback"])
+        self.assertEqual(entries["a:443#US"]["streak"], 0)  # 兜底键不虚报连续可达
         self.assertIn("a:443#US", reachable)
         self.assertNotIn("b:443#US", reachable)  # 被证伪，绝不兜底
 

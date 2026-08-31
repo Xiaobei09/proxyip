@@ -2234,6 +2234,11 @@ def compute_fallback_merge(
                 if cur.get("verdict") != "reachable":
                     cur["verdict"] = "reachable"
                     cur["fallback"] = True
+                    # 防御性归零：本键本轮实为 uncertain（仅未证伪），无论
+                    # apply_streak 时序如何，兜底键一律不得虚报"本轮已确认"的
+                    # 连续可达（stable 计算在合并前已严格排除；此处再显式清 0，
+                    # 防止任何按 streak 消费 china.json 的下游误把它当 stable）。
+                    cur["streak"] = 0
                     reachable.add(k)
                     fallback_keys.add(k)
         else:
