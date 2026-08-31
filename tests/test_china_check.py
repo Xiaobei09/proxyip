@@ -1340,6 +1340,15 @@ class TestApplyStreak(unittest.TestCase):
         cc.apply_streak(entries, prev, now=now)
         self.assertEqual(entries["a"]["streak"], 4)
 
+    def test_gap_within_tolerance_keeps_streak(self):
+        """GH 调度实测 2.5~4h 才起一轮：5h 间隔仍在 6h 容差内，streak 须延续。"""
+        now = 1_800_000_000
+        entries = {"a": {"verdict": "reachable"}}
+        prev = {"a": {"verdict": "reachable", "streak": 3,
+                      "last_ok_ts": now - 5 * 3600}}
+        cc.apply_streak(entries, prev, now=now)
+        self.assertEqual(entries["a"]["streak"], 4)
+
     def test_unreachable_clears_last_ok_ts(self):
         entries = {"a": {"verdict": "unreachable", "last_ok_ts": 1_234}}
         prev = {"a": {"verdict": "reachable", "streak": 2,
