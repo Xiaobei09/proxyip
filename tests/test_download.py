@@ -660,6 +660,90 @@ class TestFetchExtraRetry(unittest.TestCase):
         self.assertEqual(out, b"9.9.9.9\n")
 
 
+class TestMainResilience(unittest.TestCase):
+    def test_primary_fails_extras_keep_pool(self):
+        extra_pool = {"443": {"US": ["1.1.1.1"]}}
+        wo = unittest.mock.Mock(return_value=(
+            {
+                "__total__": 1, "__unique__": 1, "__countries__": 1,
+                "__ports__": 1, "__sets__": {}, "443": 1,
+            },
+            ["1.1.1.1:443#US"],
+        ))
+        patchers = [
+            unittest.mock.patch.object(
+                dp, "load_source", side_effect=OSError("primary down")
+            ),
+            unittest.mock.patch.object(
+                dp, "load_extras",
+                return_value=(extra_pool, {"1.1.1.1"}, {"https://x/ip": {"1.1.1.1"}}),
+            ),
+            unittest.mock.patch.object(dp, "enrich_countries", return_value=0),
+            unittest.mock.patch.object(dp, "write_outputs", wo),
+            unittest.mock.patch.object(dp, "write_source_attribution"),
+            unittest.mock.patch.object(dp, "_append_source_history"),
+            unittest.mock.patch.object(
+                dp, "_build_source_stats", return_value={
+                    "main (zip.cm.edu.kg)": {"total": 0, "unique": 0, "overlap": 0},
+                }
+            ),
+            unittest.mock.patch.object(dp, "write_text_if_changed"),
+            unittest.mock.patch.object(dp, "load_previous_all", return_value=[]),
+            unittest.mock.patch.object(dp, "write_diff", return_value=(1, 0)),
+            unittest.mock.patch.object(dp, "append_history"),
+            unittest.mock.patch.object(dp, "print_stats"),
+            unittest.mock.patch.object(dp, "write_upstream_meta"),
+        ]
+        for p in patchers:
+            p.start()
+        try:
+            rc = dp.main(["--no-extra-sources"])
+        finally:
+            for p in patchers:
+                p.stop()
+
+        self.assertEqual(rc, 0)
+        wo.assert_called_once()
+        called_by_port = wo.call_args[0][0]
+        self.assertEqual(called_by_port["443"]["US"], ["1.1.1.1"])
+
+    def test_both_fail_refuses_to_truncate(self):
+        wo = unittest.mock.Mock()
+        patchers = [
+            unittest.mock.patch.object(
+                dp, "load_source", side_effect=OSError("primary down")
+            ),
+            unittest.mock.patch.object(
+                dp, "load_extras", return_value=({}, set(), {})
+            ),
+            unittest.mock.patch.object(dp, "enrich_countries", return_value=0),
+            unittest.mock.patch.object(dp, "write_outputs", wo),
+            unittest.mock.patch.object(dp, "write_source_attribution"),
+            unittest.mock.patch.object(dp, "_append_source_history"),
+            unittest.mock.patch.object(
+                dp, "_build_source_stats", return_value={
+                    "main (zip.cm.edu.kg)": {"total": 0, "unique": 0, "overlap": 0},
+                }
+            ),
+            unittest.mock.patch.object(dp, "write_text_if_changed"),
+            unittest.mock.patch.object(dp, "load_previous_all", return_value=[]),
+            unittest.mock.patch.object(dp, "write_diff", return_value=(0, 0)),
+            unittest.mock.patch.object(dp, "append_history"),
+            unittest.mock.patch.object(dp, "print_stats"),
+            unittest.mock.patch.object(dp, "write_upstream_meta"),
+        ]
+        for p in patchers:
+            p.start()
+        try:
+            rc = dp.main(["--no-extra-sources"])
+        finally:
+            for p in patchers:
+                p.stop()
+
+        self.assertEqual(rc, 1)
+        wo.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
 
