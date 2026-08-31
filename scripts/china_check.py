@@ -212,6 +212,10 @@ CHINAZ_URL = "https://ping.chinaz.com"
 CHINAZ_WS = "wss://tooldata.chinaz.com/pingwebsocket"
 CHINAZ_REQ_TIMEOUT = 15
 CHINAZ_WS_IDLE = 40.0
+# ping.chinaz 的结果流不随完成发送 10002 结束帧：实测 51~53 节点约在
+# WS 打开后 ~5s 内全部到齐，剩余 ~35s 全是静默（每键白等 40s 上限）。
+# 静默 SETTLE 秒后即收尾，把每键端到端从 ~41s 压到结果跨度 + SETTLE（~12s）。
+CHINAZ_WS_SETTLE = 6.0
 CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
 
 # itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
@@ -1361,15 +1365,17 @@ def chinaz_check(ip: str, port: str, timeout: float) -> dict:
     totals = 0
     ms_values: list[float] = []
     deadline = time.monotonic() + CHINAZ_WS_IDLE
+    max_wait = min(CHINAZ_WS_SETTLE, CHINAZ_WS_IDLE)
     while time.monotonic() < deadline:
+        ws.settimeout(min(max_wait, max(0.1, deadline - time.monotonic())))
         try:
-            ws.settimeout(max(1.0, deadline - time.monotonic()))
             kind, msg = ws.read()
         except Exception as e:
             break
         if kind in ("err", "close", "closed"):
             break
         if kind == "timeout":
+            # 静默超阈值（SETTLE）→ 结果流已放完，早退收尾
             break
         if not isinstance(msg, dict):
             continue
