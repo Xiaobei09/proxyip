@@ -17,6 +17,7 @@ on it without creating import cycles.
 import json
 import re
 import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -560,11 +561,39 @@ def fetch_with_mirror(
             candidate, headers=headers or {"User-Agent": UA}
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+            return fetch_with_deadline(req, timeout)
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
     raise last_exc
+
+
+def fetch_with_deadline(request, timeout: float) -> bytes:
+    """``urlopen`` + ``read`` 带整体 wall-clock 截止的抓取。
+
+    单个 ``urlopen`` 的 socket 超时只能约束单次读写，遇到底层服务
+    永不结束的响应体（只发 200 头、随后无限阻塞）仍会挂死管线。
+    这里把抓取放进 daemon 线程，``join`` 过 ``timeout`` 未完成即按
+    ``TimeoutError`` 处理，保证任何上游都无法无限拖住流程。
+    """
+    box: dict = {}
+
+    def worker() -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as resp:
+                box["ok"] = resp.read()
+        except BaseException as exc:  # noqa: BLE001
+            box["err"] = exc
+
+    t = threading.Thread(target=worker, daemon=True, name="fetch-deadline")
+    t.start()
+    t.join(timeout + 1.0)
+    if t.is_alive():
+        raise TimeoutError(
+            f"fetch deadline exceeded ({timeout}s): {request.full_url}"
+        )
+    if "ok" in box:
+        return box["ok"]
+    raise box["err"]
 
 
 def request_follow(

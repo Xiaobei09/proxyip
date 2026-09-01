@@ -3,6 +3,7 @@
 import io
 import json
 import sys
+import time
 import unittest
 import unittest.mock
 import zipfile
@@ -946,3 +947,31 @@ class TestMirrorUrls(unittest.TestCase):
                 _c.fetch_with_mirror(
                     "https://raw.githubusercontent.com/u/r/main/f.txt", timeout=5
                 )
+
+    def test_fetch_with_mirror_hang_is_capped_by_deadline(self):
+        import common as _c
+
+        class NeverEndingResp:
+            def read(self):
+                while True:  # 永不返回：模拟只发 200 头、body 无限阻塞的上游
+                    time.sleep(0.05)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            return NeverEndingResp()
+
+        with unittest.mock.patch.object(_c.urllib.request, "urlopen", fake_urlopen):
+            t0 = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                _c.fetch_with_mirror(
+                    "https://raw.githubusercontent.com/u/r/main/f.txt", timeout=0.3
+                )
+            elapsed = time.monotonic() - t0
+        # 整体截止必须兜住 read() 无限阻塞，而不依赖 socket 超时（0.3s + 缓冲）。
+        # 3 个 mirror candidate 每个 ~1.3s 截止，总耗时须远小于"无限挂死"。
+        self.assertLess(elapsed, 8.0)

@@ -60,6 +60,7 @@ from common import (
     SOURCE_STATS_FILE,
     UPSTREAM_META_FILE,
     fetch_with_mirror,
+    fetch_with_deadline,
     read_json,
     write_text_if_changed,
 )
@@ -825,10 +826,8 @@ def lookup_countries(ips: list[str], timeout: int, delay: float) -> dict[str, st
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    seen = json.loads(
-                        resp.read().decode("utf-8", errors="replace")
-                    )
+                raw = fetch_with_deadline(req, timeout)
+                seen = json.loads(raw.decode("utf-8", errors="replace"))
                 break
             except Exception as exc:  # noqa: BLE001
                 if attempt == retries:
