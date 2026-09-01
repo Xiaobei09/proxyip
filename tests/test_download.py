@@ -366,6 +366,16 @@ class TestNormalizeCountry(unittest.TestCase):
         self.assertEqual(dp.normalize_country("NRT"), "JP")
         self.assertEqual(dp.normalize_country("zzz"), "ALL")
 
+    def test_all_sentinel_not_country(self):
+        # ``#ALL`` 是"无国家"哨兵，绝不能被 [A-Z]{2}$ 误判成 LL 桶
+        self.assertEqual(dp.normalize_country("ALL"), "ALL")
+        self.assertEqual(dp.normalize_country("all"), "ALL")
+        self.assertEqual(dp.normalize_country("all-abc"), "ALL")
+        self.assertEqual(dp.normalize_country("ALL-1"), "ALL")
+        by = dp.extract_plain(b"1.2.3.5:443#ALL\n")
+        self.assertEqual(by["443"].get("LL"), None)
+        self.assertEqual(len(by["443"].get("ALL", [])), 1)
+
 
 class TestExtractPlain(unittest.TestCase):
     def test_ip_port_with_notes(self):
