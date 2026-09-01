@@ -15,6 +15,7 @@ import logging
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from bisect import bisect_right
@@ -79,6 +80,15 @@ TOR_BULK_URL = "https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=1.1.1
 BLOCKLIST_DE_URL = "https://lists.blocklist.de/lists/all.txt"
 BLOCKLIST_DE_SSH_URL = "https://lists.blocklist.de/lists/ssh.txt"
 BLOCKLIST_DE_APACHE_URL = "https://lists.blocklist.de/lists/apache.txt"
+GREYNOISE_URL = "https://api.greynoise.io/v3/community/{ip}"
+GREYNOISE_TIMEOUT = 8
+URLLAUS_URL = "https://urlhaus.abuse.ch/downloads/csv_recent/"
+THREATFOX_URL = "https://threatfox.abuse.ch/export/json/recent/"
+FIREHOL_LEVEL1_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
+    "master/firehol_level1.netset"
+)
+BINARYDEFENSE_URL = "https://www.binarydefense.com/banlist.txt"
 SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
 SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
@@ -150,6 +160,11 @@ IPWHOIS_FLAG_PENALTIES = {
     "tor": 45,
     "hosting": 15,
 }
+GREYNOISE_FLAG_PENALTIES = {
+    "is_abuse": 60,   # classification=malicious（观察到的恶意扫描）
+    "is_bot": 35,     # riot=true（僵尸网络成员）
+    "is_noise": 15,   # 噪音扫描（低危但具干扰性）
+}
 STATIC_LIST_SCORES = {
     "abuse_list": 60,   # is_abuse（历史滥用，强信号）
     "ipsum": 55,        # is_listed（3+ 黑名单交叉确认）
@@ -166,6 +181,10 @@ STATIC_LIST_SCORES = {
     "blocklist_de_apache": 45,  # is_abuse（Web 探测/攻击源）
     "danmeuk_tor": 40,   # is_tor（dan.me.uk Tor 节点，覆盖更全）
     "tor_bulk": 35,      # is_tor（Tor 出口冗余源）
+    "urlhaus": 55,       # is_abuse（abuse.ch URLhaus 恶意软件分发托管）
+    "threatfox": 55,     # is_abuse（abuse.ch ThreatFox 恶意软件 IOC/C2）
+    "firehol_level1": 60,  # is_listed（FireHOL 最严封禁集）
+    "binarydefense": 55,   # is_abuse（Binary Defense 恶意 IP 封禁集）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -201,6 +220,11 @@ REPUTATION_WEIGHTS = {
     "blocklist_de_apache": 3,
     "danmeuk_tor": 5,
     "tor_bulk": 4,
+    "greynoise": 8,
+    "urlhaus": 5,
+    "threatfox": 5,
+    "firehol_level1": 5,
+    "binarydefense": 4,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -214,6 +238,8 @@ DEFAULT_REP_SOURCES = (
     "cins", "et_compromised", "feodo",
     "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
     "danmeuk_tor", "tor_bulk",
+    "greynoise", "urlhaus", "threatfox",
+    "firehol_level1", "binarydefense",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -231,6 +257,7 @@ SOURCE_PACING = {
     "hackmyip": (6, 0.2),
     "scamalytics": (4, 0.5),
     "iplocation": (8, 0.12),
+    "greynoise": (6, 0.3),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -352,6 +379,44 @@ def ncgy_lookup_sync(ip: str) -> dict | None:
     }
     if not any(out.values()):
         return {"clean": True}
+    return out
+
+
+def greynoise_lookup_sync(ip: str) -> dict | None:
+    """GreyNoise Community (keyless) — noise/riot/malicious-scan signal.
+
+    干净/未观测 IP 返回 HTTP 404 但体为 JSON（``{"noise":false,...}``），
+    已知扫描者返回 200 且带 ``classification``；两者均解析为信号。
+    """
+    out: dict = {"is_noise": False, "is_riot": False, "is_malicious": False}
+    req = urllib.request.Request(
+        GREYNOISE_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=GREYNOISE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            try:
+                data = json.loads(exc.read().decode("utf-8", "replace"))
+            except Exception:  # noqa: BLE001
+                return None
+        else:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(data, dict):
+        return None
+    out["is_noise"] = bool(data.get("noise"))
+    out["is_riot"] = bool(data.get("riot"))
+    classification = data.get("classification")
+    if isinstance(classification, str):
+        out["classification"] = classification.lower()
+        if classification.lower() == "malicious":
+            out["is_abuse"] = True
+    if not any(v for k, v in out.items() if k != "classification"):
+        return None
     return out
 
 
@@ -624,6 +689,84 @@ async def fetch_blocklist_de_apache() -> IpSet:
     return IpSet(rows)
 
 
+async def fetch_urlhaus() -> IpSet:
+    """abuse.ch URLhaus 恶意软件分发托管（``csv_recent``，URL 主机 IP 聚合）。"""
+    rows = list(await fetch_text_list(URLLAUS_URL))
+    ips: set[str] = set()
+    for row in rows:
+        if row.startswith("```") or ("`" in row and "```" in row):
+            continue
+        parts = [p.strip().strip('"') for p in row.split(",")]
+        if len(parts) < 3 or parts[0].lower() in ("id",):
+            continue
+        url = parts[2]
+        try:
+            host = urllib.parse.urlsplit(url).hostname or ""
+        except ValueError:  # pragma: no cover
+            continue
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        ips.add(host)
+    return IpSet(ips)
+
+
+async def fetch_threatfox() -> IpSet:
+    """abuse.ch ThreatFox 恶意软件 IOC/C2（``json/recent``，ip:port/url/ipv4 取值）。"""
+    try:
+        text = await asyncio.to_thread(
+            lambda: fetch_with_mirror(
+                THREATFOX_URL, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA}
+            ).decode("utf-8", errors="replace")
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("fetch threatfox failed open: %s", exc)
+        return IpSet()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return IpSet()
+    ips: set[str] = set()
+
+    def add_ioc(item: dict) -> None:
+        typ = item.get("ioc_type")
+        val = item.get("ioc_value")
+        if not isinstance(val, str):
+            return
+        if typ == "ipv4" or typ == "ip:port":
+            host = val.split(":", 1)[0]
+        elif typ == "url":
+            try:
+                host = urllib.parse.urlsplit(val).hostname or ""
+            except ValueError:  # pragma: no cover
+                return
+        else:
+            return
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            return
+        ips.add(host)
+
+    if isinstance(data, dict):
+        for groups in data.values():
+            for item in groups if isinstance(groups, list) else []:
+                if isinstance(item, dict):
+                    add_ioc(item)
+    return IpSet(ips)
+
+
+async def fetch_firehol_level1() -> IpSet:
+    """FireHOL ``firehol_level1`` 严格封禁 IP/CIDR（防火墙级黑名单）。"""
+    return IpSet(await fetch_text_list(FIREHOL_LEVEL1_URL))
+
+
+async def fetch_binarydefense() -> IpSet:
+    """Binary Defense Artillery 恶意 IP/CIDR 封禁集。"""
+    return IpSet(await fetch_text_list(BINARYDEFENSE_URL))
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -885,6 +1028,10 @@ async def fetch_static_lists(sources: list) -> dict:
         "blocklist_de_apache": IpSet(),
         "danmeuk_tor": IpSet(),
         "tor_bulk": IpSet(),
+        "urlhaus": IpSet(),
+        "threatfox": IpSet(),
+        "firehol_level1": IpSet(),
+        "binarydefense": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -909,6 +1056,14 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("danmeuk_tor", fetch_dan_tor()))
     if "tor_bulk" in sources:
         mapping.append(("tor_bulk", fetch_tor_bulk()))
+    if "urlhaus" in sources:
+        mapping.append(("urlhaus", fetch_urlhaus()))
+    if "threatfox" in sources:
+        mapping.append(("threatfox", fetch_threatfox()))
+    if "firehol_level1" in sources:
+        mapping.append(("firehol_level1", fetch_firehol_level1()))
+    if "binarydefense" in sources:
+        mapping.append(("binarydefense", fetch_binarydefense()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -1131,7 +1286,11 @@ def source_score(name: str, signal) -> int | None:
             "blocklist_de_apache": "is_abuse",
             "danmeuk_tor": "is_tor",
             "tor_bulk": "is_tor",
-        }[name]
+            "urlhaus": "is_abuse",
+            "threatfox": "is_abuse",
+            "firehol_level1": "is_listed",
+            "binarydefense": "is_abuse",
+        }.get(name)
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
 
@@ -1361,6 +1520,21 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"tor": True} if signal.get("is_tor") else {}
     if name == "tor_bulk":
         return {"tor": True} if signal.get("is_tor") else {}
+    if name == "urlhaus":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "threatfox":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "firehol_level1":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "binarydefense":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "greynoise":
+        opinions = {
+            "abuse": signal.get("is_abuse"),
+        }
+        if signal.get("is_riot"):
+            opinions["abuse"] = True
+        return {f: v for f, v in opinions.items() if isinstance(v, bool)}
     return {}
 
 
@@ -1751,6 +1925,9 @@ async def lookup_all_risk(
         w, d = pacing.get("iplocation", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "iplocation", iplocation_lookup_sync, cap=IPLOCATION_CAP, workers=w, delay=d))
+    if "greynoise" in sources:
+        w, d = pacing.get("greynoise", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch("greynoise", greynoise_lookup_sync, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:
@@ -1782,6 +1959,14 @@ async def lookup_all_risk(
             put("danmeuk_tor", ip, {"is_tor": True})
         if ip in static["tor_bulk"]:
             put("tor_bulk", ip, {"is_tor": True})
+        if ip in static["urlhaus"]:
+            put("urlhaus", ip, {"is_abuse": True})
+        if ip in static["threatfox"]:
+            put("threatfox", ip, {"is_abuse": True})
+        if ip in static["firehol_level1"]:
+            put("firehol_level1", ip, {"is_listed": True})
+        if ip in static["binarydefense"]:
+            put("binarydefense", ip, {"is_abuse": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue

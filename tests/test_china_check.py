@@ -377,6 +377,140 @@ class TestMergeVerdict(unittest.TestCase):
             self.assertEqual(
                 cc.merge_verdict(sources)["verdict"], "unreachable")
 
+    def test_five_new_multi_sources_strong_reachable(self):
+        """新增五源（boce/ipip/17ce/ping0/wansui）达标 → 独立判 reachable。"""
+        for name in ("boce", "ipip", "17ce", "ping0", "wansui"):
+            src = {"status": "ok", "ok": True, "ms": 50, "level": "tcp",
+                   "ok_nodes": 9, "nodes": 10, "ratio": 0.9}
+            self.assertEqual(
+                cc.merge_verdict({name: src})["verdict"],
+                "reachable", msg=f"{name} strong → reachable")
+
+    def test_five_new_multi_sources_weak_uncertain(self):
+        """新源弱确认（ok 但比率<阈值 或 残片）→ uncertain 不误判 reachable。"""
+        for name in ("boce", "ipip", "17ce", "ping0", "wansui"):
+            weak = {"status": "ok", "ok": True, "ms": 50, "level": "tcp",
+                    "ok_nodes": 1, "nodes": 10, "ratio": 0.1}
+            self.assertEqual(
+                cc.merge_verdict({name: weak})["verdict"],
+                "uncertain", msg=f"{name} weak → uncertain")
+
+    def test_five_new_multi_fail_combos_unreachable(self):
+        """新源多节点失败 + 单节点失败 → unreachable；两大节点失败 → unreachable。"""
+        cases = [
+            {"boce": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                      "nodes": 10, "ratio": 0.0},
+             "check_host": {"status": "fail", "ok": False, "ms": None}},
+            {"ipip": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                      "nodes": 10, "ratio": 0.0},
+             "17ce": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                      "nodes": 10, "ratio": 0.0}},
+            {"ping0": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                       "nodes": 10, "ratio": 0.0},
+             "xxapi": {"status": "fail", "ok": False, "ms": None}},
+            {"wansui": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                        "nodes": 10, "ratio": 0.0},
+             "ipip": {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+                      "nodes": 10, "ratio": 0.0}},
+        ]
+        for sources in cases:
+            self.assertEqual(
+                cc.merge_verdict(sources)["verdict"], "unreachable")
+
+    def test_ipip_check_parse_ok(self):
+        """tools.ipip.net POST-JSON 多节点响应 → ok（可达）。"""
+        payload = json.dumps({"nodes": [
+            {"name": "北京电信", "delay": 12, "status": "ok"},
+            {"name": "上海联通", "delay": 15, "status": "ok"},
+            {"name": "广州移动", "delay": 20, "status": "ok"},
+        ]}).encode()
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, payload)):
+            out = cc.ipip_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 3)
+        self.assertEqual(out["ms"], 12)
+        self.assertEqual(out["level"], "tcp")
+
+    def test_ipip_check_all_fail(self):
+        payload = json.dumps({"nodes": [
+            {"name": "北京电信", "delay": None, "status": "timeout"},
+            {"name": "上海联通", "delay": None, "status": "timeout"},
+        ]}).encode()
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, payload)):
+            out = cc.ipip_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+
+    def test_boce_check_parse_ok(self):
+        """boce 壳页+建任务+轮询结果 → ok。"""
+        shell = b'<html><meta name="csrf-token" content="tk123"></html>'
+        probe = json.dumps({"task_id": "t1"}).encode()
+        result = json.dumps({"nodes": [
+            {"name": "北京电信", "delay": 12, "status": "ok"},
+            {"name": "上海联通", "delay": 15, "status": "ok"},
+            {"name": "广州移动", "delay": 0, "status": "fail"},
+        ]}).encode()
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/api/v1/probe") and method == "POST":
+                return 200, {}, probe
+            if "/result" in url:
+                return 200, {}, result
+            return 200, {"Set-Cookie": "JSESSIONID=abc; Path=/"}, shell
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.boce_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["ratio"], round(2 / 3, 3))
+
+    def test_seventeen_check_parse_ok(self):
+        """17ce 壳页+api.php tasks → ok。"""
+        shell = b'<html><script>var token="tok_9"</script></html>'
+        api = json.dumps({"tasks": [
+            {"result": {"delay": 12}},
+            {"result": {"delay": 15}},
+            {"result": {"delay": 0}},
+        ]}).encode()
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if "api.php" in url:
+                return 200, {}, api
+            return 200, {"Set-Cookie": "PHPSESSID=x; Path=/"}, shell
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.seventeen_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+
+    def test_ping0_check_captcha_fail_open(self):
+        """ping0 遇验证码墙 → error（fail-open）。"""
+        shell = b'<html><script src="https://challenges.cloudflare.com/turnstile"></script></html>'
+        with mock.patch.object(cc, "request_follow", return_value=(200, {}, shell)):
+            out = cc.ping0_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(out["ok"], False)
+
+    def test_ping0_check_parse_ok(self):
+        """ping0 免挑战路径 POST /api/probe → ok。"""
+        shell = b"<html>ping0 tool</html>"
+        probe = json.dumps({"nodes": [
+            {"city": "北京", "delay": 12},
+            {"city": "上海", "delay": 15},
+        ]}).encode()
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/api/probe"):
+                return 200, {}, probe
+            return 200, {}, shell
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.ping0_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+
     def test_coffee_strong_reachable(self):
         sources = {
             "coffee": {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
