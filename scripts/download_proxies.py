@@ -695,8 +695,9 @@ def write_source_attribution(
     :data:`IP_SOURCES_FILE`.
 
     Source labels: ``"main"`` for the primary upstream, or the extra-source
-    filename stem (e.g. ``"fdip"``, ``"proxy"``).  IPs appearing in multiple
-    extra sources are labelled ``"multi"``.
+    filename stem (e.g. ``"fdip"``, ``"proxy"``); generic ``all.json``-style
+    mirrors are host-disambiguated (e.g. ``mirror-a/all``).  IPs appearing
+    in multiple extra sources are labelled ``"multi"``.
     """
     # Map bare IP → list of extra source labels that contributed it
     ip_extra_labels: dict[str, list[str]] = {}
