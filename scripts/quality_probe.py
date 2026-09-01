@@ -15,6 +15,7 @@ import urllib.request
 
 from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...)
 from common import _SSL_CTX  # noqa: F401  (import * skips underscore-prefixed names)
+from common import fetch_with_deadline  # noqa: F401  (import * 已含，显式声明便于检索)
 
 IPAPI_GET_URL = "http://ip-api.com/json/{ip}"
 IPAPI_FIELDS = (
@@ -137,8 +138,8 @@ async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
             url,
             headers={"User-Agent": "proxyip-checker/1.0"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+        raw = fetch_with_deadline(req, timeout)
+        return json.loads(raw.decode("utf-8", errors="replace"))
 
     try:
         data = await asyncio.to_thread(_fetch)
@@ -207,8 +208,8 @@ def ipapi_batch_sync(ips: list) -> list:
             "User-Agent": "proxyip/quality 1.0",
         },
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    raw = fetch_with_deadline(req, 15)
+    return json.loads(raw.decode("utf-8"))
 
 
 def ipapi_get_sync(ip: str) -> dict:
@@ -216,8 +217,8 @@ def ipapi_get_sync(ip: str) -> dict:
         IPAPI_GET_URL.format(ip=ip) + "?fields=" + IPAPI_FIELDS,
         headers={"User-Agent": "proxyip/quality 1.0"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    raw = fetch_with_deadline(req, 10)
+    return json.loads(raw.decode("utf-8"))
 
 
 async def batch_ipapi(ips: list) -> dict:
