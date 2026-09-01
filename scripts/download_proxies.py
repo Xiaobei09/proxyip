@@ -128,11 +128,37 @@ SOURCE_LABELS: dict[str, str] = {
 }
 
 
+# ``all.json``/``all.zip``/``all.txt`` 等通用清单名会被多个镜像共用，仅取
+# 文件名主干会产生 ``all`` 碰撞（互覆 stats/归属/健康监控）。此时用
+# 注册域作前缀消歧（如 ``mirror-a/all``、``mirror-b/all``）；其余来源
+# 保持文件名主干，避免破坏既有 source_stats / 健康历史的标签连续性。
+_GENERIC_STEMS = frozenset({"all", "data", "index", "output", "proxylist"})
+_GENERIC_HOST_SUFFIXES = (".co.uk", ".com", ".net", ".org", ".co", ".io",
+                          ".xyz", ".cc", ".kg", ".jp", ".cn")
+
+
+def _registrable_host(url: str) -> str:
+    """``https://sub.mirror-a.com/...`` -> 注册域主干（剥掉常见 TLD+二级）。"""
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).hostname or "").lower()
+    for suffix in _GENERIC_HOST_SUFFIXES:
+        if host.endswith(suffix) and host != suffix:
+            host = host[: -len(suffix)]
+            break
+    return host or "mirror"
+
+
 def source_label(url: str) -> str:
-    """可读的源标签：镜像/列表 URL 用显式映射，其余取文件名主干。"""
+    """可读的源标签：镜像/列表 URL 用显式映射，其余取文件名主干。
+
+    通用清单名（``all.json``/``all.zip``/``all.txt`` 等）加注册域前缀消歧，
+    避免不同镜像共用 ``all`` 标签导致 stats/归属/健康监控互覆。
+    """
     if url in SOURCE_LABELS:
         return SOURCE_LABELS[url]
     stem = url.rsplit("/", 1)[-1].split(".")[0] if "/" in url else url
+    if stem in _GENERIC_STEMS and "/" in url:
+        return f"{_registrable_host(url)}/{stem}"
     return stem
 
 
