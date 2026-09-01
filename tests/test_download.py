@@ -721,6 +721,36 @@ class TestProxyMirrorSources(unittest.TestCase):
     def test_non_generic_labels_unchanged(self):
         self.assertEqual(dp.source_label("https://x/fdip.txt"), "fdip")
 
+    def test_five_http_pool_sources_registered(self):
+        # clarketm / sunny9577 / jetkai / roosterkid / ShiftyTr 通用 HTTP 池
+        # 默认启用，各带可读标签（防 all 类文件名碰撞）。
+        urls = [u for _kind, u in dp.EXTRA_SOURCES]
+        for u, label in (
+            ("https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+             "clarketm_http"),
+            ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt",
+             "sunny9577_http"),
+            ("https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
+             "jetkai_http"),
+            ("https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt",
+             "roosterkid_https"),
+            ("https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt",
+             "shifty_http"),
+        ):
+            self.assertIn(u, urls)
+            self.assertEqual(dp.source_label(u), label)
+
+    def test_five_http_pool_sources_parse_plain(self):
+        # 新源均为裸 ip:port 行，且以 plain 类型注册。
+        for tu in (
+            ("plain", "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"),
+            ("plain", "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt"),
+            ("plain", "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt"),
+            ("plain", "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt"),
+            ("plain", "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt"),
+        ):
+            self.assertIn(tu, dp.EXTRA_SOURCES)
+
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
 
