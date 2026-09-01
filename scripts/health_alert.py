@@ -36,7 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import CHINA_FILE, QUALITY_DIR, read_json  # noqa: E402
+from common import CHINA_FILE, QUALITY_DIR, read_json, deadline_open  # noqa: E402
 
 HISTORY_FILE = QUALITY_DIR / "history.jsonl"
 VALID_HISTORY_FILE = QUALITY_DIR.parent / "valid" / "history.jsonl"
@@ -279,7 +279,7 @@ def notify(alerts: list[str]) -> bool:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15):
+        with deadline_open(req, 15):
             return True
     except OSError as exc:
         print(f"webhook delivery failed: {exc}", file=sys.stderr)

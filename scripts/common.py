@@ -596,6 +596,34 @@ def fetch_with_deadline(request, timeout: float) -> bytes:
     raise box["err"]
 
 
+class _DeadlineResp:
+    """``with deadline_open(...) as resp`` 形态的响应对象：``resp.read()`` 同受
+    整体 wall-clock 截止约束。与 ``fetch_with_deadline`` 等价，但保持
+    ``with urlopen(...) as resp: resp.read()`` 写法不变，便于最小侵入替换。"""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self, *args, **kwargs) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def deadline_open(request, timeout: float) -> _DeadlineResp:
+    """整体截止的 ``with`` 上下文打开器，替 ``urllib.request.urlopen`` 使用。
+
+    返回对象仅承载已读完的 body；``resp.read()`` 不再发起网络 I/O，故
+    底层永不结束的响应体在 deadline 内即被截断（抛 ``TimeoutError``）。
+    """
+    body = fetch_with_deadline(request, timeout)
+    return _DeadlineResp(body)
+
+
 def request_follow(
     url: str,
     headers: dict,

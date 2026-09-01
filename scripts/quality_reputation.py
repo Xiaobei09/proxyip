@@ -359,7 +359,7 @@ def netcoffee_lookup_sync(ip: str) -> dict | None:
             "Accept": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=NETCOFFEE_TIMEOUT) as resp:
+    with deadline_open(req, NETCOFFEE_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -392,7 +392,7 @@ def ncgy_lookup_sync(ip: str) -> dict | None:
         NCGY_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=NCGY_TIMEOUT) as resp:
+    with deadline_open(req, NCGY_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     proxy = data.get("proxy") if isinstance(data, dict) else None
     if not isinstance(proxy, dict):
@@ -423,7 +423,7 @@ def greynoise_lookup_sync(ip: str) -> dict | None:
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=GREYNOISE_TIMEOUT) as resp:
+        with deadline_open(req, GREYNOISE_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -455,7 +455,7 @@ def ipdata_lookup_sync(ip: str) -> dict | None:
         IPDATA_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=IPDATA_TIMEOUT) as resp:
+    with deadline_open(req, IPDATA_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict) or not data.get("success", True):
         return None
@@ -478,7 +478,7 @@ def getipintel_lookup_sync(ip: str, email: str) -> dict | None:
         GETIPINTEL_URL.format(ip=ip, email=urllib.parse.quote(email)),
         headers={"User-Agent": UA},
     )
-    with urllib.request.urlopen(req, timeout=GETIPINTEL_TIMEOUT) as resp:
+    with deadline_open(req, GETIPINTEL_TIMEOUT) as resp:
         text = resp.read().decode("utf-8").strip()
     try:
         prob = float(text)
@@ -495,7 +495,7 @@ def ipapi_is_lookup_sync(ip: str) -> dict | None:
         IPAPI_IS_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=IPAPI_IS_TIMEOUT) as resp:
+    with deadline_open(req, IPAPI_IS_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -528,7 +528,7 @@ def ipquery_lookup_sync(ip: str) -> dict | None:
         IPQUERY_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=IPQUERY_TIMEOUT) as resp:
+    with deadline_open(req, IPQUERY_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -555,7 +555,7 @@ def ffraud_lookup_sync(ip: str) -> dict | None:
         FFRAUD_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=FFRAUD_TIMEOUT) as resp:
+    with deadline_open(req, FFRAUD_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -582,7 +582,7 @@ def whatismyip_lookup_sync(ip: str) -> dict | None:
         WHATISMYIP_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=WHATISMYIP_TIMEOUT) as resp:
+    with deadline_open(req, WHATISMYIP_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -613,7 +613,7 @@ def blackbox_lookup_sync(ip: str) -> dict | None:
         BLACKBOX_URL.format(ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=BLACKBOX_TIMEOUT) as resp:
+    with deadline_open(req, BLACKBOX_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict) or not data.get("classification"):
         return None
@@ -635,7 +635,7 @@ def otx_lookup_sync(ip: str) -> dict | None:
         OTX_URL.format(ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=OTX_TIMEOUT) as resp:
+    with deadline_open(req, OTX_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -831,7 +831,7 @@ def proxycheck_lookup_sync(ip: str) -> dict | None:
         PROXYCHECK_URL.format(ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=PROXYCHECK_TIMEOUT) as resp:
+    with deadline_open(req, PROXYCHECK_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict) or data.get("status") != "ok":
         return None
@@ -861,7 +861,7 @@ def ip2location_lookup_sync(ip: str) -> dict | None:
         IP2LOCATION_URL.format(ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=IP2LOCATION_TIMEOUT) as resp:
+    with deadline_open(req, IP2LOCATION_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -876,7 +876,7 @@ def ipwhois_lookup_sync(ip: str) -> dict | None:
         IPWHOIS_URL.format(ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=IPWHOIS_TIMEOUT) as resp:
+    with deadline_open(req, IPWHOIS_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict) or data.get("success") is False:
         return None
@@ -904,7 +904,7 @@ def freeipapi_lookup_sync(ip: str) -> dict | None:
         FREEIPAPI_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=FREEIPAPI_TIMEOUT) as resp:
+    with deadline_open(req, FREEIPAPI_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict) or not data.get("ipAddress"):
         return None
@@ -930,7 +930,7 @@ def hackmyip_lookup_sync(ip: str) -> dict | None:
         HACKMYIP_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=HACKMYIP_TIMEOUT) as resp:
+    with deadline_open(req, HACKMYIP_TIMEOUT) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     if not isinstance(payload, dict) or payload.get("success") is not True:
         return None
@@ -960,7 +960,7 @@ def scamalytics_lookup_sync(ip: str) -> dict | None:
         SCAMALYTICS_URL.format(ip=ip),
         headers={"User-Agent": UA},
     )
-    with urllib.request.urlopen(req, timeout=SCAMALYTICS_TIMEOUT) as resp:
+    with deadline_open(req, SCAMALYTICS_TIMEOUT) as resp:
         html = resp.read().decode("utf-8", "replace")
     m = SCAMALYTICS_SCORE_RE.search(html)
     if not m:
@@ -978,7 +978,7 @@ def iplocation_lookup_sync(ip: str) -> dict | None:
         IPLOCATION_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=IPLOCATION_TIMEOUT) as resp:
+    with deadline_open(req, IPLOCATION_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     if not isinstance(data, dict) or not data.get("ip"):
         return None
@@ -1882,7 +1882,7 @@ def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
                 "User-Agent": "proxyip/quality 1.0",
             },
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with deadline_open(req, 10) as resp:
             data = json.loads(resp.read().decode("utf-8"))["data"]
         return {
             "service": "abuseipdb",
@@ -1896,7 +1896,7 @@ def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
     req = urllib.request.Request(
         url, headers={"User-Agent": "proxyip/quality 1.0"}
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with deadline_open(req, 10) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return {
         "service": "ipqs",
