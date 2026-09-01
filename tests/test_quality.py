@@ -584,6 +584,63 @@ class TestReputation(unittest.TestCase):
                 qc.STATIC_LIST_SCORES[name])
             self.assertIsNone(qc.source_score(name, {}))
 
+    def test_new_rep_static_sources_registered(self):
+        """c2_tracker/botscout/greensnow/sslproxies/socks_proxy 默认启用。"""
+        for name in ("c2_tracker", "botscout", "greensnow", "sslproxies",
+                     "socks_proxy"):
+            self.assertIn(name, qc.DEFAULT_REP_SOURCES)
+            self.assertIn(name, qc.REPUTATION_WEIGHTS)
+            self.assertIn(name, qc.STATIC_LIST_SCORES)
+            self.assertGreater(qc.REPUTATION_WEIGHTS[name], 0)
+
+    def test_new_rep_abuse_sources_vote_abuse(self):
+        """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
+        for name in ("c2_tracker", "botscout", "greensnow"):
+            self.assertEqual(
+                qr._flag_opinions(name, {"is_abuse": True}), {"abuse": True})
+            self.assertEqual(
+                qc.source_score(name, {"is_abuse": True}),
+                qc.STATIC_LIST_SCORES[name])
+            self.assertIsNone(qc.source_score(name, {}))
+
+    def test_new_rep_proxy_sources_vote_proxy(self):
+        """sslproxies/socks_proxy 命中 → proxy 维度（独立代理族证据）。"""
+        for name in ("sslproxies", "socks_proxy"):
+            self.assertEqual(
+                qr._flag_opinions(name, {"is_proxy": True}), {"proxy": True})
+            self.assertEqual(
+                qc.source_score(name, {"is_proxy": True}),
+                qc.STATIC_LIST_SCORES[name])
+            self.assertIsNone(qc.source_score(name, {}))
+
+    def test_fetch_static_lists_new_sources_wired2(self):
+        """fetch_static_lists 能取到 5 个新静态源。"""
+        def _set(items):
+            return qr.IpSet(items)
+        with unittest.mock.patch.object(
+                qr, "fetch_c2_tracker",
+                new=unittest.mock.AsyncMock(side_effect=lambda: _set(["10.0.0.1"]))), \
+             unittest.mock.patch.object(
+                qr, "fetch_botscout",
+                new=unittest.mock.AsyncMock(side_effect=lambda: _set(["10.0.0.2"]))), \
+             unittest.mock.patch.object(
+                qr, "fetch_greensnow",
+                new=unittest.mock.AsyncMock(side_effect=lambda: _set(["10.0.0.3"]))), \
+             unittest.mock.patch.object(
+                qr, "fetch_sslproxies",
+                new=unittest.mock.AsyncMock(side_effect=lambda: _set(["10.0.0.4"]))), \
+             unittest.mock.patch.object(
+                qr, "fetch_socks_proxy",
+                new=unittest.mock.AsyncMock(side_effect=lambda: _set(["10.0.0.5"]))):
+            out = asyncio.get_event_loop().run_until_complete(
+                qr.fetch_static_lists(["c2_tracker", "botscout", "greensnow",
+                                       "sslproxies", "socks_proxy"]))
+        self.assertIn("10.0.0.1", out["c2_tracker"])
+        self.assertIn("10.0.0.2", out["botscout"])
+        self.assertIn("10.0.0.3", out["greensnow"])
+        self.assertIn("10.0.0.4", out["sslproxies"])
+        self.assertIn("10.0.0.5", out["socks_proxy"])
+
     def test_cache_cap_tiles(self):
         """REP_CACHE_MAX 裁剪逻辑：超阈值仅保留最新 REP_CACHE_MAX 项。"""
         import time
