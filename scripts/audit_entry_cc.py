@@ -40,7 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from common import DATA_DIR, line_to_key, parse_ltd_line, read_json, build_exit_cc_map
+from common import DATA_DIR, line_to_key, parse_ltd_line, read_json, build_exit_cc_map, deadline_open
 
 IPAPI_BATCH_URL = "http://ip-api.com/batch"
 IPAPI_BATCH_SIZE = 100
@@ -79,7 +79,7 @@ def lookup_geo(
                              "User-Agent": "proxyip-audit/1.0"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with deadline_open(req, timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8", errors="replace"))
                 break
             except Exception as exc:  # noqa: BLE001

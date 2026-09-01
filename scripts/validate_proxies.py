@@ -58,6 +58,7 @@ from common import (
     CHINA_FILE,
     _rewrite_cn_speed,
     cn_display_ms,
+    deadline_open,
     EXIT_FAMILY_FILE,
     EXT_API_SOURCES,
     EXT_CHECK_FILE,
@@ -185,7 +186,7 @@ async def check_one_ext_api(
             url,
             headers={"User-Agent": "proxyip-checker/1.0"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with deadline_open(req, timeout) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
 
     try:

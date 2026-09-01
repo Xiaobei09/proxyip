@@ -228,7 +228,7 @@ async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
             url,
             headers={"User-Agent": "proxyip-checker/1.0"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with deadline_open(req, timeout) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
 
     try:
@@ -307,7 +307,7 @@ def ipapi_batch_sync(ips: list) -> list:
             "User-Agent": "proxyip/quality 1.0",
         },
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with deadline_open(req, 15) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -316,7 +316,7 @@ def ipapi_get_sync(ip: str) -> dict:
         IPAPI_GET_URL.format(ip=ip) + "?fields=" + IPAPI_FIELDS,
         headers={"User-Agent": "proxyip/quality 1.0"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with deadline_open(req, 10) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 

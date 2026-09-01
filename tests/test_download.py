@@ -975,3 +975,30 @@ class TestMirrorUrls(unittest.TestCase):
         # 整体截止必须兜住 read() 无限阻塞，而不依赖 socket 超时（0.3s + 缓冲）。
         # 3 个 mirror candidate 每个 ~1.3s 截止，总耗时须远小于"无限挂死"。
         self.assertLess(elapsed, 8.0)
+
+    def test_deadline_open_context_manager_caps_hang(self):
+        import common as _c
+
+        class NeverEndingResp:
+            def read(self):
+                while True:
+                    time.sleep(0.05)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            return NeverEndingResp()
+
+        with unittest.mock.patch.object(_c.urllib.request, "urlopen", fake_urlopen):
+            t0 = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                with _c.deadline_open(
+                    _c.urllib.request.Request("https://zip.example/all.json"), 0.3
+                ) as resp:
+                    resp.read()
+            elapsed = time.monotonic() - t0
+        self.assertLess(elapsed, 4.0)
