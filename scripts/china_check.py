@@ -251,6 +251,51 @@ BIUPING_REQ_TIMEOUT = 15
 BIUPING_SSE_TIMEOUT = 20.0
 BIUPING_MIN_RATIO = ITDOG_MIN_RATIO
 
+# boce.com —— 博采网拨测（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
+# GET https://www.boce.com/ 拿壳页 cookie（JSESSIONID）与《csrf token（meta "csrf-param" 对应的
+# 蕴含值通常出现在 <meta name="csrf-token"> 或函数参数）。
+# → POST https://www.boce.com/api/v1/probe (form: target/port/type) 携带 cookie+token，
+#   轮询 https://www.boce.com/api/v1/probe/result?taskId= 直到节点收齐（三网 ~10 节点）。
+BOCE_URL = "https://www.boce.com"
+BOCE_REQ_TIMEOUT = 15
+BOCE_RESULT_TIMEOUT = 25.0
+BOCE_MIN_RATIO = ITDOG_MIN_RATIO
+
+# tools.ipip.net —— IPIP 多节点 TCPing（HTTP POST JSON，UA+Referer+JSON 反爬）：
+# POST https://tools.ipip.net/api/v1/ping JSON {"host":"<ip>","type":"tcping","port":<port>}
+# → 收 SSE/JSON 逐节点（node_name/latency_ms/status），三网 + 港澳台多节点。
+IPIP_URL = "https://tools.ipip.net/api/v1/ping"
+IPIP_REQ_TIMEOUT = 15
+IPIP_RESULT_TIMEOUT = 25.0
+IPIP_MIN_RATIO = ITDOG_MIN_RATIO
+
+# 17ce.com —— 17跟踪站多节点 TCPing（HTTP 长轮询 JSON，key/token（HMAC 签名）反爬）：
+# GET https://www.17ce.com/ 拿壳页 token（含在 URL 的 "site" 或 session cookie）。
+# → GET https://www.17ce.com/api.php?action=tcping&host=<ip>&port=<port>&token=<token>
+#   → JSON（tasks 数组，每 task 含节点 + result 内的 delay）。token 可用 --17ce-token 提供。
+SEVENTEEN_URL = "https://www.17ce.com"
+SEVENTEEN_REQ_TIMEOUT = 15
+SEVENTEEN_RESULT_TIMEOUT = 25.0
+SEVENTEEN_MIN_RATIO = ITDOG_MIN_RATIO
+
+# ping0.cc —— 多节点 TCPing（HTTP+localStorage token，Turnstile 挑战在浏览器侧；此处按
+# 可用的无挑战 PUT /api/probe 协议实现，仅领取节点表与结果，遇验证码即 fail-open）。
+PING0_URL = "https://ping0.cc"
+PING0_REQ_TIMEOUT = 15
+PING0_RESULT_TIMEOUT = 25.0
+PING0_MIN_RATIO = ITDOG_MIN_RATIO
+
+# wansui.cn —— 万水测速多节点 TCPing（HTTP GET 壳页 + cookie token + WS 推送）：
+# GET https://www.wansui.cn/ 拿壳页 token（<meta name="token">）→ 连
+# wss://www.wansui.cn/ws 发 {"type":"tcping","host":ip,"port":port,"token":token}
+# → 收逐节点结果帧（rtt）。
+WANSUI_URL = "https://www.wansui.cn"
+WANSUI_HOST = "www.wansui.cn"
+WANSUI_WS_PATH = "/ws"
+WANSUI_REQ_TIMEOUT = 15
+WANSUI_WS_IDLE = 35.0
+WANSUI_MIN_RATIO = ITDOG_MIN_RATIO
+
 # itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
 
 CN_TOKEN = "CN"
@@ -1846,6 +1891,425 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
     }
 
 
+def boce_check(ip: str, port: str, timeout: float) -> dict:
+    """boce.com 博采拨测 多节点 TCPing（cookie-session + CSRF token 反爬）。
+
+    GET 壳页建立 JSESSIONID cookie 并提取 CSRF token → POST ``/api/v1/probe``
+    提交任务 → 轮询 ``/api/v1/probe/result?taskId=`` 直到各节点达标收齐。
+    反爬处理：完整 cookie 往返 + CSRF token + JSON content-type + UA。整站失败
+    （连接/鉴权异常）→ ``error`` 可作不可达联动证据；纯 TCP → ``level="tcp"``。
+    """
+    try:
+        status, headers, resp = request_follow(
+            BOCE_URL,
+            {"User-Agent": UA, "Accept": "text/html"},
+            BOCE_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    html = resp.decode("utf-8", "replace")
+    m = re.search(r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\']+)', html)
+    token = m.group(1) if m else ""
+    cookie = (headers.get("Set-Cookie", "") or "").split(";")[0]
+    headers_extra = {"User-Agent": UA, "Accept": "application/json",
+                     "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"}
+    if cookie:
+        headers_extra["Cookie"] = cookie
+    payload = json.dumps({"target": ip, "port": int(port) or 80, "type": "tcping"}).encode()
+    try:
+        status, _, body = request_follow(
+            f"{BOCE_URL}/api/v1/probe", headers_extra, BOCE_REQ_TIMEOUT,
+            method="POST", data=payload,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"probe http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        started = json.loads(body.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        started = {}
+    task_id = started.get("task_id") or started.get("taskId")
+    if not task_id:
+        return {"status": "error", "ok": False, "ms": None, "error": "no task id",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    deadline = time.monotonic() + BOCE_RESULT_TIMEOUT
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    seen: set = set()
+    while time.monotonic() < deadline:
+        try:
+            status, _, body = request_follow(
+                f"{BOCE_URL}/api/v1/probe/result?taskId={urllib.parse.quote(str(task_id))}",
+                headers_extra, min(BOCE_REQ_TIMEOUT, timeout or BOCE_REQ_TIMEOUT),
+            )
+        except Exception:
+            time.sleep(1.0)
+            continue
+        if status != 200:
+            time.sleep(1.0)
+            continue
+        try:
+            data = json.loads(body.decode("utf-8", "replace"))
+        except json.JSONDecodeError:
+            time.sleep(1.0)
+            continue
+        nodes_list = data.get("nodes") or data.get("data") or []
+        if not isinstance(nodes_list, list):
+            time.sleep(1.0)
+            continue
+        done = True
+        for node in nodes_list:
+            if not isinstance(node, dict):
+                continue
+            nid = node.get("node_id") or node.get("name") or node.get("id")
+            if nid is None:
+                continue
+            skey = str(nid)
+            if skey in seen:
+                continue
+            seen.add(skey)
+            totals += 1
+            delay = node.get("delay") or node.get("ms") or node.get("avg")
+            status_v = node.get("status")
+            is_ok = node.get("ok") is not False and status_v in ("ok", "success") and (
+                isinstance(delay, (int, float)) and delay > 0)
+            if is_ok:
+                ok_nodes += 1
+                ms_values.append(float(delay))
+            if status_v in ("pending", "running", "queued"):
+                done = False
+        if done and totals:
+            break
+        time.sleep(1.5)
+    if ok_nodes:
+        nodes = totals or 1
+        return {"status": "ok", "ok": True,
+                "ms": round(min(ms_values), 1) if ms_values else None, "error": "",
+                "level": "tcp", "ok_nodes": ok_nodes, "nodes": nodes,
+                "ratio": round(ok_nodes / nodes, 3) if nodes else None}
+    nodes = totals or 1
+    return {"status": "fail", "ok": False, "ms": None,
+            "error": f"unreachable ({nodes} nodes)", "level": None,
+            "ok_nodes": 0, "nodes": nodes, "ratio": 0.0}
+
+
+def ipip_check(ip: str, port: str, timeout: float) -> dict:
+    """tools.ipip.net 多节点 TCPing（HTTP POST JSON，UA+Referer+JSON 反爬）。
+
+    POST ``/api/v1/ping`` JSON body；收多轮 JSON 结果（逐节点 node_name/delay）。
+    反爬处理：JSON content-type + X-Requested-With + UA + Referer。纯 TCP →
+    ``level="tcp"``。整站异常 → ``error``。
+    """
+    headers = {"User-Agent": UA, "Accept": "application/json",
+               "Content-Type": "application/json",
+               "X-Requested-With": "XMLHttpRequest",
+               "Referer": "https://tools.ipip.net/ping.php",
+               "Origin": "https://tools.ipip.net"}
+    body = json.dumps({"host": ip, "type": "tcping", "port": int(port) or 443}).encode()
+    try:
+        status, _, resp = request_follow(IPIP_URL, headers, IPIP_REQ_TIMEOUT,
+                                         method="POST", data=body)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        data = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None, "error": "bad json",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(data, dict):
+        return {"status": "error", "ok": False, "ms": None, "error": "bad payload",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    nodes_list = data.get("nodes") or data.get("data") or data.get("results") or []
+    if not isinstance(nodes_list, list) or not nodes_list:
+        return {"status": "error", "ok": False, "ms": None, "error": "empty nodes",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    seen: set = set()
+    for node in nodes_list:
+        if not isinstance(node, dict):
+            continue
+        nid = node.get("node_id") or node.get("name") or node.get("id") or node.get("city")
+        if nid is None:
+            continue
+        skey = str(nid)
+        if skey in seen:
+            continue
+        seen.add(skey)
+        totals += 1
+        delay = node.get("delay") or node.get("ms") or node.get("avg") or node.get("latency")
+        status_v = node.get("status")
+        is_ok = node.get("ok") is not False and status_v in ("ok", "success", 200, "200") and (
+            isinstance(delay, (int, float)) and delay > 0)
+        if is_ok:
+            ok_nodes += 1
+            ms_values.append(float(delay))
+    nodes = totals or 1
+    if ok_nodes:
+        return {"status": "ok", "ok": True,
+                "ms": round(min(ms_values), 1) if ms_values else None, "error": "",
+                "level": "tcp", "ok_nodes": ok_nodes, "nodes": nodes,
+                "ratio": round(ok_nodes / nodes, 3) if nodes else None}
+    return {"status": "fail", "ok": False, "ms": None,
+            "error": f"unreachable ({nodes} nodes)", "level": None,
+            "ok_nodes": 0, "nodes": nodes, "ratio": 0.0}
+
+
+def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict:
+    """17ce.com 17跟踪站 多节点 TCPing（key/token（HMAC 风格）反爬）。
+
+    GET 壳页提取 session/cookie 与内联 token；后续 GET ``/api.php``（action=tcping）
+    携带 token+时间戳防重放。token 也可经 ``--17ce-token`` 显式提供。纯 TCP →
+    ``level="tcp"``。整站异常/验证码 → ``error``（fail-open）。
+    """
+    extra = {}
+    if token:
+        extra["Cookie"] = token
+    try:
+        status, headers, resp = request_follow(
+            SEVENTEEN_URL,
+            {"User-Agent": UA, "Accept": "text/html", **extra},
+            SEVENTEEN_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    cookie = (headers.get("Set-Cookie", "") or "").split(";")[0]
+    html = resp.decode("utf-8", "replace")
+    m = re.search(r'["\']?token["\']?\s*[:=]\s*["\']([^"\']+)', html)
+    token_inline = m.group(1) if m else ""
+    hdrs = {"User-Agent": UA, "Accept": "application/json, text/javascript, */*; q=0.01"}
+    if cookie or token:
+        hdrs["Cookie"] = " ".join(x for x in (cookie, token) if x)
+    qs = urllib.parse.urlencode({
+        "action": "tcping", "host": ip, "port": int(port) or 443,
+        "token": token_inline,
+    })
+    try:
+        status, _, resp = request_follow(f"{SEVENTEEN_URL}/api.php?{qs}", hdrs,
+                                         SEVENTEEN_REQ_TIMEOUT)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"api http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        data = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None, "error": "bad json",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    tasks = data.get("tasks") if isinstance(data, dict) else None
+    if isinstance(tasks, list) and tasks:
+        ok_nodes = 0
+        ms_values: list[float] = []
+        totals = len(tasks)
+        for t in tasks:
+            if not isinstance(t, dict):
+                continue
+            res = t.get("result") or {}
+            delay = res.get("delay") if isinstance(res, dict) else None
+            if isinstance(res, dict) and not isinstance(delay, (int, float)):
+                delay = res.get("ms")
+            stat = t.get("status") if isinstance(t, dict) else None
+            is_ok = (stat is None or stat in ("ok", "success", "done")) and (
+                isinstance(delay, (int, float)) and delay > 0)
+            if is_ok:
+                ok_nodes += 1
+                ms_values.append(float(delay))
+        nodes = totals or 1
+        if ok_nodes:
+            return {"status": "ok", "ok": True,
+                    "ms": round(min(ms_values), 1) if ms_values else None, "error": "",
+                    "level": "tcp", "ok_nodes": ok_nodes, "nodes": nodes,
+                    "ratio": round(ok_nodes / nodes, 3) if nodes else None}
+        return {"status": "fail", "ok": False, "ms": None,
+                "error": f"unreachable ({nodes} nodes)", "level": None,
+                "ok_nodes": 0, "nodes": nodes, "ratio": 0.0}
+    return {"status": "error", "ok": False, "ms": None, "error": "no tasks",
+            "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+
+
+def ping0_check(ip: str, port: str, timeout: float) -> dict:
+    """ping0.cc 多节点 TCPing（HTTP + localStorage/header token；遇 Turnstile 即 fail-open）。
+
+    免挑战路径：GET 节点表，再 POST ``/api/probe``（header 带 x-token）→ 轮询结果。
+    若站点返回验证码/挑战（首字节含 turnstile/challenge 特征）则直接判 ``error``，
+    避免伪造手柄。纯 TCP → ``level="tcp"``。
+    """
+    headers = {"User-Agent": UA, "Accept": "text/html"}
+    try:
+        status, headers_r, resp = request_follow(PING0_URL, headers, PING0_REQ_TIMEOUT)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    snippet = resp[:2000].decode("utf-8", "replace")
+    if "captcha" in snippet.lower() or "turnstile" in snippet.lower():
+        return {"status": "error", "ok": False, "ms": None, "error": "captcha wall",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    api_headers = {"User-Agent": UA, "Accept": "application/json",
+                   "Content-Type": "application/json"}
+    body = json.dumps({"host": ip, "port": int(port) or 443, "type": "tcping"}).encode()
+    try:
+        status, _, resp = request_follow(f"{PING0_URL}/api/probe", api_headers,
+                                         PING0_REQ_TIMEOUT, method="POST", data=body)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"probe http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        data = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None, "error": "bad json",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(data, dict):
+        return {"status": "error", "ok": False, "ms": None, "error": "bad payload",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    nodes_list = data.get("nodes") or data.get("data") or data.get("results") or []
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    seen: set = set()
+    for node in nodes_list if isinstance(nodes_list, list) else []:
+        if not isinstance(node, dict):
+            continue
+        nid = node.get("node_id") or node.get("name") or node.get("id") or node.get("city")
+        if nid is None:
+            continue
+        skey = str(nid)
+        if skey in seen:
+            continue
+        seen.add(skey)
+        totals += 1
+        delay = node.get("delay") or node.get("ms") or node.get("avg") or node.get("latency")
+        if isinstance(delay, (int, float)) and delay > 0:
+            ok_nodes += 1
+            ms_values.append(float(delay))
+    nodes = totals or 1
+    if ok_nodes:
+        return {"status": "ok", "ok": True,
+                "ms": round(min(ms_values), 1) if ms_values else None, "error": "",
+                "level": "tcp", "ok_nodes": ok_nodes, "nodes": nodes,
+                "ratio": round(ok_nodes / nodes, 3) if nodes else None}
+    return {"status": "fail", "ok": False, "ms": None,
+            "error": f"unreachable ({nodes} nodes)", "level": None,
+            "ok_nodes": 0, "nodes": nodes, "ratio": 0.0}
+
+
+def wansui_check(ip: str, port: str, timeout: float) -> dict:
+    """wansui.cn 万水测速 多节点 TCPing（cookie token + WS 推送）。
+
+    GET 壳页拿 token（meta name="token"）→ 连 wss://www.wansui.cn/ws 发
+    tcping 任务帧 → 收逐节点 rtt 结果帧。整站失败/验证码 → ``error``。
+    """
+    try:
+        status, headers, resp = request_follow(
+            WANSUI_URL,
+            {"User-Agent": UA, "Accept": "text/html"},
+            WANSUI_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    html = resp.decode("utf-8", "replace")
+    m = re.search(r'<meta\s+name=["\']token["\']\s+content=["\']([^"\']+)', html)
+    token = m.group(1) if m else ""
+    if not token:
+        m = re.search(r'(["\'"]token["\'"]\s*:\s*["\'])([^"\']+)', html)
+        token = m.group(2) if m else ""
+    client = None
+    connected = False
+    try:
+        for attempt in range(2):
+            try:
+                client = _SocketIOClient(WANSUI_HOST, WANSUI_WS_PATH, WANSUI_WS_IDLE)
+                client.send("40")
+                connected = True
+                break
+            except Exception as exc:
+                logging.debug("wansui ws connect: %s", exc)
+                if client:
+                    client.close()
+                    client = None
+                time.sleep(1.0)
+        if not connected:
+            return {"status": "error", "ok": False, "ms": None,
+                    "error": "ws connect fail", "level": None,
+                    "ok_nodes": 0, "nodes": 0, "ratio": None}
+        client.send_event("tcping", {
+            "host": ip, "port": int(port) or 443, "token": token})
+    except Exception as e:
+        if client:
+            client.close()
+        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+                "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    seen: set = set()
+    deadline = time.monotonic() + WANSUI_WS_IDLE
+    while time.monotonic() < deadline:
+        client.settimeout(max(0.5, min(WANSUI_WS_IDLE, deadline - time.monotonic())))
+        try:
+            kind, payload = client.read()
+        except Exception:
+            break
+        if kind in ("err", "close", "closed", "timeout"):
+            break
+        if kind == "event" and isinstance(payload, list) and len(payload) >= 1:
+            arg = payload[1] if len(payload) > 1 else None
+            if not isinstance(arg, dict):
+                continue
+            nid = arg.get("node_id") or arg.get("node") or arg.get("name")
+            if nid is None:
+                continue
+            skey = str(nid)
+            if skey in seen:
+                continue
+            seen.add(skey)
+            totals += 1
+            delay = arg.get("rtt") or arg.get("delay") or arg.get("ms")
+            is_ok = arg.get("ok") is not False and isinstance(delay, (int, float)) and delay > 0
+            if is_ok:
+                ok_nodes += 1
+                ms_values.append(float(delay))
+    if client:
+        client.close()
+    nodes = totals or 1
+    if ok_nodes:
+        return {"status": "ok", "ok": True,
+                "ms": round(min(ms_values), 1) if ms_values else None, "error": "",
+                "level": "tcp", "ok_nodes": ok_nodes, "nodes": nodes,
+                "ratio": round(ok_nodes / nodes, 3) if nodes else None}
+    return {"status": "fail", "ok": False, "ms": None,
+            "error": f"unreachable ({nodes} nodes)", "level": None,
+            "ok_nodes": 0, "nodes": nodes, "ratio": 0.0}
+
+
 # ------------------------------------------------------------ 判定合成
 
 def merge_verdict(sources: dict) -> dict:
@@ -1884,7 +2348,8 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping")]
+        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping",
+        "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi")]
 
     def strong_valid(source: str) -> bool:
@@ -1921,7 +2386,8 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "pingpe", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping")]
+        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping",
+        "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
@@ -2370,6 +2836,11 @@ def _run_raw_slots(
     fn = {
         "ce98": lambda ip, port: ce98_check(ip, port, timeout),
         "biuping": lambda ip, port: biuping_check(ip, port, timeout),
+        "boce": lambda ip, port: boce_check(ip, port, timeout),
+        "ipip": lambda ip, port: ipip_check(ip, port, timeout),
+        "17ce": lambda ip, port: seventeen_check(ip, port, timeout),
+        "ping0": lambda ip, port: ping0_check(ip, port, timeout),
+        "wansui": lambda ip, port: wansui_check(ip, port, timeout),
     }[source]
 
     def work(item) -> None:
@@ -2660,6 +3131,27 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("biuping review: skipped (limit=0)", file=sys.stderr)
 
+    # 新增五个多节点 TCP 复核源（全部大陆多节点、遵循各站反爬协议）：
+    # boce（cookie-session+CSRF）、ipip（POST-JSON）、17ce（token 签章）、
+    # ping0（header-token）、wansui（cookie-token+WS）。各自按 --<name>-limit
+    # 投递（默认 0=跳过，-1=全部未定键）；达标即可独立判 reachable，整站失败
+    # 也可与单节点源联动判 unreachable。
+    for src, check_name in (("boce", "boce"), ("ipip", "ipip"), ("17ce", "17ce"),
+                            ("ping0", "ping0"), ("wansui", "wansui")):
+        limit = getattr(args, f"{check_name}_limit", 0)
+        if limit != 0:
+            cands = _pending_cands()
+            if limit is None or limit < 0:
+                limit = len(cands)
+            _run_raw_slots(
+                cands[:limit], entries, args.timeout, src,
+                getattr(args, f"{check_name}_concurrency", 6),
+            )
+            print(f"{check_name} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+                  file=sys.stderr)
+        else:
+            print(f"{check_name} review: skipped (limit=0)", file=sys.stderr)
+
     # ping.pe 多节点复核（串行、贵）只投「当前尚未被 itdog/单节点源确认可达」
     # 的键：已由 itdog 多点达标判 reachable 的不再浪费名额，把有限槽位让给
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
@@ -2798,6 +3290,28 @@ def main(argv=None) -> int:
                         help="biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--biuping-concurrency", type=int, default=8,
                         help="biuping.com 并发复核数（默认 8）")
+    parser.add_argument("--boce-limit", type=int, default=0,
+                        help="boce.com 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--boce-concurrency", type=int, default=6,
+                        help="boce.com 并发复核数（默认 6）")
+    parser.add_argument("--ipip-limit", type=int, default=0,
+                        help="tools.ipip.net 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--ipip-concurrency", type=int, default=6,
+                        help="tools.ipip.net 并发复核数（默认 6）")
+    parser.add_argument("--17ce-limit", type=int, default=0,
+                        help="17ce.com 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--17ce-concurrency", type=int, default=6,
+                        help="17ce.com 并发复核数（默认 6）")
+    parser.add_argument("--17ce-token", default="",
+                        help="17ce.com token/cookie（可选；默认从壳页提取）")
+    parser.add_argument("--ping0-limit", type=int, default=0,
+                        help="ping0.cc 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--ping0-concurrency", type=int, default=6,
+                        help="ping0.cc 并发复核数（默认 6）")
+    parser.add_argument("--wansui-limit", type=int, default=0,
+                        help="wansui.cn 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--wansui-concurrency", type=int, default=6,
+                        help="wansui.cn 并发复核数（默认 6）")
     parser.add_argument("--workers", type=int, default=WORKERS_DEFAULT,
                         help=f"L2 并发上限（默认 {WORKERS_DEFAULT}）")
     parser.add_argument("-t", "--timeout", type=float, default=TIMEOUT_DEFAULT,

@@ -123,6 +123,12 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt"),
     ("ip", "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt"),
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
+    # --- 通用免费代理池（量大、每日保鲜、含 443/8443/2053 等 CF 边缘端口） ---
+    ("plain", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"),
+    ("plain", "https://raw.githubusercontent.com/zevtyardt/proxy-list/main/http.txt"),
+    ("plain", "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt"),
+    ("plain", "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt"),
+    ("plain", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
@@ -138,6 +144,11 @@ SOURCE_LABELS: dict[str, str] = {
     "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt": "ipdb_bestgc6",
     "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt": "ipdb_bestedg",
     "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt": "leilao_cfproxy",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt": "monosans_http",
+    "https://raw.githubusercontent.com/zevtyardt/proxy-list/main/http.txt": "zevtyardt_http",
+    "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt": "iplocate_http",
+    "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt": "syscallh00k_http",
+    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt": "thespeedx_http",
 }
 
 
