@@ -2108,5 +2108,198 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertNotIn("fallback", entries["a:443#US"])
 
 
+class TestCe98Source(unittest.TestCase):
+    """98ce.com socket.io-WS 适配器单测（mock _SocketIOClient，不触网）。"""
+
+    class _FakeSIO:
+        def __init__(self, frames):
+            self._frames = list(frames)
+            self.sent = []
+            self.closed = False
+
+        def settimeout(self, t):
+            pass
+
+        def send(self, text):
+            self.sent.append(text)
+
+        def send_event(self, name, arg):
+            self.sent.append((name, arg))
+
+        def read(self):
+            if self._frames:
+                return self._frames.pop(0)
+            return "timeout", None
+
+        def close(self):
+            self.closed = True
+
+    def _seed(self, frames, html=None):
+        if html is None:
+            html = ('<html><script id="continuous-tcping-nodes-data">'
+                    '[{"name":"上海电信","location":"上海市"},'
+                    '{"name":"广州腾讯云","location":"广东省"}]'
+                    '</script></html>').encode()
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, html)) as mr, \
+             mock.patch.object(cc, "_SocketIOClient",
+                               return_value=self._FakeSIO(frames)):
+            return cc.ce98_check("1.2.3.4", "443", 10)
+
+    def test_ce98_all_ok(self):
+        frames = [
+            ("open", {"sid": "x"}),
+            ("ack", {"sid": "y"}),
+            ("event", ["continuous_tcping_started", {"job_id": "j1"}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "上海电信", "ok": True, "loss": 0,
+                        "latest": 5.0, "average": 5.0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "广州腾讯云", "ok": True, "loss": 0,
+                        "latest": 8.0, "average": 8.0}]),
+        ]
+        out = self._seed(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["nodes"], 2)
+        self.assertEqual(out["ms"], 5.0)
+        self.assertEqual(out["level"], "tcp")
+
+    def test_ce98_mixed_with_lost(self):
+        frames = [
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "上海", "ok": True, "loss": 0,
+                        "latest": 5.0, "average": 5.0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "广州", "ok": False, "loss": 1,
+                        "latest": 0, "average": 0}]),
+        ]
+        out = self._seed(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 1)
+        self.assertEqual(out["nodes"], 2)
+        self.assertEqual(out["ratio"], 0.5)
+
+    def test_ce98_all_fail(self):
+        frames = [
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "上海", "ok": False, "latest": 0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "广州", "ok": False, "latest": 0}]),
+        ]
+        out = self._seed(frames)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+
+    def test_ce98_no_nodes_data(self):
+        frames = []
+        out = self._seed(frames, html=b"<html>no nodes</html>")
+        self.assertEqual(out["status"], "error")
+
+
+class TestBiupingSource(unittest.TestCase):
+    """biuping.com SSE 适配器单测（mock request_follow + urlopen，不触网）。"""
+
+    def _sse(self, blocks):
+        out = []
+        for b in blocks:
+            out.append("event: node\ndata: " + json.dumps(b) + "\n\n")
+        return "".join(out).encode()
+
+    def _seed(self, sse_body, page_html=None):
+        if page_html is None:
+            page_html = ('<html><meta name="csrf-token" content="tok123">'
+                         "</html>").encode()
+
+        class _Ctx:
+            def __init__(self):
+                self._done = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n=-1):
+                if self._done:
+                    return b""
+                self._done = True
+                return sse_body
+
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, page_html)) as mr, \
+             mock.patch.object(cc.urllib.request, "urlopen",
+                               return_value=_Ctx()):
+            return cc.biuping_check("1.2.3.4", "443", 10)
+
+    def test_biuping_all_ok(self):
+        sse = self._sse([
+            {"ok": True, "completed": 1, "total": 2, "results": [
+                {"node_id": 1, "isp": "电信", "status": "ok", "latest": 4.8}]},
+            {"ok": True, "completed": 2, "total": 2, "results": [
+                {"node_id": 45, "isp": "联通", "status": "ok", "latest": 16.9}]},
+        ])
+        out = self._seed(sse)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["nodes"], 2)
+        self.assertEqual(out["ms"], 4.8)
+        self.assertEqual(out["level"], "tcp")
+
+    def test_biuping_mixed(self):
+        sse = self._sse([
+            {"ok": True, "results": [
+                {"node_id": 1, "isp": "电信", "status": "ok", "latest": 5.0},
+                {"node_id": 1, "isp": "联通", "status": "timeout", "latest": None}]},
+            {"ok": True, "results": [
+                {"node_id": 1, "isp": "移动", "status": "ok", "latest": 9.0}]},
+        ])
+        out = self._seed(sse)
+        # 1:电信、1:联通、1:移动 三个独立节点键
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["nodes"], 3)
+        self.assertEqual(out["ratio"], round(2 / 3, 3))
+
+    def test_biuping_no_token(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, b"<html>no meta</html>")):
+            out = cc.biuping_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "error")
+
+
+class TestNewMultiSourcesMergeVerdict(unittest.TestCase):
+    """ce98 / biuping 并入多节点源合成判定（level/ratio 规则）。"""
+
+    def _ok(self, ok_nodes, nodes, ratio):
+        return {"status": "ok", "ok": True, "ms": 30, "level": "tcp",
+                "ok_nodes": ok_nodes, "nodes": nodes, "ratio": ratio}
+
+    def test_ce98_strong_reachable(self):
+        sources = {"ce98": self._ok(35, 35, 1.0)}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
+
+    def test_ce98_degenerate_not_strong(self):
+        sources = {"ce98": self._ok(1, 35, 0.029)}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_biuping_strong_reachable(self):
+        sources = {"biuping": self._ok(39, 39, 1.0)}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
+
+    def test_multi_failed_with_single_unreachable(self):
+        """ce98+biuping 都 fail 且 2 单节点源 fail → unreachable。"""
+        sources = {
+            "ce98": {"status": "fail", "ok": False, "ok_nodes": 0,
+                     "nodes": 35, "ratio": 0.0},
+            "biuping": {"status": "fail", "ok": False, "ok_nodes": 0,
+                        "nodes": 39, "ratio": 0.0},
+            "xxapi": {"status": "fail", "ok": False},
+            "jkapi": {"status": "fail", "ok": False},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+
 if __name__ == "__main__":
     unittest.main()

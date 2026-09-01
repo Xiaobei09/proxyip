@@ -30,18 +30,21 @@
   `xxapi.cn`（北京节点，免 key）+ `jkapi.com/zz_tcping`（浙江宁波电信，
   免 key）——两只免额单节点源独力即可双确认（single_ok≥2→reachable），
   check-host 的 250/h 配额不再是可达判定的瓶颈。
-- L3 多节点复核（串行小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
+- L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
-  判定）；可选 `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
+  判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
+  `biuping.com`（HTTP SSE，约 39 个 ISP×节点测量单元 TCPing，零 key）；可选
+  `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）；`ping.chinaz.com`
   （表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）；
   `tcping.cn`（PoW + 私有 WS 授权，纯 Python 无法收结果）。
 
 保守判定逻辑（merge_verdict）：
-  多节点源（pingpe/itdog/itdog_tcping/tcpping）任一 ok → reachable；
+  多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/antping/
+  tcpingcn/chinaz/ce98/biuping）任一 ok 且成功率达标 → reachable；
   单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   check_host / xxapi / jkapi 单节点源 ≥2 个 fail → unreachable；
-  pingpe/itdog fail + 任一其他源 fail → unreachable。
+  多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"。
 
 跨轮稳定性：写 china.json 前读取上一轮结果，per-key 维护连续可达轮数
@@ -60,6 +63,9 @@ import json
 import logging
 import os
 import re
+import socket
+import ssl
+import struct
 import sys
 import threading
 import time
@@ -217,6 +223,33 @@ CHINAZ_WS_IDLE = 40.0
 # 静默 SETTLE 秒后即收尾，把每键端到端从 ~41s 压到结果跨度 + SETTLE（~12s）。
 CHINAZ_WS_SETTLE = 6.0
 CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
+
+# 98ce.com —— 免费大陆多节点持续 TCPing（socket.io v4 over WebSocket，零 key）：
+# GET https://www.98ce.com/continuous-tcping 拿壳页（HTTPS + Referer/UA 通过 CF 反爬）,
+# 解析 <script id="continuous-tcping-nodes-data"> 得到 35 节点（34 个大陆各省运营商 + 1 海外）。
+# → 连 wss://www.98ce.com/socket.io/?EIO=4&transport=websocket（首帧 0{sid} ENGINE OPEN）
+# → 发文本 "40"（namespace CONNECT）→ 收 "40{sid}" ack
+# → 发 '42["start_continuous_tcping",{"target","port","dns_settings"}]'
+# → 收 42[...] continuous_tcping_node_update 逐节点 {node_name,ip_address,loss,latest,average,ok}
+#   （ok===true 且 loss<1 且 latest>0 → 该节点 TCP 可达；持续推送，采集所有 CN 节点后停）
+# → 发 '42["stop_continuous_tcping",{"job_id"}]'。socket.io 帧 = 数字前缀 + JSON。
+CE98_URL = "https://www.98ce.com/continuous-tcping"
+CE98_HOST = "www.98ce.com"
+CE98_WS_PATH = "/socket.io/?EIO=4&transport=websocket"
+CE98_WS_IDLE = 30.0
+CE98_REQ_TIMEOUT = 15
+CE98_MIN_RATIO = ITDOG_MIN_RATIO  # 三网多节点，≥50% 大陆节点 TCP 可达即判可达
+
+# biuping.com —— 免费大陆多节点 Ping/TCPing（纯 HTTP + SSE，零 key）：
+# GET https://www.biuping.com/ping/?target=<ip> 拿壳页，解析 <meta name="csrf-token">。
+# → GET https://www.biuping.com/probe_sse.php?target=<ip>[:port]&type=tcping&nodes=all
+#   &mode=single&_csrf=<token> → 收 SSE（event: init → 逐个 event: node，每 data 是 JSON：
+#   {"ok","latest","avg","packet_loss","point","status",...}）。节点池 21 个（三网 + 海外，
+#   CN 约 16 个）。OK/status 判定节点可达；纯 TCP → level="tcp"。
+BIUPING_URL = "https://www.biuping.com"
+BIUPING_REQ_TIMEOUT = 15
+BIUPING_SSE_TIMEOUT = 20.0
+BIUPING_MIN_RATIO = ITDOG_MIN_RATIO
 
 # itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
 
@@ -1407,6 +1440,412 @@ def chinaz_check(ip: str, port: str, timeout: float) -> dict:
     }
 
 
+# ------------------------------------------------------------ 98ce（socket.io）/ biuping（SSE）
+
+class _SocketIOClient:
+    """极简 socket.io v4 (ENGINE.IO EIO=4) over WebSocket 客户端（纯标准库）。
+
+    帧 = ENGINE 数字前缀 + 载荷：
+      - OPEN    "0{json sid}"
+      - CONNECT "40"（客户端发，命名空间 /）/ 服务端回 "40{json sid}"
+      - EVENT   "42[..]"（客户端发 = 发送事件，服务端发 = 推送事件）
+      - PING/PONG "2"/"3"（客户端必须回 PONG）
+    ``read()`` 返回 (kind, payload)：
+      - ("open",   {sid,...})           ENGINE OPEN
+      - ("ack",    {ns sid})            namespace CONNECT_ACK
+      - ("event",  [name, *args])       service 推送/服务端事件
+      - ("pong",   None) / ("ping", None)
+      - ("close"/"closed"/"err"/"timeout")
+    send 只发文本帧：``send(text)`` / ``send_event(name, arg)``（自动封装 42）。
+    """
+
+    def __init__(self, host: str, path: str, timeout: float):
+        import os as _os
+        ctx = ssl.create_default_context()
+        self.sock = socket.create_connection((host, 443), timeout=timeout)
+        self.sock = ctx.wrap_socket(self.sock, server_hostname=host)
+        key = base64.b64encode(_os.urandom(16)).decode()
+        req = (
+            f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+            f"Origin: https://{host}\r\nUser-Agent: {UA}\r\n\r\n"
+        )
+        self.sock.sendall(req.encode())
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise RuntimeError("closed during handshake")
+            data += chunk
+        head, _, self.buf = data.partition(b"\r\n\r\n")
+        if b"101" not in head.splitlines()[0]:
+            raise RuntimeError(head.splitlines()[0].decode("utf-8", "replace")[:80])
+        self.sock.settimeout(timeout)
+
+    def settimeout(self, timeout: float) -> None:
+        self.sock.settimeout(timeout)
+
+    def send(self, text: str) -> None:
+        payload = text.encode("utf-8")
+        mask = os.urandom(4)
+        ln = len(payload)
+        if ln < 126:
+            head = bytes([0x81, 0x80 | ln])
+        elif ln < 65536:
+            head = bytes([0x81, 0x80 | 126]) + struct.pack(">H", ln)
+        else:
+            head = bytes([0x81, 0x80 | 127]) + struct.pack(">Q", ln)
+        head += mask
+        self.sock.sendall(head + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    def send_event(self, name: str, arg) -> None:
+        self.send("42" + json.dumps([name, arg], ensure_ascii=False))
+
+    def _send_pong(self, payload: bytes) -> None:
+        """WS 级 PONG（opcode 10），回显 ping 帧载荷。"""
+        mask = os.urandom(4)
+        ln = len(payload)
+        if ln < 126:
+            head = bytes([0x8A, 0x80 | ln])
+        elif ln < 65536:
+            head = bytes([0x8A, 0x80 | 126]) + struct.pack(">H", ln)
+        else:
+            head = bytes([0x8A, 0x80 | 127]) + struct.pack(">Q", ln)
+        head += mask
+        self.sock.sendall(head + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    @staticmethod
+    def _decode(buf: bytes):
+        if len(buf) < 2:
+            return None, buf
+        b1, b2 = buf[0], buf[1]
+        opcode = b1 & 0x0F
+        ln = b2 & 0x7F
+        idx = 2
+        if ln == 126:
+            if len(buf) < 4:
+                return None, buf
+            ln = struct.unpack(">H", buf[2:4])[0]
+            idx = 4
+        elif ln == 127:
+            if len(buf) < 10:
+                return None, buf
+            ln = struct.unpack(">Q", buf[2:10])[0]
+            idx = 10
+        if b2 >> 7:
+            if len(buf) < idx + 4:
+                return None, buf
+            mask = buf[idx:idx + 4]
+            idx += 4
+        if len(buf) < idx + ln:
+            return None, buf
+        payload = buf[idx:idx + ln]
+        if b2 >> 7:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        return {"opcode": opcode, "payload": payload}, buf[idx + ln:]
+
+    def read(self):
+        """返回 (kind, payload)；持续组装分片帧，自动回 PONG。"""
+        while True:
+            try:
+                chunk = self.sock.recv(65536)
+            except socket.timeout:
+                return ("timeout", None)
+            except (ConnectionError, ssl.SSLError, OSError) as e:
+                return ("err", {"error": str(e)[:80]})
+            if not chunk:
+                return ("closed", None)
+            self.buf += chunk
+            while True:
+                frame, self.buf = self._decode(self.buf)
+                if frame is None:
+                    break
+                op = frame["opcode"]
+                if op == 8:
+                    return ("close", None)
+                if op == 9:
+                    self._send_pong(frame["payload"])
+                    continue
+                if op == 1:
+                    text = frame["payload"].decode("utf-8", "replace")
+                    if text == "2":
+                        self.send("3")
+                        continue
+                    if not text:
+                        continue
+                    if text[0] == "0":
+                        try:
+                            return ("open", json.loads(text[1:]))
+                        except (ValueError, IndexError):
+                            continue
+                    if text.startswith("40") and len(text) > 2:
+                        # 40{...} CONNECT_ACK（含命名空间 sid）或 40N 带 attrs
+                        try:
+                            return ("ack", json.loads(text[2:]))
+                        except ValueError:
+                            return ("ack", None)
+                    if text == "40":
+                        return ("ack", None)
+                    if text.startswith("42"):
+                        body = text[2:]
+                        try:
+                            ev = json.loads(body)
+                        except ValueError:
+                            continue
+                        if isinstance(ev, list) and len(ev) >= 1:
+                            return ("event", ev)
+                        continue
+                    if text == "41":
+                        return ("close", None)
+                    continue
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except Exception as exc:
+            logging.debug("socketio close: %s", exc)
+
+
+def ce98_check(ip: str, port: str, timeout: float) -> dict:
+    """98ce.com 单键多节点 TCP 探测（socket.io v4 over WebSocket，零 key）。
+
+    34 个大陆各省运营商节点对 ``ip:port`` 做持续 TCPing；节点 ``ok===true`` 且
+    ``loss<1`` 且 ``latest>0`` 判定可达。传输层 → ``level="tcp"``。``ms`` 取成功
+    节点最小 average。整站失败（连接/协议异常）→ ``error``，可作不可达联动证据。
+    """
+    try:
+        status, _, resp = request_follow(
+            CE98_URL,
+            {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml",
+             "Referer": "https://www.98ce.com/"},
+            CE98_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"page http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    html = resp.decode("utf-8", "replace")
+    m = re.search(
+        r'id="continuous-tcping-nodes-data"[^>]*>\s*(\[[\s\S]*?\])\s*</',
+        html,
+    )
+    if not m:
+        # 节点 JSON 中可能包含嵌套数组/省略；改按 script 内容整体 JSON.parse
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no nodes data", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        nodes = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad nodes json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(nodes, list) or not nodes:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "empty nodes", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    client = None
+    connected = False
+    try:
+        for attempt in range(2):
+            try:
+                client = _SocketIOClient(CE98_HOST, CE98_WS_PATH, CE98_WS_IDLE)
+                client.send("40")
+                connected = True
+                break
+            except Exception as exc:
+                logging.debug("ce98 ws connect: %s", exc)
+                if client:
+                    client.close()
+                    client = None
+                time.sleep(1.0)
+        if not connected:
+            return {"status": "error", "ok": False, "ms": None,
+                    "error": "ws connect fail", "level": None,
+                    "ok_nodes": 0, "nodes": 0, "ratio": None}
+        client.send_event("start_continuous_tcping", {
+            "target": ip, "port": int(port),
+            "dns_settings": {"type": "isp"},
+        })
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ok_nodes = 0
+    totals = 0
+    seen: set = set()
+    ms_values: list[float] = []
+    job_id = None
+    deadline = time.monotonic() + CE98_WS_IDLE
+    while time.monotonic() < deadline:
+        client.settimeout(max(0.5, min(CE98_WS_IDLE, deadline - time.monotonic())))
+        try:
+            kind, payload = client.read()
+        except Exception as e:
+            break
+        if kind in ("err", "close", "closed"):
+            break
+        if kind == "timeout":
+            break
+        if kind == "event" and isinstance(payload, list) and len(payload) >= 1:
+            name = payload[0]
+            arg = payload[1] if len(payload) > 1 else None
+            if name == "continuous_tcping_started" and isinstance(arg, dict):
+                job_id = arg.get("job_id")
+            elif name == "continuous_tcping_node_update" and isinstance(arg, dict):
+                node = arg.get("node_name") or arg.get("ip_address")
+                if node not in seen:
+                    seen.add(node)
+                    totals += 1
+                    ok = arg.get("ok") is True and arg.get("loss") != 1
+                    latest = arg.get("latest")
+                    if ok and isinstance(latest, (int, float)) and latest > 0:
+                        ok_nodes += 1
+                    avg = arg.get("average")
+                    if ok and isinstance(avg, (int, float)) and avg > 0:
+                        ms_values.append(avg)
+                    elif ok and isinstance(latest, (int, float)) and latest > 0:
+                        ms_values.append(latest)
+            elif name == "connect_error":
+                break
+    try:
+        if job_id:
+            client.send_event("stop_continuous_tcping", {"job_id": job_id})
+    except Exception:
+        pass
+    if client:
+        client.close()
+    nodes = totals or 1
+    if ok_nodes:
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(ms_values), 1) if ms_values else None,
+            "error": "", "level": "tcp",
+            "ok_nodes": ok_nodes, "nodes": nodes,
+            "ratio": round(ok_nodes / nodes, 3) if nodes else None,
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
+    }
+
+
+def biuping_check(ip: str, port: str, timeout: float) -> dict:
+    """biuping.com 单键多节点探测（纯 HTTP + SSE，零 key）。
+
+    CSRF token 从壳页 meta 提取；``type=tcping`` 对 ``ip:port`` 探测多节点。
+    节点成功 = SSE data 里 ``ok`` 为真且 ``status`` 正常。纯 TCP → ``level="tcp"``。
+    ``ports`` 传端口走 tcping，否则退化为 ICMP ping（``level="icmp"``）。
+    """
+    try:
+        status, _, resp = request_follow(
+            f"{BIUPING_URL}/ping/?target={urllib.parse.quote(ip)}",
+            {"User-Agent": UA, "Accept": "text/html"},
+            BIUPING_REQ_TIMEOUT,
+        )
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"page http {status}", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    html = resp.decode("utf-8", "replace")
+    m = re.search(r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\']+)', html)
+    if not m:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no csrf token", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    token = m.group(1)
+    target = f"{ip}:{port}" if port else ip
+    qs = urllib.parse.urlencode({
+        "target": target, "type": "tcping" if port else "ping",
+        "nodes": "all", "mode": "single", "_csrf": token,
+    })
+    try:
+        req = urllib.request.Request(
+            f"{BIUPING_URL}/probe_sse.php?{qs}",
+            headers={"User-Agent": UA,
+                     "Accept": "text/event-stream",
+                     "Referer": f"{BIUPING_URL}/ping/"},
+        )
+        with urllib.request.urlopen(
+            req, timeout=BIUPING_SSE_TIMEOUT
+        ) as resp:
+            chunks = b""
+            while True:
+                got = resp.read(65536)
+                if not got:
+                    break
+                chunks += got
+            sse = chunks.decode("utf-8", "replace")
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": str(e)[:120], "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ok_nodes = 0
+    totals = 0
+    ms_values: list[float] = []
+    seen: set = set()
+    for block in sse.split("\n\n"):
+        data = None
+        for line in block.splitlines():
+            if line.startswith("data:"):
+                data = line[5:].strip()
+        if not data:
+            continue
+        try:
+            ev = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(ev, dict):
+            continue
+        results = ev.get("results")
+        if not isinstance(results, list):
+            continue
+        for res in results:
+            if not isinstance(res, dict):
+                continue
+            nid = res.get("node_id")
+            if nid is None:
+                continue
+            key = f"{nid}:{res.get('isp', '')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            totals += 1
+            status = res.get("status")
+            latest = res.get("latest")
+            is_ok = res.get("ok") is not False and status in ("ok", "success") and (
+                isinstance(latest, (int, float)) and latest > 0
+            )
+            if is_ok:
+                ok_nodes += 1
+                ms_values.append(float(latest))
+    # 若某节点重复推送，按 node_id 去重
+    nodes = totals or 1
+    if ok_nodes:
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(ms_values), 1) if ms_values else None,
+            "error": "", "level": "tcp" if port else "icmp",
+            "ok_nodes": ok_nodes, "nodes": nodes,
+            "ratio": round(ok_nodes / nodes, 3) if nodes else None,
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
+    }
+
+
 # ------------------------------------------------------------ 判定合成
 
 def merge_verdict(sources: dict) -> dict:
@@ -1445,7 +1884,7 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz")]
+        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi")]
 
     def strong_valid(source: str) -> bool:
@@ -1482,7 +1921,7 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "pingpe", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz")]
+        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     if fail_sources:
@@ -1923,6 +2362,31 @@ def _run_pingloc_slots(
             fut.result()
 
 
+def _run_raw_slots(
+    candidates: list, entries: dict, timeout: float, source: str, concurrency: int
+) -> None:
+    """多节点复核通用 slot：按 ``source`` 派发到对应的多节点 check 函数
+    （ce98 socket.io-WS / biuping HTTP-SSE），只写 ``entries[key][source]``。"""
+    fn = {
+        "ce98": lambda ip, port: ce98_check(ip, port, timeout),
+        "biuping": lambda ip, port: biuping_check(ip, port, timeout),
+    }[source]
+
+    def work(item) -> None:
+        _, key, ip, port, _ = item
+        try:
+            entries[key][source] = fn(ip, port)
+        except Exception as exc:
+            logging.debug("%s failed for %s: %s", source, key, exc)
+            entries.setdefault(key, {})[source] = {
+                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = [pool.submit(work, item) for item in candidates]
+        for fut in futures:
+            fut.result()
+
+
 def run_measurements(sample, args) -> tuple[dict, set, set]:
     """L2 分两段并发（xxapi 全池免额候选 → check_host 稀缺配额只投决策键）、itdog
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
@@ -2165,6 +2629,37 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("chinaz review: skipped (limit=0)", file=sys.stderr)
 
+    # 新增多节点 TCP 复核源：ce98（socket.io-WS，34 大陆节点）、biuping
+    # （HTTP-SSE，21 节点）。均已实测出数、零 key；达标即可独立判 reachable，
+    # 整站失败也可与单节点源联动判 unreachable。默认 -1=全部未定键，0=跳过。
+    ce98_limit = getattr(args, "ce98_limit", 0)
+    if ce98_limit != 0:
+        cands = _pending_cands()
+        if ce98_limit is None or ce98_limit < 0:
+            ce98_limit = len(cands)
+        _run_raw_slots(
+            cands[:ce98_limit], entries, args.timeout, "ce98",
+            getattr(args, "ce98_concurrency", 6),
+        )
+        print(f"ce98 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("ce98 review: skipped (limit=0)", file=sys.stderr)
+
+    biuping_limit = getattr(args, "biuping_limit", 0)
+    if biuping_limit != 0:
+        cands = _pending_cands()
+        if biuping_limit is None or biuping_limit < 0:
+            biuping_limit = len(cands)
+        _run_raw_slots(
+            cands[:biuping_limit], entries, args.timeout, "biuping",
+            getattr(args, "biuping_concurrency", 8),
+        )
+        print(f"biuping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("biuping review: skipped (limit=0)", file=sys.stderr)
+
     # ping.pe 多节点复核（串行、贵）只投「当前尚未被 itdog/单节点源确认可达」
     # 的键：已由 itdog 多点达标判 reachable 的不再浪费名额，把有限槽位让给
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
@@ -2295,6 +2790,14 @@ def main(argv=None) -> int:
                         help="ping.chinaz.com 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--chinaz-concurrency", type=int, default=6,
                         help="ping.chinaz.com 并发复核数（默认 6）")
+    parser.add_argument("--ce98-limit", type=int, default=0,
+                        help="98ce.com socket.io 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--ce98-concurrency", type=int, default=6,
+                        help="98ce.com 并发复核数（默认 6）")
+    parser.add_argument("--biuping-limit", type=int, default=0,
+                        help="biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--biuping-concurrency", type=int, default=8,
+                        help="biuping.com 并发复核数（默认 8）")
     parser.add_argument("--workers", type=int, default=WORKERS_DEFAULT,
                         help=f"L2 并发上限（默认 {WORKERS_DEFAULT}）")
     parser.add_argument("-t", "--timeout", type=float, default=TIMEOUT_DEFAULT,
