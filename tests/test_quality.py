@@ -542,6 +542,16 @@ class TestReputation(unittest.TestCase):
                           "is_mobile": False}}, self.W)
         self.assertEqual(flagged, ["proxy"])
 
+    def test_feodo_source_vote(self):
+        """feodo 僵尸网络 C2 静态 IP 命中 → abuse 维度。"""
+        self.assertIn("feodo", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("feodo", qc.REPUTATION_WEIGHTS)
+        self.assertEqual(qr._flag_opinions(
+            "feodo", {"is_abuse": True}), {"abuse": True})
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"feodo": {"is_abuse": True}}, self.W)
+        self.assertEqual(flagged, ["abuse"])
+
     def test_cache_cap_tiles(self):
         """REP_CACHE_MAX 裁剪逻辑：超阈值仅保留最新 REP_CACHE_MAX 项。"""
         import time
