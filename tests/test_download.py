@@ -324,6 +324,14 @@ class TestNormalizeCountry(unittest.TestCase):
         self.assertEqual(dp.normalize_country("NRT"), "JP")
         self.assertEqual(dp.normalize_country("SIN"), "SG")
         self.assertEqual(dp.normalize_country("HGH"), "CN")
+        # 扩充的常见机场码
+        self.assertEqual(dp.normalize_country("KUL"), "MY")
+        self.assertEqual(dp.normalize_country("BKK"), "TH")
+        self.assertEqual(dp.normalize_country("DXB"), "AE")
+        self.assertEqual(dp.normalize_country("SYD"), "AU")
+        self.assertEqual(dp.normalize_country("LHR"), "GB")
+        self.assertEqual(dp.normalize_country("JFK"), "US")
+        self.assertEqual(dp.normalize_country("YYZ"), "CA")
 
     def test_emoji_flag(self):
         self.assertEqual(dp.normalize_country("\U0001F1FA\U0001F1F8US"), "US")
