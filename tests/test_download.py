@@ -636,6 +636,25 @@ class TestProxyMirrorSources(unittest.TestCase):
             "ipdb_bestproxy",
         )
 
+    def test_all_mirrors_are_disambiguated_by_host(self):
+        # 不同 all.json 镜像必须得到不同标签，避免 stats/归属互覆
+        a = dp.source_label("https://mirror-a.com/all.json")
+        b = dp.source_label("https://mirror-b.com/all.json")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, "mirror-a/all")
+        self.assertEqual(b, "mirror-b/all")
+        # 同主机 all.json 与 all.zip 标签一致（冗余互换），跨主机才需区分
+        self.assertEqual(
+            dp.source_label("https://mirror-a.com/all.zip"), "mirror-a/all"
+        )
+        # 带上 githubusercontent 路径段来源
+        self.assertTrue(
+            dp.source_label("https://raw.githubusercontent.com/x/y/main/all.json")
+        )
+
+    def test_non_generic_labels_unchanged(self):
+        self.assertEqual(dp.source_label("https://x/fdip.txt"), "fdip")
+
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
 
