@@ -552,6 +552,38 @@ class TestReputation(unittest.TestCase):
             {"feodo": {"is_abuse": True}}, self.W)
         self.assertEqual(flagged, ["abuse"])
 
+    def test_new_static_rep_sources_registered(self):
+        """新增静态信誉源（blocklist.de 三类别 + dan.me.uk + Tor 出口冗余）
+        全部默认启用、各有权重、能被 source_score 打分。"""
+        for name in (
+            "blocklist_de",
+            "blocklist_de_ssh",
+            "blocklist_de_apache",
+            "danmeuk_tor",
+            "tor_bulk",
+        ):
+            self.assertIn(name, qc.DEFAULT_REP_SOURCES)
+            self.assertIn(name, qc.REPUTATION_WEIGHTS)
+            self.assertIn(name, qc.STATIC_LIST_SCORES)
+            self.assertGreater(qc.REPUTATION_WEIGHTS[name], 0)
+
+    def test_blocklist_de_sources_vote_abuse(self):
+        """blocklist.de 各类别命中 → abuse 维度。"""
+        for name in ("blocklist_de", "blocklist_de_ssh", "blocklist_de_apache"):
+            self.assertEqual(
+                qr._flag_opinions(name, {"is_abuse": True}), {"abuse": True})
+            self.assertEqual(
+                qc.source_score(name, {"is_abuse": True}),
+                qc.STATIC_LIST_SCORES[name])
+            self.assertIsNone(qc.source_score(name, {}))
+        for name in ("danmeuk_tor", "tor_bulk"):
+            self.assertEqual(
+                qr._flag_opinions(name, {"is_tor": True}), {"tor": True})
+            self.assertEqual(
+                qc.source_score(name, {"is_tor": True}),
+                qc.STATIC_LIST_SCORES[name])
+            self.assertIsNone(qc.source_score(name, {}))
+
     def test_cache_cap_tiles(self):
         """REP_CACHE_MAX 裁剪逻辑：超阈值仅保留最新 REP_CACHE_MAX 项。"""
         import time
@@ -2070,6 +2102,43 @@ class TestNewReputationSources(unittest.TestCase):
                 qr.fetch_static_lists(["cins", "et_compromised"]))
         self.assertIn("1.1.1.1", out["cins"])
         self.assertIn("2.2.2.2", out["et_compromised"])
+
+    def test_fetch_static_lists_new_sources_wired(self):
+        async def _a():
+            return qr.IpSet(["10.0.0.1"])
+
+        async def _b():
+            return qr.IpSet(["10.0.0.2"])
+
+        async def _c():
+            return qr.IpSet(["10.0.0.3"])
+
+        async def _d():
+            return qr.IpSet(["10.0.0.4"])
+
+        async def _e():
+            return qr.IpSet(["10.0.0.5"])
+
+        with unittest.mock.patch.object(
+                qr, "fetch_blocklist_de", side_effect=_a), \
+             unittest.mock.patch.object(
+                qr, "fetch_blocklist_de_ssh", side_effect=_b), \
+             unittest.mock.patch.object(
+                qr, "fetch_blocklist_de_apache", side_effect=_c), \
+             unittest.mock.patch.object(
+                qr, "fetch_dan_tor", side_effect=_d), \
+             unittest.mock.patch.object(
+                qr, "fetch_tor_bulk", side_effect=_e):
+            out = asyncio.get_event_loop().run_until_complete(
+                qr.fetch_static_lists([
+                    "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
+                    "danmeuk_tor", "tor_bulk",
+                ]))
+        self.assertIn("10.0.0.1", out["blocklist_de"])
+        self.assertIn("10.0.0.2", out["blocklist_de_ssh"])
+        self.assertIn("10.0.0.3", out["blocklist_de_apache"])
+        self.assertIn("10.0.0.4", out["danmeuk_tor"])
+        self.assertIn("10.0.0.5", out["tor_bulk"])
 
 
 if __name__ == "__main__":

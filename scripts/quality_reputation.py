@@ -74,6 +74,11 @@ FREEIPAPI_CAP = 3000
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
 FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
+DAN_TOR_URL = "https://www.dan.me.uk/torlist"
+TOR_BULK_URL = "https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=1.1.1.1&port=443"
+BLOCKLIST_DE_URL = "https://lists.blocklist.de/lists/all.txt"
+BLOCKLIST_DE_SSH_URL = "https://lists.blocklist.de/lists/ssh.txt"
+BLOCKLIST_DE_APACHE_URL = "https://lists.blocklist.de/lists/apache.txt"
 SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
 SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
@@ -155,6 +160,12 @@ STATIC_LIST_SCORES = {
     "spamhaus": 55,     # is_listed（Spamhaus DROP/EDROP 端用户高风险网段）
     "cins": 50,         # is_listed（CINS Army 活跃滥用/拒绝服务 IP）
     "et_compromised": 45,  # is_abuse（EmergingThreats 被入侵主机回连）
+    "feodo": 40,         # is_abuse（Feodo 僵尸网络 C2）
+    "blocklist_de": 50,  # is_abuse（blocklist.de 僵尸/暴力破解滥用）
+    "blocklist_de_ssh": 45,  # is_abuse（SSH 暴力破解源）
+    "blocklist_de_apache": 45,  # is_abuse（Web 探测/攻击源）
+    "danmeuk_tor": 40,   # is_tor（dan.me.uk Tor 节点，覆盖更全）
+    "tor_bulk": 35,      # is_tor（Tor 出口冗余源）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -185,6 +196,11 @@ REPUTATION_WEIGHTS = {
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
+    "blocklist_de": 4,
+    "blocklist_de_ssh": 3,
+    "blocklist_de_apache": 3,
+    "danmeuk_tor": 5,
+    "tor_bulk": 4,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -196,6 +212,8 @@ DEFAULT_REP_SOURCES = (
     "freeipapi", "scamalytics", "iplocation",
     "hackmyip",
     "cins", "et_compromised", "feodo",
+    "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
+    "danmeuk_tor", "tor_bulk",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -566,6 +584,46 @@ async def fetch_feodo() -> IpSet:
     return IpSet(rows)
 
 
+async def fetch_dan_tor() -> IpSet:
+    """dan.me.uk Tor 节点列表（比 check.torproject 覆盖更全，独立权威）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(DAN_TOR_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
+async def fetch_tor_bulk() -> IpSet:
+    """check.torproject.org TorBulkExitList（出口节点，作为 tor 信号冗余）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(TOR_BULK_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
+async def fetch_blocklist_de() -> IpSet:
+    """blocklist.de 全集（僵尸/暴力破解/扫描，独立滥用源）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(BLOCKLIST_DE_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
+async def fetch_blocklist_de_ssh() -> IpSet:
+    """blocklist.de SSH 暴力破解源 IP（独立攻击类别）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(BLOCKLIST_DE_SSH_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
+async def fetch_blocklist_de_apache() -> IpSet:
+    """blocklist.de Apache 探测/攻击源 IP（独立攻击类别）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(BLOCKLIST_DE_APACHE_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -822,6 +880,11 @@ async def fetch_static_lists(sources: list) -> dict:
         "cins": IpSet(),
         "et_compromised": IpSet(),
         "feodo": IpSet(),
+        "blocklist_de": IpSet(),
+        "blocklist_de_ssh": IpSet(),
+        "blocklist_de_apache": IpSet(),
+        "danmeuk_tor": IpSet(),
+        "tor_bulk": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -836,6 +899,16 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("et_compromised", fetch_et_compromised()))
     if "feodo" in sources:
         mapping.append(("feodo", fetch_feodo()))
+    if "blocklist_de" in sources:
+        mapping.append(("blocklist_de", fetch_blocklist_de()))
+    if "blocklist_de_ssh" in sources:
+        mapping.append(("blocklist_de_ssh", fetch_blocklist_de_ssh()))
+    if "blocklist_de_apache" in sources:
+        mapping.append(("blocklist_de_apache", fetch_blocklist_de_apache()))
+    if "danmeuk_tor" in sources:
+        mapping.append(("danmeuk_tor", fetch_dan_tor()))
+    if "tor_bulk" in sources:
+        mapping.append(("tor_bulk", fetch_tor_bulk()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -1052,6 +1125,12 @@ def source_score(name: str, signal) -> int | None:
             "spamhaus": "is_listed",
             "cins": "is_listed",
             "et_compromised": "is_abuse",
+            "feodo": "is_abuse",
+            "blocklist_de": "is_abuse",
+            "blocklist_de_ssh": "is_abuse",
+            "blocklist_de_apache": "is_abuse",
+            "danmeuk_tor": "is_tor",
+            "tor_bulk": "is_tor",
         }[name]
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
@@ -1272,6 +1351,16 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"abuse": True} if signal.get("is_abuse") else {}
     if name == "et_compromised":
         return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "blocklist_de":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "blocklist_de_ssh":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "blocklist_de_apache":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "danmeuk_tor":
+        return {"tor": True} if signal.get("is_tor") else {}
+    if name == "tor_bulk":
+        return {"tor": True} if signal.get("is_tor") else {}
     return {}
 
 
@@ -1683,6 +1772,16 @@ async def lookup_all_risk(
             put("et_compromised", ip, {"is_abuse": True})
         if ip in static["feodo"]:
             put("feodo", ip, {"is_abuse": True})
+        if ip in static["blocklist_de"]:
+            put("blocklist_de", ip, {"is_abuse": True})
+        if ip in static["blocklist_de_ssh"]:
+            put("blocklist_de_ssh", ip, {"is_abuse": True})
+        if ip in static["blocklist_de_apache"]:
+            put("blocklist_de_apache", ip, {"is_abuse": True})
+        if ip in static["danmeuk_tor"]:
+            put("danmeuk_tor", ip, {"is_tor": True})
+        if ip in static["tor_bulk"]:
+            put("tor_bulk", ip, {"is_tor": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue
