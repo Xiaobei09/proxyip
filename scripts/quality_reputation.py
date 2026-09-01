@@ -89,6 +89,23 @@ FIREHOL_LEVEL1_URL = (
     "master/firehol_level1.netset"
 )
 BINARYDEFENSE_URL = "https://www.binarydefense.com/banlist.txt"
+FIREHOL_C2_TRACKER_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
+    "master/c2_tracker.ipset"
+)
+FIREHOL_BOTSCOUT_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
+    "master/botscout_7d.ipset"
+)
+GREENSNOW_URL = "https://blocklist.greensnow.co/greensnow.txt"
+FIREHOL_SSLPROXIES_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
+    "master/sslproxies_1d.ipset"
+)
+FIREHOL_SOCKSPROXY_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
+    "master/socks_proxy_1d.ipset"
+)
 SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
 SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
@@ -185,6 +202,11 @@ STATIC_LIST_SCORES = {
     "threatfox": 55,     # is_abuse（abuse.ch ThreatFox 恶意软件 IOC/C2）
     "firehol_level1": 60,  # is_listed（FireHOL 最严封禁集）
     "binarydefense": 55,   # is_abuse（Binary Defense 恶意 IP 封禁集）
+    "c2_tracker": 55,      # is_abuse（C2 命令与控制基础设施）
+    "botscout": 45,        # is_abuse（僵尸网络/抓取机器人源）
+    "greensnow": 50,       # is_abuse（GreenSnow 活跃攻击/DDoS/扫描）
+    "sslproxies": 60,      # is_proxy（活跃 SSL 代理，独立代理族证据）
+    "socks_proxy": 60,     # is_proxy（活跃 SOCKS 代理，独立代理族证据）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -225,6 +247,11 @@ REPUTATION_WEIGHTS = {
     "threatfox": 5,
     "firehol_level1": 5,
     "binarydefense": 4,
+    "c2_tracker": 4,
+    "botscout": 3,
+    "greensnow": 4,
+    "sslproxies": 3,
+    "socks_proxy": 3,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -240,6 +267,8 @@ DEFAULT_REP_SOURCES = (
     "danmeuk_tor", "tor_bulk",
     "greynoise", "urlhaus", "threatfox",
     "firehol_level1", "binarydefense",
+    "c2_tracker", "botscout", "greensnow",
+    "sslproxies", "socks_proxy",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -767,6 +796,31 @@ async def fetch_binarydefense() -> IpSet:
     return IpSet(await fetch_text_list(BINARYDEFENSE_URL))
 
 
+async def fetch_c2_tracker() -> IpSet:
+    """FireHOL ``c2_tracker`` 命令与控制（C2）基础设施 IP。"""
+    return IpSet(await fetch_text_list(FIREHOL_C2_TRACKER_URL))
+
+
+async def fetch_botscout() -> IpSet:
+    """FireHOL ``botscout_7d`` 僵尸网络/爬虫源 IP（7 天窗口覆盖面更大）。"""
+    return IpSet(await fetch_text_list(FIREHOL_BOTSCOUT_URL))
+
+
+async def fetch_greensnow() -> IpSet:
+    """GreenSnow 活跃攻击 IP（DDoS/扫描/暴力破解）。"""
+    return IpSet(await fetch_text_list(GREENSNOW_URL))
+
+
+async def fetch_sslproxies() -> IpSet:
+    """FireHOL ``sslproxies_1d`` 活跃 SSL 代理 IP（独立代理族证据）。"""
+    return IpSet(await fetch_text_list(FIREHOL_SSLPROXIES_URL))
+
+
+async def fetch_socks_proxy() -> IpSet:
+    """FireHOL ``socks_proxy_1d`` 活跃 SOCKS 代理 IP（独立代理族证据）。"""
+    return IpSet(await fetch_text_list(FIREHOL_SOCKSPROXY_URL))
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -1032,6 +1086,11 @@ async def fetch_static_lists(sources: list) -> dict:
         "threatfox": IpSet(),
         "firehol_level1": IpSet(),
         "binarydefense": IpSet(),
+        "c2_tracker": IpSet(),
+        "botscout": IpSet(),
+        "greensnow": IpSet(),
+        "sslproxies": IpSet(),
+        "socks_proxy": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -1064,6 +1123,16 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("firehol_level1", fetch_firehol_level1()))
     if "binarydefense" in sources:
         mapping.append(("binarydefense", fetch_binarydefense()))
+    if "c2_tracker" in sources:
+        mapping.append(("c2_tracker", fetch_c2_tracker()))
+    if "botscout" in sources:
+        mapping.append(("botscout", fetch_botscout()))
+    if "greensnow" in sources:
+        mapping.append(("greensnow", fetch_greensnow()))
+    if "sslproxies" in sources:
+        mapping.append(("sslproxies", fetch_sslproxies()))
+    if "socks_proxy" in sources:
+        mapping.append(("socks_proxy", fetch_socks_proxy()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -1300,6 +1369,11 @@ def source_score(name: str, signal) -> int | None:
             "threatfox": "is_abuse",
             "firehol_level1": "is_listed",
             "binarydefense": "is_abuse",
+            "c2_tracker": "is_abuse",
+            "botscout": "is_abuse",
+            "greensnow": "is_abuse",
+            "sslproxies": "is_proxy",
+            "socks_proxy": "is_proxy",
         }.get(name)
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
@@ -1540,6 +1614,16 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "binarydefense":
         return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "c2_tracker":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "botscout":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "greensnow":
+        return {"abuse": True} if signal.get("is_abuse") else {}
+    if name == "sslproxies":
+        return {"proxy": True} if signal.get("is_proxy") else {}
+    if name == "socks_proxy":
+        return {"proxy": True} if signal.get("is_proxy") else {}
     if name == "greynoise":
         opinions = {}
         if signal.get("is_abuse"):
@@ -2036,6 +2120,16 @@ async def lookup_all_risk(
             put("firehol_level1", ip, {"is_listed": True})
         if ip in static["binarydefense"]:
             put("binarydefense", ip, {"is_abuse": True})
+        if ip in static["c2_tracker"]:
+            put("c2_tracker", ip, {"is_abuse": True})
+        if ip in static["botscout"]:
+            put("botscout", ip, {"is_abuse": True})
+        if ip in static["greensnow"]:
+            put("greensnow", ip, {"is_abuse": True})
+        if ip in static["sslproxies"]:
+            put("sslproxies", ip, {"is_proxy": True})
+        if ip in static["socks_proxy"]:
+            put("socks_proxy", ip, {"is_proxy": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue
