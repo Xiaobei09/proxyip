@@ -376,6 +376,13 @@ class TestNormalizeCountry(unittest.TestCase):
         self.assertEqual(by["443"].get("LL"), None)
         self.assertEqual(len(by["443"].get("ALL", [])), 1)
 
+    def test_combined_tokens(self):
+        # 机场码+中文后缀、中文前缀+机场码、长令牌 HKSAR 都不再被末两位误判
+        self.assertEqual(dp.normalize_country("NRT日本"), "JP")
+        self.assertEqual(dp.normalize_country("SIN新加坡"), "SG")
+        self.assertEqual(dp.normalize_country("香港NRT"), "HK")
+        self.assertEqual(dp.normalize_country("HKSAR"), "HK")
+
 
 class TestExtractPlain(unittest.TestCase):
     def test_ip_port_with_notes(self):

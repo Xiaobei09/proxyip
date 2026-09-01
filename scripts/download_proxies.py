@@ -287,21 +287,9 @@ def normalize_country(note: str) -> str:
     # ``ALL``/``all`` 是"无国家"哨兵，不是国码（否则 ``ALL`` 会被 [A-Z]{2}$ 误判为 LL）
     if up == "ALL":
         return "ALL"
-    # 带速度/数字前缀的注释（如 ``256.85(MB/s)HK香港``、``50.2MB/sHKSAR``）：
-    # 末尾纯字母启发式会把 ``HKSAR`` 的末两位误判为 ``AR``，改为剥速度后
-    # 从令牌内找第一个已知地区（HK/SG/JP…），更可靠。
-    if re.search(r"\d", note):
-        return _extract_region(note)
-    m = re.search(r"[A-Z]{2}$", tok)
-    if m:
-        # 多字母地区令牌（如 HKSAR/SIN）不该被末两位（AR/IN）误判，
-        # 先试完整令牌再退化为末两位 ISO2。
-        full = m.group(0)
-        if tok in AIRPORT_COUNTRY_MAP:
-            return AIRPORT_COUNTRY_MAP[tok]
-        if full in AIRPORT_COUNTRY_MAP:
-            return AIRPORT_COUNTRY_MAP[full]
-        return full
+    # 剩余均交 _extract_region：它能剥速度前缀、扫描中文地区名/机场词，
+    # 处理 ``256.85(MB/s)HK香港``、``50.2MB/sHKSAR``、``香港NRT`` 等组合，
+    # 不会把 ``HKSAR`` 的末两位误判为 ``AR``，也不把不可映射串误判为国家。
     return _extract_region(note)
 
 
