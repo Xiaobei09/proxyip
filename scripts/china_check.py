@@ -1174,7 +1174,7 @@ def antping_check(ip: str, port: str, timeout: float) -> dict:
         try:
             ws.settimeout(max(1.0, deadline - time.monotonic()))
             kind, msg = ws.read()
-        except Exception as e:
+        except Exception:
             break
         if kind in ("err", "close", "closed"):
             break
@@ -1265,7 +1265,7 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
         try:
             ws.settimeout(max(1.0, deadline - time.monotonic()))
             kind, msg = ws.read()
-        except Exception as e:
+        except Exception:
             break
         if kind in ("err", "close", "closed"):
             break
@@ -1448,7 +1448,7 @@ def chinaz_check(ip: str, port: str, timeout: float) -> dict:
         ws.settimeout(min(max_wait, max(0.1, deadline - time.monotonic())))
         try:
             kind, msg = ws.read()
-        except Exception as e:
+        except Exception:
             break
         if kind in ("err", "close", "closed"):
             break
@@ -1731,7 +1731,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         client.settimeout(max(0.5, min(CE98_WS_IDLE, deadline - time.monotonic())))
         try:
             kind, payload = client.read()
-        except Exception as e:
+        except Exception:
             break
         if kind in ("err", "close", "closed"):
             break
@@ -1919,6 +1919,8 @@ def boce_check(ip: str, port: str, timeout: float) -> dict:
                      "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"}
     if cookie:
         headers_extra["Cookie"] = cookie
+    if token:
+        headers_extra["X-CSRF-Token"] = token
     payload = json.dumps({"target": ip, "port": int(port) or 80, "type": "tcping"}).encode()
     try:
         status, _, body = request_follow(

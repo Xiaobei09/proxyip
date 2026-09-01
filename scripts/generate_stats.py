@@ -992,9 +992,12 @@ def build_source_avail(rep_data: dict) -> str:
     src_items = sorted(source_counts.items(), key=lambda x: -x[1])
     depth_items = [(str(k), v) for k, v in sorted(depth_counts.items())]
 
-    total_h = 310
-    src_h = MARGIN_T + len(src_items) * 18 + 8
     gap = 12
+    total_h = 310
+    list_h = 20 + len(src_items) * 18 + gap + 14
+    need = list_h + 104 + MARGIN_B
+    if need > total_h:
+        total_h = need
 
     parts = [svg_head(WIDTH, total_h)]
     max_sv = max(v for _, v in src_items) or 1

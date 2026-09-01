@@ -72,8 +72,6 @@ def analyze(
     speed_data: dict,
 ) -> dict:
     """Compute per-source quality metrics."""
-    valid_set = set(valid_lines)
-
     # Parse valid proxy lines
     valid_keys = set()
     latencies: dict[str, float] = {}

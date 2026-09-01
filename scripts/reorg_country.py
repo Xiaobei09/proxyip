@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     ipinfo_path = args.ipinfo or (args.data_dir / "quality" / "ipinfo.json")
-    moved = reorganize(ipinfo_path, args.data_dir)
+    reorganize(ipinfo_path, args.data_dir)
     return 0
 
 
