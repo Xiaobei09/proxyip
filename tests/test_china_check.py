@@ -455,6 +455,7 @@ class TestMergeVerdict(unittest.TestCase):
 
         def fake(url, headers, timeout, method="GET", data=None):
             if url.endswith("/api/v1/probe") and method == "POST":
+                self.assertEqual(headers.get("X-CSRF-Token"), "tk123")
                 return 200, {}, probe
             if "/result" in url:
                 return 200, {}, result
@@ -1803,6 +1804,10 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
 
         item = self._item(1)
         patches = [
+            mock.patch.object(cc, "tcptest_fetch_nodes",
+                              return_value=[{"uuid": "u1", "operator": "ct",
+                                             "enabled": True,
+                                             "runtime_state": "online"}]),
             mock.patch.object(cc, "tcptest_check", side_effect=self._boom),
             mock.patch.object(cc, "coffee_check", side_effect=self._boom),
             mock.patch.object(cc, "pingloc_check", side_effect=self._boom),

@@ -415,10 +415,7 @@ def upsert_exit_region(line: str, exit_region: str) -> str:
     head = line[: m.end(1)]
     rest = line[m.end(1) :]
     arrow_end = rest.find("-")
-    if arrow_end < 0:
-        arrow_seg, tail = rest, ""
-    else:
-        arrow_seg, tail = rest[:arrow_end], rest[arrow_end:]
+    tail = rest[arrow_end:] if arrow_end >= 0 else ""
     return f"{head}→{exit_region}{tail}"
 
 
