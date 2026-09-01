@@ -655,6 +655,26 @@ class TestProxyMirrorSources(unittest.TestCase):
             "ipdb_bestproxy",
         )
 
+    def test_ipdb_cloud_pools_registered(self):
+        # ymyuuu/IPDB 的 BestAli/BestGC/BestEDG 属非 CF（阿里/谷歌等云池），
+        # 均默认启用以提升可用性，且各带可读标签（防 all 类文件名碰撞）。
+        urls = [u for _kind, u in dp.EXTRA_SOURCES]
+        for u in (
+            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt",
+            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt",
+            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt",
+            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt",
+        ):
+            self.assertIn(u, urls)
+        self.assertEqual(
+            dp.source_label("https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt"),
+            "ipdb_bestali",
+        )
+        self.assertEqual(
+            dp.source_label("https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt"),
+            "ipdb_bestgc",
+        )
+
     def test_all_mirrors_are_disambiguated_by_host(self):
         # 不同 all.json 镜像必须得到不同标签，避免 stats/归属互覆
         a = dp.source_label("https://mirror-a.com/all.json")
