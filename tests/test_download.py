@@ -524,6 +524,11 @@ class TestLoadExtras(unittest.TestCase):
                 return b"3.3.3.3\n1.1.1.1\n"
             if url == "http://x/csv.txt":
                 return b"IP,port,region,ms\n4.4.4.4,443,US,10\n"
+            if url == "http://x/data.json":
+                return json.dumps({"data": [
+                    {"ip": "5.5.5.5", "port": [443], "meta": {"country": "JP"}},
+                    {"ip": "6.6.6.6", "port": [2053]},  # 无 meta → ALL
+                ]}).encode()
             raise AssertionError(url)
 
         with unittest.mock.patch.object(dp, "fetch", side_effect=fake_fetch):
@@ -531,17 +536,21 @@ class TestLoadExtras(unittest.TestCase):
                 [("plain", "http://x/plain.txt"),
                  ("ip", "http://x/ips.txt"),
                  ("csv", "http://x/csv.txt"),
+                 ("json", "http://x/data.json"),
                  ("plain", "http://bad/cf.txt")],
                 timeout=10,
             )
-        self.assertEqual(set(by_port), {"443", "8443"})
-        self.assertEqual(set(by_port["443"]), {"US", "ALL"})
+        self.assertEqual(set(by_port), {"443", "8443", "2053"})
+        self.assertEqual(set(by_port["443"]), {"US", "ALL", "JP"})
         self.assertEqual(by_port["443"]["ALL"], ["3.3.3.3"])
-        self.assertEqual(extra_all_ips, {"3.3.3.3", "2.2.2.2"})
+        self.assertEqual(by_port["443"]["JP"], ["5.5.5.5"])
+        self.assertEqual(by_port["2053"]["ALL"], ["6.6.6.6"])
+        self.assertEqual(extra_all_ips, {"3.3.3.3", "2.2.2.2", "6.6.6.6"})
         self.assertEqual(by_port["8443"]["ALL"], ["2.2.2.2"])
         self.assertIn("http://x/plain.txt", source_ip_sets)
         self.assertIn("http://x/ips.txt", source_ip_sets)
         self.assertIn("http://x/csv.txt", source_ip_sets)
+        self.assertIn("http://x/data.json", source_ip_sets)
         self.assertNotIn("http://bad/cf.txt", source_ip_sets)
 
 
