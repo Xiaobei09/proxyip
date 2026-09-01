@@ -62,6 +62,25 @@ class TestParseEntry(unittest.TestCase):
         )
         self.assertIsNone(qc.line_to_key(""))
 
+    def test_ipv6_with_port_parses(self):
+        # 池内 IPv6 条目为无括号 ``ip:port#cc`` 拼接，rsplit 正确取端口
+        self.assertEqual(
+            qc.parse_ltd_line("2606:4700::1:443#US-8ms"),
+            ("2606:4700::1:443#US", "2606:4700::1", "443", "US"),
+        )
+        self.assertEqual(
+            qc.parse_ltd_line("2400:cb00::1:8443#JP-8ms"),
+            ("2400:cb00::1:8443#JP", "2400:cb00::1", "8443", "JP"),
+        )
+
+    def test_bracketed_ipv6_kept_in_addr(self):
+        # 方括号 IPv6 目前不产生于下载/验证管线（is_valid_ip 拒绝括号），
+        # 解析器保持字面地址与端口分离契约
+        self.assertEqual(
+            qc.parse_ltd_line("[2606:4700::1]:443#US-8ms"),
+            ("[2606:4700::1]:443#US", "[2606:4700::1]", "443", "US"),
+        )
+
 
 class TestParseHeaders(unittest.TestCase):
     def test_parses_status_and_headers(self):
