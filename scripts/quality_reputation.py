@@ -1269,6 +1269,16 @@ def source_score(name: str, signal) -> int | None:
     if name == "iplocation":
         penalty = 30 if signal.get("is_proxy") else 0
         return max(0, min(100, 100 - penalty))
+    if name == "greynoise":
+        if signal.get("is_abuse"):
+            penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
+        elif signal.get("is_riot"):
+            penalty = GREYNOISE_FLAG_PENALTIES.get("is_bot", 35)
+        elif signal.get("is_noise"):
+            penalty = GREYNOISE_FLAG_PENALTIES.get("is_noise", 15)
+        else:
+            return None
+        return max(0, min(100, 100 - penalty))
     if name in STATIC_LIST_SCORES:
         flag = {
             "abuse_list": "is_abuse",
@@ -1312,6 +1322,8 @@ FLAG_PENALTIES = {
     "scraper": 12,
     "crawler": 5,
     "anonymous": 8,
+    "bot": 35,
+    "noise": 15,
 }
 _HOSTING_TYPES = ("hosting", "datacenter", "cloud")
 
@@ -1529,20 +1541,32 @@ def _flag_opinions(name: str, signal) -> dict:
     if name == "binarydefense":
         return {"abuse": True} if signal.get("is_abuse") else {}
     if name == "greynoise":
-        opinions = {
-            "abuse": signal.get("is_abuse"),
-        }
-        if signal.get("is_riot"):
+        opinions = {}
+        if signal.get("is_abuse"):
             opinions["abuse"] = True
+        if signal.get("is_riot"):
+            opinions["bot"] = True
+        if signal.get("is_noise"):
+            opinions["noise"] = True
         return {f: v for f, v in opinions.items() if isinstance(v, bool)}
     return {}
 
 
-def consensus_flags(signals: dict, weights: dict) -> dict:
+def consensus_flags(
+    signals: dict,
+    weights: dict,
+    *,
+    tie: bool | None = None,
+    min_confirm_weight: float = 0,
+) -> dict:
     """Vote ``{family: bool|None}`` over all responding sources.
 
-    Positive votes outweigh negative votes (weighted majority); a tie yields
-    ``None`` (benefit of the doubt, family treated as not flagged).
+    - Weighted majority: ``pos > neg`` → True / ``neg > pos`` → False.
+    - A tie yields ``tie`` (default ``None`` = benefit of the doubt, family
+      treated as not flagged).
+    - ``min_confirm_weight``: when > 0, a family is only confirmed True if its
+      positive-vote weight also reaches this floor (inhibits conviction from a
+      single weak/低权重来源). Default 0 keeps legacy single-source behavior.
     """
     votes: dict = {}
     for name, signal in signals.items():
@@ -1558,12 +1582,12 @@ def consensus_flags(signals: dict, weights: dict) -> dict:
         neg = sum(
             weights.get(name, 0) for name, v in voters.items() if v is False
         )
-        if pos > neg:
+        if pos > neg and pos >= min_confirm_weight:
             flags[family] = True
         elif neg > pos:
             flags[family] = False
         else:
-            flags[family] = None
+            flags[family] = tie
     return flags
 
 
@@ -1611,6 +1635,37 @@ def continuous_penalty(
     return merged, [name for _w, _p, name in parts]
 
 
+def _family_penalty(name: str, family: str, signal: dict) -> int:
+    """该源对某**已确认**家族的实际罚分；无特例则用通用 ``FLAG_PENALTIES``。
+
+    与 ``GREYNOISE_FLAG_PENALTIES`` / ``STATIC_LIST_SCORES`` 的差异化强度对齐：
+    恶意扫描（is_abuse）按 60 从严，botnet 成员 35，噪音扫描 15——避免所有
+    家族都退化为通用 ``abuse``(35)/``listed``(30) 的粗粒度扣分。
+    """
+    if name == "greynoise":
+        if family == "abuse":
+            return GREYNOISE_FLAG_PENALTIES.get("is_abuse", FLAG_PENALTIES["abuse"])
+        if family == "bot":
+            return GREYNOISE_FLAG_PENALTIES.get("is_bot", FLAG_PENALTIES.get("bot", 35))
+        if family == "noise":
+            return GREYNOISE_FLAG_PENALTIES.get("is_noise", FLAG_PENALTIES.get("noise", 15))
+    return FLAG_PENALTIES.get(family, 0)
+
+
+def _mobile_clean_bonus(flags: dict) -> int:
+    """仅当确认 mobile 且无任何代理/滥用类标记时给 +5 奖励。
+
+    住宅移动网络的高可用信号不被代理/机房噪声稀释；但一旦同时被认作
+    proxy/vpn/tor/abuse/listed/hosting/bot 则不加成（可能为恶意出口）。
+    """
+    if flags.get("mobile") is True and not any(
+        flags.get(f) for f in ("proxy", "vpn", "tor", "listed", "abuse",
+                               "hosting", "bot")
+    ):
+        return 5
+    return 0
+
+
 def vote_reputation(
     signals: dict, weights: dict
 ) -> tuple[int | None, list[str], list[str], list[str]]:
@@ -1619,22 +1674,36 @@ def vote_reputation(
     Returns ``(score, responding, flagged, numeric_sources)``: ``flagged`` is
     the ordered list of semantic families confirmed by majority vote;
     ``numeric_sources`` are the sources contributing continuous risk.
+
+    A confirmed family's penalty is the **max** penalty among its confirming
+    sources (punish with the strongest evidence), capped once per family even
+    when multiple independent sources agree on it.
     """
     responding = sorted(
-        (n for n, s in signals.items() if isinstance(s, dict))
+        (n for n, s in signals.items()
+         if isinstance(s, dict) and weights.get(n, 0) > 0)
     )
     if not responding:
         return None, [], [], []
     flags = consensus_flags(signals, weights)
-    penalty = sum(FLAG_PENALTIES.get(f, 0) for f, v in flags.items()
-                  if v is True)
+    confirmed = {f for f, v in flags.items() if v is True}
+    family_pen: dict[str, int] = {}
+    for name, signal in signals.items():
+        if not isinstance(signal, dict):
+            continue
+        for fam, val in _flag_opinions(name, signal).items():
+            if val is not True or fam not in confirmed:
+                continue
+            family_pen[fam] = max(
+                family_pen.get(fam, 0),
+                _family_penalty(name, fam, signal),
+            )
+    penalty = sum(family_pen.values())
     numeric, numeric_sources = continuous_penalty(signals, weights)
     if numeric is not None:
         penalty += numeric
     score = 100 - penalty
-    if flags.get("mobile") is True and not any(flags.get(f) for f in
-            ("proxy", "vpn", "tor", "listed", "abuse", "hosting")):
-        score += 5
+    score += _mobile_clean_bonus(flags)
     score = max(0, min(100, round(score)))
     flagged = sorted(f for f, v in flags.items() if v is True)
     return score, responding, flagged, numeric_sources
