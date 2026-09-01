@@ -107,6 +107,9 @@ SMALL_SETS: dict[str, list[str]] = {
 # 连接池（用于 Cloudflare Worker `connect()` 等自建链路）。因此：不收录
 # Cloudflare 官方边缘 IP（AS13335，Workers 出站 TCP 禁止连接 CF IP 网段）。
 EXTRA_SOURCES: list[tuple[str, str]] = [
+    # --- CF 第三方反代（优选 proxyip）池：全部自称 CF 反代、端口落 CF 边缘 ---
+    # 收录来源仅限库名/榜单自证 CF 第三方优选反代（含 443/8443/2053/2083/2087/2096），
+    # 通用 HTTP/SOCKS 代理池与非 CF 云池（阿里/谷歌/Edge 等）一律不入池。
     ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/fdip.txt"),
     ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/vlid.txt"),
     ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/yxip.txt"),
@@ -117,23 +120,13 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://ipdb.api.030101.xyz/?type=proxy"),
     ("ip", "https://ipdb.api.030101.xyz/?type=bestproxy"),
     ("ip", "https://ipdb.api.030101.xyz/?type=bestproxy&country=true"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt"),
     ("ip", "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt"),
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
-    # --- 通用免费代理池（量大、每日保鲜、含 443/8443/2053 等 CF 边缘端口） ---
-    ("plain", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"),
-    ("plain", "https://raw.githubusercontent.com/zevtyardt/proxy-list/main/http.txt"),
-    ("plain", "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt"),
-    ("plain", "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt"),
-    ("plain", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
-    ("plain", "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"),
-    ("plain", "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt"),
-    ("plain", "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt"),
-    ("plain", "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt"),
-    ("plain", "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt"),
+    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt"),
+    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt"),
+    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt"),
+    ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt"),
+    ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
@@ -144,21 +137,12 @@ SOURCE_LABELS: dict[str, str] = {
     "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy": "ipdb_bestproxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy&country=true": "ipdb_bestproxy_cc",
-    "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt": "ipdb_bestali",
-    "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt": "ipdb_bestgc",
-    "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt": "ipdb_bestgc6",
-    "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt": "ipdb_bestedg",
     "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt": "leilao_cfproxy",
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt": "monosans_http",
-    "https://raw.githubusercontent.com/zevtyardt/proxy-list/main/http.txt": "zevtyardt_http",
-    "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt": "iplocate_http",
-    "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt": "syscallh00k_http",
-    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt": "thespeedx_http",
-    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt": "clarketm_http",
-    "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt": "sunny9577_http",
-    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt": "jetkai_http",
-    "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt": "roosterkid_https",
-    "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt": "shifty_http",
+    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt": "wwuyi_proxyip",
+    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt": "wwuyi_proxyip_cc",
+    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt": "wwuyi_all",
+    "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt": "wanwu_us",
+    "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt": "wanwu_jp",
 }
 
 

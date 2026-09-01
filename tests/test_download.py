@@ -682,9 +682,9 @@ class TestProxyMirrorSources(unittest.TestCase):
         total = sum(len(v) for c in by_port.values() for v in c.values())
         self.assertEqual(total, 2)
 
-    def test_ipdb_cloud_pools_registered(self):
-        # ymyuuu/IPDB 的 BestAli/BestGC/BestEDG 属非 CF（阿里/谷歌等云池），
-        # 均默认启用以提升可用性，且各带可读标签（防 all 类文件名碰撞）。
+    def test_non_cf_cloud_pools_excluded(self):
+        # 策略：代理源只收「自称 CF 第三方反代 proxyip」。非 CF 云池
+        # （阿里/谷歌/Edge 等 BestAli/BestGC/BestEDG）不得入池。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         for u in (
             "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt",
@@ -692,15 +692,7 @@ class TestProxyMirrorSources(unittest.TestCase):
             "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt",
             "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt",
         ):
-            self.assertIn(u, urls)
-        self.assertEqual(
-            dp.source_label("https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt"),
-            "ipdb_bestali",
-        )
-        self.assertEqual(
-            dp.source_label("https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt"),
-            "ipdb_bestgc",
-        )
+            self.assertNotIn(u, urls)
 
     def test_all_mirrors_are_disambiguated_by_host(self):
         # 不同 all.json 镜像必须得到不同标签，避免 stats/归属互覆
@@ -721,35 +713,49 @@ class TestProxyMirrorSources(unittest.TestCase):
     def test_non_generic_labels_unchanged(self):
         self.assertEqual(dp.source_label("https://x/fdip.txt"), "fdip")
 
-    def test_five_http_pool_sources_registered(self):
-        # clarketm / sunny9577 / jetkai / roosterkid / ShiftyTr 通用 HTTP 池
-        # 默认启用，各带可读标签（防 all 类文件名碰撞）。
+    def test_generic_http_pools_excluded(self):
+        # 策略：代理源只收「自称 CF 第三方反代 proxyip」。通用 HTTP/SOCKS
+        # 代理池（monosans/zevtyardt/.../clarketm/sunny9577/jetkai/roosterkid/
+        # ShiftyTr）不得入池。
+        urls = [u for _kind, u in dp.EXTRA_SOURCES]
+        for u in (
+            "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+            "https://raw.githubusercontent.com/zevtyardt/proxy-list/main/http.txt",
+            "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt",
+            "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt",
+            "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
+            "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+            "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt",
+            "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
+            "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt",
+            "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt",
+        ):
+            self.assertNotIn(u, urls)
+
+    def test_all_extra_sources_are_cf_proxyip_kind(self):
+        # 策略总闸：EXTRA_SOURCES 任何一项的端口来源都必须是 CF 反代池。
+        # kind 仅允许 ip（裸 IP→443）/plain（ip:443#CC）/csv（443 端口优选榜单）。
+        for kind, url in dp.EXTRA_SOURCES:
+            self.assertIn(kind, ("ip", "plain", "csv"))
+
+    def test_five_cf_proxyip_sources_registered(self):
+        # 新一批 A 类：Wwuyi123/CF-Proxyip（3 文件）与 wanwushequ/ProxyIP
+        # 地区优选榜（US/JP），均裸 IP 入 443 桶，各带可读标签。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         for u, label in (
-            ("https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
-             "clarketm_http"),
-            ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt",
-             "sunny9577_http"),
-            ("https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
-             "jetkai_http"),
-            ("https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt",
-             "roosterkid_https"),
-            ("https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt",
-             "shifty_http"),
+            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt",
+             "wwuyi_proxyip"),
+            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt",
+             "wwuyi_proxyip_cc"),
+            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt",
+             "wwuyi_all"),
+            ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt",
+             "wanwu_us"),
+            ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt",
+             "wanwu_jp"),
         ):
             self.assertIn(u, urls)
             self.assertEqual(dp.source_label(u), label)
-
-    def test_five_http_pool_sources_parse_plain(self):
-        # 新源均为裸 ip:port 行，且以 plain 类型注册。
-        for tu in (
-            ("plain", "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"),
-            ("plain", "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt"),
-            ("plain", "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt"),
-            ("plain", "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt"),
-            ("plain", "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt"),
-        ):
-            self.assertIn(tu, dp.EXTRA_SOURCES)
 
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
