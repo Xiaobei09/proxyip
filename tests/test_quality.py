@@ -531,7 +531,8 @@ class TestReputation(unittest.TestCase):
         self.assertIn("hackmyip", qc.REPUTATION_WEIGHTS)
         self.assertEqual(qr._flag_opinions(
             "hackmyip", {"is_proxy": True, "is_hosting": False,
-                         "is_mobile": False}), {"proxy": True})
+                         "is_mobile": False}),
+            {"hosting": False, "mobile": False, "proxy": True})
         self.assertEqual(qr._flag_opinions(
             "hackmyip", {"is_hosting": True}), {"hosting": True})
         self.assertEqual(qr._flag_opinions(
