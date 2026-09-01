@@ -1047,7 +1047,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--extra-source", action="append", default=[], metavar="KIND,URL",
-        help="Append an extra proxy source 'kind,url' (kind: plain|ip|csv); "
+        help="Append an extra proxy source 'kind,url' (kind: plain|ip|csv|json); "
         "repeatable",
     )
     parser.add_argument(
