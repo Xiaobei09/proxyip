@@ -116,10 +116,12 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy.txt"),
     ("ip", "https://ipdb.api.030101.xyz/?type=proxy"),
     ("ip", "https://ipdb.api.030101.xyz/?type=bestproxy"),
+    ("ip", "https://ipdb.api.030101.xyz/?type=bestproxy&country=true"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt"),
     ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt"),
+    ("ip", "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt"),
     ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
@@ -130,10 +132,12 @@ DEFAULT_EXTRA_PORT = "443"
 SOURCE_LABELS: dict[str, str] = {
     "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy": "ipdb_bestproxy",
+    "https://ipdb.api.030101.xyz/?type=bestproxy&country=true": "ipdb_bestproxy_cc",
     "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt": "ipdb_bestali",
     "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt": "ipdb_bestgc",
     "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt": "ipdb_bestgc6",
     "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt": "ipdb_bestedg",
+    "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt": "leilao_cfproxy",
 }
 
 

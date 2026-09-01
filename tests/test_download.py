@@ -655,6 +655,33 @@ class TestProxyMirrorSources(unittest.TestCase):
             "ipdb_bestproxy",
         )
 
+    def test_cf_country_scoped_and_leilao_sources_registered(self):
+        # bestproxy&country=true（IP#CC 格式、非 CF 反代）+ LeilaoMi 精选池
+        # 均为非 CF ASN，默认启用以提升覆盖，且各带可读标签。
+        urls = [u for _kind, u in dp.EXTRA_SOURCES]
+        self.assertIn("https://ipdb.api.030101.xyz/?type=bestproxy&country=true", urls)
+        self.assertIn(
+            "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt",
+            urls,
+        )
+        self.assertEqual(
+            dp.source_label("https://ipdb.api.030101.xyz/?type=bestproxy&country=true"),
+            "ipdb_bestproxy_cc",
+        )
+        self.assertEqual(
+            dp.source_label(
+                "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt"
+            ),
+            "leilao_cfproxy",
+        )
+
+    def test_country_code_noted_lines_parse_as_bare_ips(self):
+        # bestproxy&country=true 采用 ip#CC 元数据标记（无端口），必须经
+        # extract_bare_ips 解析成功并去掉 #CC 后缀，而非落入 plain/port 分支。
+        by_port = dp.extract_bare_ips(b"47.242.218.87#HK\n132.226.16.97#SG\n")
+        total = sum(len(v) for c in by_port.values() for v in c.values())
+        self.assertEqual(total, 2)
+
     def test_ipdb_cloud_pools_registered(self):
         # ymyuuu/IPDB 的 BestAli/BestGC/BestEDG 属非 CF（阿里/谷歌等云池），
         # 均默认启用以提升可用性，且各带可读标签（防 all 类文件名碰撞）。
