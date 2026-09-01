@@ -560,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
         "netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,"
         "ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,"
         "proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,"
-        "scamalytics,iplocation,cins,et_compromised)",
+        "hackmyip,scamalytics,iplocation,cins,et_compromised)",
     )
     parser.add_argument(
         "--reputation-weights",
