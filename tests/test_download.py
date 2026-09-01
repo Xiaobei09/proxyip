@@ -341,6 +341,31 @@ class TestNormalizeCountry(unittest.TestCase):
         self.assertEqual(dp.normalize_country("zzz"), "ALL")
         self.assertEqual(dp.normalize_country("东京"), "ALL")
 
+    def test_speed_prefixed_notes(self):
+        # Wwuyi123/CF-Proxyip 的 ``IP#速度(MB/s)地区`` 注释：以前全落 ALL，
+        # 现在应直接提取地区，减少 ip-api 往返。
+        self.assertEqual(dp.normalize_country("256.85(MB/s)HK香港"), "HK")
+        self.assertEqual(dp.normalize_country("222.32(MB/s)日本"), "JP")
+        self.assertEqual(dp.normalize_country("1024.2(MB/s)新加坡"), "SG")
+        self.assertEqual(dp.normalize_country("43.70(MB/s)JP日本"), "JP")
+        self.assertEqual(dp.normalize_country("36.90(MB/s)HK香港"), "HK")
+
+    def test_speed_prefixed_iso2(self):
+        self.assertEqual(dp.normalize_country("88.3(MB/s)US"), "US")
+        self.assertEqual(dp.normalize_country("256.85(MB/s)HK"), "HK")
+        # 带单位但无括号
+        self.assertEqual(dp.normalize_country("50.2MB/sHKSAR"), "HK")
+        # 大小写/不同单位
+        self.assertEqual(dp.normalize_country("218.3(Mbps)日本"), "JP")
+        self.assertEqual(dp.normalize_country("88.3(MB/s)US(US)"), "US")
+
+    def test_speed_prefixed_keeps_prior_paths(self):
+        # 带数字的注释不应破坏既有无数字路径
+        self.assertEqual(dp.normalize_country("us"), "US")
+        self.assertEqual(dp.normalize_country("香港"), "HK")
+        self.assertEqual(dp.normalize_country("NRT"), "JP")
+        self.assertEqual(dp.normalize_country("zzz"), "ALL")
+
 
 class TestExtractPlain(unittest.TestCase):
     def test_ip_port_with_notes(self):

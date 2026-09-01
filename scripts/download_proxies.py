@@ -227,6 +227,13 @@ AIRPORT_COUNTRY_MAP: dict[str, str] = {
     "GIG": "BR", "GRU": "BR", "JNB": "ZA", "CPT": "ZA",
 }
 
+# 常见 ISO2 国码集合，供带速度前缀的长令牌注释（如 ``HKSAR``）从开头提取
+_KNOWN_ISO2 = frozenset(
+    set(CN_COUNTRY_MAP.values())
+    | {"HK", "CN", "MO", "TW", "JP", "US", "GB", "DE", "FR", "NL", "KR",
+       "SG", "RU", "CA", "AU", "IN", "TH", "VN", "MY", "BR", "ZA", "AE"}
+)
+
 
 def fetch(url: str, timeout: int) -> bytes:
     """Fetch bytes; raw.githubusercontent.com URLs fall back to CN mirrors."""
@@ -277,9 +284,71 @@ def normalize_country(note: str) -> str:
         return AIRPORT_COUNTRY_MAP[up]
     if tok in CN_COUNTRY_MAP:
         return CN_COUNTRY_MAP[tok]
+    # 带速度/数字前缀的注释（如 ``256.85(MB/s)HK香港``、``50.2MB/sHKSAR``）：
+    # 末尾纯字母启发式会把 ``HKSAR`` 的末两位误判为 ``AR``，改为剥速度后
+    # 从令牌内找第一个已知地区（HK/SG/JP…），更可靠。
+    if re.search(r"\d", note):
+        return _extract_region(note)
     m = re.search(r"[A-Z]{2}$", tok)
     if m:
-        return m.group(0)
+        # 多字母地区令牌（如 HKSAR/SIN）不该被末两位（AR/IN）误判，
+        # 先试完整令牌再退化为末两位 ISO2。
+        full = m.group(0)
+        if tok in AIRPORT_COUNTRY_MAP:
+            return AIRPORT_COUNTRY_MAP[tok]
+        if full in AIRPORT_COUNTRY_MAP:
+            return AIRPORT_COUNTRY_MAP[full]
+        return full
+    return _extract_region(note)
+
+
+_SPEED_TOKEN_RE = re.compile(
+    r"^[\(\s]*[\d.]+(?:[\(\s]*(?:MB/s|KB/s|GB/s|Mbps|Kbps|mbps|kbps)[\)\s]*|[\)\s]*)"
+)
+
+
+def _strip_speed(note: str) -> str:
+    """剥去开头速度 token（如 ``256.85(MB/s)``、``88.3(MB/s)``、``50.2MB/s``）。
+
+    不区分单位的大小写与括号形态，反复剥离直到开头不再是数字/单位。
+    """
+    s = note
+    while _SPEED_TOKEN_RE.match(s):
+        s = _SPEED_TOKEN_RE.sub("", s, count=1).lstrip(" (（=:：")
+    return s.strip(" (）()=")
+
+
+def _extract_region(note: str) -> str:
+    """从带速度/MB 前缀的注释（如 ``256.85(MB/s)HK香港``）中提取地区。
+
+    先剥速度段，再对剩余部分依次尝试：中文地区名、完整令牌、令牌内的
+    已知 ISO2/机场词。均未命中返回 ``"ALL"``。
+    """
+    rest = _strip_speed(note)
+    if not rest:
+        return "ALL"
+    # 中文地区名：整段或包含（如 `香港`、`HK香港`）
+    if rest in CN_COUNTRY_MAP:
+        return CN_COUNTRY_MAP[rest]
+    for han, cc in CN_COUNTRY_MAP.items():
+        if han and han in rest:
+            return cc
+    # 大写字母令牌
+    alpha = "".join(ch for ch in rest if ch.isascii() and ch.isalpha()).upper()
+    if alpha in AIRPORT_COUNTRY_MAP:
+        return AIRPORT_COUNTRY_MAP[alpha]
+    if re.fullmatch(r"[A-Z]{2}", alpha):
+        return alpha
+    if alpha in CN_COUNTRY_MAP:
+        return CN_COUNTRY_MAP[alpha]
+    # 长令牌：优先匹配已知机场/ISO2 词（如 ``HKSAR`` 内的 ``HK``），
+    # 只有命中已知映射才返回；否则交回 ``"ALL"`` 避免把不可映射串误判国家。
+    for airport, country in AIRPORT_COUNTRY_MAP.items():
+        if airport in alpha:
+            return country
+    prefix2 = alpha[:2]
+    if len(alpha) >= 4 and prefix2 in _KNOWN_ISO2:
+        return prefix2
     return "ALL"
 
 
