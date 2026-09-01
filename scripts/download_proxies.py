@@ -129,6 +129,11 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("plain", "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt"),
     ("plain", "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt"),
     ("plain", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
+    ("plain", "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"),
+    ("plain", "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt"),
+    ("plain", "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt"),
+    ("plain", "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt"),
+    ("plain", "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
@@ -149,6 +154,11 @@ SOURCE_LABELS: dict[str, str] = {
     "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt": "iplocate_http",
     "https://raw.githubusercontent.com/Syscallh00k/proxy-list/main/http.txt": "syscallh00k_http",
     "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt": "thespeedx_http",
+    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt": "clarketm_http",
+    "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.txt": "sunny9577_http",
+    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt": "jetkai_http",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/master/HTTPS_RAW.txt": "roosterkid_https",
+    "https://raw.githubusercontent.com/ShiftyTr/proxy-list/master/http.txt": "shifty_http",
 }
 
 
