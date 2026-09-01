@@ -18,7 +18,7 @@
 
 #### CF 反代补充来源
 
-除主源外，默认还会拉取一批 **Cloudflare 反代（非官方 CF 段）** 来源并合并：`wentao883/TG-wxgqlfx_ZBDW`（`fdip`/`vlid`/`yxip`）、`ChatBotPlus/cf-proxyips`、`ymyuuu/IPDB`（`BestProxy/proxy.txt` 与 `bestproxy&country.txt`）、`mountain787/Lunch-Bag-ip`。解析方式分四种：`plain`（`ip:port#国家`/`ip:port#中文`）、`ip`（裸 IP，统一按 443 端口）、`csv`（`IP,端口,地区,延迟`，地区为机场码或国家码）、`json`（`all.json` 格式镜像，缺失国家字段的条目归入 `ALL`，畸形载荷容忍）。中文名与机场码经映射表归一为 ISO2；仍无国家的条目经 `ip-api.com/batch` 尽力补齐（每批 100、失败保留 `#ALL`）。单个来源失败仅告警跳过，不影响整体运行。
+除主源外，默认还会拉取一批 **Cloudflare 反代（非官方 CF 段）** 来源并合并：`wentao883/TG-wxgqlfx_ZBDW`（`fdip`/`vlid`/`yxip`）、`ChatBotPlus/cf-proxyips`、`ymyuuu/IPDB`（`BestProxy/proxy.txt` 与 `bestproxy&country.txt`）、`mountain787/Lunch-Bag-ip`。解析方式分四种：`plain`（`ip:port#国家`/`ip:port#中文`）、`ip`（裸 IP，统一按 443 端口）、`csv`（`IP,端口,地区,延迟`，地区为机场码或国家码）、`json`（`all.json` 格式镜像，缺失国家字段的条目归入 `ALL`，畸形载荷容忍）。中文名与机场码经映射表归一为 ISO2；仍无国家的条目经 `ip-api.com/batch` 尽力补齐（每批 100、失败保留 `#ALL`）。单个来源失败仅告警跳过，不影响整体运行。来源标签：`json` 镜像若为通用清单名（`all.json`/`all.zip` 等，多镜像会共用 `all` 这一名字），会自动以注册域前缀消歧（如 `mirror-a/all`、`mirror-b/all`），避免不同镜像在来源统计/逐 IP 归属/健康监控中互覆；其余来源保持文件名主干。
 
 **维护宗旨：只保留「非 Cloudflare AS13335 + Cloudflare 边缘端口」连接池。** 因此不收录 Cloudflare 官方边缘 IP（如 `byJoey/cfnew-ipdb`——其 IP 全属 AS13335，而 Workers 出站 `connect()` 禁止直连 CF IP 网段，无法用于自建链路）。最终产物经端口白名单 `443/8443/2053/2083/2087/2096` 过滤，其余端口桶一律丢弃——可用于 Worker 内部 `connect()` 直连。
 
