@@ -189,6 +189,22 @@ class TestExtractJson(unittest.TestCase):
         with self.assertRaises(ValueError):
             dp.extract_json(b'{"generated_at": "x"}')
 
+    def test_json_extra_falls_back_to_all_without_country(self):
+        payload = self._json([
+            {"ip": "1.1.1.1", "port": [443], "meta": {"country": "US"}},
+            {"ip": "5.5.5.5", "port": [443]},                 # 无国家 → ALL
+            {"ip": "6.6.6.6", "port": [2053], "meta": {}},    # 空 meta → ALL
+        ])
+        by_port = dp.extract_json_extra(payload)
+        self.assertEqual(by_port["443"]["US"], ["1.1.1.1"])
+        self.assertEqual(by_port["443"]["ALL"], ["5.5.5.5"])
+        self.assertEqual(by_port["2053"]["ALL"], ["6.6.6.6"])
+
+    def test_json_extra_tolerant_malformed(self):
+        self.assertEqual(dp.extract_json_extra(b'{"generated_at": "x"}'), {})
+        self.assertEqual(dp.extract_json_extra(b"not json"), {})
+        self.assertEqual(dp.extract_json_extra(b'{"data": [{"ip": "bad"}]}'), {})
+
 
 class TestLoadSource(unittest.TestCase):
     def setUp(self):

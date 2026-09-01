@@ -100,6 +100,8 @@ SMALL_SETS: dict[str, list[str]] = {
 #   plain —— ``ip:port(#note)?`` 行（note 可为国家码或中文名）
 #   ip    —— 裸 ``ip(#note)?`` 行（无端口，统一按 DEFAULT_EXTRA_PORT）
 #   csv   —— ``IP,port,区域,延迟`` 表（区域为机场码或国家码）
+#   json  —— ``all.json`` 格式镜像（``{"data":[{"ip","port","meta"}]}``，
+#            缺失国家字段的条目归入 ALL；容忍畸形载荷）
 #
 # 维护目标是「非 Cloudflare AS13335 + Cloudflare 边缘常用端口」的可直连
 # 连接池（用于 Cloudflare Worker `connect()` 等自建链路）。因此：不收录
@@ -248,20 +250,24 @@ META_KEYS = ("clientIp", "asn", "asOrganization", "country", "city", "region",
              "continent")
 
 
-def extract_json(content: bytes) -> tuple[dict, dict]:
-    """Parse the upstream ``all.json`` payload.
+def _parse_all_json_entries(
+    content: bytes, require_country: bool = True,
+) -> tuple[dict, dict]:
+    """Parse an ``all.json`` payload into ``(by_port, meta_map)``.
 
-    Returns ``(by_port, meta_map)`` where ``by_port`` matches the structure of
-    :func:`extract` (``by_port[port][country]`` = sorted set of bare IPs) and
-    ``meta_map`` maps each proxy IP to a trimmed copy of its metadata with a
-    derived ``family`` field ("ipv6" when the actual exit ``clientIp`` is an
-    IPv6 address, otherwise "ipv4").
+    ``by_port`` matches :func:`extract` (``by_port[port][country]`` = sorted
+    set of bare IPs) and ``meta_map`` maps each proxy IP to a trimmed copy of
+    its metadata with a derived ``family`` field ("ipv6" when the actual exit
+    ``clientIp`` is an IPv6 address, otherwise "ipv4").
+
+    When ``require_country`` is False (extra-source mirrors), entries missing a
+    usable ``meta.country`` are bucketed under ``ALL`` instead of dropped, so
+    country-less mirrors still contribute to pool coverage.
     """
-    print("[2/3] Extracting all.json ...")
     payload = json.loads(content.decode("utf-8", errors="replace"))
     entries = payload.get("data")
     if not isinstance(entries, list):
-        raise ValueError("all.json has no 'data' list")
+        return {}, {}
     by_port: dict[str, dict[str, list[str]]] = defaultdict(dict)
     meta_map: dict[str, dict] = {}
     for entry in entries:
@@ -271,7 +277,9 @@ def extract_json(content: bytes) -> tuple[dict, dict]:
         meta = entry.get("meta")
         country = meta.get("country") if isinstance(meta, dict) else None
         if not isinstance(country, str) or not country:
-            continue
+            if require_country:
+                continue
+            country = "ALL"
         ports = entry.get("port")
         if not isinstance(ports, list):
             continue
@@ -291,6 +299,34 @@ def extract_json(content: bytes) -> tuple[dict, dict]:
             by_port[port][country] = sorted(set(by_port[port][country]),
                                             key=ip_sort_key)
     return by_port, meta_map
+
+
+def extract_json(content: bytes) -> tuple[dict, dict]:
+    """Parse the upstream ``all.json`` payload into ``(by_port, meta_map)``.
+
+    Mirrors :func:`_parse_all_json_entries` but requires every entry to carry a
+    usable ``meta.country`` (the curated upstream always does), raising when the
+    payload has no ``data`` list.
+    """
+    print("[2/3] Extracting all.json ...")
+    payload = json.loads(content.decode("utf-8", errors="replace"))
+    if not isinstance(payload.get("data"), list):
+        raise ValueError("all.json has no 'data' list")
+    return _parse_all_json_entries(content, require_country=True)
+
+
+def extract_json_extra(content: bytes) -> dict:
+    """Parse an extra-source ``all.json`` mirror into ``by_port`` only.
+
+    Tolerant variant: entries without ``meta.country`` fall back to ``ALL``
+    (rather than being dropped) so country-less mirrors still widen coverage;
+    malformed payloads return an empty result instead of raising.
+    """
+    try:
+        by_port, _meta = _parse_all_json_entries(content, require_country=False)
+    except (ValueError, json.JSONDecodeError):
+        return {}
+    return by_port
 
 
 PLAIN_LINE_RE = re.compile(r"^\s*([0-9A-Fa-f:.]+):(\d{2,5})(?:#(\S*))?\s*$")
@@ -845,6 +881,8 @@ def load_extras(
             return extract_bare_ips(content)
         if kind == "csv":
             return extract_csv_ports(content)
+        if kind == "json":
+            return extract_json_extra(content)
         print(f"Skipping unknown extra source kind {kind!r} ({url})",
               file=sys.stderr)
         return {}
