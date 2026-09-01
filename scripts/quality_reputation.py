@@ -62,6 +62,8 @@ SPAMHAUS_DROP_URL = "https://www.spamhaus.org/drop/drop.txt"
 SPAMHAUS_EDROP_URL = "https://www.spamhaus.org/drop/edrop.txt"
 FREEIPAPI_URL = "https://freeipapi.com/api/json/{ip}"
 FREEIPAPI_TIMEOUT = 10
+HACKMYIP_URL = "https://hackmyip.com/api/lookup?ip={ip}"
+HACKMYIP_TIMEOUT = 10
 SCAMALYTICS_URL = "https://scamalytics.com/ip/{ip}"
 SCAMALYTICS_TIMEOUT = 12
 SCAMALYTICS_CAP = 1500
@@ -176,6 +178,7 @@ REPUTATION_WEIGHTS = {
     "tor_exit": 5,
     "spamhaus": 4,
     "freeipapi": 6,
+    "hackmyip": 6,
     "scamalytics": 8,
     "iplocation": 3,
     "cins": 5,
@@ -189,6 +192,7 @@ DEFAULT_REP_SOURCES = (
     "proxycheck", "ip2location", "ipwhois",
     "tor_exit", "spamhaus",
     "freeipapi", "scamalytics", "iplocation",
+    "hackmyip",
     "cins", "et_compromised",
 )
 SOURCE_PACING = {
@@ -204,6 +208,7 @@ SOURCE_PACING = {
     "ip2location": (6, 0.2),
     "ipwhois": (6, 0.2),
     "freeipapi": (8, 0.15),
+    "hackmyip": (6, 0.2),
     "scamalytics": (4, 0.5),
     "iplocation": (8, 0.12),
 }
@@ -647,6 +652,38 @@ def freeipapi_lookup_sync(ip: str) -> dict | None:
         out["org"] = org
     if not out["is_proxy"] and not asn:
         return None
+    return out
+
+
+def hackmyip_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``hackmyip.com/api/lookup?ip={ip}``: hosting/proxy/mobile flags.
+
+    Returns ``{"is_hosting", "is_proxy", "is_mobile", "asn"}`` from the
+    ``data.privacy`` block; ``None`` when the payload is unusable.
+    """
+    req = urllib.request.Request(
+        HACKMYIP_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=HACKMYIP_TIMEOUT) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    privacy = data.get("privacy")
+    privacy = privacy if isinstance(privacy, dict) else {}
+    out = {
+        "is_hosting": bool(privacy.get("hosting")),
+        "is_proxy": bool(privacy.get("proxy")),
+        "is_mobile": bool(privacy.get("mobile")),
+    }
+    network = data.get("network")
+    if isinstance(network, dict):
+        asn = norm_asn(network.get("asn"))
+        if asn:
+            out["asn"] = asn
     return out
 
 
@@ -1208,6 +1245,14 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"listed": True} if signal.get("is_blacklisted") else {}
     if name == "iplocation":
         return {"proxy": True} if signal.get("is_proxy") else {}
+    if name == "hackmyip":
+        return {
+            f: v for f, v in {
+                "hosting": signal.get("is_hosting"),
+                "proxy": signal.get("is_proxy"),
+                "mobile": signal.get("is_mobile"),
+            }.items() if isinstance(v, bool)
+        }
     if name == "cins":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "et_compromised":
@@ -1590,6 +1635,10 @@ async def lookup_all_risk(
         w, d = pacing.get("freeipapi", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "freeipapi", freeipapi_lookup_sync, cap=FREEIPAPI_CAP, workers=w, delay=d))
+    if "hackmyip" in sources:
+        w, d = pacing.get("hackmyip", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "hackmyip", hackmyip_lookup_sync, workers=w, delay=d))
     if "scamalytics" in sources:
         w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(

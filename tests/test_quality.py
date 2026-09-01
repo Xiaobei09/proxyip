@@ -525,6 +525,22 @@ class TestReputation(unittest.TestCase):
         self.assertIn("ipwhois", qc.DEFAULT_REP_SOURCES)
         self.assertIn("tor_exit", qc.DEFAULT_REP_SOURCES)
 
+    def test_hackmyip_source_vote(self):
+        """hackmyip hosting/proxy/mobile flags vote into the semantic dims."""
+        self.assertIn("hackmyip", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("hackmyip", qc.REPUTATION_WEIGHTS)
+        self.assertEqual(qr._flag_opinions(
+            "hackmyip", {"is_proxy": True, "is_hosting": False,
+                         "is_mobile": False}), {"proxy": True})
+        self.assertEqual(qr._flag_opinions(
+            "hackmyip", {"is_hosting": True}), {"hosting": True})
+        self.assertEqual(qr._flag_opinions(
+            "hackmyip", {"is_mobile": True}), {"mobile": True})
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"hackmyip": {"is_proxy": True, "is_hosting": False,
+                          "is_mobile": False}}, self.W)
+        self.assertEqual(flagged, ["proxy"])
+
     def test_cache_cap_tiles(self):
         """REP_CACHE_MAX 裁剪逻辑：超阈值仅保留最新 REP_CACHE_MAX 项。"""
         import time
@@ -930,6 +946,61 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["score"], 40)
         self.assertEqual(out["connection_type"], "Residential")
 
+    def test_hackmyip_lookup_parsing(self):
+        payload = (
+            b'{"success":true,"data":{"privacy":{"hosting":true,"proxy":false,'
+            b'"mobile":false},"network":{"asn":212194,"isp":"Yuusei LTD",'
+            b'"org":"Ipxo"}}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("hackmyip.com/api/lookup", req.full_url)
+            self.assertIn("1.2.3.4", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.hackmyip_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertTrue(out["is_hosting"])
+        self.assertFalse(out["is_proxy"])
+        self.assertFalse(out["is_mobile"])
+        self.assertEqual(out["asn"], "AS212194")
+
+    def test_hackmyip_lookup_bad_payload(self):
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return b'{"success":false,"error":"boom"}'
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.hackmyip_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertIsNone(out)
+
     def test_parse_abuser_score(self):
         self.assertEqual(qc.parse_abuser_score("0.0039 (Low)"), 0.0039)
         self.assertEqual(qc.parse_abuser_score("42"), 42.0)
@@ -1289,20 +1360,24 @@ class TestReputationCache(unittest.TestCase):
         self.assertTrue(qr.REP_CACHE_FILE.exists())
 
     def test_cache_expired_requeries(self):
+        # 用与运行时一致的 per-source schema，真正验证「过期 → 重查」语义：
+        # 1.1.1.1 过期须重查；8.8.8.8 仍新鲜则不重查。
         now = time.time()
         qc.save_rep_cache({
-            "1.1.1.1": {"ts": now - 2 * 604800, "signals": {"netcoffee": {"risk": "low"}}},
+            "1.1.1.1": {"netcoffee": {"ts": now - 2 * 604800, "data": {"risk": "low"}}},
+            "8.8.8.8": {"netcoffee": {"ts": now, "data": {"risk": "medium"}}},
         })
         calls = []
         orig = qr.netcoffee_lookup_sync
         qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "low"})[1]
         try:
             asyncio.run(qc.lookup_all_risk(
-                ["1.1.1.1", "2.2.2.2"], self._args()
+                ["1.1.1.1", "2.2.2.2", "8.8.8.8"], self._args()
             ))
         finally:
             qr.netcoffee_lookup_sync = orig
         self.assertEqual(calls, ["1.1.1.1", "2.2.2.2"])
+        self.assertEqual(len(calls), 2)
 
     def test_no_rep_cache_flag(self):
         calls = []
@@ -1332,6 +1407,32 @@ class TestReputationCache(unittest.TestCase):
         self.assertEqual(len(out), 2)
         data = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))
         self.assertIn("1.1.1.1", data["proxies"])
+
+    def test_cached_signal_ttl_boundary(self):
+        now = 1_000_000.0
+        cache = {
+            "1.1.1.1": {"netcoffee": {"ts": now - 5, "data": {"risk": "low"}}},
+        }
+        # 恰好 TTL(ts+ttl==now)：视为新鲜（含边界）
+        self.assertEqual(
+            qr.cached_signal(cache, "1.1.1.1", "netcoffee", now, ttl=5),
+            {"risk": "low"},
+        )
+        # 超过 TTL 一瞬(ts+ttl<now)：视为过期
+        self.assertIsNone(
+            qr.cached_signal(cache, "1.1.1.1", "netcoffee", now + 0.001, ttl=5)
+        )
+        # ttl<=0（--no-rep-cache）一律返回 None
+        self.assertIsNone(
+            qr.cached_signal(cache, "1.1.1.1", "netcoffee", now, ttl=0)
+        )
+        # 未知 IP / 未知来源 / 非 dict data 均返回 None
+        self.assertIsNone(qr.cached_signal(cache, "9.9.9.9", "netcoffee", now, 5))
+        self.assertIsNone(qr.cached_signal(cache, "1.1.1.1", "other", now, 5))
+        self.assertIsNone(
+            qr.cached_signal({"2.2.2.2": {"netcoffee": {"ts": now, "data": []}}},
+                            "2.2.2.2", "netcoffee", now, 5)
+        )
 
 
 class TestAnnotateClassify(unittest.TestCase):
