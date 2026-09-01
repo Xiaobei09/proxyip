@@ -2141,5 +2141,79 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertIn("10.0.0.5", out["tor_bulk"])
 
 
+    def test_greynoise_malicious_strong_penalty(self):
+        """GreyNoise 恶意扫描 → abuse 家族按 60 从严（非通用 35）。"""
+        sig = {"is_abuse": True, "is_noise": False, "is_riot": False}
+        self.assertEqual(qr._flag_opinions("greynoise", sig), {"abuse": True})
+        self.assertEqual(qr.source_score("greynoise", sig), 40)
+        score, _r, flagged, _n = qr.vote_reputation(
+            {"greynoise": sig}, {"greynoise": 8})
+        self.assertEqual(score, 40)
+        self.assertEqual(flagged, ["abuse"])
+
+    def test_greynoise_riot_and_noise_differentiated(self):
+        """GreyNoise botnet(is_riot)/噪音(is_noise) 按 35/15 差异化扣分。"""
+        self.assertEqual(
+            qr._flag_opinions("greynoise", {"is_riot": True}), {"bot": True})
+        self.assertEqual(qr.source_score("greynoise", {"is_riot": True}), 65)
+        score, _r, flagged, _n = qr.vote_reputation(
+            {"greynoise": {"is_riot": True}}, {"greynoise": 8})
+        self.assertEqual(score, 65)
+        self.assertEqual(flagged, ["bot"])
+        self.assertEqual(
+            qr._flag_opinions("greynoise", {"is_noise": True}), {"noise": True})
+        score, _r, flagged, _n = qr.vote_reputation(
+            {"greynoise": {"is_noise": True}}, {"greynoise": 8})
+        self.assertEqual(score, 85)
+        self.assertEqual(flagged, ["noise"])
+
+    def test_greynoise_clean_no_signal(self):
+        """干净 IP（无 noise/riot/malicious）→ 无 signal，score 100。"""
+        self.assertIsNone(qr.source_score(
+            "greynoise", {"is_noise": False, "is_riot": False}))
+        score, _r, _f, _n = qr.vote_reputation(
+            {"greynoise": {"is_noise": False, "is_riot": False}},
+            {"greynoise": 8})
+        self.assertEqual(score, 100)
+
+    def test_family_penalty_max_of_confirmers(self):
+        """同家族多源确认 → 每源取各自强度，vote 再取 max 且每家族仅计一次。"""
+        sigs = {
+            "greynoise": {"is_abuse": True},
+            "feodo": {"is_abuse": True},
+        }
+        weights = {"greynoise": 8, "feodo": 4}
+        score, _r, flagged, _n = qr.vote_reputation(sigs, weights)
+        self.assertEqual(flagged, ["abuse"])
+        self.assertEqual(score, 100 - 60)  # greynoise is_abuse 60 从严，feodo 通用 35 被 max 覆盖
+        self.assertEqual(qr._family_penalty("greynoise", "abuse", sigs["greynoise"]), 60)
+        self.assertEqual(qr._family_penalty("feodo", "abuse", sigs["feodo"]),
+                         qr.FLAG_PENALTIES["abuse"])
+
+    def test_mobile_clean_bonus_helper(self):
+        self.assertEqual(qr._mobile_clean_bonus({"mobile": True}), 5)
+        self.assertEqual(qr._mobile_clean_bonus({"mobile": True, "proxy": True}), 0)
+        self.assertEqual(qr._mobile_clean_bonus({"mobile": False}), 0)
+        self.assertEqual(qr._mobile_clean_bonus({}), 0)
+
+    def test_consensus_min_confirm_weight(self):
+        """min_confirm_weight 门槛抑制单低权重源定罪。"""
+        sig = {"greynoise": {"is_abuse": True}}
+        W = {"greynoise": 8}
+        self.assertEqual(
+            qr.consensus_flags(sig, W), {"abuse": True})
+        self.assertEqual(
+            qr.consensus_flags(sig, W, min_confirm_weight=100),
+            {"abuse": None})
+
+    def test_vote_responding_excludes_zero_weight(self):
+        """权重 0 的源不应计入 responding。"""
+        sigs = {"netcoffee": {"is_proxy": True}, "zero_w": {"is_proxy": True}}
+        W = {"netcoffee": 20, "zero_w": 0}
+        _s, responding, _f, _n = qr.vote_reputation(sigs, W)
+        self.assertNotIn("zero_w", responding)
+        self.assertIn("netcoffee", responding)
+
+
 if __name__ == "__main__":
     unittest.main()
