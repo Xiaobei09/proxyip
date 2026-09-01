@@ -73,6 +73,7 @@ IPLOCATION_CAP = 3000
 FREEIPAPI_CAP = 3000
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
+FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
 SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
 SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
@@ -183,6 +184,7 @@ REPUTATION_WEIGHTS = {
     "iplocation": 3,
     "cins": 5,
     "et_compromised": 4,
+    "feodo": 4,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -193,7 +195,7 @@ DEFAULT_REP_SOURCES = (
     "tor_exit", "spamhaus",
     "freeipapi", "scamalytics", "iplocation",
     "hackmyip",
-    "cins", "et_compromised",
+    "cins", "et_compromised", "feodo",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -556,6 +558,14 @@ async def fetch_et_compromised() -> IpSet:
     return IpSet(rows)
 
 
+async def fetch_feodo() -> IpSet:
+    """abuse.ch Feodo Tracker 僵尸网络 C2 IP（``ipblocklist.txt``，单行空白分隔）。"""
+    rows: set[str] = set()
+    for line in await fetch_text_list(FEODO_URL):
+        rows.update(line.split())
+    return IpSet(rows)
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -811,6 +821,7 @@ async def fetch_static_lists(sources: list) -> dict:
         "spamhaus": IpSet(),
         "cins": IpSet(),
         "et_compromised": IpSet(),
+        "feodo": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -823,6 +834,8 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("cins", fetch_cins_badguys()))
     if "et_compromised" in sources:
         mapping.append(("et_compromised", fetch_et_compromised()))
+    if "feodo" in sources:
+        mapping.append(("feodo", fetch_feodo()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -1255,6 +1268,8 @@ def _flag_opinions(name: str, signal) -> dict:
         }
     if name == "cins":
         return {"listed": True} if signal.get("is_listed") else {}
+    if name == "feodo":
+        return {"abuse": True} if signal.get("is_abuse") else {}
     if name == "et_compromised":
         return {"abuse": True} if signal.get("is_abuse") else {}
     return {}
@@ -1666,6 +1681,8 @@ async def lookup_all_risk(
             put("cins", ip, {"is_listed": True})
         if ip in static["et_compromised"]:
             put("et_compromised", ip, {"is_abuse": True})
+        if ip in static["feodo"]:
+            put("feodo", ip, {"is_abuse": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue

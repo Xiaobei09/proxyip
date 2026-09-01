@@ -92,7 +92,7 @@
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,hackmyip,scamalytics,iplocation,cins,et_compromised |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,hackmyip,scamalytics,iplocation,cins,et_compromised,feodo |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
@@ -132,6 +132,7 @@
 | `iplocation` | 3 | `api.iplocation.net/?ip={ip}`，免 key；`is_proxy` -30，附 isp |
 | `cins` | 5 | CINS Army `ci-badguys.txt` 静态活跃滥用/拒绝服务 IP（免费），命中投 `listed` 票 |
 | `et_compromised` | 4 | EmergingThreats `compromised-ips.txt` 被入侵主机（免费），命中投 `abuse` 票 |
+| `feodo` | 4 | abuse.ch Feodo Tracker `ipblocklist.txt` 僵尸网络 C2 IP（免费），命中投 `abuse` 票 |
 
 可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（netcoffee/ncgy：10 worker、0.15s；blackbox/proxycheck：8 worker、0.2s；ipapi_is：8 worker、0.2s；otx：6 worker、0.3s；ipquery/ffraud/whatismyip/ip2location/ipwhois：6 worker、0.2s；freeipapi：8 worker、0.15s（上限 3000/轮）；hackmyip：6 worker、0.2s；iplocation：8 worker、0.12s（上限 3000/轮）；scamalytics：4 worker、0.5s（上限 1500/轮），新源按轮次上限 + 7 天缓存逐回填覆盖，避免首轮撑爆作业预算）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。缓存表按每个 IP 最近一次信号时间封顶 `REP_CACHE_MAX`（4 万条），超限自动裁剪最旧条目防无限膨胀。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），`ipinfo.json` 每个键含 `rep_flags`/`rep_sources`/`risk_sources`，`reputation.json` 含 `flags`/`numeric`。分数也追加进 `#` 备注末尾。rep 交叉矩阵（`all_{g}_rep.txt`、`all_{g}_rep_ltd.txt`、子目录 `rep.txt` 等）同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）变体；子目录分组 rep 保持单维度以控制文件数量。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
