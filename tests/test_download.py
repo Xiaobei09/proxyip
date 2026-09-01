@@ -644,6 +644,17 @@ class TestProxyMirrorSources(unittest.TestCase):
             "ipdb_bestproxy",
         )
 
+    def test_ipdb_proxy_and_bestproxy_sources_registered(self):
+        # 同源族（ymyuuu/IPDB 非 CF 反代池）的 proxy + bestproxy 都应默认启用，
+        # 扩大覆盖与可用性，且各带可读标签。
+        urls = [u for _kind, u in dp.EXTRA_SOURCES]
+        self.assertIn("https://ipdb.api.030101.xyz/?type=proxy", urls)
+        self.assertIn("https://ipdb.api.030101.xyz/?type=bestproxy", urls)
+        self.assertEqual(
+            dp.source_label("https://ipdb.api.030101.xyz/?type=bestproxy"),
+            "ipdb_bestproxy",
+        )
+
     def test_all_mirrors_are_disambiguated_by_host(self):
         # 不同 all.json 镜像必须得到不同标签，避免 stats/归属互覆
         a = dp.source_label("https://mirror-a.com/all.json")
