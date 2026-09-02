@@ -37,12 +37,14 @@ import urllib.request
 import zipfile
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from common import (
     ALL_FILE,
     ALL_LTD_FILE,
     COUNTRIES_DIR,
     DIFF_DIR,
+    DOWNLOAD_DIR,
     HISTORY_FILE,
     IPAPI_BATCH_URL,
     IPAPI_BATCH_SIZE,
@@ -672,6 +674,35 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     return stats, all_entries
 
 
+def reconcile_download_tree(data_dir: Path = DOWNLOAD_DIR) -> int:
+    """下载树自愈：以 ``data/download/all.txt`` 为权威集裁掉派生视图
+    （ports/countries/sets/ltd）的越界行，并清理剪后残留的空文件。
+
+    崩溃式部分提交（下载步中途失败、commit 步仍照常提交的半个树）曾把
+    非 CF 端口旧文件长期留在 ``download/ports/``；此函数让下一轮完整运行
+    自动还原一致性。
+    """
+    from annotate_classify import reconcile_views
+
+    removed = reconcile_views(data_dir)
+    for sub in ("ports", "countries", "sets"):
+        base = data_dir / sub
+        if not base.is_dir():
+            continue
+        files = (
+            sorted(base.glob("**/*.txt"))
+            if sub in ("countries", "sets")
+            else sorted(base.glob("*.txt"))
+        )
+        for f in files:
+            try:
+                if f.stat().st_size == 0:
+                    f.unlink()
+            except OSError:
+                pass
+    return removed
+
+
 def print_stats(stats: dict) -> None:
     print(f"\nTotal entries: {stats.pop('__total__')}")
     print(f"Unique proxies: {stats.pop('__unique__')}")
@@ -1189,6 +1220,9 @@ def main(argv: list[str] | None = None) -> int:
         previous = load_previous_all()
         added, removed = write_diff(previous, all_entries)
         append_history(build_history_record(stats, added, removed))
+        stale_views = reconcile_download_tree()
+        if stale_views:
+            print(f"Pruned {stale_views} stale download view rows")
         print_stats(stats)
         return 0
     except Exception as exc:  # noqa: BLE001
