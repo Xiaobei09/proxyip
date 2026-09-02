@@ -549,11 +549,14 @@ def fetch_with_mirror(
     url: str,
     timeout: float,
     headers: dict | None = None,
+    max_bytes: int | None = None,
 ) -> bytes:
     """Fetch bytes trying ``url`` first, then its mirrors; last error re-raised.
 
     Mirrors only exist for raw.githubusercontent.com URLs, so elsewhere this
     is a plain single-attempt fetch with identical error behaviour.
+    ``max_bytes`` 为 None 时按 ``FETCH_BODY_MAX``（默认值在函数体内解析，
+    避免与下方常量定义顺序产生 NameError）。
     """
     candidates = [url] + mirror_urls(url)
     last_exc: Exception = RuntimeError(f"no fetch candidates for {url}")
@@ -562,7 +565,9 @@ def fetch_with_mirror(
             candidate, headers=headers or {"User-Agent": UA}
         )
         try:
-            return fetch_with_deadline(req, timeout)
+            return fetch_with_deadline(
+                req, timeout, max_bytes or FETCH_BODY_MAX
+            )
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
     raise last_exc
