@@ -191,34 +191,52 @@ def fill_and_classify(
     return out
 
 
-def reconcile_ports(valid_dir: Path) -> int:
-    """把 ``ports/*.txt`` 行集约束到 ``all.txt`` 全量存活集之内。
+def _key_of(text: str) -> set[str]:
+    return {line.split("#", 1)[0] for line in text.splitlines() if line}
 
-    历史轮次可能遗留已在 ``all.txt`` 离场的节点（非 CF 端口/下架代理）写进
-    端口分桶；每轮按 ``all.txt``（权威全集）剔除，保证下游按端口取用不会
-    拿到大师清单之外的陈旧行。返回剔除行数。
+
+def reconcile_views(valid_dir: Path) -> int:
+    """把全部数据视图约束到 ``all.txt`` 权威活池之内。
+
+    历史轮次会向 ports/countries/sets 的 ``all``/``ltd`` 视图泄漏已离开
+    ``all.txt`` 的节点（死代/非 CF 端口）；每轮按 ``all.txt``（大师清单）
+    剔除越界行。注意只对 master 修剪：entry/exit 归类迁移会让 ``ltd``
+    与所在目录 ``all`` 的归属口径不同，那些键仍是活节点，不可因归属
+    分歧删除。返回剔除行数。
     """
     all_txt = valid_dir / "all.txt"
     if not all_txt.exists():
         return 0
-    all_keys = {
-        line.split("#", 1)[0]
-        for line in all_txt.read_text(encoding="utf-8").splitlines()
-        if line
-    }
-    if not all_keys:
+    master = _key_of(all_txt.read_text(encoding="utf-8"))
+    if not master:
         return 0
     removed = 0
-    for port_txt in sorted((valid_dir / "ports").glob("*.txt")):
-        lines = port_txt.read_text(encoding="utf-8").splitlines()
+
+    def prune(path: Path) -> None:
+        nonlocal removed
+        if not path.exists():
+            return
+        lines = path.read_text(encoding="utf-8").splitlines()
         kept = [
             line for line in lines
-            if not line or line.split("#", 1)[0] in all_keys
+            if not line or line.split("#", 1)[0] in master
         ]
         if len(kept) != len(lines):
             removed += len(lines) - len(kept)
             text = "\n".join(kept) + ("\n" if kept else "")
-            write_text_if_changed(port_txt, text)
+            write_text_if_changed(path, text)
+
+    for port_txt in sorted((valid_dir / "ports").glob("*.txt")):
+        prune(port_txt)
+
+    for sub in ("countries", "sets"):
+        for path in sorted((valid_dir / sub).glob("*/all.txt")):
+            prune(path)
+        for path in sorted((valid_dir / sub).glob("*/ltd.txt")):
+            prune(path)
+
+    for name in ("all_ltd.txt", "all_verified.txt", "all_stable.txt"):
+        prune(valid_dir / name)
     return removed
 
 
@@ -274,8 +292,8 @@ def main(argv: list[str] | None = None) -> int:
         files, (cn_set, cnh_set), family_map, rep_map, ip_type_map,
         exit_map, uptime_map,
     )
-    stale = reconcile_ports(valid_dir)
-    print(f"Done: {len(files)} files, {total} lines updated, {stale} stale port lines removed")
+    stale = reconcile_views(valid_dir)
+    print(f"Done: {len(files)} files, {total} lines updated, {stale} stale view lines removed")
     return 0
 
 
