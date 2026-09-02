@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import DATA_DIR, OUTPUT_DIR, now_ts, read_json, write_text_if_changed
+from common import DATA_DIR, OUTPUT_DIR, line_to_key, now_ts, read_json, write_text_if_changed
 
 SPEED_NOTE_RE = __import__("re").compile(r"(\d+(?:\.\d+)?)MB/s")
 
@@ -873,11 +873,28 @@ def collect_cn_summary(china_data: dict, valid_dir: Path) -> dict:
     注意 china_check 对空子集「不写盘」，重启/横波动后旧子集文件可能
     短暂残留（设计使然，守住既定清单）；stats 因此以文件行数为口径，
     让消费者看到真正可下载的规模，而非可能被清空的规则计值。
+
+    ``reachable`` 只统计 **当前存活池（all.txt）内仍存在** 的键：
+    china.json 是探测明细快照，可能含池 churn 后已离场的键（跨半天的
+    fallback/prev 合并）。若直接数 denorm 台账，badge 会虚高于
+    ``served``，让用户误以为 CN 池比实际可下载的多。
     """
+    pool_keys: set = set()
+    pool_file = valid_dir.joinpath("all.txt")
+    if pool_file.exists():
+        pool_keys = {
+            key for key in (
+                line_to_key(line)
+                for line in pool_file.read_text(encoding="utf-8").splitlines()
+            )
+            if key is not None
+        }
     reachable = sum(
         1
-        for v in (china_data.get("proxies") or {}).values()
-        if isinstance(v, dict) and v.get("verdict") == "reachable"
+        for k, v in (china_data.get("proxies") or {}).items()
+        if isinstance(v, dict)
+        and v.get("verdict") == "reachable"
+        and line_to_key(k) in pool_keys
     )
     def _lines(*parts: str) -> int:
         p = valid_dir.joinpath(*parts)
