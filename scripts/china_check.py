@@ -189,6 +189,7 @@ COFFEE_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节�
 PINGLOC_URL = "https://www.pingloc.com/api/v1"
 PINGLOC_REQ_TIMEOUT = 15
 PINGLOC_NODE_TIMEOUT = 20.0
+PINGLOC_SSE_MAX = 4 * 1024 * 1024  # SSE 事件流累计字节上限（防高速滴灌撑爆内存）
 
 # antping.com —— 免费大陆多节点 ping/tcp（JWT + WebSocket 推送），无 key：
 # GET /geek/network-tools-service/auth/publicKey 拿 JWT → 连 wss://antping.com/ws/
@@ -1088,6 +1089,8 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
                 if not got:
                     break
                 chunks += got
+                if len(chunks) >= PINGLOC_SSE_MAX:
+                    break
             sse = chunks.decode("utf-8", "replace")
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
@@ -1305,8 +1308,13 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
 def _tcpingcn_page_cookie() -> str:
     cj = http.cookiejar.CookieJar()
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(urllib.request.Request(
-        f"{TCPINGCN_URL}/ping", headers={"User-Agent": UA}), timeout=TCPINGCN_REQ_TIMEOUT)
+    with op.open(
+        urllib.request.Request(
+            f"{TCPINGCN_URL}/ping", headers={"User-Agent": UA}
+        ),
+        timeout=TCPINGCN_REQ_TIMEOUT,
+    ) as resp:
+        resp.read(1024)  # 消费并关闭响应，避免连接泄漏（异常语义与原一致：照常上抛）
     return "; ".join(f"{c.name}={c.value}" for c in cj)
 
 
