@@ -36,9 +36,11 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Download and extract
+        id: download
         run: python scripts/download_proxies.py
 
       - name: Validate proxies
+        id: validate
         run: python scripts/validate_proxies.py --time-budget 3600
 
       - name: Show stats
@@ -59,5 +61,6 @@ jobs:
           ls data/diff/*.json 2>/dev/null | wc -l
 
       - name: Commit changes
+        if: steps.download.outcome == 'success' && steps.validate.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
