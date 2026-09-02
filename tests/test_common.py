@@ -3,6 +3,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -257,6 +258,93 @@ class TestBuildExitCcMap(unittest.TestCase):
         upstream = {"proxies": {"1.1.1.1": {"country": "SG"}}}
         m = build_exit_cc_map({}, external, upstream)
         self.assertEqual(m["a:443#US"], "DE")
+
+
+class TestRequestFollowBounded(unittest.TestCase):
+    """``request_follow`` 的响应体读取须有墙钟截止与字节上限：上游无限滴灌
+    或巨型响应不得长时间占用线程 / 撑爆内存（与 WS/SSE 修复同类）。"""
+
+    def _patch_opener(self, resp):
+        import common
+
+        class _Opener:
+            def open(self, req, timeout=None):
+                return resp
+
+        return mock.patch(
+            "common.urllib.request.build_opener", return_value=_Opener()
+        )
+
+    class _OkResp:
+        status = 200
+        headers = {"X-T": "1"}
+        _n = 0
+
+        def read(self, n):
+            self._n += 1
+            return b"abc" if self._n == 1 else b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_eof_short_body(self):
+        from common import request_follow
+
+        with self._patch_opener(self._OkResp()):
+            status, headers, body = request_follow("http://h/x", {}, 10)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"abc")
+        self.assertEqual(headers["X-T"], "1")
+
+    class _TrickleResp:
+        status = 200
+        headers = {}
+
+        def __init__(self, now):
+            self._now = now
+
+        def read(self, n):
+            self._now[0] += 11  # 每次读都越过墙钟截止；数据永不 EOF
+            return b"x" * 512
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_trickle_is_capped_by_wallclock(self):
+        from common import request_follow
+
+        now = [1000.0]
+        resp = self._TrickleResp(now)
+        with self._patch_opener(resp), \
+             mock.patch("common.time.monotonic", side_effect=lambda: now[0]):
+            with self.assertRaises(TimeoutError):
+                request_follow("http://h/x", {}, 10)
+
+    class _HugeResp:
+        status = 200
+        headers = {}
+
+        def read(self, n):
+            return b"\x00" * (1024 * 1024)  # 永不 EOF 的巨型响应
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_oversized_body_rejected(self):
+        from common import request_follow
+
+        with self._patch_opener(self._HugeResp()):
+            with self.assertRaisesRegex(RuntimeError, "too large"):
+                request_follow("http://h/x", {}, 10)
 
 
 if __name__ == "__main__":

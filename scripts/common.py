@@ -18,6 +18,7 @@ import json
 import re
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -643,7 +644,7 @@ def request_follow(
             req.add_header(k, v)
         try:
             with opener.open(req, timeout=timeout) as resp:
-                return resp.status, dict(resp.headers), resp.read()
+                return resp.status, dict(resp.headers), _read_limited(resp, timeout)
         except urllib.error.HTTPError as e:
             if e.code in (301, 302, 303, 307, 308):
                 loc = e.headers.get("Location")
@@ -656,6 +657,38 @@ def request_follow(
                 continue
             raise
     raise RuntimeError("too many redirects")
+
+
+_REQUEST_BODY_MAX = 16 * 1024 * 1024  # request_follow 响应体上限
+
+
+def _read_limited(resp, timeout: float) -> bytes:
+    """带墙钟与字节上限的 ``resp.read()``。
+
+    上游只发 200 头然后永续滴灌时，单次 socket 读超时永不触发；这里用
+    ``time.monotonic()`` 整体截止并按块读取，任何恶劣上游都无法无界占用
+    线程或撑爆内存（与 WS/SSE 修复同类的最后一段残留）。
+    """
+    deadline = time.monotonic() + timeout
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("response read deadline exceeded")
+        try:
+            chunk = resp.read(65536)
+        except (TimeoutError, OSError):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("response read deadline exceeded")
+            continue
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _REQUEST_BODY_MAX:
+            raise RuntimeError("response body too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _note(line: str) -> str:
