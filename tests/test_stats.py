@@ -153,9 +153,9 @@ class TestBuilders(unittest.TestCase):
         data = {
             "ts": "2026-08-29T00:00:00Z",
             "proxies": {
-                "a:443#US": {"verdict": "reachable", "level": "http"},
-                "b:443#US": {"verdict": "reachable", "level": "tcp"},
-                "c:443#US": {"verdict": "unreachable"},
+                "1.2.3.4:443#US": {"verdict": "reachable", "level": "http"},
+                "5.6.7.8:443#US": {"verdict": "reachable", "level": "tcp"},
+                "9.9.9.9:443#US": {"verdict": "unreachable"},
             },
         }
         with tempfile.TemporaryDirectory() as td:
@@ -163,8 +163,14 @@ class TestBuilders(unittest.TestCase):
             (vd / "all_cn.txt").write_text("x\n" * 3)
             (vd / "all_cn_http.txt").write_text("x\n")
             (vd / "all_cn_stable.txt").write_text("x\n")
+            # 池内只有 1.2.3.4 与 5.6.7.8：reachable 只计当前池仍存在的键
+            (vd / "all.txt").write_text(
+                "1.2.3.4:443#US-1ms-1MB/s-CN\n"
+                "5.6.7.8:443#US-2ms-2MB/s-CN\n",
+                encoding="utf-8",
+            )
             s = gs.collect_cn_summary(data, vd)
-            self.assertEqual(s["reachable"], 2)      # verdict 真相
+            self.assertEqual(s["reachable"], 2)      # 交池：1.2.3.4 + 5.6.7.8
             self.assertEqual(s["http"], 1)           # served 文件行数
             self.assertEqual(s["stable"], 1)
             self.assertEqual(s["served"], 3)
@@ -172,6 +178,26 @@ class TestBuilders(unittest.TestCase):
         empty = gs.collect_cn_summary({}, Path(td_removed := "/nonexistent"))
         self.assertEqual(empty["reachable"], 0)
         self.assertEqual(empty["served"], 0)
+
+    def test_collect_cn_summary_excludes_pool_churned_keys(self):
+        """china.json reachable 含已离场键（池 churn/fallback 残留）时，
+        计数须与当前 all.txt 对齐，避免 badge 虚高。"""
+        data = {
+            "ts": "2026-08-29T00:00:00Z",
+            "proxies": {
+                "1.2.3.4:443#US": {"verdict": "reachable", "level": "http"},
+                "9.9.9.9:443#US": {"verdict": "reachable", "level": "tcp"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            vd = Path(td)
+            (vd / "all_cn.txt").write_text("1.2.3.4:443#US\n", encoding="utf-8")
+            (vd / "all.txt").write_text(
+                "1.2.3.4:443#US-1ms-1MB/s-CN\n", encoding="utf-8",
+            )
+            s = gs.collect_cn_summary(data, vd)
+            self.assertEqual(s["reachable"], 1)      # 9.9.9.9 已离池不计数
+            self.assertEqual(s["served"], 1)
 
 
 class TestMain(unittest.TestCase):
@@ -189,6 +215,11 @@ class TestMain(unittest.TestCase):
             )
             (data_dir / "valid" / "meta.json").write_text(
                 json.dumps(TestBuilders.META)
+            )
+            (data_dir / "valid" / "all.txt").write_text(
+                "1.1.1.1:80#US-1ms-1MB/s-CN\n"
+                "3.3.3.3:80#DE-2ms-2MB/s-CN\n",
+                encoding="utf-8",
             )
             (data_dir / "quality" / "quality_meta.json").write_text(
                 json.dumps(TestBuilders.QUALITY_META)
