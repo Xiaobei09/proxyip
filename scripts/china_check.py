@@ -1316,8 +1316,11 @@ def _tcpingcn_get(url: str, cookie: str = "") -> object:
     if cookie:
         headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
-    with deadline_open(req, TCPINGCN_REQ_TIMEOUT) as resp:
-        return json.loads(resp.read())
+    try:
+        with deadline_open(req, TCPINGCN_REQ_TIMEOUT) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}")
 
 
 def _tcpingcn_post(url: str, body: dict, cookie: str = "") -> object:
