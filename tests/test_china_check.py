@@ -1150,6 +1150,46 @@ class TestNewMultiSources(unittest.TestCase):
         self.assertEqual(out["status"], "error")
         self.assertEqual(out["error"], "no pingloc nodes")
 
+    def test_pingloc_sse_never_ending_is_capped_by_wallclock(self):
+        # 上游只回 200 头、随后持续发心跳而不 EOF —— 若 read 循环无整体
+        # 墙钟上限，worker 会永久挂住令 fut.result() 无限阻塞整条管道。
+        heartbeat = b"event: comment\ndata: heartbeat\n\n"
+        reads = {"n": 0}
+
+        class _HungCtx:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n=-1):
+                reads["n"] += 1
+                return heartbeat  # 永不返回 b"" → 旧 while True 无限循环
+
+        cc_time = cc.time  # 真实模块对象（含 monotonic）
+
+        def _clock():
+            # 首调返回 0（deadline=0+timeout+20），再调 +10 → 第二次 while 条件越界
+            _clock.t += 10.0
+            return _clock.t
+
+        _clock.t = -10.0
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if url.endswith("/node/items"):
+                return 200, {}, json.dumps({"data": [{"id": "n1"}]}).encode()
+            return 200, {}, json.dumps({"data": {"token": "task_abc"}}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake), \
+             mock.patch.object(cc.urllib.request, "urlopen", return_value=_HungCtx()), \
+             mock.patch.object(cc_time, "monotonic", side_effect=_clock):
+            out = cc.pingloc_check("1.2.3.4", 10, method="ping")
+
+        self.assertEqual(reads["n"], 2)  # 第二轮 while 墙钟越界即制动
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+
     def _seed_antping(self, frames):
         with mock.patch.object(cc, "request_follow",
                                return_value=(200, {},

@@ -1079,7 +1079,8 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
         )
         with urllib.request.urlopen(req, timeout=timeout + PINGLOC_NODE_TIMEOUT) as resp:
             chunks = b""
-            while True:
+            deadline = time.monotonic() + timeout + PINGLOC_NODE_TIMEOUT
+            while time.monotonic() < deadline:
                 got = resp.read(65536)
                 if not got:
                     break
@@ -1826,7 +1827,8 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
             req, timeout=BIUPING_SSE_TIMEOUT
         ) as resp:
             chunks = b""
-            while True:
+            deadline = time.monotonic() + BIUPING_SSE_TIMEOUT
+            while time.monotonic() < deadline:
                 got = resp.read(65536)
                 if not got:
                     break
