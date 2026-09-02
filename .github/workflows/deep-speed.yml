@@ -91,6 +91,12 @@ jobs:
             SRC=""
             LIMIT=30; BYTES=20; STREAMS=3; TARGETS="cf_speed,ovh"
           fi
+          # pick/输入可能为空（首轮、country_speed.json 稀疏或暂时缺失）：
+          # 缺 --cc/--source 会直塞 argparse 触发 parser.error 使 schedule 每跑必败。
+          # 兜底用全球覆盖默认国（无池国仅 warn 不失败），保证调度永不空转失败。
+          if [ -z "$CC" ] && [ -z "$SRC" ]; then
+            CC="US,CN,JP,HK"
+          fi
           args=()
           [ -n "$SRC" ] && args+=( --source "$SRC" )
           [ -n "$CC" ] && args+=( --cc "$CC" )
