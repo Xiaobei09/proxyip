@@ -109,6 +109,10 @@ FIREHOL_SOCKSPROXY_URL = (
 SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
 SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
+# 静态黑名单正文上限：ThreatFox json/recent、FireHOL netset 等可达数十 MB，
+# 远超通用 FETCH_BODY_MAX=16MiB。黑洞/截断即静默丢失整源信誉信号，
+# 故独立给足上限（同时仍防失控响应）。
+STATIC_LIST_MAX = 512 * 1024 * 1024
 ABUSER_SCORE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 ABUSER_SCORE_THRESHOLD = 0.1
 IPAPI_PROXY_PENALTY = 25
@@ -749,7 +753,8 @@ async def fetch_threatfox() -> IpSet:
     try:
         text = await asyncio.to_thread(
             lambda: fetch_with_mirror(
-                THREATFOX_URL, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA}
+                THREATFOX_URL, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA},
+                max_bytes=STATIC_LIST_MAX,
             ).decode("utf-8", errors="replace")
         )
     except Exception as exc:  # noqa: BLE001
@@ -1003,7 +1008,8 @@ async def fetch_text_list(url: str) -> set[str]:
     try:
         text = await asyncio.to_thread(
             lambda: fetch_with_mirror(
-                url, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA}
+                url, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA},
+                max_bytes=STATIC_LIST_MAX,
             ).decode("utf-8", errors="replace")
         )
     except Exception as exc:

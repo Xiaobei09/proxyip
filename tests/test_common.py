@@ -409,5 +409,68 @@ class TestFetchWithDeadlineBounded(unittest.TestCase):
                 deadline_open("http://h/x", 10)
 
 
+class TestFetchWithMirrorMaxBytes(unittest.TestCase):
+    """``fetch_with_mirror`` 的 ``max_bytes`` 透传：静态黑名单调用方须能放大
+    上限读取数十 MB 正文，默认 16MiB 仍拒绝巨型响应。"""
+
+    class _OkResp:
+        status = 200
+        headers = {}
+
+        def read(self, n):
+            return b"static-body"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _HugeResp:
+        status = 200
+        headers = {}
+
+        def read(self, n):
+            return b"\x00" * (17 * 1024 * 1024)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_default_cap_rejects_oversized(self):
+        from common import fetch_with_mirror
+
+        with mock.patch(
+            "common.urllib.request.urlopen",
+            return_value=self._HugeResp(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "body too large"):
+                fetch_with_mirror("http://h/x", 10)
+
+    def test_explicit_large_cap_allows_oversized(self):
+        from common import fetch_with_mirror
+
+        with mock.patch(
+            "common.urllib.request.urlopen",
+            return_value=self._HugeResp(),
+        ):
+            body = fetch_with_mirror("http://h/x", 10, max_bytes=32 * 1024 * 1024)
+            self.assertEqual(body, b"\x00" * (17 * 1024 * 1024))
+
+    def test_max_bytes_zero_keeps_default(self):
+        from common import fetch_with_mirror
+
+        with mock.patch(
+            "common.urllib.request.urlopen",
+            return_value=self._OkResp(),
+        ):
+            self.assertEqual(
+                fetch_with_mirror("http://h/x", 10, max_bytes=0),
+                b"static-body",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
