@@ -703,9 +703,9 @@ def write_diff(previous: list[str] | None, current: list[str]) -> tuple[int, int
     current_set = set(current)
     added = sorted(current_set - prev_set, key=ip_sort_key)
     removed = sorted(prev_set - current_set, key=ip_sort_key)
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = datetime.now(timezone.utc)
     record = {
-        "ts": ts,
+        "ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "added_count": len(added),
         "removed_count": len(removed),
         "added": added,
@@ -720,7 +720,8 @@ def write_diff(previous: list[str] | None, current: list[str]) -> tuple[int, int
 
     write("latest", record)
     if added or removed:
-        write(ts.replace(":", "-"), record)
+        # 归档名带微秒：同一秒内发生两次含 diff 的运行也不互相覆盖
+        write(ts.strftime("%Y-%m-%dT%H-%M-%SZ") + f".{ts.microsecond:06d}", record)
         archives = sorted(
             (DIFF_DIR / p).name
             for p in DIFF_DIR.glob("*.json")

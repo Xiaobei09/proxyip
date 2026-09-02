@@ -933,8 +933,36 @@ class TestMainResilience(unittest.TestCase):
         wo.assert_not_called()
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestWriteDiff(unittest.TestCase):
+    def test_same_second_runs_keep_both_archives(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        base = Path(tempfile.mkdtemp(prefix="dp_diff_"))
+        base_dt = datetime(2026, 9, 2, 0, 0, 0, tzinfo=timezone.utc)
+
+        class _Clock:
+            now_calls = 0
+
+            @classmethod
+            def now(cls, tz=None):
+                cls.now_calls += 1
+                return base_dt.replace(microsecond=cls.now_calls * 1000)
+
+        orig_dt = dp.datetime
+        orig_diff = dp.DIFF_DIR
+        try:
+            dp.datetime = _Clock
+            dp.DIFF_DIR = base
+            dp.write_diff(["1.1.1.1:443#US"], ["2.2.2.2:443#US"])
+            dp.write_diff(["2.2.2.2:443#US"], ["1.1.1.1:443#US"])
+        finally:
+            dp.datetime = orig_dt
+            dp.DIFF_DIR = orig_diff
+
+        archives = [p for p in base.glob("*.json") if p.name != "latest.json"]
+        self.assertEqual(len(archives), 2)
+        self.assertTrue(all(p.is_file() for p in archives))
 
 
 class TestMirrorUrls(unittest.TestCase):
