@@ -59,10 +59,12 @@ jobs:
           python-version: "3.11"
 
       - name: Generate stats and charts
+        id: stats
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/generate_stats.py
 
       - name: Export structured JSON
+        id: export
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/export_json.py
 
@@ -78,7 +80,7 @@ jobs:
         run: python scripts/health_alert.py
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true'
+        if: steps.gate.outputs.skip != 'true' && steps.stats.outcome == 'success' && steps.export.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): stats & charts ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
 

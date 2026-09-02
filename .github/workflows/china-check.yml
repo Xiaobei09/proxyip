@@ -65,6 +65,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: China reachability check
+        id: china
         if: steps.gate.outputs.skip != 'true'
         run: >-
           python scripts/china_check.py
@@ -78,6 +79,7 @@ jobs:
           --pingpe-limit 300
 
       - name: Annotate and classify
+        id: annotate
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/annotate_classify.py
 
@@ -95,6 +97,6 @@ jobs:
             data/quality/china.json 2>/dev/null || true
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true'
+        if: steps.gate.outputs.skip != 'true' && steps.china.outcome == 'success' && steps.annotate.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
