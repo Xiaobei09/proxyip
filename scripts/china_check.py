@@ -297,6 +297,9 @@ WANSUI_REQ_TIMEOUT = 15
 WANSUI_WS_IDLE = 35.0
 WANSUI_MIN_RATIO = ITDOG_MIN_RATIO
 
+WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
+WS_MAX_BUF = 4 * 1024 * 1024  # WS 帧重组缓冲上限（防坏帧长撑爆内存）
+
 # itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
 
 CN_TOKEN = "CN"
@@ -1525,6 +1528,8 @@ class _SocketIOClient:
             if not chunk:
                 raise RuntimeError("closed during handshake")
             data += chunk
+            if len(data) > WS_MAX_HEAD:
+                raise RuntimeError("oversized ws handshake")
         head, _, self.buf = data.partition(b"\r\n\r\n")
         if b"101" not in head.splitlines()[0]:
             raise RuntimeError(head.splitlines()[0].decode("utf-8", "replace")[:80])
@@ -1646,6 +1651,8 @@ class _SocketIOClient:
                     if text == "41":
                         return ("close", None)
                     continue
+            if len(self.buf) > WS_MAX_BUF:
+                return ("err", {"error": "ws buffer overflow"})
 
     def close(self) -> None:
         try:

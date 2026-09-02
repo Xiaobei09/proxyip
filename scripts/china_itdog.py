@@ -36,6 +36,9 @@ ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
 ITDOG_WS_IDLE = 20.0  # WS 单次 recv 空闲超时
 ITDOG_ISP_GROUPS = ("中国电信", "中国联通", "中国移动")
 
+WS_MAX_HEAD = 32 * 1024  # 握手响应头上限（防上游冲刷无 EOF 导致无界累积）
+WS_MAX_BUF = 4 * 1024 * 1024  # 帧重组缓冲上限（防坏帧长/滴灌撑爆内存）
+
 def itdog_md5_16(s: str) -> str:
     """itdog WebSocket 路径签名（MD5 中段 16 位）。"""
     return hashlib.md5(s.encode()).hexdigest()[8:24]
@@ -163,6 +166,8 @@ class _WebSocket:
             if not chunk:
                 raise RuntimeError("closed during handshake")
             data += chunk
+            if len(data) > WS_MAX_HEAD:
+                raise RuntimeError("oversized ws handshake")
         head, _, self.buf = data.partition(b"\r\n\r\n")
         if b"101" not in head.splitlines()[0]:
             raise RuntimeError(head.splitlines()[0].decode("utf-8", "replace")[:80])
@@ -261,6 +266,8 @@ class _WebSocket:
                     if msg.get("task_num") is not None:
                         return ("rec", msg)
                     return ("evt", msg)
+            if len(self.buf) > WS_MAX_BUF:
+                return ("err", {"error": "ws buffer overflow"})
 
     def close(self) -> None:
         try:
