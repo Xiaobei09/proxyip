@@ -230,13 +230,14 @@ def reconcile_views(valid_dir: Path) -> int:
         prune(port_txt)
 
     for sub in ("countries", "sets"):
-        for path in sorted((valid_dir / sub).glob("*/all.txt")):
-            prune(path)
-        for path in sorted((valid_dir / sub).glob("*/ltd.txt")):
+        for path in sorted((valid_dir / sub).glob("*/*.txt")):
             prune(path)
 
     for name in ("all_ltd.txt", "all_verified.txt", "all_stable.txt"):
         prune(valid_dir / name)
+    for path in sorted(valid_dir.glob("all_*.txt")):
+        if path.name != "all.txt":
+            prune(path)
     return removed
 
 
