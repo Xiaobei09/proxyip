@@ -347,5 +347,67 @@ class TestRequestFollowBounded(unittest.TestCase):
                 request_follow("http://h/x", {}, 10)
 
 
+class TestFetchWithDeadlineBounded(unittest.TestCase):
+    """``fetch_with_deadline``/``deadline_open`` 的 worker 内读须受字节上限：
+    窗口内高速填充的巨型响应不得撑爆内存。"""
+
+    class _OkResp:
+        status = 200
+        headers = {}
+        _n = 0
+
+        def read(self, n):
+            self._n += 1
+            return b"tiny-body" if self._n == 1 else b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _HugeResp:
+        status = 200
+        headers = {}
+
+        def read(self, n):
+            return b"\x00" * (17 * 1024 * 1024)  # 单次即超出 FETCH_BODY_MAX
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_ok_body_returned(self):
+        from common import fetch_with_deadline
+
+        with mock.patch(
+            "common.urllib.request.urlopen",
+            return_value=self._OkResp(),
+        ):
+            self.assertEqual(fetch_with_deadline("http://h/x", 10), b"tiny-body")
+
+    def test_oversized_body_rejected(self):
+        from common import fetch_with_deadline
+
+        with mock.patch(
+            "common.urllib.request.urlopen",
+            return_value=self._HugeResp(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "body too large"):
+                fetch_with_deadline("http://h/x", 10)
+
+    def test_deadline_open_oversized_body_rejected(self):
+        from common import deadline_open
+
+        with mock.patch(
+            "common.urllib.request.urlopen",
+            return_value=self._HugeResp(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "body too large"):
+                deadline_open("http://h/x", 10)
+
+
 if __name__ == "__main__":
     unittest.main()

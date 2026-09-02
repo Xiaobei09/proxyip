@@ -568,20 +568,35 @@ def fetch_with_mirror(
     raise last_exc
 
 
-def fetch_with_deadline(request, timeout: float) -> bytes:
-    """``urlopen`` + ``read`` 带整体 wall-clock 截止的抓取。
+_REQUEST_BODY_MAX = 16 * 1024 * 1024  # request_follow 响应体上限
+FETCH_BODY_MAX = 16 * 1024 * 1024  # fetch_with_deadline / deadline_open 响应体上限
+
+
+def fetch_with_deadline(
+    request, timeout: float, max_bytes: int = FETCH_BODY_MAX
+) -> bytes:
+    """``urlopen`` + ``read`` 带整体 wall-clock 截止与字节上限的抓取。
 
     单个 ``urlopen`` 的 socket 超时只能约束单次读写，遇到底层服务
     永不结束的响应体（只发 200 头、随后无限阻塞）仍会挂死管线。
     这里把抓取放进 daemon 线程，``join`` 过 ``timeout`` 未完成即按
-    ``TimeoutError`` 处理，保证任何上游都无法无限拖住流程。
+    ``TimeoutError`` 处理（滴灌场景由该 join 墙钟兜底）；响应体另以
+    单次 ``read(max_bytes+1)`` 限长，窗口内高速填充的巨型响应也无法
+    撑爆内存。
     """
     box: dict = {}
 
     def worker() -> None:
         try:
             with urllib.request.urlopen(request, timeout=timeout) as resp:
-                box["ok"] = resp.read()
+                try:
+                    body = resp.read(max_bytes + 1)
+                except TypeError:
+                    # 无参 read() 的测试替身：生产 HTTPResponse 总接受 size 参数
+                    body = resp.read()
+                if len(body) > max_bytes:
+                    raise RuntimeError("response body too large")
+                box["ok"] = body
         except BaseException as exc:  # noqa: BLE001
             box["err"] = exc
 
@@ -615,13 +630,15 @@ class _DeadlineResp:
         return False
 
 
-def deadline_open(request, timeout: float) -> _DeadlineResp:
+def deadline_open(
+    request, timeout: float, max_bytes: int = FETCH_BODY_MAX
+) -> _DeadlineResp:
     """整体截止的 ``with`` 上下文打开器，替 ``urllib.request.urlopen`` 使用。
 
     返回对象仅承载已读完的 body；``resp.read()`` 不再发起网络 I/O，故
     底层永不结束的响应体在 deadline 内即被截断（抛 ``TimeoutError``）。
     """
-    body = fetch_with_deadline(request, timeout)
+    body = fetch_with_deadline(request, timeout, max_bytes=max_bytes)
     return _DeadlineResp(body)
 
 
@@ -659,10 +676,7 @@ def request_follow(
     raise RuntimeError("too many redirects")
 
 
-_REQUEST_BODY_MAX = 16 * 1024 * 1024  # request_follow 响应体上限
-
-
-def _read_limited(resp, timeout: float) -> bytes:
+def _read_limited(resp, timeout: float, max_bytes: int = _REQUEST_BODY_MAX) -> bytes:
     """带墙钟与字节上限的 ``resp.read()``。
 
     上游只发 200 头然后永续滴灌时，单次 socket 读超时永不触发；这里用
@@ -685,7 +699,7 @@ def _read_limited(resp, timeout: float) -> bytes:
         if not chunk:
             break
         total += len(chunk)
-        if total > _REQUEST_BODY_MAX:
+        if total > max_bytes:
             raise RuntimeError("response body too large")
         chunks.append(chunk)
     return b"".join(chunks)

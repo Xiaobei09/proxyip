@@ -428,7 +428,10 @@ def greynoise_lookup_sync(ip: str) -> dict | None:
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             try:
-                data = json.loads(exc.read().decode("utf-8", "replace"))
+                data = json.loads(
+                    exc.read(64 * 1024 + 1)
+                    [:64 * 1024].decode("utf-8", "replace")
+                )
             except Exception:  # noqa: BLE001
                 return None
         else:
