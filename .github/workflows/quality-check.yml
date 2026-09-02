@@ -64,6 +64,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Deep quality check
+        id: quality
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/quality_check.py --source data/valid/all.txt --time-budget 5400 --rep-cache-ttl 604800
 
@@ -76,6 +77,7 @@ jobs:
         run: python scripts/reorg_country.py
 
       - name: Annotate and classify
+        id: annotate
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/annotate_classify.py
 
@@ -97,6 +99,6 @@ jobs:
           jq -r '.by_type // empty' data/quality/quality_meta.json 2>/dev/null || true
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true'
+        if: steps.gate.outputs.skip != 'true' && steps.quality.outcome == 'success' && steps.annotate.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): quality check + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

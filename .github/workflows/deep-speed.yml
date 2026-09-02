@@ -76,6 +76,7 @@ jobs:
           echo "weekly countries: $CC"
 
       - name: Deep probe
+        id: probe
         run: |
           # github.event.inputs 仅在 workflow_dispatch 存在；schedule 触发会
           # 展开为空串，直塞 argparse 会因缺参崩溃——统一按事件源装配默认值。
@@ -105,5 +106,6 @@ jobs:
           python scripts/deep_speed.py "${args[@]}"
 
       - name: Commit changes
+        if: steps.probe.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): deep speed probe ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

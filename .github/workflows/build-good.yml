@@ -57,12 +57,13 @@ jobs:
           python-version: "3.11"
 
       - name: Build good lists and tiers
+        id: good
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/build_good.py
 
       # 图表/渲染由专职 stats 工作流在 "Build good lists" 完成后统一重建（单一写入者）
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true'
+        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): good tiers & variants ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
