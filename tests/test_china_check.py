@@ -1,10 +1,12 @@
 """Tests for china_check.py pure functions."""
 
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -2519,6 +2521,49 @@ class TestWsBufferCaps(unittest.TestCase):
         self.assertEqual(out[0], "err")
         self.assertIn("buffer overflow", out[1]["error"])
         self.assertLessEqual(len(client.buf), cc.WS_MAX_BUF + 65536)
+
+
+class TestTcpingcnHttpParity(unittest.TestCase):
+    """``_tcpingcn_get/_post`` 对 HTTPError 的转换须对称（RuntimeError 带状态码），
+    且畸形 JSON 不伪装成空成功。"""
+
+    def _patch_deadline_open(self, side_effect):
+        return mock.patch.object(cc, "deadline_open", side_effect=side_effect)
+
+    def test_get_http_error_becomes_runtime_error(self):
+        err = urllib.error.HTTPError(
+            "http://tcping.cn/ping", 429, "Too Many Requests",
+            {"Content-Type": "application/json"}, io.BytesIO(b'{"m":"n"}'),
+        )
+        with self._patch_deadline_open(side_effect=err):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 429"):
+                cc._tcpingcn_get("http://tcping.cn/ping", cookie="")
+
+    def test_get_ok_parses_json(self):
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'{"uuid": "u1"}'
+
+        with mock.patch.object(
+            cc, "deadline_open",
+            new=lambda req, timeout: _Resp(),
+        ):
+            self.assertEqual(cc._tcpingcn_get("http://tcping.cn/x", cookie=""), {"uuid": "u1"})
+
+    def test_post_http_error_becomes_runtime_error(self):
+        err = urllib.error.HTTPError(
+            "http://tcping.cn/ping", 400, "Bad Request",
+            {"Content-Type": "application/json"}, io.BytesIO(b'{}'),
+        )
+        with self._patch_deadline_open(side_effect=err):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 400"):
+                cc._tcpingcn_post("http://tcping.cn/x", {"probe": "t"}, cookie="")
 
 
 if __name__ == "__main__":
