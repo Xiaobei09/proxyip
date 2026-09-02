@@ -2480,5 +2480,46 @@ class TestNewMultiSourcesMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
 
+class TestWsBufferCaps(unittest.TestCase):
+    """WS 重组缓冲上限：声明超大帧（2^40）且永不补全的上游，读循环必须在
+    ``WS_MAX_BUF`` 内返回 err，而不是随滴灌无限累积内存。"""
+
+    class _DripSock:
+        def __init__(self, chunk):
+            self.chunk = chunk
+
+        def recv(self, n):
+            return self.chunk
+
+        def settimeout(self, t):
+            pass
+
+        def close(self):
+            pass
+
+    def _wedged_chunk(self):
+        import struct
+        # 文本帧(FIN|opcode=1) + ln==127(64 位长度=2^40)：永远装不满 → 只累积
+        return b"\x81\x7f" + struct.pack(">Q", 1 << 40) + b"\x00" * 65526
+
+    def test_itdog_websocket_read_caps_accumulation(self):
+        ws = ci._WebSocket.__new__(ci._WebSocket)
+        ws.sock = self._DripSock(self._wedged_chunk())
+        ws.buf = b""
+        out = ws.read()
+        self.assertEqual(out[0], "err")
+        self.assertIn("buffer overflow", out[1]["error"])
+        self.assertLessEqual(len(ws.buf), ci.WS_MAX_BUF + 65536)
+
+    def test_china_socketio_read_caps_accumulation(self):
+        client = cc._SocketIOClient.__new__(cc._SocketIOClient)
+        client.sock = self._DripSock(self._wedged_chunk())
+        client.buf = b""
+        out = client.read()
+        self.assertEqual(out[0], "err")
+        self.assertIn("buffer overflow", out[1]["error"])
+        self.assertLessEqual(len(client.buf), cc.WS_MAX_BUF + 65536)
+
+
 if __name__ == "__main__":
     unittest.main()

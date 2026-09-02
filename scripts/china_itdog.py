@@ -23,9 +23,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from common import UA, request_follow
 
-ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
-ITDOG_TCPING_URL = "https://www.itdog.cn/batch_tcping/"
-ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
+ITDOG_BATCH_URL = "[REDACTED_PRIVATE_RESOURCE]"
+ITDOG_TCPING_URL = "[REDACTED_PRIVATE_RESOURCE]"
+ITDOG_WS_BASE = "[REDACTED_PRIVATE_RESOURCE]"
 ITDOG_TOKEN = "What this is is no longer important."
 ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
 ITDOG_NODES_PER_ISP = 6  # 电信/联通/移动各取 N 节点（默认 6 → 共 18，池子 ~80/ISP）
@@ -35,6 +35,9 @@ ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
 ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限
 ITDOG_WS_IDLE = 20.0  # WS 单次 recv 空闲超时
 ITDOG_ISP_GROUPS = ("中国电信", "中国联通", "中国移动")
+
+WS_MAX_HEAD = 32 * 1024  # 握手响应头上限（防上游冲刷无 EOF 导致无界累积）
+WS_MAX_BUF = 4 * 1024 * 1024  # 帧重组缓冲上限（防坏帧长/滴灌撑爆内存）
 
 def itdog_md5_16(s: str) -> str:
     """itdog WebSocket 路径签名（MD5 中段 16 位）。"""
@@ -163,6 +166,8 @@ class _WebSocket:
             if not chunk:
                 raise RuntimeError("closed during handshake")
             data += chunk
+            if len(data) > WS_MAX_HEAD:
+                raise RuntimeError("oversized ws handshake")
         head, _, self.buf = data.partition(b"\r\n\r\n")
         if b"101" not in head.splitlines()[0]:
             raise RuntimeError(head.splitlines()[0].decode("utf-8", "replace")[:80])
@@ -261,6 +266,8 @@ class _WebSocket:
                     if msg.get("task_num") is not None:
                         return ("rec", msg)
                     return ("evt", msg)
+            if len(self.buf) > WS_MAX_BUF:
+                return ("err", {"error": "ws buffer overflow"})
 
     def close(self) -> None:
         try:
