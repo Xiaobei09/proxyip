@@ -33,6 +33,7 @@ from common import (
     read_json,
     collect_txt_files,
     annotate_files,
+    write_text_if_changed,
 )
 
 
@@ -190,6 +191,37 @@ def fill_and_classify(
     return out
 
 
+def reconcile_ports(valid_dir: Path) -> int:
+    """把 ``ports/*.txt`` 行集约束到 ``all.txt`` 全量存活集之内。
+
+    历史轮次可能遗留已在 ``all.txt`` 离场的节点（非 CF 端口/下架代理）写进
+    端口分桶；每轮按 ``all.txt``（权威全集）剔除，保证下游按端口取用不会
+    拿到大师清单之外的陈旧行。返回剔除行数。
+    """
+    all_txt = valid_dir / "all.txt"
+    if not all_txt.exists():
+        return 0
+    all_keys = {
+        line.split("#", 1)[0]
+        for line in all_txt.read_text(encoding="utf-8").splitlines()
+        if line
+    }
+    if not all_keys:
+        return 0
+    removed = 0
+    for port_txt in sorted((valid_dir / "ports").glob("*.txt")):
+        lines = port_txt.read_text(encoding="utf-8").splitlines()
+        kept = [
+            line for line in lines
+            if not line or line.split("#", 1)[0] in all_keys
+        ]
+        if len(kept) != len(lines):
+            removed += len(lines) - len(kept)
+            text = "\n".join(kept) + ("\n" if kept else "")
+            write_text_if_changed(port_txt, text)
+    return removed
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -242,7 +274,8 @@ def main(argv: list[str] | None = None) -> int:
         files, (cn_set, cnh_set), family_map, rep_map, ip_type_map,
         exit_map, uptime_map,
     )
-    print(f"Done: {len(files)} files, {total} lines updated")
+    stale = reconcile_ports(valid_dir)
+    print(f"Done: {len(files)} files, {total} lines updated, {stale} stale port lines removed")
     return 0
 
 
