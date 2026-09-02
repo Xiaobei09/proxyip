@@ -1419,6 +1419,29 @@ class TestAnnotateNestedValidFiles(unittest.TestCase):
             (sdir / "rep.txt").read_text(encoding="utf-8").endswith("-GPT\n")
         )
 
+    def test_annotate_reconciles_phantom_rows(self):
+        (self.tmp / "all.txt").write_text(
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s\n",
+            encoding="utf-8",
+        )
+        cdir = self.tmp / "countries" / "US"
+        cdir.mkdir(parents=True)
+        good = "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s\n"
+        phantom = ("9.9.9.9:443#\U0001F1FA\U0001F1F8US-150ms-0.50MB/s\n")
+        write = lambda p, s: (p.parent.mkdir(parents=True, exist_ok=True), p.write_text(s, encoding="utf-8"))
+        write(cdir / "all.txt", good + phantom)
+        write(cdir / "ltd.txt", good + phantom)
+        pruned = qc.annotate_valid_files({"1.2.3.4:443#US": "GPT-CF"})
+        self.assertEqual(
+            (cdir / "all.txt").read_text(encoding="utf-8"),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s-GPT\n",
+        )
+        self.assertEqual(
+            (cdir / "ltd.txt").read_text(encoding="utf-8"),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-120ms-0.44MB/s-GPT\n",
+        )
+        self.assertEqual(pruned, 2)
+
 
 class TestReputationCache(unittest.TestCase):
     def setUp(self):
