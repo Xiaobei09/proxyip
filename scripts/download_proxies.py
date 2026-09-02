@@ -237,8 +237,11 @@ _KNOWN_ISO2 = frozenset(
 
 def fetch(url: str, timeout: int) -> bytes:
     """Fetch bytes; raw.githubusercontent.com URLs fall back to CN mirrors."""
+    # 源池正文可合法达数十 MB（聚合 txt/csv），通用 16MiB 上限会静默丢源；
+    # 独立给足上限仍防失控响应。
     return fetch_with_mirror(
-        url, timeout, headers={"User-Agent": "proxyip-updater/1.0"}
+        url, timeout, headers={"User-Agent": "proxyip-updater/1.0"},
+        max_bytes=64 * 1024 * 1024,
     )
 
 
