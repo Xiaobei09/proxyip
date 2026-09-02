@@ -86,6 +86,7 @@ from common import (
     VALID_ALL_FILE,
     VALID_ALL_LTD_FILE,
     VALID_DIR,
+    deadline_open,
     has_token,
     line_to_key,
     merge_note_tokens,
@@ -1311,7 +1312,7 @@ def _tcpingcn_get(url: str, cookie: str = "") -> object:
     if cookie:
         headers["Cookie"] = cookie
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=TCPINGCN_REQ_TIMEOUT) as resp:
+    with deadline_open(req, TCPINGCN_REQ_TIMEOUT) as resp:
         return json.loads(resp.read())
 
 
@@ -1325,7 +1326,7 @@ def _tcpingcn_post(url: str, body: dict, cookie: str = "") -> object:
     req = urllib.request.Request(
         url, data=json.dumps(body).encode(), method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=TCPINGCN_REQ_TIMEOUT) as resp:
+        with deadline_open(req, TCPINGCN_REQ_TIMEOUT) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}")
