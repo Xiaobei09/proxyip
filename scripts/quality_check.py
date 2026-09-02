@@ -383,8 +383,11 @@ def annotate_text(
     return "\n".join(out) + "\n", changed
 
 
-def annotate_valid_files(annotations: dict) -> None:
-    """Annotate ``all.txt``/``all_ltd.txt`` and sub-file trees with tokens."""
+def annotate_valid_files(annotations: dict) -> int:
+    """Annotate ``all.txt``/``all_ltd.txt`` and sub-file trees with tokens.
+
+    Returns number of view rows pruned by the trailing reconcile (0 if none).
+    """
     files: list[Path] = [VALID_DIR / "all.txt", VALID_DIR / "all_ltd.txt"]
     for sub in ("countries", "sets"):
         files.extend(sorted((VALID_DIR / sub).glob("*/all.txt")))
@@ -400,6 +403,9 @@ def annotate_valid_files(annotations: dict) -> None:
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(text, encoding="utf-8")
             tmp.replace(path)
+    from annotate_classify import reconcile_views
+
+    return reconcile_views(VALID_DIR)
 
 
 def build_meta(
