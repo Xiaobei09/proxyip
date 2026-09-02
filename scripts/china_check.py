@@ -2638,6 +2638,14 @@ def generate_cn_subset(
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
 
 
+def write_cn_subset(path: Path, text: str) -> None:
+    """原子写 CN 子集；空文本清理残留旧文件（防跨轮误导计数）。"""
+    if text:
+        write_text_if_changed(path, text)
+    elif path.exists():
+        path.unlink()
+
+
 # 大陆清单健康下限：清单须保持完整（正常水平 ≥1 万可达键）。
 MIN_CN_POOL = 10000
 # 大陆延迟的最小可信读数：互联网真实 RTT 一向 ≥ ~2ms（同机房直连也难低于
@@ -3480,15 +3488,13 @@ def main(argv=None) -> int:
         lambda k, l: k in http_keys or has_token(_note(l), "CNH"),
         cn_ms,
     )
-    if http_text:
-        write_text_if_changed(VALID_ALL_CN_HTTP_FILE, http_text)
+    write_cn_subset(VALID_ALL_CN_HTTP_FILE, http_text)
     stable_text, stable_count = generate_cn_subset(
         all_pool_text,
         lambda k, l: k in stable_keys,
         cn_ms,
     )
-    if stable_text:
-        write_text_if_changed(VALID_ALL_CN_STABLE_FILE, stable_text)
+    write_cn_subset(VALID_ALL_CN_STABLE_FILE, stable_text)
     annotate_cn_files(reachable)
     cn_report = check_cn_health(cn_text)
     print(

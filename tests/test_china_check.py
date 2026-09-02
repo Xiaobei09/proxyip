@@ -1689,6 +1689,32 @@ class TestGenerateCnSubset(unittest.TestCase):
         self.assertEqual(lines[0].split("#")[0], "2.2.2.2:443")
 
 
+class TestWriteCnSubset(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.f = self.tmp / "sub.txt"
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_writes_nonempty(self):
+        cc.write_cn_subset(self.f, "a\n")
+        self.assertEqual(self.f.read_text(encoding="utf-8"), "a\n")
+
+    def test_empty_unlinks_stale(self):
+        self.f.write_text("stale\n", encoding="utf-8")
+        cc.write_cn_subset(self.f, "")
+        self.assertFalse(self.f.exists())
+
+    def test_empty_without_stale_is_noop(self):
+        cc.write_cn_subset(self.f, "")
+        self.assertFalse(self.f.exists())
+
+
 class TestScarceQuotaAllocation(unittest.TestCase):
     """check_host 稀缺配额（~250/h）只投递决策键：xxapi 明确 fail 者省略，
     预算全部用于 xxapi ok / 临时性失败者 —— 提高「把 uncertain 翻成
