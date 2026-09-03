@@ -13,7 +13,8 @@
         "RU": 1
       },
       "family_dist": {
-        "ipv4": 1
+        "ipv4": 2,
+        "ipv6": 1
       },
       "median_latency": 271.0,
       "median_speed": 1.62,
@@ -45,7 +46,7 @@
         "US": 3
       },
       "family_dist": {
-        "ipv4": 1,
+        "ipv4": 2,
         "unknown": 34
       },
       "median_latency": 360.0,
@@ -92,10 +93,10 @@
         "US": 1785
       },
       "family_dist": {
-        "dual": 35,
-        "ipv4": 4640,
-        "ipv6": 10960,
-        "unknown": 60
+        "dual": 32,
+        "ipv4": 4641,
+        "ipv6": 10973,
+        "unknown": 53
       },
       "median_latency": 279.0,
       "median_speed": 1.63,
@@ -139,9 +140,9 @@
         "US": 7
       },
       "family_dist": {
-        "ipv4": 15,
+        "ipv4": 16,
         "ipv6": 4,
-        "unknown": 124
+        "unknown": 125
       },
       "median_latency": 338.0,
       "median_speed": 1.67,
@@ -198,7 +199,7 @@
         "JP": 4
       },
       "family_dist": {
-        "ipv4": 2
+        "ipv4": 4
       },
       "median_latency": 255.0,
       "median_speed": 1.81,
@@ -257,10 +258,10 @@
         "VN": 1
       },
       "family_dist": {
-        "dual": 2,
-        "ipv4": 26,
-        "ipv6": 6,
-        "unknown": 20
+        "dual": 1,
+        "ipv4": 25,
+        "ipv6": 7,
+        "unknown": 19
       },
       "median_latency": 275.0,
       "median_speed": 1.69,
@@ -288,7 +289,10 @@
         "LT": 1,
         "NL": 1
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 3,
+        "ipv6": 2
+      },
       "median_latency": 299.0,
       "median_speed": 1.58,
       "port_dist": {
@@ -306,5 +310,5 @@
   },
   "total_alive": 15966,
   "total_proxies": 17238,
-  "ts": "2026-09-02T23:43:42Z"
+  "ts": "2026-09-03T00:06:15Z"
 }
