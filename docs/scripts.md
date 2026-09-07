@@ -336,6 +336,28 @@ python scripts/build_good.py
 python scripts/build_good.py --data-dir /path/to/data
 ```
 
+### `scripts/build_premium.py`
+
+构建高端优质 `premium.txt` 清单（策略组/国家组/集合组各一份）。从验证池（`data/valid/all.txt`、`countries/*/all.txt`、`sets/*/all.txt`）中筛选同时满足以下条件的代理，按综合分降序输出（行内容原样保留）：
+
+1. **大陆可达**：`china.json` 判定 `reachable`（与 `good` 同规则）
+2. **信誉分 ≥ 95**：存在于 `reputation.json` 且 `score >= 95`
+3. **真实住宅 IP**：`ipinfo.json` 的 `ip_type == "RES"`
+4. **非高风险**：`reputation.json` 的 `risk != high`
+
+综合分公式与 `good` 一致：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0。同分依次按延迟升序、key 升序。质量 JSON 缺失时优雅降级为空清单。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--data-dir` | 数据根目录（含 `valid/` 与 `quality/`） | `data` |
+
+输出文件：`data/valid/all_premium.txt`、`data/valid/countries/<CC>/premium.txt`、`data/valid/sets/<name>/premium.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）可靠性变体，以及 `_<tier>.txt` 速度档变体。CI 在 quality-check / china-check / annotate-classify 完成后自动运行。
+
+```bash
+python scripts/build_premium.py
+python scripts/build_premium.py --data-dir /path/to/data
+```
+
 ### `scripts/analyze_sources.py`
 
 分析各下载源的质量。读取 `ip_sources.json`（逐 IP 来源归属）并与验证/信誉/大陆可达性数据交叉引用，产出每个源的存活率、延迟、速度、信誉分、大陆可达率等指标。
