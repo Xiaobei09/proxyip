@@ -263,6 +263,17 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 按综合分降序排列：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0；同分依次按延迟升序、IP 序。行内容为源池原行（含全部备注），不改动。
 
+### `data/valid/all_premium.txt` 及各目录 `premium.txt`
+
+**高端优质清单**（质量 CI 生成，`build_premium.py`）：从对应池中筛选同时满足以下条件的代理（比 `good` 更严格）：
+
+1. 大陆可达（`china.json` 判定 `reachable`，与 `good` 同规则）
+2. 信誉分 ≥ 95（存在于 `reputation.json` 且 `score >= 95`）
+3. 真实住宅 IP（`ipinfo.json` 的 `ip_type == "RES"`）
+4. 非高风险（`reputation.json` 的 `risk != high`）
+
+综合分公式与 `good` 一致（信誉为主），按综合分降序排列。行内容为源池原行，不改动。同步派生 `_verified.txt`/`_stable.txt`/`_uptime.txt` 可靠性变体与 `_<tier>.txt` 速度档变体。
+
 ### `data/quality/china.json`（china-check CI 输出）
 
 顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）。
