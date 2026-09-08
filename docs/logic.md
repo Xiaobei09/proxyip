@@ -88,13 +88,14 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 ### 4.1 评分公式
 
-**多源加权合成**：
+**跨源共识合成**（默认 `--reputation-provider multi`，实现 `quality_reputation.vote_reputation`）：
 
-```
-score = round(Σ(w_i × s_i) / Σ(w_i))
-```
+1. 先把各源的布尔标记归一为语义维度（`tor`/`proxy`/`vpn`/`hosting`(数据中心)/`mobile`/`abuse`/`listed`/`scraper`/`crawler`/`anonymous`）。
+2. 按源权重做**加权多数投票**：正票总权重 > 负票总权重才认定该维度为真，打平视为无结论（不扣分），避免单源误报独断与大权重单源主导。
+3. 叠加连续型风险源（`trust_score`、`probability`、`risk_score`、`fraud_score`、`score`、otx reputation/pulse、proxycheck risk）的加权罚分。
+4. 查到出口地理（`countryCode`）即把 `ip-api` 计入投票；无任何信号则该项无分（不误判满分）。
 
-其中 `w_i` 为源权重，`s_i` 为源给出的 0-100 干净分（越大越干净），仅计入实际响应的源。
+扣分表与默认源/权重见 `docs/scripts.md:105` 正文（tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅 mobile 与其余风险维度均不成立时有 +5 加分）。
 
 **滥用分优先级**：若 AbuseIPDB/IPQS 滥用分可用，直接取 `100 - abuse_score`，不走多源合成。
 

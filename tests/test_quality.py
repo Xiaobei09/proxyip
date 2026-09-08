@@ -2397,5 +2397,22 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertIn("netcoffee", responding)
 
 
+class TestBuildMetaRepMedian(unittest.TestCase):
+    """build_meta 的 rep_median 对奇数长度取中间值，偶数取两中间均值。"""
+
+    def _meta(self, scores):
+        rep_map = {f"k{i}": {"score": s} for i, s in enumerate(scores)}
+        return qc.build_meta({}, {}, {}, rep_map)
+
+    def test_odd_len_takes_middle(self):
+        self.assertEqual(self._meta([60, 70, 75, 80, 90])["rep_median"], 75.0)
+
+    def test_even_len_averages_mid_two(self):
+        self.assertEqual(self._meta([60, 70, 80, 90])["rep_median"], 75.0)
+
+    def test_empty_reps_none(self):
+        self.assertIsNone(self._meta([])["rep_median"])
+
+
 if __name__ == "__main__":
     unittest.main()

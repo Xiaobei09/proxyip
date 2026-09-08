@@ -76,6 +76,13 @@
 | `chart_source_avail.svg` | IP 来源覆盖率 + 每代理源数量分布 |
 | `chart_source_stats.svg` | 每下载来源 IP 数量与重叠分布 |
 | `chart_rep.svg` | 信誉分分布条形图 |
+| `chart_exit.svg` | 出口国 Top15（common.build_exit_cc_map 三源 →CC 汇聚）条形图 |
+| `chart_entry_audit.svg` | 入口国家标签审计 verdict 分布（audit_entry_cc 汇总） |
+| `chart_ip_type.svg` | IP 类型（DC/RES/MOB/PROXY）分布条形图 |
+| `chart_country_speed.svg` | 各国速度分位数（p25/p50/p75/max）条形图 |
+| `chart_speed_spread.svg` | 同国内部分化 Top-20（四分位差 `(p75-p25)/p50` 百分比） |
+
+另生成 `country_speed.json`（各国 `n`/`p25`/`p50`/`p75`/`max`/`spread_pct`，样本 <5 的国家不收录）。
 
 ### `scripts/quality_check.py`
 
@@ -92,7 +99,7 @@
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,hackmyip,scamalytics,iplocation,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,hackmyip,scamalytics,iplocation,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk,greynoise,urlhaus,threatfox,firehol_level1,binarydefense,c2_tracker,botscout,greensnow,sslproxies,socks_proxy |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
