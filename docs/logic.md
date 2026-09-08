@@ -229,7 +229,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 ### 5.4 输出
 
 - `data/quality/china.json`：逐条明细，含各源 status/ms/level 与合成 verdict/basis/ms/level/streak
-- `data/valid/all_cn.txt`：全量大陆可达清单（本次 reachable + 历史 -CN），按大陆实测延迟升序；
+- `data/valid/all_cn.txt`：全量大陆可达清单（仅本次 reachable，历史累积 `-CN` 不再自动纳入），按大陆实测延迟升序；
   应用层确认行追加 `-CNH` 备注
 - `data/valid/all_cn_http.txt`：应用层确认子集（本轮 level=http 或历史已带 `-CNH`）
 - `data/valid/all_cn_stable.txt`：跨轮稳定子集（连续 ≥2 轮 reachable，不含历史兜底）

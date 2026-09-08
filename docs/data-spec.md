@@ -257,7 +257,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 **综合最优清单**（质量 CI 生成，`build_good.py`）：从对应池（根级 `all.txt` / 各国家、集合目录 `all.txt`）中筛选同时满足以下条件的代理：
 
-1. 大陆可达（`china.json` 判定 `reachable`，或行内已带历史 `-CN` 备注，与 `all_cn.txt` 同规则）
+1. 大陆可达（`china.json` 判定 `reachable`，仅当期可达集，过期历史 `-CN` 不再兜底——与 `all_cn.txt` 同规则，见 `scripts/china_check.py`「严格交战」）
 2. 信誉分 ≥ 80（存在于 `reputation.json` 且 `score >= 80`）
 3. 非高风险（`reputation.json` 的 `risk != high`）
 
