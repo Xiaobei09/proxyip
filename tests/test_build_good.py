@@ -252,6 +252,53 @@ class TestWriteGoodFiles(unittest.TestCase):
             self.assertTrue((valid / "countries" / "US" / "good.txt").exists())
             self.assertTrue((valid / "sets" / "hot" / "good.txt").exists())
 
+    def test_good_ltd_from_ltd_pools(self):
+        """good_ltd = 同套 good 标准在 ltd.txt 限量池上筛选（每国最快优质子集）。"""
+        ltd_pool = (
+            "1.1.1.1:443#US-100ms-5.00MB/s-CN-90\n"   # reachable + rep90 -> in
+            "5.5.5.5:443#JP-60ms-9.00MB/s-95\n"       # 非 CN -> drop
+            "7.7.7.7:443#US-200ms-0.50MB/s-CN-55\n"   # rep<80 -> drop
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            (valid / "countries" / "US").mkdir(parents=True)
+            (valid / "sets" / "hot").mkdir(parents=True)
+            (valid / "all_ltd.txt").write_text(ltd_pool, encoding="utf-8")
+            (valid / "countries" / "US" / "ltd.txt").write_text(
+                ltd_pool, encoding="utf-8")
+            (valid / "sets" / "hot" / "ltd.txt").write_text(
+                ltd_pool, encoding="utf-8")
+
+            stats = bg.write_good_files(valid, self.CHINA, self.REP)
+            self.assertEqual(stats["all_good_ltd"], 1)
+            self.assertEqual(stats["countries/US_ltd"], 1)
+            self.assertEqual(stats["sets/hot_ltd"], 1)
+            self.assertNotIn("countries/XX", stats)
+
+            for rel in ("all_good_ltd.txt", "countries/US/good_ltd.txt",
+                        "sets/hot/good_ltd.txt"):
+                body = (valid / rel).read_text(encoding="utf-8")
+                self.assertEqual(
+                    [l.split("#")[0] for l in body.splitlines()], ["1.1.1.1:443"])
+
+    def test_good_ltd_stale_files_cleaned(self):
+        """good_ltd 全部清空时清理上轮残留（基清单及其变体）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            for name in ("all_good_ltd.txt", "all_good_ltd_verified.txt",
+                         "all_good_ltd_stable.txt"):
+                (valid / name).write_text("stale\n", encoding="utf-8")
+            # 无 ltd 池 -> 不产生且清理旧文件
+            bg.write_good_files(valid, set(), {})
+            self.assertFalse((valid / "all_good_ltd.txt").exists())
+
+            # 有 ltd 池但池内无可达行 -> 基清单清空不落盘
+            (valid / "all_ltd.txt").write_text(
+                "5.5.5.5:443#JP-60ms-9.00MB/s-95\n", encoding="utf-8")
+            bg.write_good_files(valid, self.CHINA, self.REP)
+            self.assertFalse((valid / "all_good_ltd.txt").exists())
+
     def test_verified_stable_variants(self):
         import common
 

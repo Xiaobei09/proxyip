@@ -304,6 +304,10 @@ def write_good_files(
     - 同内容镜像进细分目录 ``data/valid/tiers/<tier>/``：
       全局组写 ``all.txt``，国家组写 ``<CC>.txt``，集合组写
       ``sets/<name>.txt``——目录导航式消费入口（空档位整目录跳过）。
+
+    对每目录 ``ltd.txt`` 限量池额外产出 ``good_ltd``（每国最快的优质子集）：
+    同套 good 标准在该池上筛选（CN 可达 + 信誉≥80 + 非高风险，综合分降序），
+    派生 ``_verified`` 与 ``_stable`` 变体，空清单不落盘并清理上轮残留。
     """
     stats: dict[str, int] = {}
     speed_keys = load_speed_keys()
@@ -357,23 +361,54 @@ def write_good_files(
             tier_name="all",
         )
 
+    # good_ltd：对同目录 ltd.txt 限量池按同套标准筛出每国最快的优质子集
+    def emit_ltd(base: Path, lines: list[str]) -> int:
+        lines = to_cn_view(lines, cn_ms)
+        n = write_good_file(base, lines) if lines else 0
+        if not lines:
+            base.unlink(missing_ok=True)
+        for suffix, keys in (
+            ("_verified", speed_keys),
+            ("_stable", stable_keys),
+        ):
+            vpath = base.with_name(f"{base.stem}{suffix}.txt")
+            vlines = [ln for ln in lines if (k := line_to_key(ln)) and k in keys]
+            if vlines:
+                write_text_if_changed(vpath, "\n".join(vlines) + "\n")
+            elif vpath.exists():
+                vpath.unlink()
+        return n
+
+    def rank_ltd(pool: Path) -> list[str]:
+        if not pool.exists():
+            return []
+        return filter_rank(
+            pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
+        )
+
+    stats["all_good_ltd"] = emit_ltd(
+        valid_dir / "all_good_ltd.txt", rank_ltd(valid_dir / "all_ltd.txt")
+    )
+
     for sub in ("countries", "sets"):
         root = valid_dir / sub
         if not root.is_dir():
             continue
         for group_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-            pool = group_dir / "all.txt"
-            if not pool.exists():
-                continue
             name = f"{sub}/{group_dir.name}"
             rel = (f"sets/{group_dir.name}" if sub == "sets"
                    else f"{group_dir.name}")
-            stats[name] = emit(
-                group_dir / "good.txt",
-                filter_rank(
-                    pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
-                ),
-                tier_name=rel,
+            pool = group_dir / "all.txt"
+            if pool.exists():
+                stats[name] = emit(
+                    group_dir / "good.txt",
+                    filter_rank(
+                        pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
+                    ),
+                    tier_name=rel,
+                )
+            stats[f"{sub}/{group_dir.name}_ltd"] = emit_ltd(
+                group_dir / "good_ltd.txt", rank_ltd(group_dir / "ltd.txt")
             )
 
     # 细分目录：tiers/<tier>/{all.txt,<CC>.txt,sets/<name>.txt}
