@@ -1336,6 +1336,56 @@ class TestReputationFiles(unittest.TestCase):
         self.assertEqual([l.split("#")[0] for l in cver.splitlines()],
                          ["1.2.3.4:443"])
 
+    def test_write_reputation_files_root_ltd(self):
+        (self.tmp / "all_ltd.txt").write_text(
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms-1.00MB/s\n"
+            "5.6.7.8:8443#\U0001F1EF\U0001F1F5JP-50ms-2.00MB/s\n",
+            encoding="utf-8",
+        )
+        common.SPEED_FILE.write_text(
+            json.dumps({"proxies": {"1.2.3.4:443#US": {}}}), encoding="utf-8"
+        )
+        common.CHINA_FILE.write_text(
+            json.dumps(
+                {
+                    "proxies": {
+                        "5.6.7.8:8443#JP": {"verdict": "reachable", "streak": 3}
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        rep_map = {
+            "1.2.3.4:443#US": {"score": 90, "risk": "low", "source": "netcoffee"},
+            "5.6.7.8:8443#JP": {"score": 40, "risk": "medium",
+                                "source": "ip-api"},
+        }
+        qc.write_reputation_files("", {}, rep_map)
+        base = (self.tmp / "all_rep_ltd.txt").read_text(encoding="utf-8")
+        self.assertEqual([l.split("#")[0] for l in base.splitlines()],
+                         ["1.2.3.4:443", "5.6.7.8:8443"])
+        ver = (self.tmp / "all_rep_ltd_verified.txt").read_text(encoding="utf-8")
+        self.assertEqual([l.split("#")[0] for l in ver.splitlines()],
+                         ["1.2.3.4:443"])
+        sta = (self.tmp / "all_rep_ltd_stable.txt").read_text(encoding="utf-8")
+        self.assertEqual([l.split("#")[0] for l in sta.splitlines()],
+                         ["5.6.7.8:8443"])
+
+    def test_write_reputation_files_root_ltd_stale_cleaned(self):
+        stale = [
+            self.tmp / "all_rep_ltd.txt",
+            self.tmp / "all_rep_ltd_verified.txt",
+            self.tmp / "all_rep_ltd_stable.txt",
+        ]
+        for p in stale:
+            p.write_text("1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms\n",
+                         encoding="utf-8")
+        qc.write_reputation_files("", {}, {"1.2.3.4:443#US":
+                                           {"score": 90, "risk": "low",
+                                            "source": "netcoffee"}})
+        for p in stale:
+            self.assertFalse(p.exists())
+
     def test_write_reputation_files_unscored_last(self):
         text = (
             "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms\n"

@@ -275,8 +275,9 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
     变体过滤信号（与 validate/build_good 共用）：
     - ``_verified``: speed.json（本轮全链路验证通过）
     - ``_stable``:  china.json streak≥2（连续两轮大陆可达）
-    根级 all_rep / all_{g}_rep / all_{g}_rep_ltd 全覆盖；子目录产出
-    rep(+v/s)、rep_ltd(+v/s) 与 {g}_rep(_ltd) 单维度文件。
+    根级 all_rep / all_rep_ltd / all_{g}_rep / all_{g}_rep_ltd 全覆盖；子目录
+    产出 rep(+v/s)、rep_ltd(+v/s) 与 {g}_rep(_ltd) 单维度文件。源文件缺失
+    时清理对应产物（空清单不落盘并清理上轮残留）。
     """
     speed_keys = load_speed_keys()
     stable_keys = load_china_stable_keys()
@@ -296,16 +297,39 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
     emit(REP_RANK_FILE, ranked)
     valid_root = REP_RANK_FILE.parent
 
+    # --- 根级 all_rep_ltd(+v/s)：all_ltd.txt 的同规则信誉排行 ---
+    all_ltd = valid_root / "all_ltd.txt"
+    if all_ltd.exists():
+        emit(
+            valid_root / "all_rep_ltd.txt",
+            build_ranked(all_ltd.read_text(encoding="utf-8"), annotations, rep_map),
+        )
+    else:
+        for suffix in ("", "_verified", "_stable"):
+            stale = valid_root / f"all_rep_ltd{suffix}.txt"
+            if stale.exists():
+                stale.unlink()
+
     # --- 顶层 cross-product rep 文件 (all_cn_rep.txt, all_cn4_rep_ltd.txt 等) ---
     for g in REP_GROUP_NAMES:
         src = valid_root / f"all_{g}.txt"
         if src.exists():
             r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
             emit(valid_root / f"all_{g}_rep.txt", r)
+        else:
+            for suffix in ("", "_verified", "_stable"):
+                stale = valid_root / f"all_{g}_rep{suffix}.txt"
+                if stale.exists():
+                    stale.unlink()
         ltd_src = valid_root / f"all_{g}_ltd.txt"
         if ltd_src.exists():
             r = build_ranked(ltd_src.read_text(encoding="utf-8"), annotations, rep_map)
             emit(valid_root / f"all_{g}_rep_ltd.txt", r)
+        else:
+            for suffix in ("", "_verified", "_stable"):
+                stale = valid_root / f"all_{g}_rep_ltd{suffix}.txt"
+                if stale.exists():
+                    stale.unlink()
 
     # --- 每个 set/country 子目录: rep(+v/s) + rep_ltd(+v/s) + 分组 rep ---
     for sub in ("countries", "sets"):
