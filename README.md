@@ -209,9 +209,10 @@ data/valid/all_ipv4.txt                  出口为 IPv4 的代理清单（exit-f
 data/valid/all_ipv6.txt                  出口为 IPv6 的代理清单（exit-family CI，双栈双入）
 data/valid/all_rep.txt                   信誉排行（按分数降序，质量 CI）
 data/valid/all_good.txt                  综合最优清单（CN 可达 + 信誉≥80 + 非高风险，按综合分降序，质量 CI）
+data/valid/all_good_ltd.txt              每国最快的优质子集（同套 good 标准基于 ltd 限量池筛选 + _verified/_stable）
 data/valid/all_premium.txt               高端优质清单（CN 可达 + 信誉≥95 + 真实住宅IP，按综合分降序，质量 CI）
 data/valid/all_cn.txt                    全量大陆可达清单（全量池，china-check CI）
-data/valid/countries/<CC>/               按国家分组（all.txt、ltd.txt、v4.txt、v6.txt、46.txt、cn.txt、rep.txt、good.txt、premium.txt 等）
+data/valid/countries/<CC>/               按国家分组（all.txt、ltd.txt、v4.txt、v6.txt、46.txt、cn.txt、rep.txt、good.txt、good_ltd.txt、premium.txt 等）
 data/valid/ports/<port>.txt              按端口分组
 data/valid/sets/<name>/                  按集合分组
 data/valid/index.json                    代理索引（延迟与检测方法）
