@@ -69,7 +69,6 @@ def analyze(
     rep_data: dict,
     china_data: dict,
     family_data: dict,
-    speed_data: dict,
 ) -> dict:
     """Compute per-source quality metrics."""
     # Parse valid proxy lines
@@ -260,12 +259,9 @@ def main(argv: list[str] | None = None) -> int:
     family_data = read_json(data_dir / "quality" / "exit_family.json")
     family_proxies = family_data.get("proxies", family_data)
 
-    speed_data = read_json(data_dir / "valid" / "speed.json")
-    speed_proxies = speed_data.get("proxies", speed_data)
-
     result = analyze(
         ip_sources, valid_lines, rep_proxies,
-        china_proxies, family_proxies, speed_proxies,
+        china_proxies, family_proxies,
     )
 
     out_file = data_dir / "quality" / "source_quality.json"

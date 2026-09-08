@@ -2900,7 +2900,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         """免额单节点源（xxapi 北京 + jkapi 宁波电信）全池扫描，先建立候选集。
 
         L2 是并发受限（aggregate QPS），非逐键串行瓶颈：两个源放进同池最多干到
-        池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=48
+        池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=56
         实测两源均无 429），保键级数据一致性仍用逐键两源落盘。"""
         _, key, ip, port, _ = item
         out = {}

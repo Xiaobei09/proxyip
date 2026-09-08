@@ -179,7 +179,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 |---|---|---|
 | `--data-dir` | 数据根目录 | `data/` |
 | `--source` | 代理列表 | `<data-dir>/valid/all.txt` |
-| `--timeout` | 单批 HTTP 超时（秒） | 15 |
+| `--timeout` | 单批 HTTP 超时（秒） | 10 |
 | `--delay` | 批间延时（秒），ip-api 免费档限 45 req/min | 1.5 |
 
 ### `scripts/china_check.py`
@@ -195,12 +195,12 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all_rep.txt` |
 | `--limit` | 按信誉降序采样条数（0=全部） | 250 |
-| `--pingpe-limit` | ping.pe 多节点复核条数（有界并发） | 200 |
+| `--pingpe-limit` | ping.pe 多节点复核条数（有界并发） | 300 |
 | `--tcptest-limit` | tcptest.cn 多节点复核条数（0=跳过；-1=全部未定键） | 150 |
 | `--tcptest-concurrency` | tcptest.cn 并发复核数 | 4 |
 | `--tcptest-nodes` | tcptest.cn 每键采样节点数 | 10 |
 | `--coffee-limit` | ip.net.coffee 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
-| `--coffee-concurrency` | ip.net.coffee 并发复核数 | 16 |
+| `--coffee-concurrency` | ip.net.coffee 并发复核数 | 24 |
 | `--pingloc-limit` | pingloc.com 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
 | `--pingloc-concurrency` | pingloc.com 并发复核数 | 8 |
 | `--antping-limit` | antping.com 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
@@ -213,7 +213,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--ce98-concurrency` | 98ce.com 并发复核数 | 6 |
 | `--biuping-limit` | biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
 | `--biuping-concurrency` | biuping.com 并发复核数 | 8 |
-| `--workers` | L2 并发上限 | 16 |
+| `--workers` | L2 并发上限 | 56 |
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | check-host.cc key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | tcpping.cn token（读 `TCPPING_CN_TOKEN`） | 空 |
