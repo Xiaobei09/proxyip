@@ -1412,6 +1412,32 @@ class TestReputationFiles(unittest.TestCase):
         self.assertFalse((cdir / "cn_rep.txt").exists())
         self.assertFalse((sdir / "cn4_rep_ltd.txt").exists())
 
+    def test_write_reputation_files_dir_rep_stale_cleaned(self):
+        cdir = self.tmp / "countries" / "US"
+        sdir = self.tmp / "sets" / "asia"
+        cdir.mkdir(parents=True)
+        sdir.mkdir(parents=True)
+        (cdir / "all.txt").write_text(
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms\n", encoding="utf-8"
+        )
+        (cdir / "rep.txt").write_text(
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms\n", encoding="utf-8"
+        )
+        (sdir / "ltd.txt").write_text(
+            "5.6.7.8:8443#\U0001F1EF\U0001F1F5JP-50ms\n", encoding="utf-8"
+        )
+        (sdir / "rep_ltd.txt").write_text(
+            "5.6.7.8:8443#\U0001F1EF\U0001F1F5JP-50ms\n", encoding="utf-8"
+        )
+        qc.write_reputation_files("", {}, {})
+        self.assertTrue((cdir / "rep.txt").exists())
+        self.assertTrue((sdir / "rep_ltd.txt").exists())
+        (cdir / "all.txt").unlink()
+        (sdir / "ltd.txt").unlink()
+        qc.write_reputation_files("", {}, {})
+        self.assertFalse((cdir / "rep.txt").exists())
+        self.assertFalse((sdir / "rep_ltd.txt").exists())
+
     def test_write_reputation_files_unscored_last(self):
         text = (
             "1.2.3.4:443#\U0001F1FA\U0001F1F8US-100ms\n"
