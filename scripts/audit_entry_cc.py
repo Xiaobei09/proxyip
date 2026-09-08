@@ -50,7 +50,7 @@ CF_ASN = 13335
 
 def is_literal_ip(host: str) -> bool:
     try:
-        ipaddress.ip_address(host)
+        ipaddress.ip_address(host.strip("[]"))
         return True
     except ValueError:
         return False
