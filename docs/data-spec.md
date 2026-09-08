@@ -123,7 +123,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 每次更新对比上一版（`git show HEAD:data/download/all.txt`）生成差异：
 
 - `data/diff/latest.json`：最近一次 `added`/`removed` 列表
-- `data/diff/<时间戳>.json`：有变化时按次归档，最多保留最近 500 份
+- `data/diff/<时间戳>.json`：有变化时按次归档，最多保留最近 50 份
 - `data/quality/history.jsonl`：每条记录含 `added`/`removed` 计数
 
 ## 数据文件参考
@@ -162,6 +162,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `speed` | 测速统计（avg/median/p90/max，MB/s） |
 | `speed_dist` | 速度分桶直方图（MB/s） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
+| `prefiltered` | 进入完整检测的条目数（`--prefilter` 启用时为 TCP 预筛后保留数，未启用时等于 `total`） |
 | `sets` | 各集合存活条数 |
 | `ext_check` | 外部 API 检测汇总（仅 `--ext-check` 时出现）：`ext_check_total`/`ext_check_ok`/`ext_check_uncertain`/`ext_check_dead`/`ext_avg_response_ms` |
 
@@ -313,7 +314,7 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/quality/ip_sources.json`
 
-逐 IP 下载源归属（由 `download_proxies.py` 生成）。键为 `ip:port#CC`，值为来源标签：`"main"`（主源 zip.cm.edu.kg）、补充源文件名 stem（`fdip`/`vlid`/`yxip`/`list`/`proxy`/`bestproxy&country`/`proxyip`）、`"multi"`（多源重叠）或 `"unknown"`。供 `analyze_sources.py` 消费。
+逐 IP 下载源归属（由 `download_proxies.py` 生成）。键为 `ip:port#CC`，值为来源标签：`"main"`（主源 zip.cm.edu.kg）、补充源显式映射标签（`ipdb_proxy`/`ipdb_bestproxy`/`ipdb_bestproxy_cc`/`leilao_cfproxy`/`wwuyi_proxyip`/`wwuyi_proxyip_cc`/`wwuyi_all`/`wanwu_us`/`wanwu_jp`）、镜像注册域前缀标签（通用清单名如 `all.json` 会记为 `mirror-*/all` 消歧）、其余来源的文件名主干（`fdip`/`vlid`/`yxip`/`list`/`proxy`/`bestproxy`）、`"multi"`（多源重叠）或 `"unknown"`。供 `analyze_sources.py` 消费。
 
 ### `data/quality/source_quality.json`
 

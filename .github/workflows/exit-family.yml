@@ -40,8 +40,8 @@ jobs:
           fi
           # 注：不因触发者(quality-check)失败而跳过——本工作流从仓库
           # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
-          # 完整快照），上游单次失败不应冻结 CN 连通性追踪(streak)
-          # 与后缀应用，否则 IP 未变更期间 stable 永远无法累积。
+          # 完整快照），上游单次失败不应影响出口 IP 家族分离与标注
+          # （all_ipv4/all_ipv6/-V4/-V6/-DS），否则本次家族观测将缺席。
         env:
           GH_TOKEN: ${{ github.token }}
 
