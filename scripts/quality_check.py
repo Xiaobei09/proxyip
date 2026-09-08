@@ -356,6 +356,12 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
                 write_text_if_changed(
                     src.with_name(f"{g}_rep_ltd.txt"), "\n".join(r) + "\n"
                 )
+            for stale in sorted((valid_root / sub).glob(f"*/{g}_rep.txt")):
+                if not stale.with_name(f"{g}.txt").exists():
+                    stale.unlink()
+            for stale in sorted((valid_root / sub).glob(f"*/{g}_rep_ltd.txt")):
+                if not stale.with_name(f"{g}_ltd.txt").exists():
+                    stale.unlink()
 
     entries = {
         key: {
