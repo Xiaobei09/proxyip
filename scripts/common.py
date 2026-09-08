@@ -143,7 +143,7 @@ def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
     i = 0
     while i < len(rest) and not ("A" <= rest[i] <= "Z"):
         i += 1
-    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-")):
+    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
         cc = "ALL"
     else:
         cc = rest[i : i + 2]
@@ -607,7 +607,7 @@ def fetch_with_deadline(
 
     t = threading.Thread(target=worker, daemon=True, name="fetch-deadline")
     t.start()
-    t.join(timeout + 1.0)
+    t.join(timeout)
     if t.is_alive():
         raise TimeoutError(
             f"fetch deadline exceeded ({timeout}s): {request.full_url}"
@@ -719,7 +719,7 @@ def _note(line: str) -> str:
     i = 0
     while i < len(rest) and not ("A" <= rest[i] <= "Z"):
         i += 1
-    cc = "ALL" if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-")) else rest[i : i + 2]
+    cc = "ALL" if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")) else rest[i : i + 2]
     return rest[i + len(cc):]
 
 
@@ -845,7 +845,7 @@ def cn_display_ms(entry) -> float | None:
 
 def cn_mainland_ok(ms, cap: float | None = None) -> bool:
     """大陆视角 RTT 是否落在大陆簇（≤ cap）。无数值/非正按非大陆。"""
-    if cap is None or cap == float("inf"):
+    if cap is None:
         cap = CN_LATENCY_CAP_MS
     return bool(
         isinstance(ms, (int, float))
@@ -899,7 +899,7 @@ _NOTE_FAMILY_TOKENS = {"V4", "V6", "DS"}
 _NOTE_SCORE_RE = re.compile(r"^\d{1,3}$")
 _NOTE_UPTIME_RE = re.compile(r"^U\d{1,3}$")
 _NOTE_LAT_RE = re.compile(r"^\d+ms$")
-_NOTE_SPEED_RE = re.compile(r"^\d+(?:\.\d+)?MB/s$")
+_NOTE_SPEED_RE = re.compile(r"^≈?\d+(?:\.\d+)?MB/s$")
 
 
 def normalize_note(line: str) -> str:
