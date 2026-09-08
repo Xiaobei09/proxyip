@@ -324,8 +324,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 **行格式变化**：
 
 ```
-Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-CF-77
-After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-CF-77-DC-fast-U92
+Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-77
+After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-77-DC-fast-U92
 ```
 
 **处理范围**：`data/valid/all.txt`、`all_ltd.txt`、`countries/*/all.txt`、`countries/*/ltd.txt`、`sets/*/all.txt`、`sets/*/ltd.txt`、`ports/*.txt`

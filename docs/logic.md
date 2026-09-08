@@ -360,7 +360,7 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 ### 7.3 行格式示例
 
 ```
-1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-GPT-CF-72-DC-fast-V4-CN
+1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-GPT-72-DC-fast-V4-CN
 ```
 
 ## 8. 并发与容错
