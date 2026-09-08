@@ -5,11 +5,18 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import generate_stats as gs
+
+NOW = datetime.now(timezone.utc)
+
+
+def _ago(hours: float) -> str:
+    return (NOW - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def svg_ok(svg: str) -> bool:
@@ -43,14 +50,19 @@ class TestTimeHelpers(unittest.TestCase):
 
 
 class TestBuilders(unittest.TestCase):
-    HISTORY = [
-        {"ts": "2026-08-12T00:00:00Z", "unique": 100, "total": 200, "countries": 5, "ports": 3, "sets": {}, "added": 10, "removed": 5},
-        {"ts": "2026-08-12T01:00:00Z", "unique": 110, "total": 210, "countries": 5, "ports": 3, "sets": {}, "added": 12, "removed": 2},
-    ]
-    VALID_HISTORY = [
-        {"ts": "2026-08-12T00:30:00Z", "total": 200, "checked": 200, "alive": 195, "dead": 5},
-        {"ts": "2026-08-12T01:30:00Z", "total": 210, "checked": 210, "alive": 205, "dead": 5},
-    ]
+    HISTORY = None
+    VALID_HISTORY = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.HISTORY = [
+            {"ts": _ago(2), "unique": 100, "total": 200, "countries": 5, "ports": 3, "sets": {}, "added": 10, "removed": 5},
+            {"ts": _ago(1), "unique": 110, "total": 210, "countries": 5, "ports": 3, "sets": {}, "added": 12, "removed": 2},
+        ]
+        cls.VALID_HISTORY = [
+            {"ts": _ago(1.5), "total": 200, "checked": 200, "alive": 195, "dead": 5},
+            {"ts": _ago(0.5), "total": 210, "checked": 210, "alive": 205, "dead": 5},
+        ]
     META = {
         "alive": 205,
         "checked": 210,
@@ -142,6 +154,21 @@ class TestBuilders(unittest.TestCase):
         svg = gs.build_combo(self.HISTORY, self.VALID_HISTORY)
         self.assertIn("去重 110", svg)
         self.assertIn("存活率", svg)
+
+    def test_windowed_drops_records_outside_window(self):
+        recs = [
+            {"ts": (NOW - timedelta(days=31)).strftime("%Y-%m-%dT%H:%M:%SZ"), "unique": 1},
+            {"ts": (NOW - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), "unique": 2},
+        ]
+        out = gs._windowed(recs, 30)
+        self.assertEqual([r["unique"] for r in out], [2])
+
+    def test_windowed_unparseable_timestamps_fallback(self):
+        recs = [{"ts": "garbage", "unique": 9}, {"ts": "", "unique": 8}]
+        self.assertEqual(gs._windowed(recs, 30), recs)
+
+    def test_combo_titles_window(self):
+        self.assertIn("近 30 天", gs.build_combo(self.HISTORY, self.VALID_HISTORY))
 
     def test_cn_chart_sorted_by_count(self):
         svg = gs.build_cn(self.CN_DATA)
