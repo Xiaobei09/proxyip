@@ -2,7 +2,8 @@
 """Fill missing suffixes and add node classification tokens to proxy lines.
 
 Reads JSON data files (ipinfo.json, reputation.json, china.json,
-exit_family.json) from ``data/quality/`` and annotates all
+exit_family.json, external_check.json, upstream_meta.json, uptime.json)
+from ``data/quality/`` and annotates all
 ``data/valid/*.txt`` files with missing exit-country markers (→CC) and suffixes
 (CN, V4/V6, reputation) and classification tokens (IP type,
 speed tier).
