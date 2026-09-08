@@ -107,6 +107,15 @@ def _read_until(sock: socket.socket, delim: bytes, cap: int) -> bytes:
     return data
 
 
+def _drain_discard(sock: socket.socket, n: int) -> None:
+    """丢弃恰好 ``n`` 字节（chunk 尾部 CRLF），逐段读完抵御 TCP 分片。"""
+    while n > 0:
+        got = sock.recv(n)
+        if not got:
+            return
+        n -= len(got)
+
+
 def read_http_response_sync(sock: socket.socket, cap: int) -> tuple[int | None, dict, bytes]:
     """同步版 HTTP 响应读取 → ``(status, headers, body)``。"""
     raw = _read_until(sock, b"\r\n\r\n", 65536)
@@ -152,7 +161,7 @@ def _read_chunked_sync(sock: socket.socket, cap: int, start: int) -> bytes:
                 return body
             body += chunk
             remain -= len(chunk)
-        sock.recv(2)
+        _drain_discard(sock, 2)
     return body
 
 

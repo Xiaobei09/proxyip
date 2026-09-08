@@ -18,7 +18,7 @@
 
 #### CF 反代补充来源
 
-除主源外，默认还会拉取一批 **自称 Cloudflare 第三方反代 proxyip 的来源**（非官方 CF 段）并合并：`wentao883/TG-wxgqlfx_ZBDW`（`fdip`/`vlid`/`yxip`，`plain`）、`ChatBotPlus/cf-proxyips`（`ip`）、`ymyuuu/IPDB`（`BestProxy/proxy.txt`、`bestproxy&country.txt`、`bestproxy.txt`，`ip`）、`mountain787/Lunch-Bag-ip`（`csv`）、`LeilaoMi/cf-proxyip-us`（`docs/all.txt`，逐台人工/脚本实测收录的非 CF 反代池，同样排除官方 CF 段）、`ipdb.api.030101.xyz`（`?type=proxy` 全量反代池 + `?type=bestproxy` 优选反代池 + `?type=bestproxy&country=true` 带国家标注的优选池，`ip#CC` 元数据经 `extract_bare_ips` 解析并按 443 归位，同源族、互为补充，扩大可用性）、`Wwuyi123/CF-Proxyip`（`proxyip.txt`、`proxyip_with_country.txt`（`IP#速度地区`）、`ips/all_ips.txt`，`ip`）、`wanwushequ/ProxyIP`（`US.txt`/`JP.txt` 等地区优选榜，`ip`）。解析方式分四种：`plain`（`ip:port#国家`/`ip:port#中文`）、`ip`（裸 IP，统一按 443 端口）、`csv`（`IP,端口,地区,延迟`，地区为机场码或国家码）、`json`（`all.json` 格式镜像，缺失国家字段的条目归入 `ALL`，畸形载荷容忍）。中文名与机场码经映射表归一为 ISO2（`proxyip_with_country.txt` 的 `IP#速度地区` 注释先剥离速度前缀再提取地区，如 `222.32(MB/s)HK香港`→`HK`；`#ALL` 为「无国家」哨兵，不会被误判为国别）；仍无国家的条目经 `ip-api.com/batch` 尽力补齐（每批 100、失败保留 `#ALL`）。单个来源失败仅告警跳过，不影响整体运行。来源标签：`json` 镜像若为通用清单名（`all.json`/`all.zip` 等，多镜像会共用 `all` 这一名字），会自动以注册域前缀消歧（如 `mirror-a/all`、`mirror-b/all`），避免不同镜像在来源统计/逐 IP 归属/健康监控中互覆；其余来源保持文件名主干。
+除主源外，默认还会拉取一批 **自称 Cloudflare 第三方反代 proxyip 的来源**（非官方 CF 段）并合并：`wentao883/TG-wxgqlfx_ZBDW`（`fdip`/`vlid`/`yxip`，`plain`）、`ChatBotPlus/cf-proxyips`（`plain`）、`ymyuuu/IPDB`（`BestProxy/proxy.txt`、`bestproxy&country.txt`、`bestproxy.txt`，`ip`）、`mountain787/Lunch-Bag-ip`（`csv`）、`LeilaoMi/cf-proxyip-us`（`docs/all.txt`，逐台人工/脚本实测收录的非 CF 反代池，同样排除官方 CF 段）、`ipdb.api.030101.xyz`（`?type=proxy` 全量反代池 + `?type=bestproxy` 优选反代池 + `?type=bestproxy&country=true` 带国家标注的优选池，`ip#CC` 元数据经 `extract_bare_ips` 解析并按 443 归位，同源族、互为补充，扩大可用性）、`Wwuyi123/CF-Proxyip`（`proxyip.txt`、`proxyip_with_country.txt`（`IP#速度地区`）、`ips/all_ips.txt`，`ip`）、`wanwushequ/ProxyIP`（`US.txt`/`JP.txt` 等地区优选榜，`ip`）。解析方式分四种：`plain`（`ip:port#国家`/`ip:port#中文`）、`ip`（裸 IP，统一按 443 端口）、`csv`（`IP,端口,地区,延迟`，地区为机场码或国家码）、`json`（`all.json` 格式镜像，缺失国家字段的条目归入 `ALL`，畸形载荷容忍）。中文名与机场码经映射表归一为 ISO2（`proxyip_with_country.txt` 的 `IP#速度地区` 注释先剥离速度前缀再提取地区，如 `222.32(MB/s)HK香港`→`HK`；`#ALL` 为「无国家」哨兵，不会被误判为国别）；仍无国家的条目经 `ip-api.com/batch` 尽力补齐（每批 100、失败保留 `#ALL`）。单个来源失败仅告警跳过，不影响整体运行。来源标签：`json` 镜像若为通用清单名（`all.json`/`all.zip` 等，多镜像会共用 `all` 这一名字），会自动以注册域前缀消歧（如 `mirror-a/all`、`mirror-b/all`），避免不同镜像在来源统计/逐 IP 归属/健康监控中互覆；其余来源保持文件名主干。
 
 **维护宗旨：只保留「非 Cloudflare AS13335 + Cloudflare 边缘端口」连接池。** 因此不收录 Cloudflare 官方边缘 IP（如 `byJoey/cfnew-ipdb`——其 IP 全属 AS13335，而 Workers 出站 `connect()` 禁止直连 CF IP 网段，无法用于自建链路）。最终产物经端口白名单 `443/8443/2053/2083/2087/2096` 过滤，其余端口桶一律丢弃——可用于 Worker 内部 `connect()` 直连。
 
@@ -405,7 +405,7 @@ python scripts/analyze_sources.py --data-dir /path/to/data
 
 | 检查 | 触发条件 |
 |---|---|
-| `check_pool` | 池 `alive` 相对近 8 轮中位数下降 ≥30%（样本足够时评估） |
+| `check_pool` | 池 `alive` 相对近 24 轮中位数下降 ≥30%（样本足够时评估） |
 | `check_cn` | 上次 CN 可达数 ≥20 时，本轮相对上一轮下降 ≥50% |
 | `check_cn_stale` | `china.json` 超过 `CN_STALE_HOURS`(12h) 未刷新且曾有 ≥20 可达样本（CN 专链静默停机时总体数据仍新鲜，仅此检查暴露） |
 | `check_artifact_stale` | 任一产物 JSON 超龄（泛化时效检查）；`require_proxies=True` 用于 keyed 产物（`exit_family.json`：12h / ≥100 条目），`require_proxies=False` 用于 summary 产物（`quality_meta.json`、`good_meta.json`：各 12h；`valid/meta.json`：5h，此时效早于 8h 的 history 兜底告警）——分别暴露 exit-family / 质量链 / build-good 链 / validate(update) 链静默停机 |
