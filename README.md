@@ -187,8 +187,13 @@ scripts/china_itdog.py                   itdog.cn 批量探活模块（china_che
 scripts/exit_family.py                   实际出口 IP 家族检测与分离（TLS trace 回显）
 scripts/generate_fingerprint.py          浏览器指纹生成
 scripts/annotate_classify.py             后缀填充 + 节点分类（CI 自动运行）
+scripts/analyze_sources.py               下载源质量分析（历史数据）
+scripts/audit_entry_cc.py                入站国家标签准确性审计
 scripts/build_good.py                    综合最优 good 清单构建（CI 自动运行）
+scripts/build_premium.py                 premium 高端优质清单构建（CI 自动运行）
 scripts/common.py                        共享常量与助手（data 布局、HTTP/JSON 探测）
+scripts/deep_speed.py                    深测大文件多流多 CDN 测速
+scripts/quality_streaming.py             streaming 解锁 + 出口地理位置检测（quality_check 拆分）
 
 data/download/                           下载产出（原始代理列表）
 data/download/all.txt                    全量去重 ip:port#国家（IP 数字序）
@@ -246,7 +251,7 @@ data/quality/history.jsonl               更新历史记录（每行一条，最
 data/output/                             展示输出
 data/output/stats.json                   统计汇总（供徽章与外部消费）
 data/output/badge.json                   状态徽章（fresh/stale）
-data/output/chart_combo.svg              代理计数 + 存活率双轴折线图
+data/output/chart_combo.svg              代理计数 + 存活率双轴折线图（近 30 天窗口）
 data/output/chart_country.svg            存活代理按国家 top-15 条形图
 data/output/chart_port.svg               存活代理按端口条形图
 data/output/chart_churn.svg              每次更新 added/removed 条形图

@@ -29,6 +29,7 @@ import argparse
 import json
 import math
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +63,7 @@ COLOR_ERROR = "#9c9c9c"
 
 MAX_HOVER_POINTS = 600
 STALE_AFTER_S = 3 * 3600
+COMBO_WINDOW_DAYS = 30  # chart_combo 只渲染最近这段时间，避免远古历史压缩近期走势
 
 
 @dataclass
@@ -646,6 +648,8 @@ def build_churn(history: list[dict]) -> str:
 
 
 def build_combo(history: list[dict], valid_history: list[dict]) -> str:
+    history = _windowed(history, COMBO_WINDOW_DAYS)
+    valid_history = _windowed(valid_history, COMBO_WINDOW_DAYS)
     u_ts = [r.get("ts", "") for r in history]
     v_ts = [r.get("ts", "") for r in valid_history]
     pct = []
@@ -658,9 +662,25 @@ def build_combo(history: list[dict], valid_history: list[dict]) -> str:
         Series("死亡", COLOR_DEAD, v_ts, [r.get("dead", 0) for r in valid_history], dash="dash"),
         Series("存活率", COLOR_RATE, v_ts, pct, dash="dot", axis="r"),
     ]
+    title = "代理总量与存活率"
+    if COMBO_WINDOW_DAYS > 0:
+        title += f"（近 {COMBO_WINDOW_DAYS} 天）"
     return plot_lines(
-        series, right_unit="%", title="代理总量与存活率"
+        series, right_unit="%", title=title
     )
+
+
+def _windowed(records: list[dict], days: int) -> list[dict]:
+    """只保留最近 ``days`` 天的历史记录（按 ``ts`` 解析，未标明起点截断）。"""
+    if days <= 0 or not records:
+        return records
+    cutoff = time.time() - days * 86400
+    times = [to_epoch(r.get("ts")) for r in records]
+    if not any(t is not None for t in times):
+        return records
+    return [
+        r for r, t in zip(records, times) if t is not None and t >= cutoff
+    ]
 
 
 def build_latency_speed(meta: dict) -> str:
