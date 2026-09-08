@@ -276,7 +276,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/china.json`（china-check CI 输出）
 
-顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）。
+顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）、`fallback`（heuristic/单源兜底混入时置位，未达复合保守门槛）、`flip`（本轮起连续翻转计数，稳定子集准入排除 `> STABLE_MAX_FLIP` 的慢性抖动源）、`cn_mainland`（大陆视角 RTT 是否低于 `--cn-latency-cap` 门槛）。
 
 ### `data/valid/all_cn.txt`
 
@@ -321,4 +321,4 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/quality/deep_speed.json`
 
-深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）与 `proxies`（另含 `meta` 参数快照）；`proxies[key]` 为 `{<target>: {"agg_mbps": <总吞吐>, "tls_ms": …}}`。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。
+深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）、`proxies`（逐键明细）与 `meta`（参数快照：`cc`/`source`/`limit`/`bytes_mb`/`streams`/`timeout`/`targets`）三个平级键；`proxies[key]` 为 `{<target>: {"agg_mbps": <总吞吐>, "tls_ms": …}}`。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。

@@ -196,6 +196,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--source` | 输入代理列表 | `data/valid/all_rep.txt` |
 | `--limit` | 按信誉降序采样条数（0=全部） | 250 |
 | `--pingpe-limit` | ping.pe 多节点复核条数（有界并发） | 300 |
+| `--pingpe-concurrency` | ping.pe 并发复核数 | 6 |
 | `--tcptest-limit` | tcptest.cn 多节点复核条数（0=跳过；-1=全部未定键） | 150 |
 | `--tcptest-concurrency` | tcptest.cn 并发复核数 | 4 |
 | `--tcptest-nodes` | tcptest.cn 每键采样节点数 | 10 |
@@ -213,13 +214,32 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--ce98-concurrency` | 98ce.com 并发复核数 | 6 |
 | `--biuping-limit` | biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
 | `--biuping-concurrency` | biuping.com 并发复核数 | 8 |
+| `--boce-limit` | boce.com 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
+| `--boce-concurrency` | boce.com 并发复核数 | 6 |
+| `--ipip-limit` | ipip.net 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
+| `--ipip-concurrency` | ipip.net 并发复核数 | 6 |
+| `--17ce-limit` | 17ce.com 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
+| `--17ce-concurrency` | 17ce.com 并发复核数 | 6 |
+| `--17ce-token` | 17ce.com token/cookie（可选，默认从壳页提取） | 空 |
+| `--ping0-limit` | ping0.cc 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
+| `--ping0-concurrency` | ping0.cc 并发复核数 | 6 |
+| `--wansui-limit` | wansui.cn 多节点复核条数（0=跳过；-1=全部未定键） | 0 |
+| `--wansui-concurrency` | wansui.cn 并发复核数 | 6 |
 | `--workers` | L2 并发上限 | 56 |
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | check-host.cc key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | tcpping.cn token（读 `TCPPING_CN_TOKEN`） | 空 |
+| `--itdog-nodes` | itdog 每大陆运营商取节点数（`--itdog-nodes`×3 → 跨省等距采样） | 6 |
+| `--itdog-batch-size` | itdog 每任务目标数（上限 5） | 5 |
+| `--itdog-concurrency` | itdog 并发任务数 | 8 |
+| `--itdog-pacing` | itdog 两次任务启动最小间隔（秒） | 0.5 |
+| `--itdog-timeout` | itdog 单任务收结果上限（秒） | 45 |
+| `--itdog-tcping-nodes` | itdog_tcping 大节点池每运营商取节点数（×3） | 6 |
 | `--skip-pingpe` | 跳过 ping.pe 复核（本地快速冒烟） | 关 |
 | `--skip-itdog` | 跳过 itdog.cn 批量探测 | 关 |
+| `--skip-itdog-tcping` | 跳过 itdog_tcping 大节点池补测 | 关 |
 | `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
+| `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
 
 结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，仅含本轮判定 reachable 的行，历史累积 `-CN` 不再自动纳入；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等，当前不可达者撤销失效 `-CN`）。
 

@@ -11,6 +11,7 @@ class TestIsLiteralIp(unittest.TestCase):
     def test_v4_v6_domain(self):
         self.assertTrue(is_literal_ip("1.2.3.4"))
         self.assertTrue(is_literal_ip("2606:4700::1"))
+        self.assertTrue(is_literal_ip("[2606:4700::1]"))
         self.assertFalse(is_literal_ip("example.com"))
         self.assertFalse(is_literal_ip(""))
 
