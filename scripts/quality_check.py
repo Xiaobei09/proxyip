@@ -338,6 +338,9 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
                 src.with_name("rep.txt"),
                 build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map),
             )
+        for stale in sorted((valid_root / sub).glob("*/rep.txt")):
+            if not stale.with_name("all.txt").exists():
+                stale.unlink()
         for ltd_src in sorted((valid_root / sub).glob("*/ltd.txt")):
             emit(
                 ltd_src.with_name("rep_ltd.txt"),
@@ -345,6 +348,9 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
                     ltd_src.read_text(encoding="utf-8"), annotations, rep_map
                 ),
             )
+        for stale in sorted((valid_root / sub).glob("*/rep_ltd.txt")):
+            if not stale.with_name("ltd.txt").exists():
+                stale.unlink()
         for g in REP_GROUP_NAMES:
             for src in sorted((valid_root / sub).glob(f"*/{g}.txt")):
                 r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
