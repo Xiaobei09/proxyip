@@ -474,6 +474,13 @@ def build_meta(
     ext_total = sum(
         1 for res in results.values() if "external_check" in res
     )
+    _s_reps = sorted(reps)
+    _n_reps = len(_s_reps)
+    rep_median = (
+        round(_s_reps[_n_reps // 2] if _n_reps % 2
+              else (_s_reps[_n_reps // 2 - 1] + _s_reps[_n_reps // 2]) / 2, 1)
+        if _n_reps else None
+    )
     return {
         "ts": now_ts(),
         "total": len(results),
@@ -484,11 +491,7 @@ def build_meta(
         "reputation_checked": len(reps),
         "rep_dist": rep_dist,
         "rep_avg": (round(sum(reps) / len(reps), 1) if reps else None),
-        "rep_median": (
-            round(
-                (sorted(reps)[n // 2 - 1] + sorted(reps)[n // 2]) / 2, 1
-            ) if (n := len(reps)) else None
-        ),
+        "rep_median": rep_median,
         "country_mismatch": country_mismatch,
         "ext_check_total": ext_total,
         "ext_check_ok": ext_ok,

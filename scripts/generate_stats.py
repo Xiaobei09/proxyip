@@ -1296,7 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
         write_text_if_changed(path, content)
         print(f"Wrote {path}")
 
-    p90 = stats["latency"].get("p90_ms")
+    p90 = (stats["latency"] or {}).get("p90_ms")
     print(
         f"unique={stats['unique']} alive={alive}/{checked} "
         f"latency_p90={'-' if p90 is None else p90}ms"
