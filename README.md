@@ -193,7 +193,6 @@ scripts/build_good.py                    综合最优 good 清单构建（CI 自
 scripts/build_premium.py                 premium 高端优质清单构建（CI 自动运行）
 scripts/common.py                        共享常量与助手（data 布局、HTTP/JSON 探测）
 scripts/deep_speed.py                    深测大文件多流多 CDN 测速
-scripts/quality_streaming.py             streaming 解锁 + 出口地理位置检测（quality_check 拆分）
 
 data/download/                           下载产出（原始代理列表）
 data/download/all.txt                    全量去重 ip:port#国家（IP 数字序）

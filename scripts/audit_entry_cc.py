@@ -95,7 +95,10 @@ def lookup_geo(
                 continue
             q = item.get("query")
             cc, as_ = item.get("countryCode"), item.get("as") or ""
-            asn = int(as_.split()[0][2:]) if as_.startswith("AS") else None
+            try:
+                asn = int(as_.split()[0][2:]) if as_.startswith("AS") else None
+            except (ValueError, IndexError):
+                asn = None
             if isinstance(q, str):
                 found[q] = {"cc": cc if isinstance(cc, str) and cc else None,
                             "asn": asn}

@@ -67,7 +67,7 @@ class TestAnalyze(unittest.TestCase):
         result = asrc.analyze(
             ip_sources, valid_lines,
             rep_data={}, china_data={},
-            family_data={}, speed_data={},
+            family_data={},
         )
         self.assertEqual(result["total_proxies"], 3)
         self.assertEqual(result["total_alive"], 2)
@@ -90,7 +90,7 @@ class TestAnalyze(unittest.TestCase):
         result = asrc.analyze(
             ip_sources, valid_lines,
             rep_data=rep_data, china_data={},
-            family_data={}, speed_data={},
+            family_data={},
         )
         main = result["sources"]["main"]
         self.assertEqual(main["avg_reputation"], 85.0)
@@ -103,7 +103,7 @@ class TestAnalyze(unittest.TestCase):
         result = asrc.analyze(
             ip_sources, valid_lines,
             rep_data={}, china_data=china_data,
-            family_data={}, speed_data={},
+            family_data={},
         )
         main = result["sources"]["main"]
         self.assertEqual(main["china_reachable_count"], 1)
@@ -125,14 +125,14 @@ class TestAnalyze(unittest.TestCase):
         result = asrc.analyze(
             ip_sources, valid_lines,
             rep_data={}, china_data={},
-            family_data=family_data, speed_data={},
+            family_data=family_data,
         )
         main = result["sources"]["main"]
         self.assertEqual(main["family_dist"]["ipv4"], 1)
         self.assertEqual(main["family_dist"]["ipv6"], 1)
 
     def test_empty_inputs(self):
-        result = asrc.analyze({}, [], {}, {}, {}, {})
+        result = asrc.analyze({}, [], {}, {}, {})
         self.assertEqual(result["total_proxies"], 0)
         self.assertEqual(result["sources"], {})
 
