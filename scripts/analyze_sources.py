@@ -48,7 +48,7 @@ def _parse_cc(line: str) -> str | None:
     i = 0
     while i < len(rest) and not ("A" <= rest[i] <= "Z"):
         i += 1
-    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-")):
+    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
         return "ALL"
     cc = rest[i:i + 2]
     return cc if len(cc) == 2 and cc.isalpha() else None
@@ -84,7 +84,7 @@ def analyze(
         i = 0
         while i < len(rest) and not ("A" <= rest[i] <= "Z"):
             i += 1
-        if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-")):
+        if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
             cc = "ALL"
         else:
             cc = rest[i:i + 2]

@@ -862,7 +862,7 @@ def write_valid_outputs(
                 exit_region = f"→{colo}"
             elif ext_data.get("exit_geo"):
                 eg = ext_data["exit_geo"]
-                exit_region = f"→{eg.get('city', '') or eg.get('countryCode', '')}"
+                exit_region = f"→{eg.get('countryCode', '') or eg.get('city', '')}"
         if exit_region:
             base = insert_exit_region(base, exit_region)
         old = old_notes.get(entry)

@@ -12,9 +12,53 @@ from common import (
     _rewrite_cn_speed,
     cn_display_ms,
     cn_l2_ms,
+    cn_mainland_ok,
+    line_to_key,
     merge_note_tokens,
     normalize_note,
+    parse_ltd_line,
 )
+
+
+class TestParseLtdLine(unittest.TestCase):
+    """parse_ltd_line / line_to_key 的伪国家 ALL + 出口标记 → 边界契约。
+
+    ``#ALL→US`` 是 data-spec.md 定义的合法格式（入口未知但出口已知），
+    ALL 必须保持为 ALL，不得坍缩成阿尔巴尼亚 AL。"""
+
+    def test_all_plain_stays_all(self):
+        key, ip, port, cc = parse_ltd_line("1.2.3.4:443#ALL-120ms")
+        self.assertEqual((key, ip, port, cc), ("1.2.3.4:443#ALL", "1.2.3.4", "443", "ALL"))
+
+    def test_all_with_exit_marker(self):
+        key, ip, port, cc = parse_ltd_line("1.2.3.4:443#ALL→US-120ms-0.44MB/s")
+        self.assertEqual((key, cc), ("1.2.3.4:443#ALL", "ALL"))
+
+    def test_line_to_key_all_with_exit_marker(self):
+        self.assertEqual(line_to_key("1.2.3.4:443#ALL→US-120ms"), "1.2.3.4:443#ALL")
+
+    def test_real_albania_still_al(self):
+        key, _, _, cc = parse_ltd_line("1.2.3.4:443#AL-88ms")
+        self.assertEqual((key, cc), ("1.2.3.4:443#AL", "AL"))
+
+    def test_exit_marker_cc_parse(self):
+        key, _, _, cc = parse_ltd_line("1.2.3.4:443#US→KR-120ms")
+        self.assertEqual((key, cc), ("1.2.3.4:443#US", "US"))
+
+
+class TestCnMainlandOkCap(unittest.TestCase):
+    """cn_mainland_ok 的 cap 语义：None 用默认 150，inf 表示关闭（不回落）。"""
+
+    def test_inf_disables_cap(self):
+        self.assertTrue(cn_mainland_ok(200, float("inf")))
+
+    def test_default_cap_150(self):
+        self.assertFalse(cn_mainland_ok(200))
+        self.assertTrue(cn_mainland_ok(149))
+
+    def test_explicit_cap_honored(self):
+        self.assertTrue(cn_mainland_ok(80, cap=100))
+        self.assertFalse(cn_mainland_ok(120, cap=100))
 
 
 class TestNormalizeNote(unittest.TestCase):
@@ -77,6 +121,16 @@ class TestNormalizeNote(unittest.TestCase):
     def test_unknown_segments_kept_at_end(self):
         line = "1.2.3.4:443#🇺🇸US-50ms-CN-XYZ"
         self.assertEqual(normalize_note(line), f"{line}")
+
+    def test_cn_view_speed_token_idempotent(self):
+        # CN 视图速度 token（≈ 前缀）须留在速度位，不得被当作未知段垫底
+        line = "1.2.3.4:443#🇺🇸US-42ms-≈2.0MB/s-fast-90"
+        self.assertEqual(normalize_note(line), "1.2.3.4:443#🇺🇸US-42ms-≈2.0MB/s-fast-90")
+        self.assertEqual(normalize_note(normalize_note(line)), normalize_note(line))
+
+    def test_plain_speed_token_untouched(self):
+        line = "1.2.3.4:443#🇺🇸US-42ms-25.23MB/s-fast"
+        self.assertEqual(normalize_note(line), line)
 
     def test_uptime_bucket_collapses_stacked(self):
         """多轮累积的 -U<NN> 收敛为最右（最新）一条。"""
