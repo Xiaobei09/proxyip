@@ -172,8 +172,9 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 
 **单节点实测（并发）**：
 
-- `check-host.cc`：呼和浩特阿里云节点，匿名限速 5/10s、250/h
+- `check-host.cc`：呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 `--api-key` 可放宽
 - `xxapi.cn`：北京节点，免 key
+- `jkapi.com/zz_tcping`：浙江宁波电信 1 节点，免 key（纯文本报告）
 
 **batch_tcping 补测（降级通道）**：
 
@@ -183,30 +184,39 @@ score = round(Σ(w_i × s_i) / Σ(w_i))
 - 结果记为独立多节点源 `itdog_tcping`（`result>0` → 可达，`-1` → 失败），
   单独 ok 即可判 reachable
 
-#### L3 多节点复核（串行小样本）
+#### L3 多节点复核（有界并发小样本）
 
+按序接入多节点复核源补强，各源只投「当前尚未被 itdog/单节点源判可达」的键、按 `--<name>-limit` 有界，先免费/低鉴权源再复杂源：
+
+- `tcptest.cn`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
+- `ip.net.coffee`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
+- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
-- `tcpping.cn`：多运营商，需 token，缺则跳过
+- `tcpping.cn`：多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过
 
-已评估并放弃的补充源：`api.hostmonit.com/check_port`（已 404）、`ping.chinaz.com`
-（表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）。
+多节点源须「报告 ≥ `MULTI_MIN_NODES`（5）个节点 + 各自成功率达标」才可独立判 reachable（`strong_valid`），防限流残缺样本假阳性退化为单点。
+
+已评估并放弃的补充源：`api.hostmonit.com/check_port`（已 404）。
+（`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
 
 ```
-输入：sources = {check_host: {status, ok, ms, level}, xxapi: {...}, itdog: {...}, pingpe: {...}, ...}
+输入：sources = {check_host: {status, ok, ms, level}, xxapi: {...}, jkapi: {...},
+       itdog: {...}, pingpe: {...}, tcptest: {...}, ...}
       cf = True/False（是否 CF 边缘代理）
 
-规则：
-1. 多节点源（pingpe/itdog/itdog_tcping/tcpping）任一 ok → reachable
-2. 单节点源（check_host/xxapi）≥2 个 ok → reachable
-3. 仅 1 个单节点源 ok → uncertain（单点不可靠）
-4. check_host + xxapi 均 fail → unreachable
-5. pingpe fail + 任一单节点源 fail → unreachable
-6. itdog fail + 任一其他源 fail → unreachable
-7. 仅部分源 fail → uncertain
-8. 全部 error/skip → skipped（不误判）
-9. CF 启发式仅记录在 basis 中，不改变判定
+规则（merge_verdict，与 china_check 实现逐条对应）：
+1. 多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/
+   antping/tcpingcn/chinaz/ce98/biuping/boce/ipip/17ce/ping0/wansui）任一
+   强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
+2. 单节点源（check_host/xxapi/jkapi）≥2 个 ok → reachable
+3. 多节点源仅弱确认（如 itdog 仅 1/18 节点）+ 无 ≥2 单节点 ok → uncertain
+4. 有任意 ok 源但未达上述 → uncertain
+5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
+   或多节点源 ≥1 fail 且单节点源 ≥1 fail → unreachable
+6. 全部 error/skip → skipped（不误判）
+7. CF 启发式仅记录在 basis 中，不改变判定
 
 证据分级 level：
 - 任一成功源给出应用层（HTTP）确认 → "http"
