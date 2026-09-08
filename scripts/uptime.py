@@ -6,10 +6,10 @@ latest quality round, record presence per run date (UTC). Prunes history
 older than ``WINDOW_DAYS``. Emits ``data/quality/uptime.json`` with 7d /
 30d availability percentages:
 
-    {"proxies": {"<key>": {"pct7": 95, "pct30": 88,
-                            "hits7": 20, "hits30": 66,
+    {"proxies": {"<key>": {"pct7": 100, "pct30": 87,
+                            "hits7": 7, "hits30": 26,
                             "last_seen": "2026-08-23"}},
-     "runs7": 21, "runs30": 75, "ts": "..."}
+     "runs7": 7, "runs30": 30, "ts": "..."}
 
 ``runsN`` = number of distinct quality-run dates inside the window and
 serves as the denominator: a node present in every round scores 100.
@@ -80,19 +80,28 @@ def merge_seen(
 def uptime_stats(
     proxies: dict[str, list[str]], days: dict[str, int]
 ) -> dict:
-    """Compute pct7/pct30 from presence lists × run-date counters."""
+    """Compute pct7/pct30 from presence lists × run-date counters.
+
+    存现粒度是「日期」而 days 计数常含同日多次运行（质量链随 update 每 ~2h
+    触发，单日可达数轮）。若分母用轮次总数，unit 不齐——全勤节点只能拿到
+    存现天数（≤7）对轮次总数（如 20）的比值（≤35%），「uptime 100%」无法
+    达成，``_uptime`` 变体（``load_uptime_keys`` 要求 pct ≥ 80）永远为空。
+    因此分母取窗口内**实际有质量轮的日期数**（去重），与存现天数同粒度：
+    每个运行日都在场即 100%，缺一天按比例扣分。
+    """
     today_ord = max(
         (datetime.strptime(d, "%Y-%m-%d").date().toordinal() for d in days),
         default=0,
     )
 
     def runs_in(window: int) -> int:
-        n = 0
-        for d in days:
-            do = datetime.strptime(d, "%Y-%m-%d").date().toordinal()
-            if today_ord - do < window:
-                n += days[d]
-        return n
+        # 窗口内去重运行日数：与存现粒度一致，同日多轮不再稀释分母
+        return sum(
+            1
+            for d in days
+            if 0 <= today_ord - datetime.strptime(d, "%Y-%m-%d").date().toordinal()
+            < window
+        )
 
     runs7, runs30 = runs_in(7), runs_in(30)
 
