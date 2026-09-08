@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import build_premium as bp
+from common import line_to_key
 
 
 class TestBuildIpTypeMap(unittest.TestCase):
@@ -34,6 +35,52 @@ class TestBuildRepMap(unittest.TestCase):
         }}
         m = bp.build_rep_map(data)
         self.assertEqual(m, {"1.2.3.4:443#US": {"score": 96, "risk": "low"}})
+
+
+class TestBuildFamilyMap(unittest.TestCase):
+    FAMILY = {
+        "proxies": {
+            "1.1.1.1:443#US": {"family": "ipv4"},
+            "2.2.2.2:443#JP": {"family": "dual"},
+            "3.3.3.3:443#DE": {"family": "ipv6"},
+            "4.4.4.4:443#FR": {"family": "weird"},
+            "5.5.5.5:443#IT": "garbage",
+        }
+    }
+
+    def test_basic(self):
+        m = bp.build_family_map(self.FAMILY)
+        self.assertEqual(m, {
+            "1.1.1.1:443#US": "ipv4",
+            "2.2.2.2:443#JP": "dual",
+            "3.3.3.3:443#DE": "ipv6",
+        })
+
+    def test_empty(self):
+        self.assertEqual(bp.build_family_map({}), {})
+
+
+class TestFamilyOf(unittest.TestCase):
+    def test_exit_family_preferred(self):
+        fam = {"1.1.1.1:443#US": "ipv6"}
+        line = "1.1.1.1:443#US-80ms-RES-V4-CN-96"
+        self.assertEqual(bp.family_of("1.1.1.1:443#US", line, fam), "ipv6")
+
+    def test_line_token_fallback(self):
+        cases = [
+            ("1.1.1.1:443#US-80ms-RES-V4-CN-96", {}, "ipv4"),
+            ("2.2.2.2:443#US-80ms-RES-V6-CN-96", {}, "ipv6"),
+            ("3.3.3.3:443#US-80ms-RES-DS-CN-96", {}, "dual"),
+            ("4.4.4.4:443#US-80ms-RES-V4-V6-CN-96", {}, "dual"),
+        ]
+        for line, fam, want in cases:
+            self.assertEqual(bp.family_of(line_to_key(line), line, fam), want)
+
+    def test_untagged(self):
+        self.assertIsNone(bp.family_of("9.9.9.9:443#US", "9.9.9.9:443#US-80ms-RES-CN-96", {}))
+
+    def test_none_key(self):
+        self.assertIsNone(bp.family_of(None, "9.9.9.9:443#US-80ms", {}))
 
 
 class TestBuildChinaSet(unittest.TestCase):
@@ -188,6 +235,113 @@ class TestWritePremiumFiles(unittest.TestCase):
             stats = bp.write_premium_files(valid, set(), {}, {})
             self.assertEqual(stats["all_premium"], 0)
             self.assertEqual((valid / "all_premium.txt").read_text(), "")
+
+    def test_family_branches_written_and_cleaned(self):
+        POOL = (
+            "1.1.1.1:443#US-80ms-5.00MB/s-RES-V4-CN-96\n"
+            "1.1.1.2:443#US-80ms-5.00MB/s-RES-V6-CN-96\n"
+            "1.1.1.3:443#US-80ms-5.00MB/s-RES-V4-V6-CN-96\n"
+            "1.1.1.4:443#US-80ms-5.00MB/s-RES-CN-95\n"   # no family token
+            "5.5.5.5:443#JP-60ms-9.00MB/s-RES-97\n"       # not CN
+        )
+        china = {f"1.1.1.{i}:443#US" for i in range(1, 5)}
+        rep = {f"1.1.1.{i}:443#US": {"score": 96, "risk": "low"}
+               for i in range(1, 5)}
+        rep["1.1.1.4:443#US"] = {"score": 95, "risk": "low"}
+        ip_type = {f"1.1.1.{i}:443#US": "RES" for i in range(1, 5)}
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            (valid / "countries" / "US").mkdir(parents=True)
+            (valid / "sets" / "hot").mkdir(parents=True)
+            (valid / "all.txt").write_text(POOL, encoding="utf-8")
+            (valid / "countries" / "US" / "all.txt").write_text(
+                POOL, encoding="utf-8")
+            (valid / "sets" / "hot" / "all.txt").write_text(
+                POOL, encoding="utf-8")
+
+            bp.write_premium_files(valid, china, rep, ip_type)
+
+            v4 = (valid / "all_premium_v4.txt").read_text(encoding="utf-8")
+            self.assertEqual([l.split("#")[0] for l in v4.splitlines()],
+                             ["1.1.1.1:443"])
+            v6 = (valid / "all_premium_v6.txt").read_text(encoding="utf-8")
+            self.assertEqual([l.split("#")[0] for l in v6.splitlines()],
+                             ["1.1.1.2:443"])
+            d46 = (valid / "all_premium_46.txt").read_text(encoding="utf-8")
+            self.assertEqual([l.split("#")[0] for l in d46.splitlines()],
+                             ["1.1.1.3:443"])
+            # 无家族 token 的行只进基础清单
+            base = (valid / "all_premium.txt").read_text(encoding="utf-8")
+            self.assertEqual(len(base.splitlines()), 4)
+            # 国家/集合目录同步派生家族分支
+            self.assertTrue((valid / "countries" / "US" / "premium_v4.txt").exists())
+            self.assertTrue((valid / "countries" / "US" / "premium_v6.txt").exists())
+            self.assertTrue((valid / "countries" / "US" / "premium_46.txt").exists())
+            self.assertTrue((valid / "sets" / "hot" / "premium_v4.txt").exists())
+
+    def test_family_map_overrides_line_token(self):
+        POOL = (
+            "1.1.1.1:443#US-80ms-5.00MB/s-RES-V4-CN-96\n"
+            "1.1.1.2:443#US-80ms-5.00MB/s-RES-V6-CN-96\n"
+        )
+        china = {"1.1.1.1:443#US", "1.1.1.2:443#US"}
+        rep = {k: {"score": 96, "risk": "low"} for k in china}
+        ip_type = {k: "RES" for k in china}
+        fam = {"1.1.1.1:443#US": "ipv6", "1.1.1.2:443#US": "ipv4"}
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            (valid / "all.txt").write_text(POOL, encoding="utf-8")
+            bp.write_premium_files(valid, china, rep, ip_type, family_map=fam)
+            v4 = (valid / "all_premium_v4.txt").read_text(encoding="utf-8")
+            self.assertEqual([l.split("#")[0] for l in v4.splitlines()],
+                             ["1.1.1.2:443"])
+            v6 = (valid / "all_premium_v6.txt").read_text(encoding="utf-8")
+            self.assertEqual([l.split("#")[0] for l in v6.splitlines()],
+                             ["1.1.1.1:443"])
+
+    def test_family_stale_files_cleaned(self):
+        POOL = "1.1.1.1:443#US-80ms-5.00MB/s-RES-V4-CN-96\n"
+        china = {"1.1.1.1:443#US"}
+        rep = {"1.1.1.1:443#US": {"score": 96, "risk": "low"}}
+        ip_type = {"1.1.1.1:443#US": "RES"}
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            (valid / "all.txt").write_text(POOL, encoding="utf-8")
+            bp.write_premium_files(valid, china, rep, ip_type)
+            self.assertTrue((valid / "all_premium_v4.txt").exists())
+            # 家族全部消失（池中无 V4/V6/DS）→ 旧分支文件被清理
+            (valid / "all.txt").write_text("", encoding="utf-8")
+            bp.write_premium_files(valid, set(), {}, {})
+            self.assertFalse((valid / "all_premium_v4.txt").exists())
+            self.assertFalse((valid / "all_premium_v4_verified.txt").exists())
+
+    def test_cn_view_applied_to_all_outputs(self):
+        POOL = (
+            "1.1.1.1:443#US-100ms-5.00MB/s-RES-V4-CN-96\n"
+            "1.1.1.2:443#US-400ms-1.00MB/s-RES-V6-CN-96\n"
+        )
+        china = {"1.1.1.1:443#US", "1.1.1.2:443#US"}
+        rep = {k: {"score": 96, "risk": "low"} for k in china}
+        ip_type = {k: "RES" for k in china}
+        cn_ms = {"1.1.1.1:443#US": 234.0, "1.1.1.2:443#US": 35.0}
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            (valid / "all.txt").write_text(POOL, encoding="utf-8")
+            bp.write_premium_files(valid, china, rep, ip_type, cn_ms=cn_ms)
+            base = (valid / "all_premium.txt").read_text(encoding="utf-8")
+            base_lines = base.splitlines()
+            self.assertIn("US-234ms-", base_lines[0])
+            self.assertIn("≈", base_lines[0])
+            self.assertIn("US-35ms-", base_lines[1])
+            self.assertIn("≈", base_lines[1])
+            # 家族分支同样 CN 视图
+            v4 = (valid / "all_premium_v4.txt").read_text(encoding="utf-8")
+            self.assertIn("≈", v4)
+            v6 = (valid / "all_premium_v6.txt").read_text(encoding="utf-8")
+            self.assertIn("≈", v6)
 
     def test_main_stamps_premium_meta(self):
         with tempfile.TemporaryDirectory() as tmp:

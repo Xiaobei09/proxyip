@@ -22,7 +22,14 @@ Latency prefers the mainland-measured value from ``china.json`` (``ms``,
 what a mainland user actually experiences); the overseas TLS latency from
 the line notes is only the fallback when no CN measurement exists.
 
-Outputs keep the annotated source lines verbatim:
+Every ``good`` list only contains CN-reachable lines (a ``-CN``-only list by
+construction), so all outputs render the **CN view**: inline latency is the
+mainland-measured ``china.json`` reading and the speed token is rewritten to
+the ``≈XMB/s`` mainland-side estimate (``common._rewrite_cn_speed``), the
+same semantics as ``all_cn.txt``. Without ``cn_ms`` data the lines are kept
+verbatim.
+
+Outputs are the CN-viewed annotated lines:
 
 - ``data/valid/all_good.txt``            (global policy group)
 - ``data/valid/countries/<CC>/good.txt`` (per-country groups)
@@ -304,10 +311,8 @@ def write_good_files(
     uptime_keys = load_uptime_keys()
     tier_lines: dict[str, list[tuple[str, Path]]] = {t: [] for t in TIER_TOKENS}
 
-    def emit(base: Path, lines: list[str], tier_name: str | None = None,
-             cn_view: bool = False) -> int:
-        if cn_view:
-            lines = to_cn_view(lines, cn_ms)
+    def emit(base: Path, lines: list[str], tier_name: str | None = None) -> int:
+        lines = to_cn_view(lines, cn_ms)
         n = write_good_file(base, lines)
         for suffix, keys in (
             ("_verified", speed_keys),
@@ -369,7 +374,6 @@ def write_good_files(
                     pool.read_text(encoding="utf-8"), china_set, rep_map, cn_ms
                 ),
                 tier_name=rel,
-                cn_view=(group_dir.name == "CN" or group_dir.name.startswith("cn")),
             )
 
     # 细分目录：tiers/<tier>/{all.txt,<CC>.txt,sets/<name>.txt}

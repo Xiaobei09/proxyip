@@ -261,7 +261,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 2. 信誉分 ≥ 80（存在于 `reputation.json` 且 `score >= 80`）
 3. 非高风险（`reputation.json` 的 `risk != high`）
 
-按综合分降序排列：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0；同分依次按延迟升序、IP 序。行内容为源池原行（含全部备注），不改动。
+按综合分降序排列：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0；同分依次按延迟升序、IP 序。**每一份 `good` 清单都是仅含大陆可达行的 CN 列表，因此全部输出统一渲染 CN 视图**：行内 ms 为大陆实测 RTT、速度 token 改写为 `≈XMB/s` 大陆视角估算（语义同 `all_cn.txt`，`common._rewrite_cn_speed`）；无 `cn_ms` 数据时行保持原样。
 
 ### `data/valid/all_premium.txt` 及各目录 `premium.txt`
 
@@ -272,7 +272,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 3. 真实住宅 IP（`ipinfo.json` 的 `ip_type == "RES"`）
 4. 非高风险（`reputation.json` 的 `risk != high`）
 
-综合分公式与 `good` 一致（信誉为主），按综合分降序排列。行内容为源池原行，不改动。同步派生 `_verified.txt`/`_stable.txt`/`_uptime.txt` 可靠性变体与 `_<tier>.txt` 速度档变体。
+综合分公式与 `good` 一致（信誉为主），按综合分降序排列。**每一份 `premium` 清单都是仅含大陆可达行的 CN 列表，因此全部输出统一渲染 CN 视图**（大陆实测 ms + `≈XMB/s` 大陆估算，语义同 `all_cn.txt`；无 `cn_ms` 数据时行保持原样）。同步派生 `_verified.txt`/`_stable.txt`/`_uptime.txt` 可靠性变体与 `_<tier>.txt` 速度档变体；另按出口家族派生 `*_v4.txt`/`*_v6.txt`/`*_46.txt` 分支（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`，与 `all_cn4/cn6/cn46` 同规则），各分支同样派生全部变体，空家族分支不留盘并清理残留。
 
 ### `data/quality/china.json`（china-check CI 输出）
 

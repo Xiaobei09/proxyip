@@ -79,9 +79,10 @@ data/valid/countries/US/46.txt             # 该国出口为双栈（v4+v6）的
 data/valid/countries/US/cn.txt             # 该国大陆可达的代理
 data/valid/countries/US/cn4.txt            # 该国大陆可达且出口为 IPv4 的代理
 data/valid/countries/US/rep.txt            # 该国按信誉分降序（质量 CI 生成）
-data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 信誉≥80 + 非高风险，综合分降序）
-data/valid/all_premium.txt                  # 全局高端优质（CN 可达 + 信誉≥95 + 真实住宅IP，综合分降序）
-data/valid/countries/US/premium.txt         # 该国高端优质（质量 CI 生成）
+data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 信誉≥80 + 非高风险，综合分降序，CN 视图）
+ data/valid/all_premium.txt                  # 全局高端优质（CN 可达 + 信誉≥95 + 真实住宅IP，综合分降序，CN 视图）
+ data/valid/all_premium_v4.txt               # 高端优质（出口为 IPv4 的家族分支，另有 _v6 / _46）
+ data/valid/countries/US/premium.txt         # 该国高端优质（质量 CI 生成）
 data/valid/sets/hot/premium.txt             # 热门集合高端优质（质量 CI 生成）
 data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录多件套）
 data/valid/all_46.txt                      # 全部出口为双栈的代理（根级分组）
