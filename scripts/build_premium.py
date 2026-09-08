@@ -21,11 +21,25 @@ Latency prefers the mainland-measured value from ``china.json`` (``ms``,
 what a mainland user actually experiences); the overseas TLS latency from
 the line notes is only the fallback when no CN measurement exists.
 
-Outputs keep the annotated source lines verbatim:
+Every ``premium`` list only contains CN-reachable lines (a ``-CN``-only list
+by construction), so all outputs render the **CN view**: inline latency is
+the mainland-measured ``china.json`` reading and the speed token is rewritten
+to the ``≈XMB/s`` mainland-side estimate (``common._rewrite_cn_speed``), the
+same semantics as ``all_cn.txt``. Without ``cn_ms`` data the lines are kept
+verbatim.
+
+Outputs are the CN-viewed annotated lines:
 
 - ``data/valid/all_premium.txt``            (global policy group)
+- ``data/valid/all_premium_v4.txt`` / ``_v6`` / ``_46`` (exit-family split)
 - ``data/valid/countries/<CC>/premium.txt`` (per-country groups)
+- ``data/valid/countries/<CC>/premium_v4.txt`` / ``_v6`` / ``_46``
 - ``data/valid/sets/<name>/premium.txt``    (country-set groups)
+- ``data/valid/sets/<name>/premium_v4.txt`` / ``_v6`` / ``_46``
+
+Exit family prefers ``exit_family.json``; without an entry it falls back to
+the line notes ``-V4``/``-V6``/``-DS`` (same rule as the ``v4``/``v6``/``46``
+group files). Untagged lines appear only in the unsplit list.
 """
 
 import argparse
@@ -45,20 +59,26 @@ from build_good import (
 from common import (
     CHINA_FILE,
     DATA_DIR,
+    EXIT_FAMILY_FILE,
     IPINFO_FILE,
     REPUTATION_FILE,
     cn_display_ms,
+    has_token,
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
     load_uptime_keys,
     note_tier,
+    parse_line,
     read_json,
     write_json,
     write_text_if_changed,
 )
 
 MIN_REP_SCORE = 95
+
+FAMILY_BRANCHES = ("v4", "v6", "46")
+_FAMILY_BRANCH_TO_NAME = {"ipv4": "v4", "ipv6": "v6", "dual": "46"}
 
 
 def build_ip_type_map(data: dict) -> dict[str, str]:
@@ -110,6 +130,39 @@ def is_cn_reachable(key: str | None, china_set: set[str]) -> bool:
     return key in china_set
 
 
+def build_family_map(data: dict) -> dict[str, str]:
+    """``exit_family.json`` -> ``{key: family}`` (ipv4/ipv6/dual)."""
+    result: dict[str, str] = {}
+    for key, entry in data.get("proxies", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        fam = entry.get("family")
+        if fam in _FAMILY_BRANCH_TO_NAME:
+            result[key] = fam
+    return result
+
+
+def family_of(key: str | None, line: str, family_map: dict[str, str]) -> str | None:
+    """出口家族：优先 ``exit_family.json``，缺失时按行内 ``-V4``/``-V6``/``-DS`` 兜底。
+
+    返回 ``ipv4``/``ipv6``/``dual`` 之一，无法判定时 ``None``。
+    """
+    fam = family_map.get(key) if key else None
+    if fam in _FAMILY_BRANCH_TO_NAME:
+        return fam
+    parsed = parse_line(line)
+    note = parsed[4] if parsed else ""
+    if has_token(note, "DS"):
+        return "dual"
+    if has_token(note, "V4") and has_token(note, "V6"):
+        return "dual"
+    if has_token(note, "V4"):
+        return "ipv4"
+    if has_token(note, "V6"):
+        return "ipv6"
+    return None
+
+
 def filter_rank(
     text: str,
     china_set: set[str],
@@ -156,16 +209,27 @@ def write_premium_files(
     rep_map: dict[str, dict],
     ip_type_map: dict[str, str],
     cn_ms: dict[str, float] | None = None,
+    family_map: dict[str, str] | None = None,
 ) -> dict[str, int]:
-    """Write all_premium.txt + per-country/set premium.txt; return counts."""
+    """Write all_premium.txt + per-country/set premium.txt; return counts.
+
+    每份 premium 清单都是仅含大陆可达行的 CN 列表，统一输出 **CN 视图**
+    （大陆实测延迟 + ``≈XMB/s`` 大陆估算速度）。除基础清单外同步派生：
+
+    - ``_verified``（speed.json 全链路验证）、``_stable``（china.json
+      streak≥2）与 ``_uptime``（uptime.json 滚动可用率）可靠性变体；
+    - ``_<tier>.txt`` 速度档变体（fast/mid/slow）；
+    - 出口家族分支 ``_v4.txt``/``_v6.txt``/``_46.txt``（`exit_family.json`
+      优先、行内 ``-V4``/``-V6``/``-DS`` 兜底），空家族不落盘并清理残留。
+    """
     stats: dict[str, int] = {}
     speed_keys = load_speed_keys()
     stable_keys = load_china_stable_keys()
     uptime_keys = load_uptime_keys()
+    family_map = family_map or {}
 
-    def emit(base: Path, lines: list[str], cn_view: bool = False) -> int:
-        if cn_view:
-            lines = to_cn_view(lines, cn_ms)
+    def emit(base: Path, lines: list[str]) -> int:
+        lines = to_cn_view(lines, cn_ms)
         n = write_good_file(base, lines)
         for suffix, keys in (
             ("_verified", speed_keys),
@@ -187,15 +251,36 @@ def write_premium_files(
                 tpath.unlink()
         return n
 
+    def emit_family(base: Path, lines: list[str]) -> None:
+        """按出口家族派生 ``<stem>_v4/v6/46.txt`` 分支；空分支清理残留。"""
+        branches: dict[str, list[str]] = {b: [] for b in FAMILY_BRANCHES}
+        for ln in lines:
+            fam = family_of(line_to_key(ln), ln, family_map)
+            branch = _FAMILY_BRANCH_TO_NAME.get(fam or "")
+            if branch in branches:
+                branches[branch].append(ln)
+        for branch, blines in branches.items():
+            bpath = base.with_name(f"{base.stem}_{branch}.txt")
+            if blines:
+                emit(bpath, blines)
+            else:
+                stale = [bpath]
+                stale += [bpath.with_name(f"{base.stem}_{branch}{s}.txt")
+                          for s in ("_verified", "_stable", "_uptime")]
+                stale += [bpath.with_name(f"{base.stem}_{branch}_{t}.txt")
+                          for t in TIER_TOKENS]
+                for p in stale:
+                    if p.exists():
+                        p.unlink()
+
     all_pool = valid_dir / "all.txt"
     if all_pool.exists():
-        stats["all_premium"] = emit(
-            valid_dir / "all_premium.txt",
-            filter_rank(
-                all_pool.read_text(encoding="utf-8"), china_set, rep_map,
-                ip_type_map, cn_ms,
-            ),
+        lines = filter_rank(
+            all_pool.read_text(encoding="utf-8"), china_set, rep_map,
+            ip_type_map, cn_ms,
         )
+        stats["all_premium"] = emit(valid_dir / "all_premium.txt", lines)
+        emit_family(valid_dir / "all_premium.txt", lines)
 
     for sub in ("countries", "sets"):
         root = valid_dir / sub
@@ -206,14 +291,12 @@ def write_premium_files(
             if not pool.exists():
                 continue
             name = f"{sub}/{group_dir.name}"
-            stats[name] = emit(
-                group_dir / "premium.txt",
-                filter_rank(
-                    pool.read_text(encoding="utf-8"), china_set, rep_map,
-                    ip_type_map, cn_ms,
-                ),
-                cn_view=(group_dir.name == "CN" or group_dir.name.startswith("cn")),
+            lines = filter_rank(
+                pool.read_text(encoding="utf-8"), china_set, rep_map,
+                ip_type_map, cn_ms,
             )
+            stats[name] = emit(group_dir / "premium.txt", lines)
+            emit_family(group_dir / "premium.txt", lines)
     return stats
 
 
@@ -233,9 +316,12 @@ def main(argv: list[str] | None = None) -> int:
     cn_ms = build_cn_ms_map(read_json(quality_dir / CHINA_FILE.name))
     rep_map = build_rep_map(read_json(quality_dir / REPUTATION_FILE.name))
     ip_type_map = build_ip_type_map(read_json(quality_dir / IPINFO_FILE.name))
-    print(f"Maps: cn={len(china_set)} cn_ms={len(cn_ms)} rep={len(rep_map)} ip_type={len(ip_type_map)}")
+    family_map = build_family_map(read_json(quality_dir / EXIT_FAMILY_FILE.name))
+    print(f"Maps: cn={len(china_set)} cn_ms={len(cn_ms)} rep={len(rep_map)} ip_type={len(ip_type_map)} family={len(family_map)}")
 
-    stats = write_premium_files(valid_dir, china_set, rep_map, ip_type_map, cn_ms)
+    stats = write_premium_files(
+        valid_dir, china_set, rep_map, ip_type_map, cn_ms, family_map,
+    )
     total = sum(stats.values())
     for name in sorted(stats):
         print(f"  {name}.txt: {stats[name]}")

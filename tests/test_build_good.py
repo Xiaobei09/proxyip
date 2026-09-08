@@ -353,6 +353,39 @@ class TestWriteGoodFiles(unittest.TestCase):
         self.assertEqual(common.note_tier("1.1.1.1:80#US-x-fast"), "fast")
         self.assertIsNone(common.note_tier("1.1.1.1:80#US-x"))
 
+    def test_cn_view_applied_to_all_good_outputs(self):
+        """good 全部输出（全局/国家/集合）都是仅含 CN 行的列表 → 统一 CN 视图。"""
+        pool = (
+            "1.1.1.1:443#US-100ms-5.00MB/s-CN-fast-90\n"
+            "2.2.2.2:443#US-400ms-1.00MB/s-CN-slow-85\n"
+        )
+        china = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
+        rep = {k: {"score": 90, "risk": "low"} for k in china}
+        cn_ms = {"1.1.1.1:443#US": 234.0, "2.2.2.2:443#US": 35.0}
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            (valid / "countries" / "US").mkdir(parents=True)
+            (valid / "sets" / "hot").mkdir(parents=True)
+            (valid / "all.txt").write_text(pool, encoding="utf-8")
+            (valid / "countries" / "US" / "all.txt").write_text(pool, encoding="utf-8")
+            (valid / "sets" / "hot" / "all.txt").write_text(pool, encoding="utf-8")
+
+            bg.write_good_files(valid, china, rep, cn_ms=cn_ms)
+
+            for rel in ("all_good.txt", "countries/US/good.txt",
+                        "sets/hot/good.txt"):
+                body = (valid / rel).read_text(encoding="utf-8")
+                lines = body.splitlines()
+                self.assertIn("US-234ms-", lines[0])
+                self.assertIn("≈", lines[0])
+                self.assertIn("US-35ms-", lines[1])
+                self.assertIn("≈", lines[1])
+            # 派生变体同样 CN 视图
+            fast = (valid / "all_good_fast.txt").read_text(encoding="utf-8")
+            self.assertIn("≈", fast)
+            ver = (valid / "all_good_verified.txt")  # 无 speed.json 数据 → 不生成
+            self.assertFalse(ver.exists())
+
     def test_idempotent_rewrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             valid = Path(tmp) / "valid"
