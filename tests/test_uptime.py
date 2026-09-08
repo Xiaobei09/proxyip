@@ -52,6 +52,26 @@ class TestUptimeStats(unittest.TestCase):
         self.assertEqual(stats["runs7"], 2)
         self.assertEqual(stats["proxies"]["a:443#US"]["pct7"], 100)
 
+    def test_multiple_runs_same_day_not_diluted(self):
+        # 同一天多次运行：分母按去重日期计，全勤节点仍应 100%，
+        # 而不再被轮次总数（如 5 轮）稀释成 40%——否则 pct≥80 永不可达，
+        # _uptime 变体（load_uptime_keys min_pct=80）永远为空。
+        stats = uptime_stats(
+            {"a:443#US": ["2026-08-22", "2026-08-23"]},
+            {"2026-08-22": 3, "2026-08-23": 2},
+        )
+        self.assertEqual(stats["runs7"], 2)
+        self.assertEqual(stats["proxies"]["a:443#US"]["pct7"], 100)
+
+    def test_multiple_runs_same_day_partial_still_scaled(self):
+        # 同样多轮同日：缺一天 → 50%（去重日期粒度扣分）
+        stats = uptime_stats(
+            {"b:443#US": ["2026-08-23"]},
+            {"2026-08-22": 3, "2026-08-23": 2},
+        )
+        self.assertEqual(stats["runs7"], 2)
+        self.assertEqual(stats["proxies"]["b:443#US"]["pct7"], 50)
+
     def test_missed_round_scores_lower(self):
         stats = uptime_stats(
             {"b:443#US": ["2026-08-23"]},          # 缺 08-22 那轮

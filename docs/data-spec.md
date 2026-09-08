@@ -222,7 +222,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 `node_seen.json`：`{runs: {<YYYY-MM-DD>: 轮次计数}, proxies: {<key>: [出现日期…]}}`——滚动 45 天窗口的按轮存活记录。
 
-`uptime.json`：`{proxies: {<key>: {pct7, pct30, hits7, hits30, last_seen}}, runs7, runs30, ts}`。pct 为窗口内存现天数 ÷ 运行轮数的百分比。
+`uptime.json`：`{proxies: {<key>: {pct7, pct30, hits7, hits30, last_seen}}, runs7, runs30, ts}`。pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（去重，同日多轮算 1 天）的百分比——存现与分母同按日粒度，每个运行日都在场即 100%，缺一天按比例扣分（同一运行日多次运行不稀释分母，避免全勤节点被轮次总数低估）。
 
 ### `data/valid/all.json`
 
