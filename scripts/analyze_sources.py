@@ -22,6 +22,7 @@ from common import (
     LATENCY_RE,
     QUALITY_DIR,
     SPEED_RE,
+    _scan_cc,
     read_json,
     write_text_if_changed,
 )
@@ -45,13 +46,8 @@ def _parse_cc(line: str) -> str | None:
     if "#" not in line:
         return None
     rest = line.rsplit("#", 1)[1]
-    i = 0
-    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-        i += 1
-    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
-        return "ALL"
-    cc = rest[i:i + 2]
-    return cc if len(cc) == 2 and cc.isalpha() else None
+    found = _scan_cc(rest)
+    return found[0] if found else None
 
 
 def _parse_port(line: str) -> str | None:
@@ -81,14 +77,11 @@ def analyze(
         if "#" not in line:
             continue
         addr, rest = line.rsplit("#", 1)
-        i = 0
-        while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-            i += 1
-        if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
-            cc = "ALL"
-        else:
-            cc = rest[i:i + 2]
-        if ":" not in addr or not cc:
+        found = _scan_cc(rest)
+        if not found or ":" not in addr:
+            continue
+        cc = found[0]
+        if not cc:
             continue
         ip, port = addr.rsplit(":", 1)
         key = f"{ip}:{port}#{cc}"
