@@ -205,7 +205,6 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 ```
 输入：sources = {check_host: {status, ok, ms, level}, xxapi: {...}, jkapi: {...},
        itdog: {...}, pingpe: {...}, tcptest: {...}, ...}
-      cf = True/False（是否 CF 边缘代理）
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
 1. 多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/
@@ -217,7 +216,6 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
    或多节点源 ≥1 fail 且单节点源 ≥1 fail → unreachable
 6. 全部 error/skip → skipped（不误判）
-7. CF 启发式仅记录在 basis 中，不改变判定
 
 证据分级 level：
 - 任一成功源给出应用层（HTTP）确认 → "http"

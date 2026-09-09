@@ -133,7 +133,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：五个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`、`cn_reachable`；`data/output/badge.json` 驱动状态徽章——正常时按数据年龄显示 fresh/stale（超过 3 小时变红），看门狗触发告警时直接替换为告警名（如 `stale data`、`valid-lists stale`）并标红，停机原因对访客可见
 
-`.github/workflows/quality-check.yml`（流媒体/出口质量独立 CI）：
+`.github/workflows/quality-check.yml`（出口质量独立 CI）：
 
 - **触发**：每次 `Update proxy list` 完成后自动触发（`workflow_run`）；支持 `workflow_dispatch` 手动触发
 - **流程**：跑测试（`unittest`）→ `quality_check.py`（`--source data/valid/all.txt` 全量存活池；`--time-budget 5400` 兜底；信誉信号按 IP 缓存 7 天，见上文信誉缓存）→ `uptime.py`（滚动可用率）→ `reorg_country.py`（按出口国家重组 country/set/port 文件，改写 `#CC`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 之后由专职 build-good 工作流重建 good 清单（含 `_uptime` 可靠性变体）→ stats 工作流统一渲染图表并执行 `export_json.py` + `health_alert.py`（stats 另有每 2 小时独立心跳，确保任一数据链持续失败时看门狗仍能发出 stale/塌方告警）→ 有变更则自动提交并推送
@@ -185,7 +185,7 @@ scripts/uptime.py                        滚动节点可用率（node_seen.json 
 scripts/export_json.py                   结构化 all.json 导出
 scripts/health_alert.py                  池健康看门狗（webhook 告警）
 scripts/reorg_country.py                 按出口国家重组 country/set/port 文件
-scripts/china_check.py                   大陆连通性检测（CF 启发式 + check-host + xxapi + ping.pe）
+scripts/china_check.py                   大陆连通性检测（itdog 批量 + check-host/xxapi/jkapi + ping.pe）
 scripts/china_itdog.py                   itdog.cn 批量探活模块（china_check 拆分）
 scripts/exit_family.py                   实际出口 IP 家族检测与分离（TLS trace 回显）
 scripts/generate_fingerprint.py          浏览器指纹生成
@@ -205,12 +205,12 @@ data/download/ports/<port>.txt           按端口汇总（跨国家去重）
 data/download/sets/<集合>.txt            常用国家集合（europe、asia、hot、cn_common 等）
 data/download/sets/<集合>_ltd.txt        限量版（每国 --per-country-limit 条）
 
-data/valid/                              验证后代理数据
+data/valid/                              验证后代理数据（valid/ 下与 quality/ 同名的 *.json 为历史镜像：无写入者，仅存档查询）
 data/valid/all.txt                       存活代理（按延迟排序）
 data/valid/all_ltd.txt                   限量版（每国最快 20 条，速度降序）
 data/valid/all_cn*.txt                   变体（cn、cn4、cn6、cn46、cn46_ltd 等）
-data/valid/all_cn_http.txt / all_cn_stable.txt   大陆可达可靠性子集（→http →stable 双等级）
-data/valid/good_verified.txt / good_stable.txt   可靠-good 变体（speed/uptime 可靠性分档）
+data/valid/all_cn_http.txt / all_cn_stable.txt   大陆可达可靠性子集（`-CN` 可达 / `-CNH` 应用层可信；对应确认级为空时文件不落盘）
+data/valid/all_good_verified.txt / all_good_stable.txt   可靠-good 变体（全链路验证 / 中国两轮稳定）
 data/valid/tiers/<tier>/                 speed 分档目录（fast/mid/slow；good 全量镜像）
 data/valid/all_ipv4.txt                  出口为 IPv4 的代理清单（exit-family CI，双栈双入）
 data/valid/all_ipv6.txt                  出口为 IPv6 的代理清单（exit-family CI，双栈双入）
@@ -248,6 +248,9 @@ data/quality/source_history.json         各源逐轮 unique 覆盖快照（告�
 data/quality/source_quality.json         源质量分析（来源依赖关系与来源质量打分）
 data/output/source_quality_report.txt    源质量人类可读汇总表
 data/quality/entry_audit.json            入口国标签三方交叉审计结果
+data/quality/good_meta.json              good 候选镜像（good CI 构建用 IP 元数据）
+data/quality/premium_meta.json           premium 候选镜像（premium CI 构建用）
+data/quality/ip_sources.json             各源信誉信号统计（质量 CI）
 data/quality/history.jsonl               更新历史记录（每行一条，最多 1000 条）
 
 data/output/                             展示输出
@@ -269,9 +272,10 @@ data/output/chart_entry_audit.svg        入口国标签审计汇总
 data/output/chart_ip_type.svg            出口 IP 类型（机房/住宅/移动）分布
 data/output/chart_exit.svg               出口国家 top-15
 data/output/chart_rep.svg                信誉分分布条形图
+data/output/country_speed.json           各国测速汇总（中位速度，质量 CI）
 
-data/raw/<port>/<CC>.txt                 下载中间产物（不入库，可重建）
-data/diff/                               更新差异归档（不入库）
+data/raw/<port>/<CC>.txt                 下载中间产物（历史已入库；由 CI 周期生成重建）
+data/diff/                               更新差异归档（历史已入库）
 tests/                                   标准库 unittest 测试套件
 archive/Check_Proxy.js                   遗留的单节点连通性检查脚本（已停用归档）
 ```

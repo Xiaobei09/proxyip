@@ -76,7 +76,9 @@ class TestDiverse(unittest.TestCase):
             "9.9.9.9:443#GB": {"score": 95},
         }
         out = build_diverse_lines(pool, {}, rep)
-        self.assertTrue(out[0].startswith("9.9.9.9"))
+        self.assertEqual(
+            [l.split(":")[0] for l in out], ["9.9.9.9", "1.1.1.1"]
+        )
 
     def test_exit_identity_fallbacks(self):
         from build_good import exit_identity
