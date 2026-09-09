@@ -22,11 +22,13 @@ under ``data/quality/``:
                       written pre-annotated by ``write_reputation_files``)
 
 All proxies use the TLS (Cloudflare edge) method: direct TLS connections with
-SNI routing. Only Cloudflare-fronted hosts are reachable. The exit is the edge
-itself.
+SNI routing. Only Cloudflare-fronted hosts are reachable. The exit is the
+probe-observed egress IP (``resolve_exit_ips``: trace > exit_family > proxy
+itself).
 
 Annotation format appends to the existing ``ip:port#<flag><cc>-<lat>-<speed>``
-lines as ``-<type>-<rep>``, e.g. ``1.2.3.4:443#US-120ms-0.44MB/s-72``.
+lines as ``-<rep>`` (type tokens ``DC/RES/MOB/PROXY`` 由 annotate_classify
+追加), e.g. ``1.2.3.4:443#US-120ms-0.44MB/s-72``.
 (流媒体解锁检查已移除——历史行上的 NF/D+/YT/MX/PV/GPT token 由
 normalize_note 作为遗留段继续容忍解析，但不再产生新观测。) When the exit
 region is known it is inserted right after the entry country code as
@@ -109,19 +111,6 @@ def build_ipinfo_map(
         info["risk"] = derive_risk(signals, abuse_item, weights)
         info_map[res["key"]] = info
     return info_map
-
-
-def type_tokens(ipinfo: dict) -> str:
-    tokens = []
-    ip_type = ipinfo.get("ip_type")
-    if ip_type:
-        tokens.append(ip_type)
-    family = ipinfo.get("family")
-    if family == "dual":
-        tokens.append("DS")
-    elif family == "ipv6":
-        tokens.append("V6")
-    return " ".join(tokens)
 
 
 def build_annotation(stream_toks: str, type_toks: str) -> str:
@@ -369,15 +358,19 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
                 if not stale.with_name(f"{g}_ltd.txt").exists():
                     stale.unlink()
 
-    entries = {
-        key: {
+    entries: dict[str, dict] = {}
+    for key, rep in rep_map.items():
+        ent = {
             "score": rep["score"],
             "risk": rep["risk"],
             "source": rep["source"],
             "sources": rep.get("sources") or [],
+            "flags": rep.get("flags") or [],
+            "numeric": rep.get("numeric") or [],
         }
-        for key, rep in rep_map.items()
-    }
+        if rep.get("deep_bonus") is not None:
+            ent["deep_bonus"] = rep["deep_bonus"]
+        entries[key] = ent
     entries = dict(
         sorted(entries.items(), key=lambda kv: (-kv[1]["score"], kv[0]))
     )
@@ -601,11 +594,8 @@ def main(argv: list[str] | None = None) -> int:
         "--reputation-sources",
         default=None,
         help="Comma list of sources for --reputation-provider multi "
-        "(default: all DEFAULT_REP_SOURCES in quality_reputation.py: "
-        "netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,"
-        "ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,"
-        "proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,"
-        "hackmyip,scamalytics,iplocation,cins,et_compromised,feodo)",
+        "(default: all DEFAULT_REP_SOURCES — 42 源，见 quality_reputation.py "
+        "常量与 docs/scripts.md『默认源与权重』表；如 netcoffee,ncgy,ip-api)",
     )
     parser.add_argument(
         "--reputation-weights",

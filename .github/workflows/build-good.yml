@@ -5,7 +5,12 @@ on:
   # 质量链或心跳链任一成功完成后即重建 good 变体与 tiers/ 目录：
   # good_stable 依赖 china.json（每小时刷新），good_verified 依赖
   # speed.json（质量链产出）——此前挂在两条链内部重复执行且互相覆盖，
-  # 独立后单一写入者、更快反馈。
+  # 独立后响应更快。
+  #
+  # 注：build_good.py 并非单一写入者——annotate-classify 与 exit-family
+  # 工作流（均由 quality-check 完成事件触发）也会调用它/annotate_classify，
+  # 跨 runner 并发写 data/valid/*.txt 与 good 清单，各自后 push 胜出；
+  # 属设计内（数据链下一轮自愈），勿在别处声称「单一写入者」。
   workflow_run:
     workflows: ["Quality check", "China check"]
     types: [completed]

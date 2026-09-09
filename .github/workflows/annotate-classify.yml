@@ -56,15 +56,17 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Annotate and classify
+        id: annotate
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/annotate_classify.py
 
       - name: Build good lists
+        id: build
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/build_good.py
 
       - name: Show summary
-        if: steps.gate.outputs.skip != 'true'
+        if: success() && steps.gate.outputs.skip != 'true'
         run: |
           echo "Annotated lines:"
           wc -l data/valid/all.txt
@@ -74,6 +76,9 @@ jobs:
           grep -oP '(?<=-)(fast|mid|slow)(?=-|$)' data/valid/all_ltd.txt 2>/dev/null | sort | uniq -c | sort -rn || true
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true'
+        # 闸门：仅当 annotate/build_good 均成功才提交——否则部分写入的
+        # data/valid/*.txt 与 good 清单会被推入库（自定义 if 会顶掉默认
+        # success()，须显式恢复）
+        if: success() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success' && steps.build.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
