@@ -5,7 +5,7 @@
 
 1. **入口 IP 地理**（ip-api batch，``countryCode`` + ``as``）——与订阅标签对比；
    入口为 Cloudflare 边缘（AS13335）时标签无法经入口验证（源站在 CF 之后）。
-2. **出口国观测**（``common.build_exit_cc_map`` 四源汇聚）——区分
+2. **出口国观测**（``common.build_exit_cc_map`` 三源汇聚：external_check/upstream_meta/ipinfo）——区分
    "标签错" 与正常的 "出口漂移"。
 
 判定（verdict）：
@@ -40,7 +40,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from common import DATA_DIR, line_to_key, parse_ltd_line, read_json, build_exit_cc_map, deadline_open
+from common import (
+    DATA_DIR, line_to_key, parse_ltd_line, read_json, build_exit_cc_map,
+    deadline_open, write_text_if_changed,
+)
 
 IPAPI_BATCH_URL = "http://ip-api.com/batch"
 IPAPI_BATCH_SIZE = 100
@@ -139,7 +142,7 @@ def audit(source: Path, quality_dir: Path, timeout: int, delay: float) -> dict:
         host = ln.rsplit(":", 1)[0].rsplit("#", 1)[0] if ":" in ln else ""
         row = {"key": key, "listed": listed,
                "exit_cc": exit_map.get(key), "entry_ip": None,
-               "entry_geo": None, "verdict": None}
+               "entry_geo": None, "verdict": None, "asn": None}
         if not is_literal_ip(host):
             row["verdict"] = "domain_entry"
         else:
@@ -178,8 +181,9 @@ def main(argv: list[str] | None = None) -> int:
     report = audit(source, args.data_dir / "quality", args.timeout, args.delay)
 
     out = args.data_dir / "quality" / "entry_audit.json"
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=1),
-                   encoding="utf-8")
+    write_text_if_changed(
+        out, json.dumps(report, ensure_ascii=False, indent=1) + "\n",
+        encoding="utf-8")
 
     total = report["total"] or 1
     print(f"Entry CC audit: {report['total']} lines -> {out}")

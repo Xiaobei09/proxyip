@@ -45,6 +45,13 @@ class TestParseLtdLine(unittest.TestCase):
         key, _, _, cc = parse_ltd_line("1.2.3.4:443#US→KR-120ms")
         self.assertEqual((key, cc), ("1.2.3.4:443#US", "US"))
 
+    def test_three_letter_non_all_rejected(self):
+        self.assertIsNone(parse_ltd_line("1.2.3.4:443#USA-120ms"))
+        self.assertIsNone(parse_ltd_line("1.2.3.4:443#ALLY-120ms"))
+        self.assertIsNone(parse_ltd_line("1.2.3.4:443#ALZ-1ms"))
+        key, _, _, cc = parse_ltd_line("1.2.3.4:443#ALL→US-120ms")
+        self.assertEqual((key, cc), ("1.2.3.4:443#ALL", "ALL"))
+
 
 class TestCnMainlandOkCap(unittest.TestCase):
     """cn_mainland_ok 的 cap 语义：None 用默认 150，inf 表示关闭（不回落）。"""
@@ -87,6 +94,14 @@ class TestNormalizeNote(unittest.TestCase):
         self.assertEqual(
             normalize_note(line),
             "1.2.3.4:443#🇺🇸US-50ms-1.00MB/s-RES-fast-70",
+        )
+
+    def test_three_digit_score_not_treated_as_score(self):
+        # 3 位数不匹配 score 桶 → 沉入 other 垫底，70 保持为官方 0-100 分
+        line = "1.2.3.4:443#🇺🇸US-50ms-112-70"
+        self.assertEqual(
+            normalize_note(line),
+            "1.2.3.4:443#🇺🇸US-50ms-70-112",
         )
 
     def test_family_rightmost(self):

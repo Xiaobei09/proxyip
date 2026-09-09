@@ -147,6 +147,9 @@ def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
         cc = "ALL"
     else:
         cc = rest[i : i + 2]
+        nxt = rest[i + 2 : i + 3]
+        if nxt and nxt.isalpha():
+            return None
     if (len(cc) != 2 and cc != "ALL") or not cc.isalpha() or ":" not in addr:
         return None
     ip, port = addr.rsplit(":", 1)
@@ -877,7 +880,7 @@ _NOTE_STREAMING_RE = re.compile(r"^(?:D\+|YT|MX|PV|GPT|NF\([^)]*\))$")
 _NOTE_TYPE_TOKENS = {"DC", "RES", "MOB", "PROXY"}
 _NOTE_TIER_TOKENS = {"fast", "mid", "slow"}
 _NOTE_FAMILY_TOKENS = {"V4", "V6", "DS"}
-_NOTE_SCORE_RE = re.compile(r"^\d{1,3}$")
+_NOTE_SCORE_RE = re.compile(r"^\d{1,2}$")
 _NOTE_UPTIME_RE = re.compile(r"^U\d{1,3}$")
 _NOTE_LAT_RE = re.compile(r"^\d+ms$")
 _NOTE_SPEED_RE = re.compile(r"^≈?\d+(?:\.\d+)?MB/s$")

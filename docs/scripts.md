@@ -79,7 +79,7 @@
 | `chart_exit.svg` | 出口国 Top15（common.build_exit_cc_map 三源 →CC 汇聚）条形图 |
 | `chart_entry_audit.svg` | 入口国家标签审计 verdict 分布（audit_entry_cc 汇总） |
 | `chart_ip_type.svg` | IP 类型（DC/RES/MOB/PROXY）分布条形图 |
-| `chart_country_speed.svg` | 各国速度分位数（p25/p50/p75/max）条形图 |
+| `chart_country_speed.svg` | 各国中位速度（Top20）条形图，附 Top5 的 p25–p75 区间文本注释 |
 | `chart_speed_spread.svg` | 同国内部分化 Top-20（四分位差 `(p75-p25)/p50` 百分比） |
 
 另生成 `country_speed.json`（各国 `n`/`p25`/`p50`/`p75`/`max`/`spread_pct`，样本 <5 的国家不收录）。
@@ -178,7 +178,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 入口国家标签准确性审计。订阅标签（`#CC`）此前无从验证，本脚本以两个
 独立信号交叉对比：① 入口 IP 地理（ip-api batch，含 ASN）；② 出口国观测
-（四源 exit map）。判定写入 `data/quality/entry_audit.json`
+（三源 exit map：external_check/upstream_meta/ipinfo，exit_family 仅贡献候选键）。判定写入 `data/quality/entry_audit.json`
 （`proxies[key].verdict`）并打印汇总：
 
 | verdict | 含义 |
@@ -389,7 +389,7 @@ python scripts/build_good.py --data-dir /path/to/data
 |---|---|---|
 | `--data-dir` | 数据根目录（含 `valid/` 与 `quality/`） | `data` |
 
-输出文件：`data/valid/all_premium.txt`、`data/valid/countries/<CC>/premium.txt`、`data/valid/sets/<name>/premium.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）、`*_stable.txt`（china.json streak≥2 跨轮稳定）与 `*_uptime.txt`（uptime.json 滚动可用率）可靠性变体，以及 `_<tier>.txt` 速度档变体。另按输出家族派生 **v4/v6/46 分支**：`*_v4.txt`、`*_v6.txt`、`*_46.txt`（含各自的派生变体），家族判定优先 `exit_family.json`，缺失时按行内 `-V4`/`-V6`/`-DS` 兜底（与 `v4`/`v6`/`46` 组文件同规则），无对应家族时分支空则不留盘并清理残留。
+输出文件：`data/valid/all_premium.txt`、`data/valid/countries/<CC>/premium.txt`、`data/valid/sets/<name>/premium.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）、`*_stable.txt`（china.json streak≥2 跨轮稳定）与 `*_uptime.txt`（uptime.json 滚动可用率）可靠性变体，以及 `_<tier>.txt` 速度档变体。另按输出家族派生 **v4/v6/46 分支**：`*_v4.txt`、`*_v6.txt`、`*_46.txt`（含各自的派生变体），家族判定优先 `exit_family.json`，缺失时按行内 `-V4`/`-V6`/`-DS` 兜底（与 `v4`/`v6`/`46` 组文件同规则），无对应家族时分支空则不留盘并清理残留。另写 `data/quality/premium_meta.json` 汇总（`ts`/`file_count`/`proxy_count`，见 data-spec.md）。
 
 每一份 `premium` 清单都只含大陆可达行（仅 CN 列表），因此全部输出统一渲染 **CN 视图**：行内延迟改写为大陆实测 `china.json` 读数、速度令牌改写为 `≈XMB/s` 大陆估算值（语义与 `all_cn.txt` 一致）；无 `cn_ms` 数据时行保持原样。CI 在 `build-good.yml` 专职工作流中与 `build_good.py` 同 job 运行。
 
