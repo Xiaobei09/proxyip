@@ -119,6 +119,41 @@ class TestParseHeaders(unittest.TestCase):
         self.assertIsNone(status)
 
 
+class TestRunChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_time_budget_cancels_pending(self):
+        # 超出时间预算的探测任务必须被取消并入 GC 集合，不残留、可复跑
+        async def slow_check(*args, **kwargs):
+            await asyncio.sleep(5)
+            return {"done": True}
+
+        entries = [("1.1.1.1:443#US", "1.1.1.1", "443", "US"),
+                   ("2.2.2.2:443#JP", "2.2.2.2", "443", "JP")]
+        ns = unittest.mock.Mock(workers=1, time_budget=0.15)
+        finished = []
+
+        async def timed_check(entry, method, args):
+            t0 = asyncio.get_running_loop().time()
+            res = await slow_check(entry, method, args)
+            finished.append(asyncio.get_running_loop().time() - t0)
+            return res
+
+        with unittest.mock.patch.object(qp, "check_one", timed_check):
+            out = await qp.run_checks(entries, {}, ns)
+        self.assertEqual(out, {})
+        self.assertEqual(finished, [])  # pending 全部被取消，无任务跑满
+
+    async def test_results_collected_on_success(self):
+        async def ok_check(entry, method, args):
+            return {"key": entry[0], "ok": True}
+
+        entries = [("1.1.1.1:443#US", "1.1.1.1", "443", "US"),
+                   ("2.2.2.2:443#JP", "2.2.2.2", "443", "JP")]
+        ns = unittest.mock.Mock(workers=2, time_budget=5)
+        with unittest.mock.patch.object(qp, "check_one", ok_check):
+            out = await qp.run_checks(entries, {}, ns)
+        self.assertEqual(sorted(out), ["1.1.1.1:443#US", "2.2.2.2:443#JP"])
+
+
 class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
     async def test_partial_success_keeps_only_success(self):
         with unittest.mock.patch.object(
