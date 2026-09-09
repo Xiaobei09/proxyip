@@ -3227,7 +3227,7 @@ def compute_fallback_merge(
 ) -> set:
     """判定层兜底合并（纯函数，便于单测）。
 
-    上轮可达、本轮仅因源配额/调度抖动落入 uncertain（或干脆未被采样）且
+    上轮可达、本轮仅因源配额/调度抖动落入 uncertain/skipped（或干脆未被采样）且
     **无任何失败源**的键，合并回 verdict=reachable 并标注 fallback=true，
     streak 清 0（未复测不虚报连续可达）。发生在中国 check 写 china.json 之前，
     使 build_good/annotate/all_cn.txt 全从 china.json 单一事实源读到同一集合，
@@ -3241,7 +3241,7 @@ def compute_fallback_merge(
             continue
         cur = entries.get(k)
         if isinstance(cur, dict):
-            if cur.get("verdict") not in ("reachable", "uncertain"):
+            if cur.get("verdict") not in ("reachable", "uncertain", "skipped"):
                 continue
             s = cur.get("sources") or {}
             fails = sum(

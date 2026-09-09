@@ -1637,10 +1637,11 @@ def _flag_opinions(name: str, signal) -> dict:
         opinions = {}
         if signal.get("is_abuse"):
             opinions["abuse"] = True
-        if signal.get("is_riot"):
-            opinions["bot"] = True
-        if signal.get("is_noise"):
-            opinions["noise"] = True
+        else:
+            if signal.get("is_riot"):
+                opinions["bot"] = True
+            if signal.get("is_noise"):
+                opinions["noise"] = True
         return {f: v for f, v in opinions.items() if isinstance(v, bool)}
     return {}
 
@@ -1700,7 +1701,7 @@ def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
         rep = int(signal.get("reputation") or 0)
         pulses = int(signal.get("pulse_count") or 0)
         return min(rep * 5, 80) + min(pulses * 2, 20)
-    for key in ("risk_score", "fraud_score", "score", "risk"):
+    for key in ("risk_score", "fraud_score", "score", "risk", "threat_score"):
         value = signal.get(key)
         if isinstance(value, (int, float)):
             return round(max(0, min(100, value)))
@@ -1749,11 +1750,13 @@ def _mobile_clean_bonus(flags: dict) -> int:
     """仅当确认 mobile 且无任何代理/滥用类标记时给 +5 奖励。
 
     住宅移动网络的高可用信号不被代理/机房噪声稀释；但一旦同时被认作
-    proxy/vpn/tor/abuse/listed/hosting/bot 则不加成（可能为恶意出口）。
+    proxy/vpn/tor/abuse/listed/hosting/bot/noise/crawler/scraper/anonymous
+    则不加成（可能为恶意出口）。
     """
     if flags.get("mobile") is True and not any(
         flags.get(f) for f in ("proxy", "vpn", "tor", "listed", "abuse",
-                               "hosting", "bot")
+                               "hosting", "bot", "noise", "crawler",
+                               "scraper", "anonymous")
     ):
         return 5
     return 0

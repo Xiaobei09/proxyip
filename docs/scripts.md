@@ -50,7 +50,7 @@
 | `--ext-timeout` | 外部 API 单源超时（秒） | 10 |
 | `--ext-workers` | 外部 API 并发上限 | 10 |
 
-除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（缺失时回退行内 `-V4`/`-V6`/`-DS`），大陆可达取自行内 `-CN`；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
+除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（缺失时回退行内 `-V4`/`-V6`/`-DS`），大陆可达取自行内 `-CN` 或 `china.json` `verdict==reachable`（含 fallback 兜底）；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
 
 每个清单（含根级 `all*.txt` 与全部分组）同步派生两个可靠性维度：`*_verified.txt`（本轮测速成功 = TLS + HTTP 2xx + 真实下载全链路通过，过滤半死代理）与 `*_stable.txt`（上一轮 `index.json` 与本轮存活的交集，抗 churn；首轮无上一轮数据时不生成）。可与任意分组叠加，如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`；`ltd` 家族同样派生（`ltd_verified.txt`、根级 `all_ltd_stable.txt`）。空清单不落盘并清理残留，数量计入 `meta.json` 的 `sets.all_verified` / `sets.all_stable`。
 
@@ -109,13 +109,13 @@
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
 | `--time-budget` | 最多执行秒数（0 = 不限） | 0 |
 
-滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）**跨源共识合成**：abuse 分存在时取 `100 - score`（最高优先级）；否则先把各源的布尔标记归一为语义维度（`tor`/`proxy`/`vpn`/`hosting`(数据中心)/`mobile`/`abuse`/`listed`/`scraper`/`crawler`/`anonymous`），按源权重做**加权多数投票**——正票总权重 > 负票总权重才认定该维度为真，打平视为无结论（不扣分），避免单源误报独断与大权重单源主导；再叠加连续型风险源的加权罚分（`trust_score`、`probability`、`risk_score`、`fraud_score`、`score`、otx reputation/pulse、proxycheck risk）。查到出口地理（`countryCode`）即把 `ip-api` 计入（代理/机房/移动标志直接参与投票）；无任何信号则该项无分（不误判满分）。共识扣分表：tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅当 mobile 与其余风险维度均不成立时有 +5 加分。greynoise 源例外：经其确认的恶意类别直接按「60=恶意 / 35=僵尸(bot, riot) / 15=噪音」差异化罚分（覆盖 consensus 通用维度折算）。默认源与权重：
+滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）**跨源共识合成**：abuse 分存在时取 `100 - score`（最高优先级）；否则先把各源的布尔标记归一为语义维度（`tor`/`proxy`/`vpn`/`hosting`(数据中心)/`mobile`/`abuse`/`listed`/`scraper`/`crawler`/`anonymous`），按源权重做**加权多数投票**——正票总权重 > 负票总权重才认定该维度为真，打平视为无结论（不扣分），避免单源误报独断与大权重单源主导；再叠加连续型风险源的加权罚分（`trust_score`、`probability`、`risk_score`、`fraud_score`、`score`、otx reputation/pulse、proxycheck risk）。查到出口地理（`countryCode`）即把 `ip-api` 计入（代理/机房/移动标志直接参与投票）；无任何信号则该项无分（不误判满分）。共识扣分表：tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅当 mobile 与其余风险维度均不成立时有 +5 加分。greynoise 源例外：经其确认的恶意类别直接按「60=恶意 / 35=僵尸(bot, riot) / 15=噪音」差异化罚分（覆盖 consensus 通用维度折算；同 IP 恶意确认时不再叠加噪音罚分）。**下表『说明』中的标志罚分/直用均为 legacy 单源口径；主路径统一折算为 consensus 语义维度 + 权重投票 + 共识扣分表（见上文），数值可能不同，以 consensus 为准。`ip-api` 的 mobile 奖励固定为 +5**。默认源与权重：
 
 | 源 | 权重 | 说明 |
 |---|---|---|
 | `netcoffee` | 20 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
 | `ncgy` | 10 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
-| `ip-api` | 15 | 本地批量地理的标志：proxy -25 / hosting -10 / mobile +10；`countryCode` 存在即计入 |
+| `ip-api` | 15 | 本地批量地理的标志：proxy / hosting 判负、mobile 奖励 +5；`countryCode` 存在即计入 |
 | `ipquery` | 12 | `api.ipquery.io/{ip}`，免 key；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
 | `ffraud` | 12 | `api.ffraud.com/public/ip/{ip}`，免 key；`fraud_score` 直用，或 tor/vpn/proxy/hosting/abuser/recent_abuse 罚分（取较大者） |
 | `blackbox` | 10 | `blackbox.ipinfo.app/api/v3beta/{ip}`，免 key；分类评分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10 / bogon 5 / unknown 50；suspicious -20 |
@@ -156,7 +156,7 @@
 | `sslproxies` | 3 | 活跃 SSL 代理列表（独立代理族证据），命中投 `proxy` 票 |
 | `socks_proxy` | 3 | 活跃 SOCKS 代理列表（独立代理族证据），命中投 `proxy` 票 |
 
-可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 300 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（netcoffee/ncgy：10 worker、0.15s；blackbox/proxycheck：8 worker、0.2s；ipapi_is：8 worker、0.2s；otx：6 worker、0.3s；ipquery/ffraud/whatismyip/ip2location/ipwhois：6 worker、0.2s；freeipapi：8 worker、0.15s（上限 3000/轮）；hackmyip：6 worker、0.2s；iplocation：8 worker、0.12s（上限 3000/轮）；scamalytics：4 worker、0.5s（上限 1500/轮），新源按轮次上限 + 7 天缓存逐回填覆盖，避免首轮撑爆作业预算）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。缓存表按每个 IP 最近一次信号时间封顶 `REP_CACHE_MAX`（4 万条），超限自动裁剪最旧条目防无限膨胀。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 查信誉（不走 `ip-api` 地理）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），`ipinfo.json` 每个键含 `rep_flags`/`rep_sources`/`risk_sources`（存在 abuse 分时经 `derive_risk` 直接分解、不逐源列出），`reputation.json` 含 `flags`/`numeric`（有 deep_speed 带宽加成时另有 `deep_bonus`）。分数也追加进 `#` 备注末尾。rep 交叉矩阵（`all_{g}_rep.txt`、`all_{g}_rep_ltd.txt`、子目录 `rep.txt` 等）同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）变体；子目录分组 rep 保持单维度以控制文件数量。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
+可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 2000 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（netcoffee/ncgy：10 worker、0.15s；blackbox/proxycheck：8 worker、0.2s；ipapi_is：8 worker、0.2s；otx：6 worker、0.3s；ipquery/ffraud/whatismyip/ip2location/ipwhois：6 worker、0.2s；freeipapi：8 worker、0.15s（上限 3000/轮）；hackmyip：6 worker、0.2s；iplocation：8 worker、0.12s（上限 3000/轮）；scamalytics：4 worker、0.5s（上限 1500/轮），新源按轮次上限 + 7 天缓存逐回填覆盖，避免首轮撑爆作业预算）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。缓存表按每个 IP 最近一次信号时间封顶 `REP_CACHE_MAX`（4 万条），超限自动裁剪最旧条目防无限膨胀。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 作为出口参与检测与 `ip-api` 地理（入口即出口，`ip-api` 计入规则与其源相同）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），`ipinfo.json` 每个键含 `rep_flags`/`rep_sources`/`risk_sources`（存在 abuse 分时经 `derive_risk` 直接分解、不逐源列出），`reputation.json` 含 `flags`/`numeric`（有 deep_speed 带宽加成时另有 `deep_bonus`）。分数也追加进 `#` 备注末尾。rep 交叉矩阵（`all_{g}_rep.txt`、`all_{g}_rep_ltd.txt`、子目录 `rep.txt` 等）同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）变体；子目录分组 rep 保持单维度以控制文件数量。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/reorg_country.py`
 

@@ -2314,6 +2314,24 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(fb, set())
         self.assertNotIn("fallback", entries["a:443#US"])
 
+    def test_skipped_no_fail_merged(self):
+        # 上轮可达、本轮全源 error(未获确认、无 fail) → 兜底（原实现仅放行
+        # reachable/uncertain，会把全源异常轮的键挡在 -CN 之外，跌穿告警）。
+        prev = self._prev("a:443#US")
+        entries = {"a:443#US": {
+            "verdict": "skipped",
+            "sources": {"xxapi": {"status": "error"},
+                        "itdog_tcping": {"status": "error"}},
+            "streak": 1,
+        }}
+        reachable = set()
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, {"a:443#US"})
+        self.assertEqual(entries["a:443#US"]["verdict"], "reachable")
+        self.assertTrue(entries["a:443#US"]["fallback"])
+        self.assertEqual(entries["a:443#US"]["streak"], 0)
+        self.assertIn("a:443#US", reachable)
+
 
 class TestCe98Source(unittest.TestCase):
     """98ce.com socket.io-WS 适配器单测（mock _SocketIOClient，不触网）。"""
