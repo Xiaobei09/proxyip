@@ -253,6 +253,8 @@ def download(url: str, timeout: int = 60) -> bytes:
 
 
 def is_valid_ip(line: str) -> bool:
+    if not isinstance(line, str):
+        return False
     line = line.strip()
     if not line:
         return False

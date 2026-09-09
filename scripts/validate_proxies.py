@@ -221,8 +221,8 @@ def merge_ext_verdict(results: list[dict]) -> dict:
     Rules (following china_check.py merge_verdict pattern):
     - 2+ sources ok -> alive
     - 1 source ok -> uncertain
-    - 0 sources ok, 2+ failed -> dead
-    - all errors -> skipped
+    - 0 sources ok, 2+ failed/errors -> dead
+    - otherwise -> skipped
     """
     ok = [r for r in results if r.get("ok")]
     fail = [r for r in results if not r.get("ok") and r.get("error")]
@@ -1201,17 +1201,16 @@ async def check_entries(
             "exit_geo": merged.get("exit_geo"),
         }
         async with lock:
-            if verdict["alive"] is True:
-                latency = merged.get("response_ms") or 0.0
+            latency = merged.get("response_ms")
+            if verdict["alive"] is True and latency is not None:
                 results[f"{ip}:{port}#{cc}"] = (
                     ip, port, cc, "ext", latency, None, ext_data,
                 )
                 by_method["ext"] = by_method.get("ext", 0) + 1
                 ext_ok += 1
-                if merged.get("response_ms") is not None:
-                    ext_response_ms_sum += merged["response_ms"]
-                    ext_response_ms_count += 1
-            elif verdict["alive"] == "uncertain":
+                ext_response_ms_sum += latency
+                ext_response_ms_count += 1
+            elif verdict["alive"] is True or verdict["alive"] == "uncertain":
                 ext_uncertain += 1
             else:
                 ext_dead += 1
@@ -1224,7 +1223,8 @@ async def check_entries(
             logging.debug("check_proxy %s:%s: %s", ip, port, exc)
             status, method, latency, speed = "dead", None, None, None
         async with lock:
-            checked += 1
+            if not is_retry:
+                checked += 1
             if status == "ok":
                 results[f"{ip}:{port}#{cc}"] = (
                     ip, port, cc, method, latency, speed, None,
