@@ -113,23 +113,23 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     # --- CF 第三方反代（优选 proxyip）池：全部自称 CF 反代、端口落 CF 边缘 ---
     # 收录来源仅限库名/榜单自证 CF 第三方优选反代（含 443/8443/2053/2083/2087/2096），
     # 通用 HTTP/SOCKS 代理池与非 CF 云池（阿里/谷歌/Edge 等）一律不入池。
-    ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/fdip.txt"),
-    ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/vlid.txt"),
-    ("plain", "https://raw.githubusercontent.com/wentao883/TG-wxgqlfx_ZBDW/main/yxip.txt"),
-    ("plain", "https://raw.githubusercontent.com/ChatBotPlus/cf-proxyips/main/list.txt"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy%26country.txt"),
-    ("ip", "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/bestproxy.txt"),
+    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
     ("ip", "https://ipdb.api.030101.xyz/?type=proxy"),
     ("ip", "https://ipdb.api.030101.xyz/?type=bestproxy"),
     ("ip", "https://ipdb.api.030101.xyz/?type=bestproxy&country=true"),
-    ("ip", "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt"),
-    ("csv", "https://raw.githubusercontent.com/mountain787/Lunch-Bag-ip/main/proxyip.csv"),
-    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt"),
-    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt"),
-    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt"),
-    ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt"),
-    ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("csv", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
+    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
@@ -140,12 +140,12 @@ SOURCE_LABELS: dict[str, str] = {
     "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy": "ipdb_bestproxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy&country=true": "ipdb_bestproxy_cc",
-    "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt": "leilao_cfproxy",
-    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt": "wwuyi_proxyip",
-    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt": "wwuyi_proxyip_cc",
-    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt": "wwuyi_all",
-    "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt": "wanwu_us",
-    "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt": "wanwu_jp",
+    "[REDACTED_PRIVATE_RESOURCE]": "leilao_cfproxy",
+    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_proxyip",
+    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_proxyip_cc",
+    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_all",
+    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_us",
+    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_jp",
 }
 
 
@@ -667,7 +667,8 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         )
         set_counts["all_ltd"] = len(all_ltd_entries)
     stats["__total__"] = total
-    stats["__unique__"] = len(all_entries)
+    stats["__unique__"] = len(
+        {e.rsplit("#", 1)[0] for e in all_entries})
     stats["__countries__"] = len(by_country)
     stats["__ports__"] = len(by_port_all)
     stats["__sets__"] = set_counts

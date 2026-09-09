@@ -15,15 +15,24 @@ from common import line_to_key
 class TestBuildIpTypeMap(unittest.TestCase):
     def test_basic(self):
         data = {"proxies": {
-            "1.2.3.4:443#US": {"ip_type": "RES"},
-            "5.6.7.8:443#JP": {"ip_type": "DC"},
+            "1.2.3.4:443#US": {"ip_type": "RES", "geo_checked": True},
+            "5.6.7.8:443#JP": {"ip_type": "DC", "geo_checked": True},
             "9.9.9.9:443#DE": "garbage",
         }}
         m = bp.build_ip_type_map(data)
         self.assertEqual(m, {"1.2.3.4:443#US": "RES", "5.6.7.8:443#JP": "DC"})
 
+    def test_unchecked_geo_excluded(self):
+        # ip-api 缺失/失败时 classify_ip({}) 默认 RES 是未知而非实测住宅，
+        # 不得放进 premium 住宅子集
+        data = {"proxies": {
+            "1.2.3.4:443#US": {"ip_type": "RES", "geo_checked": False},
+            "5.6.7.8:443#JP": {"ip_type": "DC"},   # 未写 geo_checked
+        }}
+        self.assertEqual(bp.build_ip_type_map(data), {})
+
     def test_missing_ip_type(self):
-        data = {"proxies": {"1.2.3.4:443#US": {"asn": "AS1234"}}}
+        data = {"proxies": {"1.2.3.4:443#US": {"geo_checked": True}}}
         self.assertEqual(bp.build_ip_type_map(data), {})
 
 

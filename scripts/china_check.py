@@ -128,28 +128,28 @@ POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
 
 # check-host.cc —— 呼和浩特（阿里云 AS37963），每目标仅 1 大陆节点
-CHECKHOST_URL = "https://api.check-host.cc/tcp"
-CHECKHOST_REPORT_URL = "https://api.check-host.cc/report/{uuid}"
+CHECKHOST_URL = "[REDACTED_PRIVATE_RESOURCE]"
+CHECKHOST_REPORT_URL = "[REDACTED_PRIVATE_RESOURCE]"
 CHECKHOST_NODE = "CN-HOH-Alibaba"
 CH_WINDOW_SEC = 10.0
 CH_PER_WINDOW = 5  # 匿名限速 5/10s
 CH_HOUR_CAP = 250
 
 # xxapi.cn —— 北京服务器（免 key）
-XXAPI_URL = "https://v2.xxapi.cn/api/tcping"
+XXAPI_URL = "[REDACTED_PRIVATE_RESOURCE]/api/tcping"
 
 # jkapi.com（无铭 API）zz_tcping —— 浙江宁波电信 1 节点（免 key，纯文本报告）。
 # 单节点大陆实测，返回平均延迟 ms；目标不可达返回「所有测试均失败」。
 # 与 xxapi 同属免费无限额单节点源，二者联手即可绕开 check-host 的 250/h 配额
 # 独立完成双源确认（merge_verdict 单节点源 ≥2 ok → reachable）。
-JKAPI_URL = "https://jkapi.com/api/zz_tcping"
+JKAPI_URL = "[REDACTED_PRIVATE_RESOURCE]/api/zz_tcping"
 JKAPI_TIMEOUT = 8.0  # 拉低单次超时上限：免额源不应拖慢整池 L2
 
 # ping.pe —— 约 13 个大陆节点，需走 antiflood + start_token 流程
-PINGPE_URL = "https://tcp.ping.pe/{host}"
-PINGPE_START_URL = "https://tcp.ping.pe/ajax_startTask_v1.php"
-PINGPE_RESULTS_URL = "https://tcp.ping.pe/ajax_getPingResults_v2.php"
-PINGPE_ORIGIN = "https://tcp.ping.pe"
+PINGPE_URL = "[REDACTED_PRIVATE_RESOURCE]/{host}"
+PINGPE_START_URL = "[REDACTED_PRIVATE_RESOURCE]/ajax_startTask_v1.php"
+PINGPE_RESULTS_URL = "[REDACTED_PRIVATE_RESOURCE]/ajax_getPingResults_v2.php"
+PINGPE_ORIGIN = "[REDACTED_PRIVATE_RESOURCE]"
 PINGPE_CN_MAJORITY = 7  # ≥7/13 大陆节点可达即判可达
 ITDOG_MIN_RATIO = 0.5   # itdog 系列单源确认所需的最小节点成功率（防单节点假阳性）
 PINGPE_MIN_REPORTED = 5  # 报告节点不足 → inconclusive，避免误判
@@ -160,7 +160,7 @@ TCPPING_URL = "https://tcpping.cn/ping_api"
 # tcptest.cn —— 免费大陆多节点 TCP 探测（REST），无需 key/token：
 # POST /api/v1/tasks 建任务（type=tcping，target=ip:port），轮询任务状态后
 # 拉取逐节点结果。节点池 ~146 个（全国各运营商），为强多节点确认源。
-TCPTEST_URL = "https://www.tcptest.cn/api/v1"
+TCPTEST_URL = "[REDACTED_PRIVATE_RESOURCE]"
 TCPTEST_NODES = 10      # 每任务采样的节点数（跨省跨运营商均衡）
 TCPTEST_LIMIT_DEFAULT = 150  # 每轮复核的键数上限（免费源节流）
 TCPTEST_CONCURRENCY = 8  # 有界并发（每键端到端 ~2-6s）
@@ -186,7 +186,7 @@ COFFEE_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节�
 # GET /api/v1/node/items 拿节点列表 → POST /api/v1/task/create 建任务拿 token →
 # GET /api/v1/task/exec?token=... 收 SSE 流式逐节点结果（error_code 0=成功）。
 # 注意 tcp_ping 固定端口 80（UI 无自定义端口，传 port 键会被忽略）。
-PINGLOC_URL = "https://www.pingloc.com/api/v1"
+PINGLOC_URL = "[REDACTED_PRIVATE_RESOURCE]"
 PINGLOC_REQ_TIMEOUT = 15
 PINGLOC_NODE_TIMEOUT = 20.0
 PINGLOC_SSE_MAX = 4 * 1024 * 1024  # SSE 事件流累计字节上限（防高速滴灌撑爆内存）
@@ -196,7 +196,7 @@ PINGLOC_SSE_MAX = 4 * 1024 * 1024  # SSE 事件流累计字节上限（防高速
 # 发 {"token":jwt,"code":3|4,"data":"ip[:port]","dns":"","retry":false,
 #     "network":"1,2,3,4,5"}（3=ping 4=tcp-ppin；network 1电信2联通3移动4多线5海外）
 # → 收 code:200 帧,每节点一条;可达 = status==200 且 speed>0。全部节点免费测。
-ANTPING_URL = "https://antping.com/geek"
+ANTPING_URL = "[REDACTED_PRIVATE_RESOURCE]/geek"
 ANTPING_WS = "wss://antping.com/ws/"
 ANTPING_REQ_TIMEOUT = 12
 ANTPING_WS_IDLE = 30.0
@@ -207,17 +207,17 @@ ANTPING_WS_IDLE = 30.0
 # sha256(f"{r}\n{salt}\n{request_hash}\n{nonce}") 前 d 位为 0 →
 # POST /api/probe/task（body 含 r/ts/p/nonce）拿 {k,r,u} → 连 wss:{u} 发
 # {"k":..,"r":..} → 收 hello/start/result/complete 逐节点结果（rtt_avg）。
-TCPINGCN_URL = "https://www.tcping.cn"
+TCPINGCN_URL = "[REDACTED_PRIVATE_RESOURCE]"
 TCPINGCN_REQ_TIMEOUT = 15
 TCPINGCN_POW_DIFFICULTY = 15
 TCPINGCN_WS_IDLE = 40.0
 
 # ping.chinaz.com —— 免费大陆多节点 ping（服务端渲染 token + WS），无 key：
-# GET https://ping.chinaz.com/<host> 拿壳页（let token=...; serverList 53 节点）
-# → 连 wss://tooldata.chinaz.com/pingwebsocket 发 {"keyword":host,"token":token}
+# GET [REDACTED_PRIVATE_RESOURCE]/<host> 拿壳页（let token=...; serverList 53 节点）
+# → 连 [REDACTED_PRIVATE_RESOURCE] 发 {"keyword":host,"token":token}
 # → 收 code:1 单节点结果帧(timeMs/tTL)，code:10002 帧即结束。
-CHINAZ_URL = "https://ping.chinaz.com"
-CHINAZ_WS = "wss://tooldata.chinaz.com/pingwebsocket"
+CHINAZ_URL = "[REDACTED_PRIVATE_RESOURCE]"
+CHINAZ_WS = "[REDACTED_PRIVATE_RESOURCE]"
 CHINAZ_REQ_TIMEOUT = 15
 CHINAZ_WS_IDLE = 40.0
 # ping.chinaz 的结果流不随完成发送 10002 结束帧：实测 51~53 节点约在
@@ -227,7 +227,7 @@ CHINAZ_WS_SETTLE = 6.0
 CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
 
 # 98ce.com —— 免费大陆多节点持续 TCPing（socket.io v4 over WebSocket，零 key）：
-# GET https://www.98ce.com/continuous-tcping 拿壳页（HTTPS + Referer/UA 通过 CF 反爬）,
+# GET [REDACTED_PRIVATE_RESOURCE]/continuous-tcping 拿壳页（HTTPS + Referer/UA 通过 CF 反爬）,
 # 解析 <script id="continuous-tcping-nodes-data"> 得到 35 节点（34 个大陆各省运营商 + 1 海外）。
 # → 连 wss://www.98ce.com/socket.io/?EIO=4&transport=websocket（首帧 0{sid} ENGINE OPEN）
 # → 发文本 "40"（namespace CONNECT）→ 收 "40{sid}" ack
@@ -235,7 +235,7 @@ CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
 # → 收 42[...] continuous_tcping_node_update 逐节点 {node_name,ip_address,loss,latest,average,ok}
 #   （ok===true 且 loss<1 且 latest>0 → 该节点 TCP 可达；持续推送，采集所有 CN 节点后停）
 # → 发 '42["stop_continuous_tcping",{"job_id"}]'。socket.io 帧 = 数字前缀 + JSON。
-CE98_URL = "https://www.98ce.com/continuous-tcping"
+CE98_URL = "[REDACTED_PRIVATE_RESOURCE]/continuous-tcping"
 CE98_HOST = "www.98ce.com"
 CE98_WS_PATH = "/socket.io/?EIO=4&transport=websocket"
 CE98_WS_IDLE = 30.0
@@ -243,7 +243,7 @@ CE98_REQ_TIMEOUT = 15
 CE98_MIN_RATIO = ITDOG_MIN_RATIO  # 三网多节点，≥50% 大陆节点 TCP 可达即判可达
 
 # biuping.com —— 免费大陆多节点 Ping/TCPing（纯 HTTP + SSE，零 key）：
-# GET https://www.biuping.com/ping/?target=<ip> 拿壳页，解析 <meta name="csrf-token">。
+# GET [REDACTED_PRIVATE_RESOURCE]?target=<ip> 拿壳页，解析 <meta name="csrf-token">。
 # → GET https://www.biuping.com/probe_sse.php?target=<ip>[:port]&type=tcping&nodes=all
 #   &mode=single&_csrf=<token> → 收 SSE（event: init → 逐个 event: node，每 data 是 JSON：
 #   {"ok","latest","avg","packet_loss","point","status",...}）。节点池 21 个（三网 + 海外，
@@ -254,44 +254,44 @@ BIUPING_SSE_TIMEOUT = 20.0
 BIUPING_MIN_RATIO = ITDOG_MIN_RATIO
 
 # boce.com —— 博采网拨测（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
-# GET https://www.boce.com/ 拿壳页 cookie（JSESSIONID）与《csrf token（meta "csrf-param" 对应的
+# GET [REDACTED_PRIVATE_RESOURCE]/ 拿壳页 cookie（JSESSIONID）与《csrf token（meta "csrf-param" 对应的
 # 蕴含值通常出现在 <meta name="csrf-token"> 或函数参数）。
-# → POST https://www.boce.com/api/v1/probe (form: target/port/type) 携带 cookie+token，
-#   轮询 https://www.boce.com/api/v1/probe/result?taskId= 直到节点收齐（三网 ~10 节点）。
-BOCE_URL = "https://www.boce.com"
+# → POST [REDACTED_PRIVATE_RESOURCE]/api/v1/probe (form: target/port/type) 携带 cookie+token，
+#   轮询 [REDACTED_PRIVATE_RESOURCE]/api/v1/probe/result?taskId= 直到节点收齐（三网 ~10 节点）。
+BOCE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 BOCE_REQ_TIMEOUT = 15
 BOCE_RESULT_TIMEOUT = 25.0
 BOCE_MIN_RATIO = ITDOG_MIN_RATIO
 
 # tools.ipip.net —— IPIP 多节点 TCPing（HTTP POST JSON，UA+Referer+JSON 反爬）：
-# POST https://tools.ipip.net/api/v1/ping JSON {"host":"<ip>","type":"tcping","port":<port>}
+# POST [REDACTED_PRIVATE_RESOURCE]/ping JSON {"host":"<ip>","type":"tcping","port":<port>}
 # → 收 SSE/JSON 逐节点（node_name/latency_ms/status），三网 + 港澳台多节点。
-IPIP_URL = "https://tools.ipip.net/api/v1/ping"
+IPIP_URL = "[REDACTED_PRIVATE_RESOURCE]/ping"
 IPIP_REQ_TIMEOUT = 15
 IPIP_RESULT_TIMEOUT = 25.0
 IPIP_MIN_RATIO = ITDOG_MIN_RATIO
 
 # 17ce.com —— 17跟踪站多节点 TCPing（HTTP 长轮询 JSON，key/token（HMAC 签名）反爬）：
-# GET https://www.17ce.com/ 拿壳页 token（含在 URL 的 "site" 或 session cookie）。
-# → GET https://www.17ce.com/api.php?action=tcping&host=<ip>&port=<port>&token=<token>
+# GET [REDACTED_PRIVATE_RESOURCE]/ 拿壳页 token（含在 URL 的 "site" 或 session cookie）。
+# → GET [REDACTED_PRIVATE_RESOURCE]/api.php?action=tcping&host=<ip>&port=<port>&token=<token>
 #   → JSON（tasks 数组，每 task 含节点 + result 内的 delay）。token 可用 --17ce-token 提供。
-SEVENTEEN_URL = "https://www.17ce.com"
+SEVENTEEN_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SEVENTEEN_REQ_TIMEOUT = 15
 SEVENTEEN_RESULT_TIMEOUT = 25.0
 SEVENTEEN_MIN_RATIO = ITDOG_MIN_RATIO
 
 # ping0.cc —— 多节点 TCPing（HTTP+localStorage token，Turnstile 挑战在浏览器侧；此处按
 # 可用的无挑战 PUT /api/probe 协议实现，仅领取节点表与结果，遇验证码即 fail-open）。
-PING0_URL = "https://ping0.cc"
+PING0_URL = "[REDACTED_PRIVATE_RESOURCE]"
 PING0_REQ_TIMEOUT = 15
 PING0_RESULT_TIMEOUT = 25.0
 PING0_MIN_RATIO = ITDOG_MIN_RATIO
 
 # wansui.cn —— 万水测速多节点 TCPing（HTTP GET 壳页 + cookie token + WS 推送）：
-# GET https://www.wansui.cn/ 拿壳页 token（<meta name="token">）→ 连
+# GET [REDACTED_PRIVATE_RESOURCE]/ 拿壳页 token（<meta name="token">）→ 连
 # wss://www.wansui.cn/ws 发 {"type":"tcping","host":ip,"port":port,"token":token}
 # → 收逐节点结果帧（rtt）。
-WANSUI_URL = "https://www.wansui.cn"
+WANSUI_URL = "[REDACTED_PRIVATE_RESOURCE]"
 WANSUI_HOST = "www.wansui.cn"
 WANSUI_WS_PATH = "/ws"
 WANSUI_REQ_TIMEOUT = 15
@@ -1143,7 +1143,7 @@ def antping_check(ip: str, port: str, timeout: float) -> dict:
         status, _, resp = request_follow(
             f"{ANTPING_URL}/network-tools-service/auth/publicKey",
             {"User-Agent": UA, "app-id": "2", "Accept": "application/json",
-             "Referer": "https://antping.com/ping"},
+             "Referer": "[REDACTED_PRIVATE_RESOURCE]/ping"},
             ANTPING_REQ_TIMEOUT,
         )
     except Exception as e:
@@ -1259,7 +1259,7 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
         return {"status": "error", "ok": False, "ms": None,
                 "error": "no task", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
-    ws_url = f"wss://www.tcping.cn{task['u']}"
+    ws_url = f"[REDACTED_PRIVATE_RESOURCE]{task['u']}"
     try:
         ws = _WebSocket(ws_url, timeout=TCPINGCN_WS_IDLE)
         ws.send_text(json.dumps({"k": task["k"], "r": task["r"]}))
@@ -1683,7 +1683,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         status, _, resp = request_follow(
             CE98_URL,
             {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml",
-             "Referer": "https://www.98ce.com/"},
+             "Referer": "[REDACTED_PRIVATE_RESOURCE]/"},
             CE98_REQ_TIMEOUT,
         )
     except Exception as e:
@@ -2361,9 +2361,14 @@ def merge_verdict(sources: dict) -> dict:
         if r.get("ok") and isinstance(r.get("ms"), (int, float)) and r["ms"] > 0
     ]
     ms = round(min(ms_values), 1) if ms_values else None
-    # 证据分级：任一成功源给出应用层确认 → "http"；仅传输层 → "tcp"
+    # 证据分级：任一成功源给出应用层确认 → "http"；仅传输层 → "tcp"；
+    # 仅 ICMP 主机存活源（coffee/chinaz）→ "icmp"（如实标注，不冒充 TCP）
     if any(sources[s].get("level") == "http" for s in ok_sources):
         level = "http"
+    elif ok_sources and all(
+        sources[s].get("level") == "icmp" for s in ok_sources
+    ):
+        level = "icmp"
     elif ok_sources:
         level = "tcp"
     else:

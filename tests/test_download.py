@@ -108,6 +108,25 @@ class TestWriteOutputs(unittest.TestCase):
         ltd = (dp.ALL_LTD_FILE).read_text().splitlines()
         self.assertEqual(ltd, ["1.1.1.1:443#US", "3.3.3.3:443#JP"])
 
+    def test_unique_counts_unique_ip_port_across_cc(self):
+        # 同一 ip:port 被不同订阅标成多国 → 行级 set 保留两行（多国输出），
+        # 但 __unique__ 须反映真实 ip:port 唯一数（data-spec:139 语义），
+        # 而非行数
+        import tempfile
+
+        base = Path(tempfile.mkdtemp(prefix="dp_"))
+        for k in self.orig:
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        by_port = {"443": {"US": ["1.1.1.1"], "JP": ["1.1.1.1"],
+                           "DE": ["1.1.1.1"], "FR": ["2.2.2.2"]}}
+        stats, all_entries = dp.write_outputs(by_port, per_country_limit=0)
+        self.assertEqual(stats["__total__"], 4)
+        self.assertEqual(stats["__unique__"], 2)
+
     def test_non_cf_edge_ports_dropped(self):
         import tempfile
 
@@ -704,7 +723,7 @@ class TestProxyMirrorSources(unittest.TestCase):
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         self.assertIn("https://ipdb.api.030101.xyz/?type=bestproxy&country=true", urls)
         self.assertIn(
-            "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt",
+            "[REDACTED_PRIVATE_RESOURCE]",
             urls,
         )
         self.assertEqual(
@@ -713,7 +732,7 @@ class TestProxyMirrorSources(unittest.TestCase):
         )
         self.assertEqual(
             dp.source_label(
-                "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt"
+                "[REDACTED_PRIVATE_RESOURCE]"
             ),
             "leilao_cfproxy",
         )
@@ -786,15 +805,15 @@ class TestProxyMirrorSources(unittest.TestCase):
         # 地区优选榜（US/JP），均裸 IP 入 443 桶，各带可读标签。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         for u, label in (
-            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt",
+            ("[REDACTED_PRIVATE_RESOURCE]",
              "wwuyi_proxyip"),
-            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt",
+            ("[REDACTED_PRIVATE_RESOURCE]",
              "wwuyi_proxyip_cc"),
-            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt",
+            ("[REDACTED_PRIVATE_RESOURCE]",
              "wwuyi_all"),
-            ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt",
+            ("[REDACTED_PRIVATE_RESOURCE]",
              "wanwu_us"),
-            ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt",
+            ("[REDACTED_PRIVATE_RESOURCE]",
              "wanwu_jp"),
         ):
             self.assertIn(u, urls)
@@ -967,12 +986,12 @@ class TestWriteDiff(unittest.TestCase):
 
 class TestMirrorUrls(unittest.TestCase):
     def test_raw_url_yields_ordered_mirrors(self):
-        url = "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestProxy/proxy.txt"
+        url = "[REDACTED_PRIVATE_RESOURCE]"
         mirrors = common.mirror_urls(url)
         self.assertEqual(mirrors, [
-            "https://gh-proxy.com/" + url,
-            "https://cdn.jsdelivr.net/gh/ymyuuu/IPDB@master/BestProxy/proxy.txt",
-            "https://raw.gitmirror.com/ymyuuu/IPDB/master/BestProxy/proxy.txt",
+            "[REDACTED_PRIVATE_RESOURCE]" + url,
+            "[REDACTED_PRIVATE_RESOURCE]ymyuuu/IPDB@master/BestProxy/proxy.txt",
+            "[REDACTED_PRIVATE_RESOURCE]ymyuuu/IPDB/master/BestProxy/proxy.txt",
         ])
 
     def test_non_raw_url_has_no_mirrors(self):
@@ -1004,7 +1023,7 @@ class TestMirrorUrls(unittest.TestCase):
             )
         self.assertEqual(data, b"mirror-data")
         self.assertEqual(calls[0], "https://raw.githubusercontent.com/u/r/main/f.txt")
-        self.assertTrue(calls[1].startswith("https://gh-proxy.com/"))
+        self.assertTrue(calls[1].startswith("[REDACTED_PRIVATE_RESOURCE]"))
 
     def test_fetch_with_mirror_reraises_last_error(self):
         import common as _c

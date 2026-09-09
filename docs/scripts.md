@@ -88,7 +88,7 @@
 
 出口 IP 质量检测（独立 CI 运行，探测引擎拆分于 `quality_probe.py`：TLS GET / 外部出口地理回显 / ip-api 批量）。默认对 `data/valid/all.txt`（全量存活池）检测：
 
-- TLS 直连（Cloudflare 边缘）测活，备注 `CF`
+- **外部出口地理回显判活**（quality 链不做本地 TLS 握手，是以外部 API 回显为真相的独立证据链，与 validate 本地探测互不交叉；TLS 死键可用外部 API 结果复活，质量链同以其回显为准——`090227` 单源抖动时整池 `ext_check_ok` 会同降，属已知风险）
 - **滚动可用率**：质量链每轮运行后由 `uptime.py` 更新 `node_seen.json`/`uptime.json`，注解链为节点追加 `-U<NN>` 备注
 - **深测带宽加成**：`deep_speed.json` 的最优目标 `agg_mbps` 线性加成分数（封顶 +10，仅对已有信誉分节点生效）；深测数据超过 10 天（`DEEP_SPEED_TTL_DAYS`）视为过期，不再参与加分
 - **出口 IP 解析**：信誉/地理/滥用查询使用真实出口 IP——优先外部探测回显，其次 `exit_family.json` 实测，兜底代理自身 IP（见 logic.md §4.0）
@@ -203,8 +203,8 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 大陆连通性检测（独立 CI 运行）。CI 以 `--source data/valid/all.txt --limit 0` 全量池检测；本地缺省按 `data/valid/all_rep.txt` 信誉降序采样前 250 条（缺失时回退 `all_ltd.txt`）。从大陆视角实测 TCP 可达性，分三层判定（曾有的 **L1 启发式**基于行内 `-CF` 死标记记录 heuristic 源，随 CF token 废弃一并移除，china.json 不再写 `cf_heuristic` 字段）：
 
-- **L2 itdog.cn 批量实测（主源）**：每任务 5 目标 × 电信/联通/移动各 2 节点（共 6 节点），经 WebSocket 收结果，TCP 连通即判可达
-- **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**保守判定：多节点源（pingpe/itdog/tcptest/coffee/pingloc/antping/tcpingcn/chinaz/ce98/biuping）单独确认 → reachable；单节点源 ≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
+- **L2 itdog.cn 批量实测（主源）**：每任务 5 目标 × 电信/联通/移动各 6 节点（共 18 节点，`ITDOG_NODES_PER_ISP=6`），经 WebSocket 收结果，TCP 连通即判可达
+- **L2 单节点实测（并发）**：`check-host.cc`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽）+ `xxapi.cn`（北京节点，免 key）。**保守判定：多节点源（pingpe/itdog/itdog_tcping/tcptest/coffee/pingloc/antping/tcpingcn/chinaz/ce98/biuping/boce/ipip/17ce/ping0/wansui，与 `merge_verdict` 的 `multi_ok` 表一致）单独确认 → reachable；单节点源 ≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
 - **L3 多节点复核（有界并发小样本）**：`tcptest.cn`（免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP `ip:port` 直连，节点成功率达 50% 即判可达）先于 ping.pe 跑——免费、端到端 ~2-6s/键，确认过的键自动让位；`ip.net.coffee`（18 ICMP 节点，成功率达 50% 判可达，专测中国大陆主机存活）；`pingloc.com`（~12 节点 ICMP ping，纯 HTTP+SSE 零鉴权）；`antping.com`（~155 节点，JWT+WS，ICMP ping / TCP `ip:port` 均可）；`tcping.cn`（~163 TCP 节点，SHA-256 PoW 纯 Python 求解 + WS，真实端口直连）；`ping.chinaz.com`（~53 ICMP 节点，服务端渲染 token + WS）；`98ce.com`（34 个大陆各省运营商节点持续 TCPing，socket.io v4 over WebSocket，CF 反爬用 HTTPS+Referer 壳页取节点、连 `wss://www.98ce.com/socket.io` 发/收事件，零 key，实测 35/35 节点出数）；`biuping.com`（约 39 个 ISP×节点 TCPing 测量单元，纯 HTTP + SSE、CSRF token 从壳页 meta 提取，零 key，实测 39/39 出数）；随后 `ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive），各源均只投「当前尚未被 itdog/单节点源判可达」的键且按 `--<name>-limit` 有界；多节点源须「≥ `MULTI_MIN_NODES`（5）个节点 + 成功率达标」才可独立判 reachable，防限流残缺样本假阳性；可选 `tcpping.cn`（多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过）
 
 | 参数 | 说明 | 默认 |
@@ -263,7 +263,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
 
-- 分别请求仅 IPv4（`ipv4.icanhazip.com`，仅 A 记录）与仅 IPv6（`ipv6.icanhazip.com`，仅 AAAA）的回显服务（纯 IP 文本），走得通即具备对应家族出口能力；两者均失败则尝试 `cloudflare.com/cdn-cgi/trace` 兜底。注意：CF 边缘代理的出口由 Worker fetch() 决定、与入口/目标主机名无关，故 CF 类代理 `dual` 恒为 0 属架构固有行为
+- 分别请求仅 IPv4 与仅 IPv6 的回显服务（纯 IP 文本），**每族双服务商**：`ipv4.icanhazip.com` + `api4.ipify.org`（v4）、`ipv6.icanhazip.com` + `api6.ipify.org`（v6）；一族两源结果不一致即本轮不采信该族（双源互证，防单栈劫持），`verify_pinning()` 对回显做来源钉扎自检。两者全失败则尝试 `cloudflare.com/cdn-cgi/trace` 兜底。注意：CF 边缘代理的出口由 Worker fetch() 决定、与入口/目标主机名无关，故 CF 类代理 `dual` 恒为 0 属架构固有行为
 
 家族判定：仅 v4 → `ipv4`；仅 v6 → `ipv6`；双通 → `dual`；探测全失败 → `unknown`。结果写入：
 
@@ -380,7 +380,7 @@ python scripts/build_good.py --data-dir /path/to/data
 
 1. **大陆可达**：`china.json` 判定 `reachable`（与 `good` 同规则）
 2. **信誉分 ≥ 95**：存在于 `reputation.json` 且 `score >= 95`
-3. **真实住宅 IP**：`ipinfo.json` 的 `ip_type == "RES"`
+3. **真实住宅 IP**：`ipinfo.json` 的 `ip_type == "RES"` 且 `geo_checked == true`（查不到出口地理时 `classify_ip({})` 默认 RES 只是未知，不当作实测住宅）
 4. **非高风险**：`reputation.json` 的 `risk != high`
 
 综合分公式与 `good` 一致：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0。同分依次按延迟升序、key 升序。质量 JSON 缺失时优雅降级为空清单。

@@ -198,7 +198,7 @@ scripts/common.py                        共享常量与助手（data 布局、H
 scripts/deep_speed.py                    深测大文件多流多 CDN 测速
 
 data/download/                           下载产出（原始代理列表）
-data/download/all.txt                    全量去重 ip:port#国家（IP 数字序）
+data/download/all.txt                    全量去重 ip:port#国家（IP 数字序；同一 ip:port 多国标签可并存）
 data/download/all_ltd.txt                全部国家每国限量后的并集
 data/download/countries/<CC>.txt         按国家汇总（跨端口去重）
 data/download/ports/<port>.txt           按端口汇总（跨国家去重）
