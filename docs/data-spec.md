@@ -19,7 +19,7 @@
 
 - token 是 note 中以**段首或 `-` 为界**的独立子串（`common.has_token(note, token)`，等价 `(?:^|-)TOKEN(?:$|-)`）。如 `-CF-63` 含 token `CF`、`63`；`-120ms-CN-V4` 含 token `CN`、`V4`，不含 `CF`。
 - 单一职责：`exit_family.has_family_note`（`V4`/`V6`/`DS`）、`china_check.has_cn_note`（`CN`）均基于 `has_token` 实现，新增/判断 token 不得另写正则。（历史 `is_cf_heuristic` 随 CF token 废弃移除。）
-- token 分隔符统一为 `-`；流媒体段内用空格分隔（`NF(US) D+ YT`），不属于 token 匹配范围。
+- token 分隔符统一为 `-`。历史以空格分隔的流媒体段（`NF(US) D+ YT`）在 `normalize_note` 时被 `_flatten_segs` 拆解为 `-` 连接的独立 token（归一化后渲染 `-NF(US)-D+-YT-`），因此可被 `has_token`/merge 判重命中；**空格不是维护态 token 分隔符**。
 - 幂等：追加 token 前先 `has_token` 判重（`annotate_family`/`annotate_cn`），避免重复标注。
 
 ### 处理流程
@@ -243,6 +243,14 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ### `data/quality/abuse.json`
 
 提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。
+
+### `data/quality/entry_audit.json`
+
+**入口国家标签审计**（audit_entry_cc CI 输出）：顶层 `generated_at`/`total`/`summary`（verdict 计数），`proxies` 键为 `ip:port#国家`，值为 `{listed, exit_cc, entry_ip, entry_geo, verdict, asn}`：`listed` 为订阅行内 `#CC` 标签，`exit_cc` 为 `build_exit_cc_map` 三源汇聚的出口国（无观测时 `None`），`entry_ip` 为入口 IP（域名入口时为 `null`），`entry_geo`/`asn` 为 ip-api 实测（查询失败为 `null`），`verdict` 见 scripts.md 表（`ok`/`ok_with_drift`/`tag_mismatch`/`cf_fronted`/`domain_entry`/`entry_unknown`）。只读不改行、不参与门控。
+
+### `data/quality/premium_meta.json`
+
+**premium 产物汇总**（build_premium 输出）：`{ts, file_count, proxy_count}`——生成时间与落盘的 `premium*.txt` 文件数/总行数（空清单时 `proxy_count=0`）。
 
 ### `data/quality/reputation.json`
 

@@ -36,15 +36,15 @@ align_foreign() {
 
 for attempt in 1 2 3 4 5; do
   git fetch origin main || { sleep 5; continue; }
-  git reset -q --mixed origin/main
+  git reset -q --mixed origin/main || { echo "git reset failed" >&2; exit 1; }
   align_foreign
   # shellcheck disable=SC2086
-  git add -Af -- $CHANGED
+  git add -Af -- $CHANGED || { echo "git add failed" >&2; exit 1; }
   if git diff --cached --quiet; then
     echo "Nothing to commit"
     exit 0
   fi
-  git commit -q -m "$MSG"
+  git commit -q -m "$MSG" || { echo "git commit failed" >&2; exit 1; }
   if git push; then
     echo "Pushed on attempt $attempt"
     exit 0

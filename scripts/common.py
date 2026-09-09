@@ -79,33 +79,33 @@ MAX_HISTORY_RECORDS = 1000
 MAX_DIFF_FILES = 50
 PER_COUNTRY_LIMIT = 20
 
-EXTERNAL_CHECK_URL = "https://api.090227.xyz/check"
+EXTERNAL_CHECK_URL = "[REDACTED_PRIVATE_RESOURCE]"
 EXT_CHECK_FILE = VALID_DIR / "ext_check.json"
 
 # ---------------------------------------------------------------- 外部 API 多源配置
 EXT_API_SOURCES = [
     {
         "name": "090227",
-        "url": "https://api.090227.xyz/check",
+        "url": "[REDACTED_PRIVATE_RESOURCE]",
         "param_key": "proxyip",
         "timeout": 10,
     },
     {
         "name": "cmliu",
-        "url": "https://Check.ProxyIP.CMLiussss.net/check",
+        "url": "[REDACTED_PRIVATE_RESOURCE]",
         "param_key": "proxyip",
         "timeout": 10,
     },
     {
         "name": "toicf",
-        "url": "https://pr-apis.ekt.me/probe",
+        "url": "[REDACTED_PRIVATE_RESOURCE]",
         "param_key": "candidate",
         "timeout": 15,
     },
 ]
 
 # ---------------------------------------------------------------- ip-api 共享常量
-IPAPI_BATCH_URL = "http://ip-api.com/batch"
+IPAPI_BATCH_URL = "[REDACTED_PRIVATE_RESOURCE]"
 IPAPI_BATCH_SIZE = 100
 IPAPI_BATCH_DELAY = 1.2
 
@@ -147,6 +147,9 @@ def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
         cc = "ALL"
     else:
         cc = rest[i : i + 2]
+        nxt = rest[i + 2 : i + 3]
+        if nxt and nxt.isalpha():
+            return None
     if (len(cc) != 2 and cc != "ALL") or not cc.isalpha() or ":" not in addr:
         return None
     ip, port = addr.rsplit(":", 1)
@@ -518,11 +521,11 @@ def mirror_urls(url: str) -> list[str]:
         return []
     path = url[len(RAW_GITHUB_PREFIX):]
     parts = path.split("/", 3)
-    out = ["https://gh-proxy.com/" + url]
+    out = ["[REDACTED_PRIVATE_RESOURCE]" + url]
     if len(parts) == 4:
         user, repo, branch, rest = parts
-        out.append(f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{rest}")
-    out.append("https://raw.gitmirror.com/" + path)
+        out.append(f"[REDACTED_PRIVATE_RESOURCE]{user}/{repo}@{branch}/{rest}")
+    out.append("[REDACTED_PRIVATE_RESOURCE]" + path)
     return out
 
 
@@ -877,7 +880,7 @@ _NOTE_STREAMING_RE = re.compile(r"^(?:D\+|YT|MX|PV|GPT|NF\([^)]*\))$")
 _NOTE_TYPE_TOKENS = {"DC", "RES", "MOB", "PROXY"}
 _NOTE_TIER_TOKENS = {"fast", "mid", "slow"}
 _NOTE_FAMILY_TOKENS = {"V4", "V6", "DS"}
-_NOTE_SCORE_RE = re.compile(r"^\d{1,3}$")
+_NOTE_SCORE_RE = re.compile(r"^\d{1,2}$")
 _NOTE_UPTIME_RE = re.compile(r"^U\d{1,3}$")
 _NOTE_LAT_RE = re.compile(r"^\d+ms$")
 _NOTE_SPEED_RE = re.compile(r"^≈?\d+(?:\.\d+)?MB/s$")

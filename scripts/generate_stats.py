@@ -1227,7 +1227,9 @@ def main(argv: list[str] | None = None) -> int:
     age_s = (now - updated_epoch) if updated_epoch is not None else None
     stale = age_s is not None and age_s > STALE_AFTER_S
 
-    unique = latest.get("unique") or latest.get("total", 0)
+    unique = latest.get("unique")
+    if unique is None:
+        unique = latest.get("total", 0)
     cn_summary = collect_cn_summary(china_data, data_dir / "valid")
     stats = {
         "ts": now_ts(),
