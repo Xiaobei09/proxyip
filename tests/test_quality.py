@@ -495,19 +495,34 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(score, 60)
         self.assertEqual(numeric, ["ipdata"])
 
-    def test_otx_numeric_penalty_clamps_negative_reputation(self):
-        """OTX 负 reputation 虽触发 listed 标记，数值罚分不得反向加分。"""
+    def test_otx_numeric_penalty_sign_matches_flag_semantics(self):
+        """OTX reputation 负=恶意（官方 -3..+3，负号幅值越大越脏）。数值罚分
+        按负侧幅值计，正/零声誉不罚——与 _flag_opinions 的 listed 语义一致，
+        纠正此前把正声誉当脏、负声誉当净的符号反转。"""
         self.assertEqual(qr._numeric_risk_penalty(
-            "otx", {"reputation": -100, "pulse_count": 0}), 0)
+            "otx", {"reputation": -100, "pulse_count": 0}), 80)
         self.assertEqual(qr._numeric_risk_penalty(
-            "otx", {"reputation": -100, "pulse_count": 99}), 20)
+            "otx", {"reputation": -100, "pulse_count": 99}), 100)
         self.assertEqual(qr._numeric_risk_penalty(
-            "otx", {"reputation": 100, "pulse_count": 0}), 80)
-        score, _r, flagged, _n = qr.vote_reputation(
+            "otx", {"reputation": 100, "pulse_count": 0}), 0)
+        self.assertEqual(qr._numeric_risk_penalty(
+            "otx", {"reputation": 0, "pulse_count": 0}), 0)
+        self.assertEqual(qr._numeric_risk_penalty(
+            "otx", {"reputation": -3, "pulse_count": 0}), 15)
+        self.assertEqual(qr.source_score(
+            "otx", {"reputation": -100, "pulse_count": 0}), 20)
+        self.assertEqual(qr.source_score(
+            "otx", {"reputation": 100, "pulse_count": 0}), 100)
+        dirty, _r, flagged, _n = qr.vote_reputation(
             {"otx": {"reputation": -100, "pulse_count": 0}},
             qr.REPUTATION_WEIGHTS)
-        self.assertEqual(score, 70)
+        self.assertEqual(dirty, 0)
         self.assertEqual(flagged, ["listed"])
+        fresh, _r2, flagged2, _n2 = qr.vote_reputation(
+            {"otx": {"reputation": 100, "pulse_count": 0}},
+            qr.REPUTATION_WEIGHTS)
+        self.assertEqual(fresh, 100)
+        self.assertEqual(flagged2, [])
 
     def test_mobile_bonus_noise_crawler_excluded(self):
         """mobile 奖励需所有风险维度均不成立，noise/crawler 视为风险。"""

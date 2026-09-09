@@ -1305,9 +1305,13 @@ def source_score(name: str, signal) -> int | None:
             score = max(0, score - 20)
         return max(0, min(100, score))
     if name == "otx":
+        # OTX reputation：负值=恶意、正值=洁净（官方信誉为 -3..+3，负号幅值
+        # 越大越脏）。罚分按负侧幅值计，正/零声誉不罚——与 _flag_opinions 的
+        # listed 语义一致（此前把正声誉当脏、负声誉当净是符号反转）。
         rep = int(signal.get("reputation") or 0)
         pulses = int(signal.get("pulse_count") or 0)
-        penalty = min(rep * 5, 80) + min(pulses * 2, 20)
+        bad = min(max(0, -rep) * 5, 80)
+        penalty = bad + min(pulses * 2, 20)
         return max(0, min(100, 100 - penalty))
     if name == "proxycheck":
         penalty = sum(
@@ -1698,9 +1702,10 @@ def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
             return None
         return round(prob * 100)
     if name == "otx":
+        # 负声誉=恶意（见 source_score 同名段注释），正/零声誉不罚。
         rep = int(signal.get("reputation") or 0)
         pulses = int(signal.get("pulse_count") or 0)
-        return max(0, min(rep * 5, 80)) + max(0, min(pulses * 2, 20))
+        return min(max(0, -rep) * 5, 80) + max(0, min(pulses * 2, 20))
     for key in ("risk_score", "fraud_score", "score", "risk", "threat_score"):
         value = signal.get(key)
         if isinstance(value, (int, float)):
