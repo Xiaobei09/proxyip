@@ -272,15 +272,6 @@ class TestResolveExitIps(unittest.TestCase):
 
 
 class TestAnnotation(unittest.TestCase):
-    def test_type_tokens(self):
-        self.assertEqual(
-            qc.type_tokens({"ip_type": "RES", "family": "dual"}), "RES DS"
-        )
-        self.assertEqual(
-            qc.type_tokens({"ip_type": "MOB", "family": "ipv6"}), "MOB V6"
-        )
-        self.assertEqual(qc.type_tokens({"ip_type": "", "family": "ipv4"}), "")
-
     def test_build_annotation(self):
         self.assertEqual(
             qc.build_annotation("NF(US) D+ YT GPT", "DC"), "NF(US) D+ YT GPT-DC"

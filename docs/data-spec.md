@@ -217,7 +217,9 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/ipinfo.json`（质量 CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`reputation`（0-100 信誉分）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`ext_ok`/`ext_colo`/`ext_response_ms`（external_check 探测概要：成功与否 / 边缘 colo / 响应耗时）、`reputation`（0-100 信誉分，见下方口径说明）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
+
+**口径说明**：`reputation` 为**含 ip-api 地理信号**的运行维度分（`build_ipinfo_map`，ip-api 查到 `countryCode` 即参与投票）；行尾 `-<score>` 注解与 `reputation.json` 的 `score` 为**不含 ip-api** 的静态黑名单信号分（`build_reputation_map`，build_good 的 ≥80 门槛与 premium 消费此口径）。两数间可差至单源权重，勿跨文件混用。
 
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
@@ -244,11 +246,11 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/reputation.json`
 
-单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources, flags, numeric}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`blackbox`/`otx`/`ipsum`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`vpn_asn`/`resproxy_asn`/`proxycheck`/`ip2location`/`ipwhois`/`tor_exit`/`spamhaus`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表，`flags` 为共识确定的语义维度列表，`numeric` 为参与连续型罚分的源列表。按分数降序、同分按键序排列。
+单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources, flags, numeric[, deep_bonus]}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`blackbox`/`otx`/`ipsum`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`vpn_asn`/`resproxy_asn`/`proxycheck`/`ip2location`/`ipwhois`/`tor_exit`/`spamhaus`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表，`flags` 为共识确定的语义维度列表，`numeric` 为参与连续型罚分的源列表，`deep_bonus` 为有深测带宽加成时的 +0~10 值（无则缺省）。按分数降序、同分按键序排列。
 
 ### `data/quality/reputation_cache.json`
 
-单行 JSON，按 IP 缓存各按 IP 信誉 API 源的原始信号，键为出口 IP，值为 `{ts, signals: {source: signal}}`：`ts` 为查询时间戳（epoch 秒），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP 发起外部查询；静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存；表按每个 IP 最近信号时间封顶 4 万条，超限裁剪最旧。
+单行 JSON，按 IP 缓存各按 IP 信誉 API 源的原始信号，键为出口 IP，值为 `{<source>: {"ts": …, "data": …}}`——每个源独立记录最近一次查询的 epoch 秒时间戳与原始信号（逐源独立 TTL），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP×源发起外部查询；静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存；表按每个 IP 最近信号时间封顶 4 万条，超限裁剪最旧。
 
 ### `data/valid/all_rep.txt`
 
