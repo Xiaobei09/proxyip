@@ -414,6 +414,13 @@ class TestCrossCheck(unittest.TestCase):
         self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], None)
         self.assertIs(results["1.1.1.1:443#US"]["upstream_absent"], False)
 
+    def test_dual_probe_lenient_match(self):
+        """探测为 dual 双栈时，与上游单侧（v4 或 v6）均不算矛盾。"""
+        upstream = {"1.1.1.1": {"clientIp": "1.1.1.1", "family": "ipv4"}}
+        results = {"1.1.1.1:443#US": self._res("1.1.1.1", "dual")}
+        ef.cross_check(results, upstream)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

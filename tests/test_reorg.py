@@ -60,6 +60,24 @@ class TestPathHelpers(unittest.TestCase):
         )
 
 
+def test_moves_preserve_latency_order(self):
+        """移入目标文件的行按延迟升序并入，不再破坏保序契约。"""
+        us = self.country_dir / "US" / "all.txt"
+        de = self.country_dir / "DE" / "all.txt"
+        # DE 已有两行：20ms 与 80ms；US 移入 50ms
+        self._write("valid/countries/DE/all.txt",
+                    ["10.0.0.1:443#DE-20ms", "10.0.0.2:443#DE-80ms"])
+        self._write("valid/countries/US/all.txt",
+                    ["1.1.1.1:443#US-120ms", "2.2.2.2:443#US"])
+        stats = {"moved": 0, "files_written": 0}
+        rc.reorganize_file(us, {"2.2.2.2:443#US": "DE"}, stats)
+        self.assertEqual(
+            self._read("valid/countries/DE/all.txt"),
+            ["10.0.0.1:443#DE-20ms", "2.2.2.2:443#US→DE", "10.0.0.2:443#DE-80ms"],
+        )
+        self.assertEqual(stats["moved"], 1)
+
+
 class TestReorganizeFile(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="reorg_"))

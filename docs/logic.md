@@ -61,7 +61,7 @@ TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降�
 质量链每轮把存活节点按 UTC 日期记入 `data/quality/node_seen.json`
 （滚动 45 天窗口），并维护全局"运行日计数器"作为分母：
 
-- `uptime7 / uptime30`：窗口内出现天数 ÷ **窗口内实际有质量轮的日期数**（去重，同日多轮算 1 天）→ 存活率百分比，每个运行日都在场即 100%；
+- `pct7 / pct30`：窗口内出现天数 ÷ **窗口内实际有质量轮的日期数**（去重，同日多轮算 1 天）→ 存活率百分比，每个运行日都在场即 100%；
 - 结果写入 `data/quality/uptime.json`，注解链为命中的行追加 `-U<NN>`
   备注（如 `-U92`），build-good 产出 `_uptime` 可靠性子集（pct7 ≥ 80）。
 
@@ -153,11 +153,11 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 ## 5. 大陆连通性检测（china_check.py）
 
-### 5.1 四层检测架构
+### 5.1 三层检测架构
 
-#### L1 启发式（零网络）
-
-行备注已带 `-CF`（Cloudflare 边缘 tls 代理）→ 记录 `heuristic` 源，但**不自动判 reachable**。CF 启发式仅作为 basis 标注。
+**L1 启发式（零网络）已移除**：曾基于行内 `-CF` 死标记记录 heuristic
+源作为 basis 标注；CF token 现已废弃（池子全为 CF 边缘端口恒真，
+归一化时丢弃），零网络层不再存在，china.json 不再写 `cf_heuristic` 字段。
 
 #### L2 批量实测（主源）
 
@@ -341,8 +341,8 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 1. `external_check.json` —— 外部探测接口直接回显的出口地理；
 2. `upstream_meta.json` —— 自有 CF Worker 观测到的代理出口国。其键为
-   裸出口 IP，经 `common.build_exit_ip_map`（external 回显 `exit_geo.ip`
-   > exit_family 实测 `exit_v4`/`exit_v6`）解析到行键后命中；
+   代理（接入）裸 IP，值的 `country` 即该代理出站地理；经 `common.
+   build_exit_cc_map` 按行键的入口 IP 部分（`ip:port#CC` → 裸 `ip`）命中；
 3. `ipinfo.json` —— 出口 IP 的 ip-api 地理。历史轮次可能是入口 IP 的
    地理，仅作末位兜底。
    （原第 3 层 streaming 解锁国已随流媒体检查移除。）

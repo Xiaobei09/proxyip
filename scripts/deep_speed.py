@@ -184,7 +184,8 @@ async def main_async(args: argparse.Namespace) -> int:
     # 候选排序：信誉分（行内尾 token）降序，取前 --limit
 
     def rep_of(ln_text: str) -> int:
-        m = re.search(r"-(\d{1,3})$", ln_text.rstrip())
+        # 行尾为 `-<score>[-U<NN>]`，U 段是滚动存活率 token，可选的尾缀
+        m = re.search(r"-(\d{1,3})(?:-U\d{1,3})?$", ln_text.rstrip())
         return int(m.group(1)) if m else 0
 
     entries.sort(key=lambda e: -rep_of(keyed_lines.get(e[0], "")))

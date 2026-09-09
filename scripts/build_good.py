@@ -3,9 +3,8 @@
 
 Filters the annotated valid pools to proxies that simultaneously satisfy:
 
-1. CN-reachable      — ``china.json`` verdict == ``reachable``, or the line
-   already carries a historical ``-CN`` annotation (same rule as
-   ``all_cn.txt``)
+1. CN-reachable      — `china.json` verdict == ``reachable``（当期为准；历史性
+   ``-CN`` 行备注早随该标注入口移除，不再参与判定）
 2. reputation >= 80  — present in ``reputation.json`` with a score of at
    least 80
 3. not high risk     — ``reputation.json`` risk != ``high``
@@ -316,6 +315,7 @@ def write_good_files(
     tier_lines: dict[str, list[tuple[str, Path]]] = {t: [] for t in TIER_TOKENS}
 
     def emit(base: Path, lines: list[str], tier_name: str | None = None) -> int:
+        raw = lines
         lines = to_cn_view(lines, cn_ms)
         n = write_good_file(base, lines)
         for suffix, keys in (
@@ -329,11 +329,16 @@ def write_good_files(
                 write_text_if_changed(vpath, "\n".join(vlines) + "\n")
             elif vpath.exists():
                 vpath.unlink()
-        # 组内相对最优：good_top.txt（前 25% 分位，按组内实测速度）
-        tlines, thr = top_slice(lines)
+        # 组内相对最优：good_top.txt（前 25% 分位）。必须用 CN 视图改写前的
+        # 原始海外实测速度遴选（_line_mbps 读行内速度 token），否则无大陆读数
+        # 的行速度 token 已被 _rewrite_cn_speed 删除而连带性剔除、有读数的行
+        # 退化为按 ≈ 估算值排序——两种都不复现「按组内实测速度取前 25%」。
+        tlines, thr = top_slice(raw)
         tpath = base.with_name(f"{base.stem}_top.txt")
         if tlines:
-            write_text_if_changed(tpath, "\n".join(tlines) + "\n")
+            write_text_if_changed(
+                tpath, "\n".join(to_cn_view(tlines, cn_ms)) + "\n"
+            )
         elif tpath.exists():
             tpath.unlink()
         if tier_name is not None and tlines:
