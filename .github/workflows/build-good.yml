@@ -68,9 +68,22 @@ jobs:
           python scripts/build_good.py
           python scripts/build_premium.py
 
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。此前陈旧 china.json/空 cn_ms 会令构建把纯速度
+      # 原样透传进清单，骑行在 tests 步之后才落盘、单价式提交上去——此步在
+      # 提交前校验被改动后的树，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
+        run: >-
+          python -m unittest
+          tests.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
       # 图表/渲染由专职 stats 工作流在 "Build good lists" 完成后统一重建（单一写入者）
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
+        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success' && steps.verify.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): good tiers & variants ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
