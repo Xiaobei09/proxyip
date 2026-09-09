@@ -87,6 +87,19 @@ jobs:
 
       # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
 
+      # 提交前护栏：数据产出后再校验 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测速度），防止陈旧/空 cn_ms 重建把纯 -XMB/s 提交进仓库；
+      # 失败即中止，本 run 不提交（此前 tests 步先于数据改动执行，抓不到
+      # 改后状态）。
+      - name: Verify CN-view invariant
+        id: verify
+        if: steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: >-
+          python -m unittest
+          tests.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
       - name: Show summary
         if: steps.gate.outputs.skip != 'true'
         run: |
@@ -97,6 +110,6 @@ jobs:
             data/quality/china.json 2>/dev/null || true
 
       - name: Commit changes
-        if: steps.gate.outputs.skip != 'true' && steps.china.outcome == 'success' && steps.annotate.outcome == 'success'
+        if: steps.gate.outputs.skip != 'true' && steps.china.outcome == 'success' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
