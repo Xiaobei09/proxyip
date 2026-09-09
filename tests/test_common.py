@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from common import (
     _cn_fallback_ms,
+    _note,
     _rewrite_cn_speed,
     cn_display_ms,
     cn_l2_ms,
@@ -51,6 +52,12 @@ class TestParseLtdLine(unittest.TestCase):
         self.assertIsNone(parse_ltd_line("1.2.3.4:443#ALZ-1ms"))
         key, _, _, cc = parse_ltd_line("1.2.3.4:443#ALL→US-120ms")
         self.assertEqual((key, cc), ("1.2.3.4:443#ALL", "ALL"))
+
+    def test_speed_first_tag_not_read_as_cc(self):
+        """备注以 ``-115MB/s`` 开头、缺国码的畸形行，MB 不得被当作国码。"""
+        self.assertIsNone(parse_ltd_line("1.2.3.4:443#-115MB/s-US-120ms"))
+        self.assertIsNone(parse_ltd_line("1.2.3.4:443#115MB/s US-120ms"))
+        self.assertEqual(_note("1.2.3.4:443#-115MB/s-US-120ms"), "")
 
 
 class TestCnMainlandOkCap(unittest.TestCase):

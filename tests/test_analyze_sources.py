@@ -44,6 +44,13 @@ class TestParseCc(unittest.TestCase):
     def test_no_hash(self):
         self.assertIsNone(asrc._parse_cc("1.2.3.4:443"))
 
+    def test_speed_first_tag_not_read_as_cc(self):
+        self.assertIsNone(asrc._parse_cc("1.2.3.4:443#-115MB/s-US-120ms"))
+        self.assertIsNone(asrc._parse_cc("1.2.3.4:443#.5MB/sKHHK"))
+
+    def test_valid_note_after_cc(self):
+        self.assertEqual(asrc._parse_cc("1.2.3.4:443#US→KR-120ms"), "US")
+
 
 class TestParsePort(unittest.TestCase):
     def test_standard(self):
@@ -135,6 +142,18 @@ class TestAnalyze(unittest.TestCase):
         result = asrc.analyze({}, [], {}, {}, {})
         self.assertEqual(result["total_proxies"], 0)
         self.assertEqual(result["sources"], {})
+
+    def test_malformed_line_not_bucketed_as_mb(self):
+        ip_sources = {"1.1.1.1:443#US": "main"}
+        valid_lines = ["1.1.1.1:443#-115MB/s-US-120ms"]
+        result = asrc.analyze(
+            ip_sources, valid_lines,
+            rep_data={}, china_data={},
+            family_data={},
+        )
+        self.assertEqual(result["total_alive"], 0)
+        for source in result["sources"].values():
+            self.assertNotIn("MB", source.get("country_dist", {}))
 
 
 class TestFormatReport(unittest.TestCase):

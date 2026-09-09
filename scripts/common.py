@@ -130,6 +130,25 @@ def now_ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _scan_cc(rest: str) -> tuple[str, int] | None:
+    """``#`` 后 flag/CC 段的 2 字母国码（或伪国码 ``ALL``）及起止位置，失败返回 ``None``。
+
+    跳过国旗非大写部分，读取 CC，并要求紧跟合法分隔符（``-``/``→``/行尾），
+    杜绝畸形备注把 ``-115MB/s-US`` 里的 ``MB`` 误读为国码。
+    """
+    i = 0
+    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
+        i += 1
+    if i >= len(rest):
+        return None
+    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
+        return "ALL", i
+    cc = rest[i : i + 2]
+    if len(cc) != 2 or not cc.isalpha() or rest[i + 2 : i + 3] not in ("", "-", "→"):
+        return None
+    return cc, i
+
+
 def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
     """``ip:port#<flag><cc>-...`` -> ``(key, ip, port, cc)`` or ``None``.
 
@@ -140,18 +159,10 @@ def parse_ltd_line(line: str) -> tuple[str, str, str, str] | None:
     if not line or "#" not in line:
         return None
     addr, rest = line.rsplit("#", 1)
-    i = 0
-    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-        i += 1
-    if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")):
-        cc = "ALL"
-    else:
-        cc = rest[i : i + 2]
-        nxt = rest[i + 2 : i + 3]
-        if nxt and nxt.isalpha():
-            return None
-    if (len(cc) != 2 and cc != "ALL") or not cc.isalpha() or ":" not in addr:
+    found = _scan_cc(rest)
+    if not found or ":" not in addr:
         return None
+    cc, _i = found
     ip, port = addr.rsplit(":", 1)
     if not port.isdigit():
         return None
@@ -699,11 +710,11 @@ def _note(line: str) -> str:
     parsed = parse_ltd_line(line)
     if not parsed:
         return ""
-    addr, rest = line.rsplit("#", 1)
-    i = 0
-    while i < len(rest) and not ("A" <= rest[i] <= "Z"):
-        i += 1
-    cc = "ALL" if rest[i:].startswith("ALL") and (rest[i + 3:i + 4] in ("", "-", "→")) else rest[i : i + 2]
+    _addr, rest = line.rsplit("#", 1)
+    found = _scan_cc(rest)
+    if not found:
+        return ""
+    cc, i = found
     return rest[i + len(cc):]
 
 
