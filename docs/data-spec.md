@@ -96,7 +96,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 - `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）、`good.txt`（综合最优，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
  - 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
    - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
-   - `cn.txt` — 大陆可达（`-CN` 备注）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
+   - `cn.txt` — 大陆可达（行内 `-CN` 或 `china.json` `verdict==reachable`，含 fallback 兜底）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
    - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），缺失时回退行内 `-V4`/`-V6`/`-DS` 备注；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
    - 根级另有 `all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`（及 `*_ltd.txt`）；v4/v6 复用既有 `all_ipv4.txt`/`all_ipv6.txt`，不重复生成
    - **可靠性变体**：上述每个清单（含根级 `all*.txt`）同步派生 `*_verified.txt` 与 `*_stable.txt` 两个维度，可与任意分组叠加（如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`）：
@@ -219,7 +219,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`ext_ok`/`ext_colo`/`ext_response_ms`（external_check 探测概要：成功与否 / 边缘 colo / 响应耗时）、`reputation`（0-100 信誉分，见下方口径说明）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
 
-**口径说明**：`reputation` 为**含 ip-api 地理信号**的运行维度分（`build_ipinfo_map`，ip-api 查到 `countryCode` 即参与投票）；行尾 `-<score>` 注解与 `reputation.json` 的 `score` 为**不含 ip-api** 的静态黑名单信号分（`build_reputation_map`，build_good 的 ≥80 门槛与 premium 消费此口径）。两数间可差至单源权重，勿跨文件混用。
+**口径说明**：`reputation` 为**含 ip-api 地理信号**的运行维度分（`build_ipinfo_map`，ip-api 查到 `countryCode` 即参与投票；存在 abuse 分时直接 `100-abuse`）；行尾 `-<score>` 注解与 `reputation.json` 的 `score` 为**不含 ip-api** 的静态黑名单信号分（`build_reputation_map`，build_good 的 ≥80 门槛与 premium 消费此口径）。启用 abuse 服务时两数差距可不止单源权重（`reputation` 走 `100-abuse`，`reputation.json` 仍纯信号分），勿跨文件混用。
 
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
@@ -291,13 +291,13 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/valid/all_cn.txt`
 
-**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 的行（缺 all.txt 时回退 `all_ltd.txt`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。**清单保持完整（全可达集，正常水平 ≥1 万），不按大陆延迟门槛精简**。每行的 ms 为大陆视角读数（`common.cn_display_ms`：可信大陆探测源 xxapi/jkapi/checkhost 优先，L3 复核源 1ms 噪声不落地），速度 token 同步改写为 `≈XMB/s` 大陆视角估算。逐条检测明细见 `china.json`；落地自带健康自检（行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，见 `check_cn_health`）。
+**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 的行（缺 all.txt 时回退 `all_ltd.txt`；含经 `compute_fallback_merge` 并入的历史兜底键，其 verdict 已在写 `china.json` 前改写为 reachable，见 `logic.md`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。**清单保持完整（全可达集，正常水平 ≥1 万），不按大陆延迟门槛精简**。每行的 ms 为大陆视角读数（`common.cn_display_ms`：可信大陆探测源 xxapi/jkapi/checkhost 优先，L3 复核源 1ms 噪声不落地），速度 token 同步改写为 `≈XMB/s` 大陆视角估算。逐条检测明细见 `china.json`；落地自带健康自检（行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，见 `check_cn_health`）。
 
 ### `data/valid/all_cn_http.txt` / `data/valid/all_cn_stable.txt`
 
 china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序）：
 
-- `all_cn_http.txt` — **应用层确认**子集：本轮任一成功源给出 HTTP 级确认（`level=http`）或历史已带 `-CNH` 的行。TCP 通但应用层被干扰的代理不会进入此清单
+- `all_cn_http.txt` — **应用层确认**子集：本轮任一成功源给出 HTTP 级确认（`level=http`）或历史已带 `-CNH` 的行。TCP 通但应用层被干扰的代理不会进入此清单。`-CNH` 为**粘性标**（反映最近一次应用层确认，非逐轮新鲜；`common` 渲染 CNH 恒蕴含 CN，因此弱确认键的池行仍显示 `-CN-CNH`，但不会进入 `all_cn.txt`）
 - `all_cn_stable.txt` — **跨轮稳定**子集：连续 ≥2 轮判 `reachable` 的行（strict，不含历史 `-CN` 兜底），对抗单轮误判与快速 churn
 
 推荐消费顺序：`all_cn_stable.txt` > `all_cn_http.txt` > `all_cn.txt`。

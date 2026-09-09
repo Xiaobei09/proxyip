@@ -123,7 +123,9 @@ def fill_and_classify(
 
     ``china_sets`` = ``(cn_set, cnh_set)``：-CN 严格只给当期 verdict 为
     reachable 的 key；其余一律撤销（含历史累积的失效 -CN）；-CNH 按应用层
-    HTTP 确认集保留。其余 token 的 ``has_token`` 检查使用 ``out``（演进的
+    HTTP 确认集保留、**粘性**（反映最近一次确认，非逐轮新鲜；`common` 渲染
+    CNH 恒蕴含 CN，故弱确认键在池行中仍带 -CN-CNH 但不会进入 all_cn 清单）。
+    其余 token 的 ``has_token`` 检查使用 ``out``（演进的
     行）而非原始 ``note``，避免同调用内重复追加。
     """
     parsed = parse_line(line)

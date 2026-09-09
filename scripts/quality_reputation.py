@@ -55,12 +55,12 @@ FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
 )
-DC_ASN_URL = "https://iplogs.com/data/datacenter-asns.csv"
-VPN_ASN_URL = "https://iplogs.com/data/vpn-providers.csv"
-RESPROXY_ASN_URL = "https://iplogs.com/data/residential-proxy-backbones.csv"
-TOR_EXITS_URL = "https://check.torproject.org/exit-addresses"
-SPAMHAUS_DROP_URL = "https://www.spamhaus.org/drop/drop.txt"
-SPAMHAUS_EDROP_URL = "https://www.spamhaus.org/drop/edrop.txt"
+DC_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
+VPN_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
+RESPROXY_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
+TOR_EXITS_URL = "[REDACTED_PRIVATE_RESOURCE]"
+SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
+SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 FREEIPAPI_URL = "https://freeipapi.com/api/json/{ip}"
 FREEIPAPI_TIMEOUT = 10
 HACKMYIP_URL = "https://hackmyip.com/api/lookup?ip={ip}"
@@ -72,23 +72,23 @@ IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
 IPLOCATION_TIMEOUT = 10
 IPLOCATION_CAP = 3000
 FREEIPAPI_CAP = 3000
-CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
-ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
-FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
-DAN_TOR_URL = "https://www.dan.me.uk/torlist"
-TOR_BULK_URL = "https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=1.1.1.1&port=443"
-BLOCKLIST_DE_URL = "https://lists.blocklist.de/lists/all.txt"
-BLOCKLIST_DE_SSH_URL = "https://lists.blocklist.de/lists/ssh.txt"
-BLOCKLIST_DE_APACHE_URL = "https://lists.blocklist.de/lists/apache.txt"
+CINS_BADGUYS_URL = "[REDACTED_PRIVATE_RESOURCE]"
+ET_COMPROMISED_URL = "[REDACTED_PRIVATE_RESOURCE]"
+FEODO_URL = "[REDACTED_PRIVATE_RESOURCE]"
+DAN_TOR_URL = "[REDACTED_PRIVATE_RESOURCE]"
+TOR_BULK_URL = "[REDACTED_PRIVATE_RESOURCE]"
+BLOCKLIST_DE_URL = "[REDACTED_PRIVATE_RESOURCE]"
+BLOCKLIST_DE_SSH_URL = "[REDACTED_PRIVATE_RESOURCE]"
+BLOCKLIST_DE_APACHE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 GREYNOISE_URL = "https://api.greynoise.io/v3/community/{ip}"
 GREYNOISE_TIMEOUT = 8
-URLLAUS_URL = "https://urlhaus.abuse.ch/downloads/csv_recent/"
-THREATFOX_URL = "https://threatfox.abuse.ch/export/json/recent/"
+URLLAUS_URL = "[REDACTED_PRIVATE_RESOURCE]"
+THREATFOX_URL = "[REDACTED_PRIVATE_RESOURCE]"
 FIREHOL_LEVEL1_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_level1.netset"
 )
-BINARYDEFENSE_URL = "https://www.binarydefense.com/banlist.txt"
+BINARYDEFENSE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 FIREHOL_C2_TRACKER_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/c2_tracker.ipset"
@@ -97,7 +97,7 @@ FIREHOL_BOTSCOUT_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/botscout_7d.ipset"
 )
-GREENSNOW_URL = "https://blocklist.greensnow.co/greensnow.txt"
+GREENSNOW_URL = "[REDACTED_PRIVATE_RESOURCE]"
 FIREHOL_SSLPROXIES_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/sslproxies_1d.ipset"
@@ -653,7 +653,7 @@ def otx_lookup_sync(ip: str) -> dict | None:
     }
 
 
-IPSUM_URL = "https://raw.githubusercontent.com/stamparm/ipsum/master/levels/3.txt"
+IPSUM_URL = "[REDACTED_PRIVATE_RESOURCE]"
 
 
 async def fetch_ipsum_list() -> set[str]:
@@ -1637,10 +1637,11 @@ def _flag_opinions(name: str, signal) -> dict:
         opinions = {}
         if signal.get("is_abuse"):
             opinions["abuse"] = True
-        if signal.get("is_riot"):
-            opinions["bot"] = True
-        if signal.get("is_noise"):
-            opinions["noise"] = True
+        else:
+            if signal.get("is_riot"):
+                opinions["bot"] = True
+            if signal.get("is_noise"):
+                opinions["noise"] = True
         return {f: v for f, v in opinions.items() if isinstance(v, bool)}
     return {}
 
@@ -1700,7 +1701,7 @@ def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
         rep = int(signal.get("reputation") or 0)
         pulses = int(signal.get("pulse_count") or 0)
         return min(rep * 5, 80) + min(pulses * 2, 20)
-    for key in ("risk_score", "fraud_score", "score", "risk"):
+    for key in ("risk_score", "fraud_score", "score", "risk", "threat_score"):
         value = signal.get(key)
         if isinstance(value, (int, float)):
             return round(max(0, min(100, value)))
@@ -1749,11 +1750,13 @@ def _mobile_clean_bonus(flags: dict) -> int:
     """仅当确认 mobile 且无任何代理/滥用类标记时给 +5 奖励。
 
     住宅移动网络的高可用信号不被代理/机房噪声稀释；但一旦同时被认作
-    proxy/vpn/tor/abuse/listed/hosting/bot 则不加成（可能为恶意出口）。
+    proxy/vpn/tor/abuse/listed/hosting/bot/noise/crawler/scraper/anonymous
+    则不加成（可能为恶意出口）。
     """
     if flags.get("mobile") is True and not any(
         flags.get(f) for f in ("proxy", "vpn", "tor", "listed", "abuse",
-                               "hosting", "bot")
+                               "hosting", "bot", "noise", "crawler",
+                               "scraper", "anonymous")
     ):
         return 5
     return 0
@@ -1880,7 +1883,7 @@ def derive_risk(
 def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
     if service == "abuseipdb":
         url = (
-            "https://api.abuseipdb.com/api/v2/check"
+            "[REDACTED_PRIVATE_RESOURCE]"
             f"?ipAddress={ip}&maxAgeInDays=90"
         )
         req = urllib.request.Request(
@@ -1901,7 +1904,7 @@ def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
             "is_hosting": data.get("isHosting"),
             "country_code": data.get("countryCode"),
         }
-    url = f"https://ipqualityscore.com/api/json/ip/{key}/{ip}"
+    url = f"[REDACTED_PRIVATE_RESOURCE]"
     req = urllib.request.Request(
         url, headers={"User-Agent": "proxyip/quality 1.0"}
     )

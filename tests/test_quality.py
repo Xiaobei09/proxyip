@@ -468,6 +468,39 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(score, 72)
         self.assertEqual(flagged, ["proxy"])
 
+    def test_greynoise_abuse_not_double_penalized_with_noise(self):
+        """同一 IP 恶意+噪音：abuse 特判即最高口径，不叠加 noise 二次罚分。"""
+        sigs = {
+            "greynoise": {
+                "is_abuse": True, "is_noise": True,
+                "classification": "malicious",
+            },
+        }
+        # greynoise 恶意目录按特判 60 罚（非不加 noise 的 consensus 35 口径）
+        score, _r, flagged, _n = qc.vote_reputation(sigs, self.W)
+        self.assertEqual(score, 40)
+        self.assertEqual(flagged, ["abuse"])
+        self.assertNotIn("noise", flagged)
+
+    def test_greynoise_riot_penalty(self):
+        sigs = {"greynoise": {"is_riot": True}}
+        score, _r, flagged, _n = qc.vote_reputation(sigs, self.W)
+        self.assertEqual(flagged, ["bot"])
+        self.assertEqual(score, 65)
+
+    def test_ipdata_threat_score_numeric(self):
+        """ipdata threat_score 进入连续型罚分链。"""
+        sigs = {"ipdata": {"is_proxy": False, "threat_score": 40}}
+        score, _r, _f, numeric = qc.vote_reputation(sigs, self.W)
+        self.assertEqual(score, 60)
+        self.assertEqual(numeric, ["ipdata"])
+
+    def test_mobile_bonus_noise_crawler_excluded(self):
+        """mobile 奖励需所有风险维度均不成立，noise/crawler 视为风险。"""
+        self.assertEqual(qr._mobile_clean_bonus({"mobile": True}), 5)
+        self.assertEqual(qr._mobile_clean_bonus({"mobile": True, "crawler": True}), 0)
+        self.assertEqual(qr._mobile_clean_bonus({"mobile": True, "noise": True}), 0)
+
     def test_consensus_clean_source_abstains_on_unknown(self):
         """ncgy clean 只否定它检查过的家族；对无关家族不投票。"""
         sigs = {
