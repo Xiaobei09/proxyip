@@ -361,6 +361,26 @@ class TestMergeVerdict(unittest.TestCase):
         self.assertEqual(
             cc.merge_verdict(sources)["verdict"], "uncertain")
 
+    def test_icmp_only_source_level_honest(self):
+        """仅 ICMP 主机存活源（coffee/chinaz）确认时，level 如实标 icmp，
+        不冒充 tcp（all_cn_http 消费方以此区分传输层证据）。"""
+        sources = {
+            "chinaz": {"status": "ok", "ok": True, "ms": 40,
+                       "ok_nodes": 45, "nodes": 50, "ratio": 0.9,
+                       "level": "icmp"},
+            "coffee": {"status": "ok", "ok": True, "ms": 35,
+                       "ok_nodes": 20, "nodes": 30, "ratio": 0.8,
+                       "level": "icmp"},
+        }
+        mv = cc.merge_verdict(sources)
+        self.assertEqual(mv["verdict"], "reachable")
+        self.assertEqual(mv["level"], "icmp")
+        # 混入 TCP 源 → 保守回落 tcp
+        sources["tcptest"] = {"status": "ok", "ok": True, "ms": 30,
+                           "ok_nodes": 12, "nodes": 12, "ratio": 1.0,
+                           "level": "tcp"}
+        self.assertEqual(cc.merge_verdict(sources)["level"], "tcp")
+
     def test_new_multi_fail_combos_unreachable(self):
         """新源多节点失败 + 单节点失败 → unreachable；两大节点失败也 → unreachable。"""
         cases = [

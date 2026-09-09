@@ -108,6 +108,25 @@ class TestWriteOutputs(unittest.TestCase):
         ltd = (dp.ALL_LTD_FILE).read_text().splitlines()
         self.assertEqual(ltd, ["1.1.1.1:443#US", "3.3.3.3:443#JP"])
 
+    def test_unique_counts_unique_ip_port_across_cc(self):
+        # 同一 ip:port 被不同订阅标成多国 → 行级 set 保留两行（多国输出），
+        # 但 __unique__ 须反映真实 ip:port 唯一数（data-spec:139 语义），
+        # 而非行数
+        import tempfile
+
+        base = Path(tempfile.mkdtemp(prefix="dp_"))
+        for k in self.orig:
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        by_port = {"443": {"US": ["1.1.1.1"], "JP": ["1.1.1.1"],
+                           "DE": ["1.1.1.1"], "FR": ["2.2.2.2"]}}
+        stats, all_entries = dp.write_outputs(by_port, per_country_limit=0)
+        self.assertEqual(stats["__total__"], 4)
+        self.assertEqual(stats["__unique__"], 2)
+
     def test_non_cf_edge_ports_dropped(self):
         import tempfile
 

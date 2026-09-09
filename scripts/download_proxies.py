@@ -667,7 +667,8 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         )
         set_counts["all_ltd"] = len(all_ltd_entries)
     stats["__total__"] = total
-    stats["__unique__"] = len(all_entries)
+    stats["__unique__"] = len(
+        {e.rsplit("#", 1)[0] for e in all_entries})
     stats["__countries__"] = len(by_country)
     stats["__ports__"] = len(by_port_all)
     stats["__sets__"] = set_counts

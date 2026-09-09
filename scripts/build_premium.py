@@ -82,10 +82,15 @@ _FAMILY_BRANCH_TO_NAME = {"ipv4": "v4", "ipv6": "v6", "dual": "46"}
 
 
 def build_ip_type_map(data: dict) -> dict[str, str]:
-    """``ipinfo.json`` -> ``{key: ip_type}``（DC/RES/MOB/PROXY）。"""
+    """``ipinfo.json`` -> ``{key: ip_type}``（DC/RES/MOB/PROXY）。
+
+    仅收录 `geo_checked == true` 的键：ip-api 缺失时 `classify_ip({})` 默认
+    返回 RES 是「未知」而非实测住宅，若放行会把查不到出口地理的代理误收进
+    premium 住宅子集。
+    """
     result: dict[str, str] = {}
     for key, entry in data.get("proxies", {}).items():
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or entry.get("geo_checked") is not True:
             continue
         ip_type = entry.get("ip_type")
         if isinstance(ip_type, str) and ip_type:

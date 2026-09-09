@@ -10,7 +10,7 @@
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
 - **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
 - **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-[-<出口类型段>][-<信誉分>][-U<NN>]`。出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6）；信誉分为 0-100 整数（来自 `reputation.json`）；`U<NN>` 为 7 天滚动存活率百分比（来自 `uptime.json`，如 `-U92`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-72-U92`。无结果的行保持原样。（tls 方法标记 `CF` 曾作为死标记生成，现池子全为 CF 边缘端口恒真、归一化时丢弃，新行不再含该 token；历史行上的流媒体标记 `NF(区域)/D+/YT/MX/PV/GPT` 仍被解析器容忍但已停止生成）
-- **去重**：同一 `ip:port` 组合全局唯一
+- **去重**：同一 `ip:port` 组合在**同一国家标签内**唯一；同一入口可能被不同订阅标为多国出口（此时保留多国条目，池中存在少量跨标签重复属设计内；下载历史 `unique` 按真实 `ip:port` 唯一数计算）
 - **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序（`all_cn*.txt` 按**大陆实测延迟**升序），`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
 
 ### 备注段（note）与 token 规范
@@ -215,6 +215,10 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 数据未变化时文件不变（避免无意义提交）。
 
+### `data/quality/external_check.json`
+
+质量 CI 的 `external_check` 探测输出：键为 `ip:port#国家`，值为 `{success, response_ms, colo, ipv4_ok, ipv6_ok, exit_geo}`——外部出口地理回显（单源 `090227`）探测结果：`success` 回显成功与否、`response_ms` 耗时、`colo` CF 边缘 IATA、`ipv4_ok`/`ipv6_ok` 出口族可达标注、`exit_geo` 回显出口的 `countryCode`/`city`/`asn`/`org`。与 validate 的多源 `data/valid/ext_check.json` 不同：本文件是 quality 链以外部 API 为真相的独立证据（不做本地 TLS 握手），供 `build_exit_cc_map` 三源汇聚与 `resolve_exit_ips` 消费；**不写** `sources`/`dual_stack`（双栈权威在 `exit_family.json`）。
+
 ### `data/quality/ipinfo.json`（质量 CI 输出）
 
 单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`ext_ok`/`ext_colo`/`ext_response_ms`（external_check 探测概要：成功与否 / 边缘 colo / 响应耗时）、`reputation`（0-100 信誉分，见下方口径说明）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
@@ -238,7 +242,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/quality_meta.json`
 
-质量检测汇总（供 stats 消费）：`ts`（生成时间戳 ISO-8601）、`total`（代理总数）、`tls`（TLS 方法代理数）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
+质量检测汇总（供 stats 消费）：`ts`（生成时间戳 ISO-8601）、`total`（代理总数）、`tls`（参与本轮质量检测的键数——quality 链以外部 API 回显判活、不做本地 TLS 握手，故含 validate `--ext-check` 复活的 `method=ext` 键，勿与 `index.json` 的 by_method 口径混用）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数，`ok`=被外检覆盖的 TLS 存活键数 + 外检复活键数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`。
 
 ### `data/quality/abuse.json`
 
@@ -280,7 +284,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 1. 大陆可达（`china.json` 判定 `reachable`，与 `good` 同规则）
 2. 信誉分 ≥ 95（存在于 `reputation.json` 且 `score >= 95`）
-3. 真实住宅 IP（`ipinfo.json` 的 `ip_type == "RES"`）
+3. 真实住宅 IP（`ipinfo.json` 的 `ip_type == "RES"` **且 `geo_checked == true`**——查不到出口地理时 `classify_ip({})` 默认 RES 只是未知，不得当作实测住宅）
 4. 非高风险（`reputation.json` 的 `risk != high`）
 
 综合分公式与 `good` 一致（信誉为主），按综合分降序排列。**每一份 `premium` 清单都是仅含大陆可达行的 CN 列表，因此全部输出统一渲染 CN 视图**（大陆实测 ms + `≈XMB/s` 大陆估算，语义同 `all_cn.txt`；无 `cn_ms` 数据时行保持原样）。同步派生 `_verified.txt`/`_stable.txt`/`_uptime.txt` 可靠性变体与 `_<tier>.txt` 速度档变体；另按出口家族派生 `*_v4.txt`/`*_v6.txt`/`*_46.txt` 分支（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`，与 `all_cn4/cn6/cn46` 同规则），各分支同样派生全部变体，空家族分支不留盘并清理残留。

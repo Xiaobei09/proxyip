@@ -2361,9 +2361,14 @@ def merge_verdict(sources: dict) -> dict:
         if r.get("ok") and isinstance(r.get("ms"), (int, float)) and r["ms"] > 0
     ]
     ms = round(min(ms_values), 1) if ms_values else None
-    # 证据分级：任一成功源给出应用层确认 → "http"；仅传输层 → "tcp"
+    # 证据分级：任一成功源给出应用层确认 → "http"；仅传输层 → "tcp"；
+    # 仅 ICMP 主机存活源（coffee/chinaz）→ "icmp"（如实标注，不冒充 TCP）
     if any(sources[s].get("level") == "http" for s in ok_sources):
         level = "http"
+    elif ok_sources and all(
+        sources[s].get("level") == "icmp" for s in ok_sources
+    ):
+        level = "icmp"
     elif ok_sources:
         level = "tcp"
     else:
