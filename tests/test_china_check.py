@@ -961,6 +961,56 @@ class TestItdogParseSubmit(unittest.TestCase):
         self.assertEqual(err, "no task_id")
 
 
+class TestItdogCollect(unittest.TestCase):
+    class _FakeWS:
+        def __init__(self, frames):
+            self._frames = list(frames)
+            self.closed = False
+
+        def send_text(self, payload):
+            pass
+
+        def read(self):
+            if self._frames:
+                return self._frames.pop(0)
+            return "timeout", None
+
+        def close(self):
+            self.closed = True
+
+    def _collect(self, frames, expected, timeout=1.0):
+        with mock.patch.object(ci, "_WebSocket",
+                               return_value=self._FakeWS(frames)):
+            return ci.itdog_collect("task", expected, timeout)
+
+    def test_evt_does_not_skip_tail_records(self):
+        """进度事件绝不计入收齐判定：3 rec + 1 evt 交错，3 条节点记录必须收齐。"""
+        frames = [
+            ("rec", {"task_num": 1}),
+            ("evt", {"progress": True}),
+            ("rec", {"task_num": 2}),
+            ("rec", {"task_num": 3}),
+        ]
+        out = self._collect(frames, expected=3)
+        self.assertEqual([r.get("task_num") for r in out], [1, 2, 3])
+        self.assertNotIn("progress", {m for r in out for m in r})
+
+    def test_only_records_counted_toward_expected(self):
+        frames = [("rec", {"task_num": 1}), ("evt", {"x": 1}),
+                  ("rec", {"task_num": 2}), ("rec", {"task_num": 3}),
+                  ("done", None)]
+        out = self._collect(frames, expected=2)
+        self.assertEqual([r.get("task_num") for r in out], [1, 2])
+
+    def test_done_breaks_early(self):
+        out = self._collect([("rec", {"task_num": 1}), ("done", None)], expected=9)
+        self.assertEqual(len(out), 1)
+
+    def test_timeout_returns_partial(self):
+        out = self._collect([("rec", {"task_num": 1})], expected=5, timeout=0.05)
+        self.assertEqual(len(out), 1)
+
+
 class TestItdogRecOk(unittest.TestCase):
     def test_http_ok(self):
         ok, ms, level = ci.itdog_rec_ok({"http_code": 200, "connect_time": 0.02, "all_time": 0.05})
