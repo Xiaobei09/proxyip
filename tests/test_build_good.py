@@ -473,7 +473,13 @@ class TestWriteGoodFiles(unittest.TestCase):
 
 
 class TestCommittedCnViewInvariant(unittest.TestCase):
-    """数据合规护栏：good/premium 家族是 CN 视图，行内速度只能是 ≈ 估算。
+    """数据合规护栏：仓库内所有 CN 视图文件不混入海外实测 ``-XMB/s``。
+
+    覆盖三块 CN 视图表面（统一只允许 ``≈XMB/s`` 估算或无速度 token）：
+
+    - ``good/premium`` 家族（build_good/build_premium 及其全部变体）；
+    - ``data/valid/tiers/`` 镜像（good 家族同源 CN 视图副本）；
+    - ``all_cn*.txt``（china_check 的大陆清单）。
 
     曾出现陈旧清单把海外实测 ``-XMB/s`` 直接提交进 per-country/set 的
     good/premium 文件（大陆用户误读为大陆速度）。此测试在 CI 里直接扫描
@@ -481,16 +487,21 @@ class TestCommittedCnViewInvariant(unittest.TestCase):
     """
 
     ROOT = Path(__file__).resolve().parent.parent
+    _PLAIN_SPEED = re.compile(r"-\d+(?:\.\d+)?MB/s")
 
-    def _good_family_files(self):
+    def _cn_view_files(self):
         valid = self.ROOT / "data" / "valid"
         if not valid.is_dir():
             return []
         out = []
-        for path in valid.rglob("*"):
-            if not path.is_file():
-                continue
+        for path in valid.rglob("*.txt"):
             if path.name.startswith(("good", "premium")):
+                out.append(path)
+                continue
+            if path.name.startswith("all_cn"):
+                out.append(path)
+                continue
+            if "tiers" in path.parts:
                 out.append(path)
         return out
 
@@ -499,18 +510,17 @@ class TestCommittedCnViewInvariant(unittest.TestCase):
         "repo data dir not present",
     )
     def test_no_plain_overseas_speed_in_good_premium(self):
-        plain = re.compile(r"-\d+(?:\.\d+)?MB/s")
         offenders = []
         total = 0
-        for path in self._good_family_files():
+        for path in self._cn_view_files():
             for line in path.read_text(encoding="utf-8").splitlines():
                 total += 1
-                if plain.search(line):
+                if self._PLAIN_SPEED.search(line):
                     offenders.append((str(path.relative_to(self.ROOT)), line))
         if offenders:
             first = offenders[0]
             self.fail(
-                f"good/premium 家族混入 {len(offenders)} 条海外实测速度（应为 ≈ 估算）："
+                f"CN 视图家族混入 {len(offenders)} 条海外实测速度（应为 ≈ 估算）："
                 f"{first[0]} {first[1][:80]}"
             )
         # 全家族非空（含关键基准文件），防止护栏失联
