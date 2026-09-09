@@ -1,6 +1,7 @@
 """Tests for build_good.py scoring, filtering and output layout."""
 
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -469,6 +470,51 @@ class TestWriteGoodFiles(unittest.TestCase):
             self.assertIn("proxy_count", meta)
             self.assertIsInstance(meta["ts"], str)  # ISO 时间戳已落盘
             self.assertGreater(len(meta["ts"]), 10)
+
+
+class TestCommittedCnViewInvariant(unittest.TestCase):
+    """数据合规护栏：good/premium 家族是 CN 视图，行内速度只能是 ≈ 估算。
+
+    曾出现陈旧清单把海外实测 ``-XMB/s`` 直接提交进 per-country/set 的
+    good/premium 文件（大陆用户误读为大陆速度）。此测试在 CI 里直接扫描
+    仓库内已提交数据，出现任何纯 ``-XMB/s`` 即失败，防止问题复发。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def _good_family_files(self):
+        valid = self.ROOT / "data" / "valid"
+        if not valid.is_dir():
+            return []
+        out = []
+        for path in valid.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name.startswith(("good", "premium")):
+                out.append(path)
+        return out
+
+    @unittest.skipUnless(
+        (Path(__file__).resolve().parent.parent / "data" / "valid").is_dir(),
+        "repo data dir not present",
+    )
+    def test_no_plain_overseas_speed_in_good_premium(self):
+        plain = re.compile(r"-\d+(?:\.\d+)?MB/s")
+        offenders = []
+        total = 0
+        for path in self._good_family_files():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                total += 1
+                if plain.search(line):
+                    offenders.append((str(path.relative_to(self.ROOT)), line))
+        if offenders:
+            first = offenders[0]
+            self.fail(
+                f"good/premium 家族混入 {len(offenders)} 条海外实测速度（应为 ≈ 估算）："
+                f"{first[0]} {first[1][:80]}"
+            )
+        # 全家族非空（含关键基准文件），防止护栏失联
+        self.assertGreater(total, 0)
 
 
 if __name__ == "__main__":
