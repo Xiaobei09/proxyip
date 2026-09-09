@@ -303,12 +303,14 @@ def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
         if connected:
             while time.monotonic() - t0 < timeout:
                 kind, msg = ws.read()
-                if kind in ("rec", "evt") and isinstance(msg, dict):
+                if kind == "rec" and isinstance(msg, dict):
                     records.append(msg)
                 elif kind == "done":
                     break
                 elif kind in ("close", "closed", "err", "timeout"):
                     break
+                # evt（进度/连接事件，无 task_num）不入列、不计数——
+                # 计入会把收齐判定（len >= expected）提前命中、丢弃尾部节点记录
                 if len(records) >= expected:
                     break
     except Exception as exc:
