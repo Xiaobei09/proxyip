@@ -635,7 +635,10 @@ def build_country(meta: dict) -> str:
 
 def build_port(meta: dict) -> str:
     per_port = meta.get("per_port", {})
-    items = [(p, per_port[p]) for p in sorted(per_port, key=lambda p: int(p))]
+    items = sorted(
+        ((p, per_port[p]) for p in per_port if p.isdigit()),
+        key=lambda kv: int(kv[0]),
+    )
     if not items:
         return empty_svg(text="暂无按端口数据")
     return plot_vbars(items, title="按端口统计存活代理")
