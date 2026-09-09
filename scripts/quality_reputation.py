@@ -1700,7 +1700,7 @@ def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
     if name == "otx":
         rep = int(signal.get("reputation") or 0)
         pulses = int(signal.get("pulse_count") or 0)
-        return min(rep * 5, 80) + min(pulses * 2, 20)
+        return max(0, min(rep * 5, 80)) + max(0, min(pulses * 2, 20))
     for key in ("risk_score", "fraud_score", "score", "risk", "threat_score"):
         value = signal.get(key)
         if isinstance(value, (int, float)):
