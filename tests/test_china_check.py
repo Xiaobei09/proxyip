@@ -417,6 +417,26 @@ class TestMergeVerdict(unittest.TestCase):
                 cc.merge_verdict({name: weak})["verdict"],
                 "uncertain", msg=f"{name} weak → uncertain")
 
+    def test_per_source_ratio_threshold_wired(self):
+        """各多节点源成功率阈值常量必须真正接线（此前 ce98/biuping/boce/
+        ipip/17ce/ping0/wansui 的 *_MIN_RATIO 定义了却未接入 strong_valid，
+        调高任意常量都会被静默回退到 ITDOG_MIN_RATIO）。"""
+        src = {"status": "ok", "ok": True, "ms": 60, "level": "tcp",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        for name in ("ce98", "biuping", "boce", "ipip", "17ce", "ping0", "wansui"):
+            self.assertEqual(
+                cc.merge_verdict({name: dict(src)})["verdict"],
+                "reachable", msg=f"{name} ratio 0.7 ≥ 默认阈值 → reachable")
+            old = cc._SOURCE_MIN_RATIO[name]
+            cc._SOURCE_MIN_RATIO[name] = 0.75
+            try:
+                self.assertEqual(
+                    cc.merge_verdict({name: dict(src)})["verdict"],
+                    "uncertain",
+                    msg=f"{name} ratio 0.7 < 调高的 0.75 → weak，不得定论")
+            finally:
+                cc._SOURCE_MIN_RATIO[name] = old
+
     def test_five_new_multi_fail_combos_unreachable(self):
         """新源多节点失败 + 单节点失败 → unreachable；两大节点失败 → unreachable。"""
         cases = [

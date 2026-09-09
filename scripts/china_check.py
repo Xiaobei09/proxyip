@@ -298,6 +298,22 @@ WANSUI_REQ_TIMEOUT = 15
 WANSUI_WS_IDLE = 35.0
 WANSUI_MIN_RATIO = ITDOG_MIN_RATIO
 
+# 各多节点源可独立判 reachable 的最小节点成功率（strong_valid 的单一入口）。
+# 原实现只特判 coffee/chinaz，ce98/biuping/boce/ipip/17ce/ping0/wansui 的
+# 阈值常量定义了却从未被读取——调高任意一个都会被静默回退到 ITDOG_MIN_RATIO。
+# 这里统一接线，让每源的阈值真正生效；改动某个常量即按比例收紧/放宽该源。
+_SOURCE_MIN_RATIO = {
+    "coffee": COFFEE_MIN_RATIO,
+    "chinaz": CHINAZ_MIN_RATIO,
+    "ce98": CE98_MIN_RATIO,
+    "biuping": BIUPING_MIN_RATIO,
+    "boce": BOCE_MIN_RATIO,
+    "ipip": IPIP_MIN_RATIO,
+    "17ce": SEVENTEEN_MIN_RATIO,
+    "ping0": PING0_MIN_RATIO,
+    "wansui": WANSUI_MIN_RATIO,
+}
+
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
 WS_MAX_BUF = 4 * 1024 * 1024  # WS 帧重组缓冲上限（防坏帧长撑爆内存）
 
@@ -2346,7 +2362,9 @@ def merge_verdict(sources: dict) -> dict:
       判定 → uncertain（单节点假阳性抑制）
     - 单节点源（check_host/xxapi/jkapi）≥2 个失败 → unreachable
     - 多节点源失败且所有单节点源也失败 → unreachable
-    - 有确认源但也有失败源（冲突）→ uncertain（保守）
+    - 有确认源但也有失败源（冲突）→ 强证据多数裁定：强多节点确认或
+      ≥2 单节点确认仍判 reachable（多数证据盖过单点证伪）；仅弱确认/
+      孤证与失败并存时归 uncertain（保守）
     - 全部为错误/跳过 → skipped（不误判）
     - ``level``：证据分级——任一成功源给出应用层（HTTP）确认 → "http"，
       仅传输层（TCP）确认 → "tcp"，无成功源 → None
@@ -2387,11 +2405,7 @@ def merge_verdict(sources: dict) -> dict:
             return True  # pingpe/tcpping 内部已实施多数/60% 规则
         if (sources[source].get("nodes") or 0) < MULTI_MIN_NODES:
             return False  # 残缺样本（限流/连接中断）不作强确认，防退化为单点假阳性
-        if source == "coffee":
-            return ratio >= COFFEE_MIN_RATIO
-        if source == "chinaz":
-            return ratio >= CHINAZ_MIN_RATIO
-        return ratio >= ITDOG_MIN_RATIO
+        return ratio >= _SOURCE_MIN_RATIO.get(source, ITDOG_MIN_RATIO)
 
     strong_multi = [s for s in multi_ok if strong_valid(s)]
 
