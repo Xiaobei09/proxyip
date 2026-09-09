@@ -32,13 +32,25 @@ WORKERS = 60
 async def read_until(
     reader: asyncio.StreamReader, delim: bytes, cap: int
 ) -> bytes:
-    data = b""
-    while delim not in data and len(data) < cap:
-        chunk = await asyncio.wait_for(reader.read(65536), timeout=READ_TIMEOUT)
-        if not chunk:
-            break
-        data += chunk
-    return data
+    """Read until ``delim`` (inclusive) or EOF; never over-read the stream.
+
+    首选 ``reader.readuntil``：它把分隔符之后、同一次 TCP 交付的多余字节
+    留在缓冲区（天然回退），避免此前 ``read(65536)`` 一次吞入整个响应时
+    ``read_chunked`` 把后续 body 误当 chunk 头解析而丢数据。``cap`` 为防御
+    上限（真实响应头远小于缓冲 limit，一般不会触发）。
+    """
+    try:
+        return await asyncio.wait_for(
+            reader.readuntil(delim), timeout=READ_TIMEOUT
+        )
+    except asyncio.IncompleteReadError as exc:
+        return exc.partial
+    except asyncio.LimitOverrunError:
+        data = await asyncio.wait_for(reader.read(cap), timeout=READ_TIMEOUT)
+        idx = data.find(delim)
+        if idx < 0:
+            return data
+        return data[: idx + len(delim)]
 
 
 async def read_chunked(
