@@ -137,6 +137,12 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("暂无信誉源数据", gs.build_source_avail({}))
         self.assertIn("暂无信誉源统计", gs.build_source_stats({}))
 
+    def test_build_port_skips_non_numeric_keys(self):
+        svg = gs.build_port({"per_port": {"443": 120, "abc": 5, "": 3}})
+        svg_ok(svg)
+        self.assertIn("443", svg)
+        self.assertNotIn("abc", svg)
+
     def test_chart_latency_speed_has_bars_and_labels(self):
         svg = gs.build_latency_speed(self.META)
         svg_ok(svg)
