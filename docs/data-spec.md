@@ -9,15 +9,15 @@
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
 - **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
-- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-[-<出口类型段>][-<信誉分>][-U<NN>]`。出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6）；信誉分为 0-100 整数（来自 `reputation.json`）；`U<NN>` 为 7 天滚动存活率百分比（来自 `uptime.json`，如 `-U92`）。示例：`1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-72-U92`。无结果的行保持原样。（tls 方法标记 `CF` 曾作为死标记生成，现池子全为 CF 边缘端口恒真、归一化时丢弃，新行不再含该 token；历史行上的流媒体标记 `NF(区域)/D+/YT/MX/PV/GPT` 仍被解析器容忍但已停止生成）
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-[-<出口类型段>][-<信誉分>][-U<NN>]`。出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6）；信誉分为 0-100 整数（来自 `reputation.json`）；`U<NN>` 为 7 天滚动存活率百分比（来自 `uptime.json`，如 `-U35`）。实际 token 顺序：`<出口类型>` 后依次是速度档（`fast`/`mid`/`slow`）、家族（`V4`/`V6`/`DS`）、大陆标记（`CN`/`CNH`）、信誉分、`U<NN>`，示例 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-RES-fast-V4-CN-29-U35`。无结果的行保持原样。（tls 方法标记 `CF` 曾作为死标记生成，现池子全为 CF 边缘端口恒真、归一化时丢弃，新行不再含该 token；历史行上的流媒体标记 `NF(区域)/D+/YT/MX/PV/GPT` 仍被解析器容忍但已停止生成）
 - **去重**：同一 `ip:port` 组合在**同一国家标签内**唯一；同一入口可能被不同订阅标为多国出口（此时保留多国条目，池中存在少量跨标签重复属设计内；下载历史 `unique` 按真实 `ip:port` 唯一数计算）
-- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序（`all_cn*.txt` 按**大陆实测延迟**升序），`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
+- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序（`all_cn*.txt` 及其 http/stable 可靠性子集按**大陆实测延迟**升序；`all_cn4/6/46` 沿用全量池序），`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
 
 ### 备注段（note）与 token 规范
 
-统一解析（`common.parse_line`）：`ip:port#<cc><note>` 中，`key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它，例如 `1.2.3.4:443#🇺🇸US→US-120ms-GPT-CF-63` 的 note 为 `→US-120ms-GPT-CF-63`）。
+统一解析（`common.parse_line`）：`ip:port#<cc><note>` 中，`key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它，例如 `1.2.3.4:443#🇺🇸US→US-120ms-RES-fast-V4-CN-29-U35` 的 note 为 `→US-120ms-RES-fast-V4-CN-29-U35`）。
 
-- token 是 note 中以**段首或 `-` 为界**的独立子串（`common.has_token(note, token)`，等价 `(?:^|-)TOKEN(?:$|-)`）。如 `-CF-63` 含 token `CF`、`63`；`-120ms-CN-V4` 含 token `CN`、`V4`，不含 `CF`。
+- token 是 note 中以**段首或 `-` 为界**的独立子串（`common.has_token(note, token)`，等价 `(?:^|-)TOKEN(?:$|-)`）。如 `-RES-fast-V4-CN-29-U35` 含 token `RES`、`fast`、`V4`、`CN`、`29`、`U35`，不含 `CF`。
 - 单一职责：`exit_family.has_family_note`（`V4`/`V6`/`DS`）、`china_check.has_cn_note`（`CN`）均基于 `has_token` 实现，新增/判断 token 不得另写正则。（历史 `is_cf_heuristic` 随 CF token 废弃移除。）
 - token 分隔符统一为 `-`。历史以空格分隔的流媒体段（`NF(US) D+ YT`）在 `normalize_note` 时被 `_flatten_segs` 拆解为 `-` 连接的独立 token（归一化后渲染 `-NF(US)-D+-YT-`），因此可被 `has_token`/merge 判重命中；**空格不是维护态 token 分隔符**。
 - 幂等：追加 token 前先 `has_token` 判重（`annotate_family`/`annotate_cn`），避免重复标注。
@@ -221,7 +221,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/ipinfo.json`（质量 CI 输出）
 
-单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`ext_ok`/`ext_colo`/`ext_response_ms`（external_check 探测概要：成功与否 / 边缘 colo / 响应耗时）、`reputation`（0-100 信誉分，见下方口径说明）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
+单行 JSON，键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`ext_ok`/`ext_colo`/`ext_response_ms`（external_check 探测概要：成功与否 / 边缘 colo / 响应耗时）、`reputation`（0-100 信誉分，见下方口径说明）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/ipwhois/tor_exit/spamhaus/getipintel/abuseipdb/ipqs，多源时为 multi；实际数据中另出现过下载侧 legacy 来源标记 `blocklist_de`/`firehol_level1`/`freeipapi`/`hackmyip`/`iplocation`/`scamalytics` 等）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
 
 **口径说明**：`reputation` 为**含 ip-api 地理信号**的运行维度分（`build_ipinfo_map`，ip-api 查到 `countryCode` 即参与投票；存在 abuse 分时直接 `100-abuse`）；行尾 `-<score>` 注解与 `reputation.json` 的 `score` 为**不含 ip-api** 的静态黑名单信号分（`build_reputation_map`，build_good 的 ≥80 门槛与 premium 消费此口径）。启用 abuse 服务时两数差距可不止单源权重（`reputation` 走 `100-abuse`，`reputation.json` 仍纯信号分），勿跨文件混用。
 
@@ -258,7 +258,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/reputation.json`
 
-单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources, flags, numeric[, deep_bonus]}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`blackbox`/`otx`/`ipsum`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`vpn_asn`/`resproxy_asn`/`proxycheck`/`ip2location`/`ipwhois`/`tor_exit`/`spamhaus`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`），`sources` 为实际参与合分的源列表，`flags` 为共识确定的语义维度列表，`numeric` 为参与连续型罚分的源列表，`deep_bonus` 为有深测带宽加成时的 +0~10 值（无则缺省）。按分数降序、同分按键序排列。
+单行 JSON，键为 `ip:port#国家`，值为 `{score, risk, source, sources, flags, numeric[, deep_bonus]}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`blackbox`/`otx`/`ipsum`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`vpn_asn`/`resproxy_asn`/`proxycheck`/`ip2location`/`ipwhois`/`tor_exit`/`spamhaus`/`getipintel`/`abuseipdb`/`ipqs`（多源时为 `multi`；见上方 ipinfo 段 legacy 来源列表），`sources` 为实际参与合分的源列表，`flags` 为共识确定的语义维度列表，`numeric` 为参与连续型罚分的源列表，`deep_bonus` 为有深测带宽加成时的 +0~10 值（无则缺省）。按分数降序、同分按键序排列。
 
 ### `data/quality/reputation_cache.json`
 

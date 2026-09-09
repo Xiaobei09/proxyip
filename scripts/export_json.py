@@ -9,7 +9,7 @@ One JSON object per annotated proxy line:
      "family": "V4|V6|DS|null", "cn": bool, "type": "DC|null",
      "tier": "fast|null", "rep": 72|null, "uptime7": 92|null}
 
-Run in the stats workflow (single writer) before commit.
+Run in the stats workflow before commit (repo shared across CI jobs; writes are gated by workflow concurrency).
 """
 
 from __future__ import annotations
