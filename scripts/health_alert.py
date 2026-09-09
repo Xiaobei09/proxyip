@@ -3,12 +3,12 @@
 
 Compares the latest round against recent history and fires alerts when:
 
-- **pool crash**  — alive count dropped > ``POOL_DROP_PCT`` (default 30%)
-                    vs the median of the previous day's rounds;
-- **CN collapse** — china.json reachable count dropped > ``CN_DROP_PCT``
+- **pool crash**  — alive count dropped ≥ ``POOL_DROP_PCT`` (default 30%)
+                    vs the median of the last 24 rounds (不含当前轮);
+- **CN collapse** — china.json reachable count dropped ≥ ``CN_DROP_PCT``
                     (default 50%) vs the previous round's snapshot stored
                     in the alert state file;
-- **source collapse** — an upstream source's unique-count dropped > ``SOURCE_DROP_PCT``
+- **source collapse** — an upstream source's unique-count dropped ≥ ``SOURCE_DROP_PCT``
                     (default 55%) vs the median of its last 8 rounds, from
                     ``data/quality/source_history.json``;
 - **stale data**  — newest history record older than ``STALE_HOURS``
@@ -104,9 +104,12 @@ def check_pool(history: list[dict], drop_pct: float = POOL_DROP_PCT) -> str | No
 
 def _ts(ts: str) -> datetime:
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return _now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def check_stale(history: list[dict], hours: float = STALE_HOURS) -> str | None:
@@ -120,8 +123,16 @@ def check_stale(history: list[dict], hours: float = STALE_HOURS) -> str | None:
 
 
 def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple[str | None, dict]:
-    """Reachable-count collapse vs persisted previous-round snapshot."""
+    """Reachable-count collapse vs persisted previous-round snapshot.
+
+    文件缺失或载荷无任何检测条目（损坏/空）时不评估、不覆盖历史快照
+    （与 check_countries 同款守卫，避免瞬时空窗误报全塌方）。
+    """
+    if not cn_file.exists():
+        return None, dict(state or {})
     proxies = read_json(cn_file).get("proxies", {})
+    if not isinstance(proxies, dict) or not proxies:
+        return None, dict(state or {})
     cur = sum(
         1
         for v in proxies.values()
@@ -131,7 +142,7 @@ def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple
     new_state["cn_reachable"] = cur
     new_state["cn_ts"] = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
     prev = (state or {}).get("cn_reachable")
-    if isinstance(prev, int) and prev > CN_MIN_BASELINE:
+    if isinstance(prev, int) and prev >= CN_MIN_BASELINE:
         drop = (prev - cur) / prev * 100
         if drop >= drop_pct:
             return f"CN collapse: reachable {cur} vs {prev} (-{drop:.0f}%)", new_state
@@ -242,8 +253,16 @@ def check_sources(
         return None
     series: dict[str, list[int]] = {}
     for run in runs:
-        for label, count in (run.get("counts") or {}).items():
-            series.setdefault(label, []).append(int(count))
+        if not isinstance(run, dict):
+            continue
+        counts = run.get("counts") or {}
+        if not isinstance(counts, dict):
+            continue
+        for label, count in counts.items():
+            try:
+                series.setdefault(label, []).append(int(count))
+            except (TypeError, ValueError):
+                continue  # 畸形计数不拖垮整轮看门狗
     alerts = []
     for label, vals in series.items():
         if len(vals) < min_samples:
@@ -397,7 +416,9 @@ def update_badge(root: Path, alerts: list[str]) -> None:
     """
     if not alerts:
         return
-    msg = alerts[0].split(":")[0].strip()
+    # badge 名称 = 首条告警的冒号前段（如 "stale data"/"CN collapse"）；
+    # 无冒号消息（source/country collapsed）则回退整条文案
+    msg = alerts[0].split(":")[0].strip() if alerts[0] else "status"
     write_data_json(
         root / "data" / "output" / "badge.json",
         {"schemaVersion": 1, "label": "status", "message": msg, "color": "red"},
@@ -412,7 +433,9 @@ def write_data_json(path: Path, data: dict) -> None:
 
 
 def write_state(state: dict, path: Path | None = None) -> None:
-    (path or STATE_FILE).write_text(
+    p = path or STATE_FILE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
         json.dumps(state, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 

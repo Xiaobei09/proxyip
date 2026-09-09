@@ -1891,7 +1891,7 @@ class TestBuildExitMap(unittest.TestCase):
         })
 
     def test_build_exit_map_multi_source_priority(self):
-        """external_check > upstream_meta > ipinfo 三源回退。"""
+        """external_check > upstream_meta(按入口 IP) > ipinfo 三源回退。"""
         from annotate_classify import _build_exit_map
         ipinfo = {
             "proxies": {
@@ -1904,13 +1904,14 @@ class TestBuildExitMap(unittest.TestCase):
         external = {
             "proxies": {
                 "a:443#US": {"exit_geo": {"country": "SG"}},
+                "d:443#US": {"exit_geo": {"country": None}},  # 无国家 → 由 upstream 补
                 "f:443#US": {"exit_geo": {"country": 123}},  # 非法 → 忽略
             }
         }
         upstream = {
             "proxies": {
-                "c:443#US": {"country": "HK"},
-                "d:443#US": {"clientIp": "::1", "country": "TW"},
+                "c": {"country": "HK"},
+                "d": {"clientIp": "::1", "country": "TW"},
             }
         }
         exit_map = _build_exit_map(ipinfo, external, upstream)

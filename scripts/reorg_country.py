@@ -29,12 +29,29 @@ from pathlib import Path
 
 from common import (
     DATA_DIR,
+    LATENCY_RE,
     build_exit_cc_map,
     line_to_key,
     parse_ltd_line,
     upsert_exit_region,
     write_text_if_changed,
 )
+
+
+def _merge_ordered(existing: str, new_lines: list[str]) -> str:
+    """按延迟升序把移入行并入目标 all.txt（保序契约）。
+
+    append 会破坏 data/valid 的延迟升序不变量；用稳定排序整体重排——
+    原有行相对顺序不变，仅新行落到正确的数值位置。缺延迟段的行
+    （(1, 0) 键）维持相对顺序、统一排在有延迟行之后。
+    """
+    rows = [ln for ln in existing.splitlines() if ln] if existing else []
+    merged = rows + list(new_lines)
+    merged.sort(key=lambda ln: (
+        (0, int(LATENCY_RE.search(ln).group(1)))
+        if LATENCY_RE.search(ln) else (1, 0)
+    ))
+    return "\n".join(merged) + ("\n" if merged else "")
 
 
 def ensure_exit_marker(line: str, exit_cc: str) -> str:
@@ -105,7 +122,7 @@ def reorganize_file(
         # Determine target path: mirror the same sub-path under the new CC dir
         target = _target_path(path, new_cc)
         existing = target.read_text(encoding="utf-8") if target.exists() else ""
-        merged = (existing.rstrip("\n") + "\n" if existing else "") + "\n".join(new_lines) + "\n"
+        merged = _merge_ordered(existing, new_lines)
         write_text_if_changed(target, merged)
         stats["files_written"] += 1
 

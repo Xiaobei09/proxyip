@@ -18,7 +18,7 @@
 统一解析（`common.parse_line`）：`ip:port#<cc><note>` 中，`key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它，例如 `1.2.3.4:443#🇺🇸US→US-120ms-GPT-CF-63` 的 note 为 `→US-120ms-GPT-CF-63`）。
 
 - token 是 note 中以**段首或 `-` 为界**的独立子串（`common.has_token(note, token)`，等价 `(?:^|-)TOKEN(?:$|-)`）。如 `-CF-63` 含 token `CF`、`63`；`-120ms-CN-V4` 含 token `CN`、`V4`，不含 `CF`。
-- 单一职责：`is_cf_heuristic`（CF 边缘）、`exit_family.has_family_note`（`V4`/`V6`/`DS`）、`china_check.has_cn_note`（`CN`）均基于 `has_token` 实现，新增/判断 token 不得另写正则。
+- 单一职责：`exit_family.has_family_note`（`V4`/`V6`/`DS`）、`china_check.has_cn_note`（`CN`）均基于 `has_token` 实现，新增/判断 token 不得另写正则。（历史 `is_cf_heuristic` 随 CF token 废弃移除。）
 - token 分隔符统一为 `-`；流媒体段内用空格分隔（`NF(US) D+ YT`），不属于 token 匹配范围。
 - 幂等：追加 token 前先 `has_token` 判重（`annotate_family`/`annotate_cn`），避免重复标注。
 
@@ -277,7 +277,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/china.json`（china-check CI 输出）
 
-顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`/`cf_heuristic`（是否 CF 边缘启发式）、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`/`heuristic`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）、`fallback`（heuristic/单源兜底混入时置位，未达复合保守门槛）、`flip`（本轮起连续翻转计数，稳定子集准入排除 `> STABLE_MAX_FLIP` 的慢性抖动源）、`cn_mainland`（大陆视角 RTT 是否低于 `--cn-latency-cap` 门槛）。
+顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）、`fallback`（上一轮可达、本轮仅因源配额/抖动未获确认而经 `compute_fallback_merge` 并入历史兜底的键置位）、`flip`（本轮起连续翻转计数，稳定子集准入排除 `> STABLE_MAX_FLIP` 的慢性抖动源）、`cn_mainland`（大陆视角 RTT 是否低于 `--cn-latency-cap` 门槛）。（历史字段 `cf_heuristic` 随 L1 启发式移除，不再写入）。
 
 ### `data/valid/all_cn.txt`
 
@@ -318,8 +318,8 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/quality/source_quality.json`
 
-各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`china_reachable_rate`（大陆可达率）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。
+各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`china_reachable_count`/`china_reachable_rate`（大陆可达数；`china_reachable_rate` = 大陆可达数 ÷ 该源**存活数**，反映存活代理的大陆可用占比）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。
 
 ### `data/quality/deep_speed.json`
 
-深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）、`proxies`（逐键明细）与 `meta`（参数快照：`cc`/`source`/`limit`/`bytes_mb`/`streams`/`timeout`/`targets`）三个平级键；`proxies[key]` 为 `{<target>: {"agg_mbps": <总吞吐>, "tls_ms": …}}`。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。
+深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）、`proxies`（逐键明细）与 `meta`（参数快照：`cc`/`source`/`limit`/`bytes_mb`/`streams`/`timeout`/`targets`）三个平级键。`proxies[key]` 的结构为 `{tls_ms: <TLS 建连耗时 ms>, <target>: {"agg_mbps": <该目标多流总吞吐 MB/s>, "streams_ok": <成功流数>, "streams_total": <并发流总数>, "samples": [<逐流 MB/s 或 null>]}, …}`——`tls_ms` 与各 target 平级置于顶层（最先测得）。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。

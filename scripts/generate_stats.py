@@ -12,12 +12,15 @@ Reads ``data/quality/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_sets.svg``         alive proxies per named set (horizontal bars)
 - ``chart_cn.svg``           mainland-China reachability verdicts (horizontal bars)
 - ``chart_family.svg``       actual exit IP family distribution (horizontal bars)
-- ``chart_exit.svg``         exit country top 15 (four-source →CC observations)
+- ``chart_exit.svg``         exit country top 15 (三源 →CC: external_check/
+                            upstream_meta/ipinfo; exit_family 仅贡献候选键)
 - ``chart_entry_audit.svg``  entry CC label audit verdicts (tag mismatch rate)
 - ``chart_ip_type.svg``      IP type distribution (DC/RES/MOB/PROXY)
 - ``chart_source_avail.svg`` IP source coverage + sources-per-proxy (composite)
 - ``chart_source_stats.svg`` per-download-source IP count & overlap (stacked bars)
 - ``chart_rep.svg``          reputation score distribution (vertical bars)
+- ``chart_country_speed.svg`` per-country median speed (horizontal bars)
+- ``chart_speed_spread.svg`` latency-vs-speed cluster scatter
 
 Line charts share a real-time x axis (series lacking usable timestamps fall
 back to index spacing), zoom each y-axis to its data range so small variations

@@ -269,40 +269,29 @@ class TestMergeNoteTokens(unittest.TestCase):
 
 
 class TestBuildExitCcMap(unittest.TestCase):
-    def test_upstream_by_exit_ip_resolved(self):
-        """upstream_meta 裸出口 IP 键经 build_exit_ip_map 解析到行键。"""
-        from common import build_exit_cc_map, build_exit_ip_map
-        external = {"proxies": {
-            "a:443#US": {"exit_geo": {"ip": "1.1.1.1", "country": None}},
-        }}
-        family = {"proxies": {
-            "b:443#US": {"exit_v4": "2.2.2.2"},
-            "c:443#US": {"exit_v6": "2606:4700::1"},
-        }}
-        ips = build_exit_ip_map(external, family)
-        self.assertEqual(ips, {
-            "a:443#US": "1.1.1.1",
-            "b:443#US": "2.2.2.2",
-            "c:443#US": "2606:4700::1",
-        })
-        upstream = {"proxies": {
-            "1.1.1.1": {"country": "sg"},       # 小写规范化
-            "2.2.2.2": {"country": "HK"},
-        }}
-        m = build_exit_cc_map({}, external, upstream, family_data=family)
-        # upstream（第 2 层）胜过 ipinfo（末位兜底）
-        self.assertEqual(m["a:443#US"], "SG")
-        self.assertEqual(m["b:443#US"], "HK")
-        # c 无 upstream 观测 → 不受影响，且不产生幽灵键
-        self.assertNotIn("c:443#US", m)
-
-    def test_upstream_line_key_compat(self):
-        """upstream_meta 若直接为行键则原样命中。"""
+    def test_upstream_by_entry_ip(self):
+        """upstream_meta 键为代理（接入）裸 IP，按行键入口 IP 部分匹配。"""
         from common import build_exit_cc_map
+        upstream = {"proxies": {
+            "1.2.3.4": {"country": "sg"},       # 小写规范化
+            "9.9.9.9": {"country": "HK"},
+        }}
         m = build_exit_cc_map(
-            {}, {}, {"proxies": {"x:443#US": {"country": "FR"}}}, {}
+            {}, {}, upstream,
+            family_data={"proxies": {"9.9.9.9:443#JP": {"exit_v6": "2606::1"}}},
         )
-        self.assertEqual(m, {"x:443#US": "FR"})
+        # 行键入口 IP 命中 upstream；family 键被覆盖为 upstream 出口国
+        self.assertEqual(m["9.9.9.9:443#JP"], "HK")
+        # 无入口 IP 观测的行不受影响，不产生幽灵键
+        self.assertNotIn("10.0.0.1:443#JP", m)
+
+    def test_upstream_fills_ipinfo_backstop(self):
+        """upstream（第 2 层）胜过 ipinfo（末位兜底）。"""
+        from common import build_exit_cc_map
+        ipinfo = {"proxies": {"5.5.5.5:80#SG": {"country_code": "SG"}}}
+        upstream = {"proxies": {"5.5.5.5": {"country": "US"}}}
+        m = build_exit_cc_map(ipinfo, {}, upstream)
+        self.assertEqual(m["5.5.5.5:80#SG"], "US")
 
     def test_external_beats_upstream(self):
         from common import build_exit_cc_map

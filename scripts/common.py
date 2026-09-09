@@ -427,30 +427,6 @@ def upsert_exit_region(line: str, exit_region: str) -> str:
 # 覆盖率不足 1%）。
 
 
-def build_exit_ip_map(
-    external_check: dict | None = None,
-    family_data: dict | None = None,
-) -> dict[str, str]:
-    """``{行键: 出口 IP}``，与 quality_check.resolve_exit_ips 同优先级：
-
-    外部探测回显（``external_check.exit_geo.ip``）> exit_family 实测
-    （``exit_v4``/``exit_v6``）。两者皆无则不含该键。
-    """
-    result: dict[str, str] = {}
-    for key, info in (external_check or {}).get("proxies", {}).items():
-        ip = (info.get("exit_geo") if isinstance(info, dict) else None) or {}
-        ip = ip.get("ip") if isinstance(ip, dict) else None
-        if isinstance(ip, str) and ip:
-            result[key] = ip
-    for key, info in (family_data or {}).get("proxies", {}).items():
-        if key in result or not isinstance(info, dict):
-            continue
-        ip = info.get("exit_v4") or info.get("exit_v6")
-        if isinstance(ip, str) and ip:
-            result[key] = ip
-    return result
-
-
 def _norm_cc(v) -> str:
     """2 位字母国家码规范化；非法输入返回空串。"""
     return v.upper() if isinstance(v, str) and len(v) == 2 and v.isalpha() else ""
@@ -467,8 +443,8 @@ def build_exit_cc_map(
     1. ``external_check.json`` —— 外部探测接口直接回显的出口地理
        （``probe_results.ipv4.exit.country/countryCode``）
     2. ``upstream_meta.json`` —— 自有 CF Worker 观测到的代理出口国。
-       键为裸出口 IP 时经 ``build_exit_ip_map`` 解析到行键；
-       若直接为行键则原样使用（兼容）
+       键为代理（接入）裸 IP，值的 ``country`` 即该代理出站地理；
+       按行键的入口 IP 部分匹配（行键 ``ip:port#CC`` → 裸 ``ip``）
     3. ``ipinfo.json`` —— ``country_code``（ip-api 地理）。历史轮次可能是
        入口 IP 的地理，故仅作末位兜底
     （流媒体解锁国作为第 3 源已随解锁检查一并移除。）
@@ -480,12 +456,17 @@ def build_exit_cc_map(
         if cc and key not in result:
             result[key] = cc
 
+    candidate: set[str] = set()
     for key, info in (external_check or {}).get("proxies", {}).items():
+        candidate.add(key)
         geo = info.get("exit_geo") if isinstance(info, dict) else None
         if isinstance(geo, dict):
             put(key, geo.get("country") or geo.get("countryCode"))
+    for key, _info in (ipinfo or {}).get("proxies", {}).items():
+        candidate.add(key)
+    for key, _info in (family_data or {}).get("proxies", {}).items():
+        candidate.add(key)
 
-    # upstream_meta：{出口IP或行键: country}
     upstream_cc: dict[str, str] = {}
     for key, info in (upstream_meta or {}).get("proxies", {}).items():
         cc = info.get("country") if isinstance(info, dict) else None
@@ -493,10 +474,10 @@ def build_exit_cc_map(
         if cc:
             upstream_cc[key] = cc
     if upstream_cc:
-        for key, cc in upstream_cc.items():
-            put(key, cc)  # 行键直命中（兼容）
-        exit_ips = build_exit_ip_map(external_check, family_data)
-        for key, ip in exit_ips.items():
+        for key in candidate:
+            if key in result:
+                continue
+            ip = key.rsplit("#", 1)[0].rsplit(":", 1)[0]
             put(key, upstream_cc.get(ip))
 
     for key, info in (ipinfo or {}).get("proxies", {}).items():

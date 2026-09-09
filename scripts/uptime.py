@@ -39,9 +39,14 @@ def _today() -> str:
 
 
 def prune_days(days: dict[str, int], today: str) -> dict[str, int]:
-    """Drop run-date counters older than WINDOW_DAYS."""
+    """Drop run-date counters older than WINDOW_DAYS.
+
+    保留 ``[today-44, today]`` 共 ``WINDOW_DAYS``(45) 个去重运行日
+    （含今天当天；与 7/30 窗口的端点包含口径一致）。
+    """
     cutoff_d = (
-        datetime.strptime(today, "%Y-%m-%d").date().toordinal() - WINDOW_DAYS
+        datetime.strptime(today, "%Y-%m-%d").date().toordinal()
+        - (WINDOW_DAYS - 1)
     )
     out: dict[str, int] = {}
     for d, n in days.items():
@@ -56,9 +61,15 @@ def prune_days(days: dict[str, int], today: str) -> dict[str, int]:
 def merge_seen(
     seen: dict, alive_keys: list[str], today: str
 ) -> tuple[dict[str, list[str]], dict[str, int]]:
-    """Merge this round's alive keys into presence lists + run counters."""
+    """Merge this round's alive keys into presence lists + run counters.
+
+    ``alive_keys`` 为空（输入文件缺失/损坏 → 无存活输入）时本轮不计入
+    运行日：无质量轮不应稀释 ``pct7/pct30`` 分母（分母=实际有质量轮的
+    去重日期数）。上轮历史保留，仅当日计数跳过。
+    """
     days: dict[str, int] = dict(seen.get("runs", {}))
-    days[today] = days.get(today, 0) + 1
+    if alive_keys:
+        days[today] = days.get(today, 0) + 1
     days = prune_days(days, today)
     valid_dates = set(days)
 
@@ -109,7 +120,7 @@ def uptime_stats(
         return sum(
             1
             for d in dates
-            if today_ord - datetime.strptime(d, "%Y-%m-%d").date().toordinal()
+            if 0 <= today_ord - datetime.strptime(d, "%Y-%m-%d").date().toordinal()
             < window
         )
 

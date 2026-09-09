@@ -438,8 +438,12 @@ def cross_check(results: dict, upstream: dict) -> None:
         res["upstream_client_ip"] = client_ip
         res["upstream_family"] = up_family
         res["upstream_absent"] = False
+        # upstream 每次只观测单个出口（v4 或 v6），与双栈代理断言一致；
+        # 探测 family == dual 时对任一单侧均为宽松匹配，不算矛盾
         if res["family"] != "unknown" and up_family in ("ipv4", "ipv6"):
-            res["upstream_match"] = res["family"] == up_family
+            res["upstream_match"] = (
+                res["family"] == up_family or res["family"] == "dual"
+            )
         else:
             res["upstream_match"] = None
 
