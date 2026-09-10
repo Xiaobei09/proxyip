@@ -1465,6 +1465,18 @@ class TestReputationFiles(unittest.TestCase):
         self.assertFalse((cdir / "cn_rep.txt").exists())
         self.assertFalse((sdir / "cn4_rep_ltd.txt").exists())
 
+    def test_write_reputation_files_empty_source_unlinks(self):
+        # 空源（残留空目录）→ 空清单不落盘，不留 1 字节 "\n" 残留
+        cdir = self.tmp / "countries" / "US"
+        cdir.mkdir(parents=True)
+        (cdir / "all.txt").write_text("", encoding="utf-8")
+        (cdir / "rep.txt").write_text("stale\n", encoding="utf-8")
+        (cdir / "cn_ltd.txt").write_text("", encoding="utf-8")
+        (cdir / "cn_rep_ltd.txt").write_text("stale\n", encoding="utf-8")
+        qc.write_reputation_files("", {}, {})
+        self.assertFalse((cdir / "rep.txt").exists())
+        self.assertFalse((cdir / "cn_rep_ltd.txt").exists())
+
     def test_write_reputation_files_dir_rep_stale_cleaned(self):
         cdir = self.tmp / "countries" / "US"
         sdir = self.tmp / "sets" / "asia"
