@@ -65,6 +65,18 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python scripts/build_good.py
 
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。tests 步先于数据改动执行、抓不到改后状态，
+      # 此处对已落盘数据校验，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        if: steps.gate.outputs.skip != 'true' && steps.build.outcome == 'success'
+        run: >-
+          python -m unittest
+          tests.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
       - name: Show summary
         if: success() && steps.gate.outputs.skip != 'true'
         run: |
@@ -76,9 +88,9 @@ jobs:
           grep -oP '(?<=-)(fast|mid|slow)(?=-|$)' data/valid/all_ltd.txt 2>/dev/null | sort | uniq -c | sort -rn || true
 
       - name: Commit changes
-        # 闸门：仅当 annotate/build_good 均成功才提交——否则部分写入的
-        # data/valid/*.txt 与 good 清单会被推入库（自定义 if 会顶掉默认
+        # 闸门：仅当 annotate/build_good + CN 视图护栏均成功才提交——否则部分
+        # 写入的 data/valid/*.txt 与 good 清单会被推入库（自定义 if 会顶掉默认
         # success()，须显式恢复）
-        if: success() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success' && steps.build.outcome == 'success'
+        if: success() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success' && steps.build.outcome == 'success' && steps.verify.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
