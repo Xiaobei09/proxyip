@@ -293,6 +293,28 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertFalse((vp.VALID_DIR / "sets" / "hot.txt").exists())
         self.assertFalse((vp.VALID_DIR / "sets" / "hot_ltd.txt").exists())
 
+    def test_sets_empty_not_written_and_residue_removed(self):
+        # 空命名集合（所含国家全部缺席）不得产出 0 字节/单换行残留：
+        # 旧实现写 \"\\n\"，且此类文件在 data/valid（守卫覆盖）但未及写入端。
+        (vp.VALID_DIR / "sets" / "africa").mkdir(parents=True)
+        (vp.VALID_DIR / "sets" / "africa" / "all.txt").write_text("\n")
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 0.5, None),
+            "2.0.0.1:443#JP": ("2.0.0.1", "443", "JP", "tls", 80.0, 1.0, None),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        self.assertFalse((vp.VALID_DIR / "sets" / "africa" / "all.txt").exists())
+        self.assertFalse((vp.VALID_DIR / "sets" / "africa" / "ltd.txt").exists())
+        self.assertTrue((vp.VALID_DIR / "sets" / "hot" / "all.txt").exists())
+        self.assertTrue((vp.VALID_DIR / "all.txt").exists())
+
+    def test_empty_alive_no_residue_all_txt(self):
+        # 全池轮空时 all.txt 不写 \"\\n\" 残留（直接清理）
+        (vp.VALID_DIR).mkdir(parents=True, exist_ok=True)
+        (vp.VALID_DIR / "all.txt").write_text("\n")
+        vp.write_valid_outputs({}, per_country_limit=1)
+        self.assertFalse((vp.VALID_DIR / "all.txt").exists())
+
     def test_stale_flat_files_and_dirs_removed(self):
         (vp.VALID_DIR / "countries").mkdir(parents=True)
         (vp.VALID_DIR / "sets").mkdir(parents=True)

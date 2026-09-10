@@ -76,7 +76,7 @@ MAX_HISTORY_RECORDS,
     rewrite_latency,
     write_text_if_changed,
 )
-from download_proxies import COUNTRY_SETS, SMALL_SETS
+from download_proxies import COUNTRY_SETS, SMALL_SETS, write_entries_list
 
 SPEED_HOST = "cdnjs.cloudflare.com"
 TARGET_SNI = SPEED_HOST
@@ -1022,9 +1022,7 @@ def write_valid_outputs(
         full = [e for e in ordered if alive[e][2] in cc_set]
         sdir = sets_dir / name
         sdir.mkdir(parents=True, exist_ok=True)
-        write_text_if_changed(
-            sdir / "all.txt", "\n".join(line(e) for e in full) + "\n"
-        )
+        write_entries_list(sdir / "all.txt", [line(e) for e in full])
         set_counts[name] = len(full)
         grouped = group_map(full)
         set_group_ltd = {
@@ -1046,9 +1044,7 @@ def write_valid_outputs(
                 if cc in country_ltd:
                     ltd.extend(country_ltd[cc])
             ltd = sorted(ltd, key=ltd_key)
-            write_text_if_changed(
-                sdir / "ltd.txt", "\n".join(line(e) for e in ltd) + "\n"
-            )
+            write_entries_list(sdir / "ltd.txt", [line(e) for e in ltd])
             write_variant(sdir, "ltd_verified", [e for e in ltd if is_verified(e)])
             write_variant(sdir, "ltd_stable", [e for e in ltd if is_stable(e)])
             set_counts[f"{name}_ltd"] = len(ltd)
@@ -1060,7 +1056,7 @@ def write_valid_outputs(
         else:
             stale.unlink()
 
-    write_text_if_changed(VALID_DIR / "all.txt", "\n".join(line(e) for e in ordered) + "\n")
+    write_entries_list(VALID_DIR / "all.txt", [line(e) for e in ordered])
     set_counts["all"] = len(ordered)
 
     # 全链路验证子集：测速成功 = TLS + HTTP 2xx + 真实下载全部通过，
