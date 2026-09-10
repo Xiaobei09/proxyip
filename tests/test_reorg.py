@@ -145,6 +145,20 @@ class TestReorganizeFile(unittest.TestCase):
         stats = {"moved": 0, "files_written": 0}
         rc.reorganize_file(self.country_dir / "ZZ" / "all.txt", {}, stats)
 
+    def test_all_moved_out_unlinks_source(self):
+        # 出口观测覆盖全文件 → 源文件清空不落盘，不留 0 字节残留
+        us = self.country_dir / "US" / "all.txt"
+        self._write("valid/countries/US/all.txt",
+                    ["1.1.1.1:443#US", "2.2.2.2:443#US"])
+        stats = {"moved": 0, "files_written": 0}
+        rc.reorganize_file(
+            us, {"1.1.1.1:443#US": "DE", "2.2.2.2:443#US": "DE"}, stats
+        )
+        self.assertFalse(us.exists())
+        self.assertEqual(self._read("valid/countries/DE/all.txt"),
+                         ["1.1.1.1:443#US→DE", "2.2.2.2:443#US→DE"])
+        self.assertEqual(stats["moved"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

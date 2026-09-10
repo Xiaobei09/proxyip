@@ -41,7 +41,8 @@ class TestReconcileViews(unittest.TestCase):
             (valid / "ports" / "443.txt").read_text(encoding="utf-8"),
             "1.1.1.1:443#US\n",
         )
-        self.assertEqual((valid / "ports" / "85.txt").read_text(encoding="utf-8"), "")
+        # 越界行全数剔除 → 清空不落盘（不写 0 字节残留）
+        self.assertFalse((valid / "ports" / "85.txt").exists())
 
     def test_key_compare_ignores_note_differences(self):
         d, valid = self._tree(
