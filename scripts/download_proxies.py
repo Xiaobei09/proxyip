@@ -556,6 +556,14 @@ def merge_by_port(base: dict, extra: dict) -> dict:
     return base
 
 
+def write_entries_list(path: Path, entries) -> None:
+    """写清单；空清单不落盘并清理残留（避免 0 字节 / 单换行残留文件）。"""
+    if entries:
+        write_text_if_changed(path, "\n".join(entries) + "\n")
+    elif path.exists():
+        path.unlink()
+
+
 def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> tuple[dict, set]:
     print("[3/3] Writing output files ...")
     # 只维护 Cloudflare 边缘常用端口：其余端口桶（来自 zip 回退或 extra 源
@@ -640,11 +648,11 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
             if per_country_limit > 0:
                 ltd_entries.update(cc_entries[:per_country_limit])
         full_entries = sorted(full_entries, key=ip_sort_key)
-        write_text_if_changed(SETS_DIR / f"{name}.txt", "\n".join(full_entries) + "\n")
+        write_entries_list(SETS_DIR / f"{name}.txt", full_entries)
         set_counts[name] = len(full_entries)
         if per_country_limit > 0:
             ltd_entries = sorted(ltd_entries, key=ip_sort_key)
-            write_text_if_changed(SETS_DIR / f"{name}_ltd.txt", "\n".join(ltd_entries) + "\n")
+            write_entries_list(SETS_DIR / f"{name}_ltd.txt", ltd_entries)
             set_counts[f"{name}_ltd"] = len(ltd_entries)
     expected_sets = {f"{n}.txt" for n in all_sets} | {f"{n}_ltd.txt" for n in all_sets}
     for stale in SETS_DIR.iterdir():
@@ -655,7 +663,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         {e for entries in by_country.values() for e in entries} | all_only,
         key=ip_sort_key,
     )
-    write_text_if_changed(ALL_FILE, "\n".join(all_entries) + "\n")
+    write_entries_list(ALL_FILE, all_entries)
     set_counts["all"] = len(all_entries)
     if per_country_limit > 0:
         all_ltd_entries = {
@@ -664,9 +672,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
             for e in sorted(by_country[cc], key=ip_sort_key)[:per_country_limit]
         }
         all_ltd_entries.update(sorted(all_only, key=ip_sort_key)[:per_country_limit])
-        write_text_if_changed(
-            ALL_LTD_FILE, "\n".join(sorted(all_ltd_entries, key=ip_sort_key)) + "\n"
-        )
+        write_entries_list(ALL_LTD_FILE, sorted(all_ltd_entries, key=ip_sort_key))
         set_counts["all_ltd"] = len(all_ltd_entries)
     stats["__total__"] = total
     stats["__unique__"] = len(

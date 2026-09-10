@@ -104,6 +104,29 @@ class TestReconcileViews(unittest.TestCase):
         d, valid = self._tree(all_lines=[], ports={"443.txt": ["9.9.9.9:443#US"]})
         self.assertEqual(reconcile_views(valid), 0)
 
+    def test_newline_only_file_pruned_as_empty(self):
+        # 空集合曾以 \"\\n\" 形式（1 字节）落盘；空行不是主集成员，
+        # prune 须将其视为空文件整体清除（此前空行被\"保留\"，残留永不愈合）。
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US"],
+            ports={"443.txt": [""]},
+        )
+        (valid / "ports" / "443.txt").write_text("\n", encoding="utf-8")
+        removed = reconcile_views(valid)
+        self.assertEqual(removed, 1)
+        self.assertFalse((valid / "ports" / "443.txt").exists())
+        # 混有真实行 + 空行的文件：空行剔除、真实行保留
+        d2, valid2 = self._tree(
+            all_lines=["1.1.1.1:443#US"],
+            ports={"443.txt": ["1.1.1.1:443#US", ""]},
+        )
+        removed = reconcile_views(valid2)
+        self.assertEqual(removed, 1)
+        self.assertEqual(
+            (valid2 / "ports" / "443.txt").read_text(encoding="utf-8"),
+            "1.1.1.1:443#US\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

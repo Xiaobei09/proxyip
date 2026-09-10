@@ -222,7 +222,7 @@ def reconcile_views(valid_dir: Path) -> int:
         lines = path.read_text(encoding="utf-8").splitlines()
         kept = [
             line for line in lines
-            if not line or line.split("#", 1)[0] in master
+            if line and line.split("#", 1)[0] in master
         ]
         if len(kept) != len(lines):
             removed += len(lines) - len(kept)
