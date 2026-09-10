@@ -27,9 +27,16 @@ class TestNoEmptyResidueFiles(unittest.TestCase):
         for path in sorted(VALID_DIR.rglob("*.txt")):
             size = os.path.getsize(path)
             if size == 0:
-                offenders.append(f"{path.relative_to(DATA_DIR)} (0 bytes)")
+                offenders.append(f"{self._rel(path)} (0 bytes)")
             elif size == 1 and path.read_text(encoding="utf-8") == "\n":
-                offenders.append(f"{path.relative_to(DATA_DIR)} (newline-only)")
+                offenders.append(f"{self._rel(path)} (newline-only)")
         self.assertEqual(
             offenders, [], "空清单残留文件不应入库：\n" + "\n".join(offenders)
         )
+
+    @staticmethod
+    def _rel(path: Path) -> str:
+        try:
+            return str(path.relative_to(VALID_DIR))
+        except ValueError:
+            return str(path)
