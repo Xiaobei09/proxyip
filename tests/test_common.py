@@ -14,6 +14,7 @@ from common import (
     cn_display_ms,
     cn_l2_ms,
     cn_mainland_ok,
+    clear_note_buckets,
     line_to_key,
     merge_note_tokens,
     normalize_note,
@@ -109,6 +110,23 @@ class TestNormalizeNote(unittest.TestCase):
         self.assertEqual(
             normalize_note(line),
             "1.2.3.4:443#🇺🇸US-50ms-70-112",
+        )
+
+    def test_score_100_parsed_and_clearable(self):
+        # 官方信誉分上界含 100（深测带宽加成可达满分）：须落入 score 桶，
+        # 否则 clear_note_buckets 的 score 桶清不掉它，会与新版分值叠罗汉
+        # （同 test_collapses_historical_snapshots 的旧 token 堆叠风险）。
+        line = "1.2.3.4:443#🇺🇸US-50ms-1.00MB/s-CN-100-U16"
+        self.assertEqual(
+            normalize_note(line),
+            "1.2.3.4:443#🇺🇸US-50ms-1.00MB/s-CN-100-U16",
+        )
+        # 分数回落到 60：100 能被 score 桶清除，不残留 "-100-60" 双分
+        cleared = clear_note_buckets(line, "score")
+        self.assertNotIn("-100", cleared)
+        self.assertEqual(
+            merge_note_tokens(cleared, "60"),
+            "1.2.3.4:443#🇺🇸US-50ms-1.00MB/s-CN-60-U16",
         )
 
     def test_family_rightmost(self):
