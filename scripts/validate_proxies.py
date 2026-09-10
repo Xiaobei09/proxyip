@@ -1074,9 +1074,7 @@ def write_valid_outputs(
         ltd_all = sorted(
             [e for cc in country_ltd for e in country_ltd[cc]], key=ltd_key
         )
-        write_text_if_changed(
-            VALID_DIR / "all_ltd.txt", "\n".join(line(e) for e in ltd_all) + "\n"
-        )
+        write_entries_list(VALID_DIR / "all_ltd.txt", [line(e) for e in ltd_all])
         set_counts["all_ltd"] = len(ltd_all)
         ltd_ver = [e for e in ltd_all if is_verified(e)]
         ltd_sta = [e for e in ltd_all if is_stable(e)]
