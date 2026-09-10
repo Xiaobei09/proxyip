@@ -29,6 +29,28 @@ class TestParseTrace(unittest.TestCase):
         self.assertEqual(ef.parse_trace(b""), {})
 
 
+class TestWriteLines(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp(prefix="ef_write_")) / "all_ipv6.txt"
+
+    def test_empty_unlinks_not_writes(self):
+        # 对应家族无代理 → 清空不落盘，不留 0 字节残留
+        self.path.write_text("1.1.1.1:443#US\n", encoding="utf-8")
+        ef.write_lines(self.path, [])
+        self.assertFalse(self.path.exists())
+
+    def test_missing_noop(self):
+        ef.write_lines(self.path, [])
+        self.assertFalse(self.path.exists())
+
+    def test_nonempty_writes(self):
+        ef.write_lines(self.path, ["1.1.1.1:443#US", "2.2.2.2:443#US"])
+        self.assertEqual(
+            self.path.read_text(encoding="utf-8"),
+            "1.1.1.1:443#US\n2.2.2.2:443#US\n",
+        )
+
+
 class TestClassify(unittest.TestCase):
     def test_classify(self):
         self.assertEqual(ef.classify_family("1.2.3.4", None), "ipv4")

@@ -449,7 +449,11 @@ def cross_check(results: dict, upstream: dict) -> None:
 
 
 def write_lines(path: Path, lines: list) -> None:
-    write_text_if_changed(path, "\n".join(lines) + ("\n" if lines else ""))
+    if not lines:
+        # 空清单不落盘（对应家族无代理时清理残留，避免 0 字节文件）
+        path.unlink(missing_ok=True)
+        return
+    write_text_if_changed(path, "\n".join(lines) + "\n")
 
 
 def annotate_source_files(families: dict, source: Path) -> None:

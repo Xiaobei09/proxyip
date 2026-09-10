@@ -115,7 +115,11 @@ def reorganize_file(
             keep.append(raw)
     if not moves and not changed:
         return
-    write_text_if_changed(path, "\n".join(keep) + "\n" if keep else "")
+    # 出口观测覆盖全文件（线全部迁走/改标）→ 清空不落盘，避免 0 字节残留
+    if keep:
+        write_text_if_changed(path, "\n".join(keep) + "\n")
+    elif path.exists():
+        path.unlink()
     stats["files_written"] += 1
     # Append moved lines to exit-country counterpart
     for new_cc, new_lines in moves.items():

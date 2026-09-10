@@ -226,8 +226,12 @@ def reconcile_views(valid_dir: Path) -> int:
         ]
         if len(kept) != len(lines):
             removed += len(lines) - len(kept)
-            text = "\n".join(kept) + ("\n" if kept else "")
-            write_text_if_changed(path, text)
+            if not kept:
+                # 越界行全数剔除 → 清空不落盘（避免 0 字节残留）
+                if path.exists():
+                    path.unlink()
+            else:
+                write_text_if_changed(path, "\n".join(kept) + "\n")
 
     for port_txt in sorted((valid_dir / "ports").glob("*.txt")):
         prune(port_txt)
