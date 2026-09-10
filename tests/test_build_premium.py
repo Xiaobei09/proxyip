@@ -243,7 +243,8 @@ class TestWritePremiumFiles(unittest.TestCase):
             (valid / "all.txt").write_text(self.POOL, encoding="utf-8")
             stats = bp.write_premium_files(valid, set(), {}, {})
             self.assertEqual(stats["all_premium"], 0)
-            self.assertEqual((valid / "all_premium.txt").read_text(), "")
+            # 空清单不落盘（不写 0 字节文件）
+            self.assertFalse((valid / "all_premium.txt").exists())
 
     def test_family_branches_written_and_cleaned(self):
         POOL = (

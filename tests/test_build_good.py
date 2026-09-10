@@ -454,7 +454,25 @@ class TestWriteGoodFiles(unittest.TestCase):
             (valid / "all.txt").write_text(self.POOL, encoding="utf-8")
             stats = bg.write_good_files(valid, set(), {})
             self.assertEqual(stats["all_good"], 0)
-            self.assertEqual((valid / "all_good.txt").read_text(), "")
+            # 空清单不落盘（不写 0 字节文件），避免仓库堆积空壳订阅文件
+            self.assertFalse((valid / "all_good.txt").exists())
+
+    def test_write_good_file_empty_cleans_up(self):
+        """write_good_file：空清单清理残留、不写 0 字节文件；非空正常写。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale = root / "good.txt"
+            stale.write_text("9.9.9.9:80#US\n", encoding="utf-8")
+            self.assertEqual(bg.write_good_file(stale, []), 0)
+            self.assertFalse(stale.exists())
+            fresh = root / "good.txt"
+            self.assertEqual(bg.write_good_file(fresh, []), 0)
+            self.assertFalse(fresh.exists())
+            real = root / "good.txt"
+            self.assertEqual(
+                bg.write_good_file(real, ["1.1.1.1:443#US-80ms-CN-90"]), 1)
+            self.assertEqual(real.read_text(encoding="utf-8"),
+                             "1.1.1.1:443#US-80ms-CN-90\n")
 
     def test_main_stamps_good_meta(self):
         with tempfile.TemporaryDirectory() as tmp:
