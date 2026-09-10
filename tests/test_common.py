@@ -289,6 +289,32 @@ class TestCnDisplayMs(unittest.TestCase):
         e = {"sources": {"chinaz": {"status": "ok", "ms": 1.0}}}
         self.assertIsNone(cn_display_ms(e))
 
+    def test_icmp_level_source_never_used_as_latency(self):
+        # coffee/pingloc/antping 的聚合结果带 level="icmp"：即便 ms≈45 也不得
+        # 冒充大陆延迟（ICMP 到 IP 边缘 ≠ 隧道/代理延迟），应整源剔除
+        e = {"sources": {"coffee": {"status": "ok", "ok": True, "ms": 45.0, "level": "icmp"}}}
+        self.assertIsNone(cn_display_ms(e))
+        self.assertIsNone(_cn_fallback_ms(e, e["sources"]))
+
+    def test_icmp_level_excluded_even_when_tcp_absent(self):
+        # 混合源：纯 ICMP 的 coffee 不参与，TCP 的 tcpingcn 才是候选
+        e = {"sources": {
+            "coffee": {"status": "ok", "ok": True, "ms": 4.2, "level": "icmp"},
+            "tcpingcn": {"status": "ok", "ok": True, "ms": 34.0, "level": "tcp"},
+        }}
+        self.assertEqual(cn_display_ms(e), 34.0)
+
+    def test_pingpe_icmp_excluded_by_name(self):
+        # pingpe 结果不带 level 字段（仅有 ms），须按名称剔除，不得 US-8ms 失真
+        e = {"sources": {"pingpe": {"status": "ok", "ok": True, "ms": 8.0}}}
+        self.assertIsNone(cn_display_ms(e))
+        # 有真实 TCP 源时 pingpe 不再干扰取值
+        e2 = {"sources": {
+            "pingpe": {"status": "ok", "ok": True, "ms": 8.0},
+            "tcptest": {"status": "ok", "ok": True, "ms": 50.0, "level": "tcp"},
+        }}
+        self.assertEqual(cn_display_ms(e2), 50.0)
+
 
 class TestMergeNoteTokens(unittest.TestCase):
     def test_append_missing_tokens_normalized(self):

@@ -773,8 +773,11 @@ CN_LATENCY_CAP_MS = 150.0
 _CHINA_VANTAGE_SOURCES = ("xxapi", "jkapi", "check_host")
 
 # chinaz 为 **纯 ICMP ping**（proxyip 不可达的"到 IP 边缘路由"延迟，常说 1~8ms，
-# 与真实代理/隧道延迟无关，反直觉地极小）。绝不用它冒充大陆延迟；回退时剔除。
-_CN_ICMP_ONLY_SOURCES = ("chinaz",)
+# 与真实代理/隧道延迟无关，反直觉地极小）；pingpe 同为大陆节点 ICMP 且结果
+# 不带 level 字段，只能按名称剔除。其余源若带 ``level="icmp"`` 由
+# ``_cn_fallback_ms`` 按 level 过滤，防止 coffee/pingloc/antping 等复用站点
+# 的 ICMP RTT 冒充大陆延迟（曾理论可漏入 US-4ms 式失真行）。
+_CN_ICMP_ONLY_SOURCES = ("chinaz", "pingpe")
 
 
 def cn_l2_ms(entry) -> float | None:
@@ -808,6 +811,9 @@ def _cn_fallback_ms(entry, sources: dict) -> float | None:
     best = None
     for name, r in sources.items():
         if name in _CN_ICMP_ONLY_SOURCES:
+            continue
+        if (isinstance(r, dict) and r.get("level") == "icmp"
+                and r.get("status") == "ok"):
             continue
         if (isinstance(r, dict) and r.get("status") == "ok"
                 and isinstance(r.get("ms"), (int, float))
