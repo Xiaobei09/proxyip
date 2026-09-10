@@ -162,6 +162,44 @@ class TestWriteOutputs(unittest.TestCase):
         self.assertFalse(dp.ALL_LTD_FILE.exists())
         self.assertFalse((dp.SETS_DIR / "europe_ltd.txt").exists())
 
+    def test_empty_sets_not_written_and_residue_removed(self):
+        """空命名集合不得产出 0 字节/单换行残留（data/download 已跟踪）。
+
+        如 oceania 集（AU/NZ）无可达国家时，不得写 ``\\n``；此前遗留的
+        单换行文件应被清理——reconcile_views.prune 视空行为主集成员，无法
+        自行愈合，故写入端直接不落盘并 unlink。
+        """
+        import tempfile
+
+        base = Path(tempfile.mkdtemp(prefix="dp_"))
+        for k in self.orig:
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        dp.SETS_DIR.mkdir(parents=True, exist_ok=True)
+        prev_residue = dp.SETS_DIR / "oceania.txt"
+        prev_residue_ltd = dp.SETS_DIR / "oceania_ltd.txt"
+        prev_residue.write_text("\n")
+        prev_residue_ltd.write_text("\n")
+        by_port = {"443": {"US": ["1.1.1.1"], "JP": ["2.2.2.2"]}}
+        dp.write_outputs(by_port, per_country_limit=1)
+        self.assertFalse((dp.SETS_DIR / "oceania.txt").exists())
+        self.assertFalse((dp.SETS_DIR / "oceania_ltd.txt").exists())
+        # 有成员的非空集合正常落盘
+        self.assertTrue((dp.SETS_DIR / "cn_common.txt").exists())
+        self.assertEqual(
+            (dp.SETS_DIR / "cn_common.txt").read_text().splitlines(),
+            ["1.1.1.1:443#US", "2.2.2.2:443#JP"],
+        )
+        # 根级 all.txt/all_ltd.txt 非空正常写
+        self.assertTrue(dp.ALL_FILE.exists())
+        self.assertTrue(dp.ALL_LTD_FILE.exists())
+        # 任何生成的集合文件都不得是 0 字节或单换行
+        for f in (dp.SETS_DIR / "africa.txt", dp.SETS_DIR / "europe.txt"):
+            self.assertFalse(f.exists())
+
 
 class TestExtractJson(unittest.TestCase):
     def _json(self, entries: list[dict]) -> bytes:
