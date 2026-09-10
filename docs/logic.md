@@ -383,10 +383,19 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 ### 8.3 门控逻辑
 
-下游 workflow 仅做**竞态去重**：用 `gh run list` 查同工作流是否有更新的
-in_progress/queued 运行，有则让位（旧运行自动跳过），防止积压排队。
+所有 workflow 共用两层门控（`gh run list` 竞态去重 + 可选触发者状态闸）：
 
-刻意**不因触发者失败而跳过**：下游脚本从仓库 checkout 的自洽数据运行
-（all.txt 与各 JSON 均为上次成功轮的完整快照），quality 单次失败不应
-冻结 CN 连通性追踪与后缀应用——否则 IP 未变更期间 stable 永远无法累积、
-信誉/家族等新数据也无法及时反映到清单后缀。
+1. **竞态去重**：用 `gh run list` 查同工作流是否有更新的 in_progress/queued
+   运行，有则让位（旧运行自动跳过），防止积压排队。
+2. **触发者状态闸（仅 `workflow_run` 链）**：quality-check（←update-proxies）、
+   exit-family / annotate-classify（←quality-check）、build-good（←quality/
+   china）、stats（←quality/china/exit-family/build-good）在触发工作流
+   conclusion 非 success 时**跳过**——上游失败说明本轮没有新的数据产物，
+   无需浪费一次下游重算。
+
+刻意**不因触发者失败而跳过**的只有 `china-check.yml`：它已改为纯 schedule
+驱动（每小时 11 分自启，见 8.1），不再挂 `workflow_run` 链——因此它没有
+"触发者"概念。独立心跳保证上游失败或 IP 长期未变更时 stable 仍按小时
+累积，否则 IP 未变更期间 stable 永远无法累积、信誉/家族等新数据也无法
+及时反映到清单后缀。该链从仓库 checkout 的自洽数据运行（all.txt 与各
+JSON 均为上次成功轮的完整快照），单次失败不冻结 CN 连通性追踪。
