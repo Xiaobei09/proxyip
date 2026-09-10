@@ -235,8 +235,12 @@ def top_slice(lines: list[str], frac: float = 0.25,
 
 
 def write_good_file(path: Path, lines: list[str]) -> int:
-    content = "\n".join(lines) + "\n" if lines else ""
-    write_text_if_changed(path, content)
+    """Write ``lines`` to ``path``; empty list cleans up instead of leaving a
+    0-byte file (consistent with "空清单不落盘并清理残留")."""
+    if not lines:
+        path.unlink(missing_ok=True)
+        return 0
+    write_text_if_changed(path, "\n".join(lines) + "\n")
     return len(lines)
 
 
