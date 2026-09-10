@@ -272,8 +272,11 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
     stable_keys = load_china_stable_keys()
 
     def emit(base: Path, lines: list[str]) -> None:
-        """写清单本体 + verified/stable 变体（空变体清理旧文件）。"""
-        write_text_if_changed(base, "\n".join(lines) + "\n")
+        """写清单本体 + verified/stable 变体（空清单/空变体清理旧文件）。"""
+        if lines:
+            write_text_if_changed(base, "\n".join(lines) + "\n")
+        elif base.exists():
+            base.unlink()
         for suffix, keys in (("_verified", speed_keys), ("_stable", stable_keys)):
             vpath = base.with_name(f"{base.stem}{suffix}.txt")
             vlines = [ln for ln in lines if (k := line_to_key(ln)) and k in keys]
@@ -343,14 +346,18 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
         for g in REP_GROUP_NAMES:
             for src in sorted((valid_root / sub).glob(f"*/{g}.txt")):
                 r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
-                write_text_if_changed(
-                    src.with_name(f"{g}_rep.txt"), "\n".join(r) + "\n"
-                )
+                rep_path = src.with_name(f"{g}_rep.txt")
+                if r:
+                    write_text_if_changed(rep_path, "\n".join(r) + "\n")
+                elif rep_path.exists():
+                    rep_path.unlink()
             for src in sorted((valid_root / sub).glob(f"*/{g}_ltd.txt")):
                 r = build_ranked(src.read_text(encoding="utf-8"), annotations, rep_map)
-                write_text_if_changed(
-                    src.with_name(f"{g}_rep_ltd.txt"), "\n".join(r) + "\n"
-                )
+                rep_path = src.with_name(f"{g}_rep_ltd.txt")
+                if r:
+                    write_text_if_changed(rep_path, "\n".join(r) + "\n")
+                elif rep_path.exists():
+                    rep_path.unlink()
             for stale in sorted((valid_root / sub).glob(f"*/{g}_rep.txt")):
                 if not stale.with_name(f"{g}.txt").exists():
                     stale.unlink()
