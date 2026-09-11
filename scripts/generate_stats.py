@@ -20,7 +20,8 @@ Reads ``data/quality/history.jsonl`` and ``data/valid/history.jsonl`` plus
 - ``chart_source_stats.svg`` per-download-source IP count & overlap (stacked bars)
 - ``chart_rep.svg``          reputation score distribution (vertical bars)
 - ``chart_country_speed.svg`` per-country median speed (horizontal bars)
-- ``chart_speed_spread.svg`` latency-vs-speed cluster scatter
+- ``chart_speed_spread.svg`` per-country speed divergence top 20
+                            (IQR spread (p75-p25)/p50 as %)
 
 Line charts share a real-time x axis (series lacking usable timestamps fall
 back to index spacing), zoom each y-axis to its data range so small variations
