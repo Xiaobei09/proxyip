@@ -844,6 +844,26 @@ def cn_display_ms(entry) -> float | None:
     return m if isinstance(m, (int, float)) and m > 2.0 else None
 
 
+def cn_fastest_ms(entry) -> float | None:
+    """最快运营商视角的大陆 RTT：``entry["isp_ms"]``（``{运营商: ms}``，
+    china-check 由 itdog 等 per-ISP 节点汇聚写入）的各运营商最小 RTT 中取
+    全局最小；无 per-ISP 读数时回退 :func:`cn_display_ms`。
+
+    消费方：CN 清单的展示延迟与 ``≈XMB/s`` 速度估算——"最快运营商"即大陆
+    用户体验上界，规避单节点/单 ISP 视角失真；对 1~2ms ICMP 噪声同样拒绝
+    （strict > 2.0）。"""
+    if isinstance(entry, dict):
+        im = entry.get("isp_ms")
+        if isinstance(im, dict):
+            vals = [
+                v for v in im.values()
+                if isinstance(v, (int, float)) and v > 2.0
+            ]
+            if vals:
+                return min(vals)
+    return cn_display_ms(entry)
+
+
 def cn_mainland_ok(ms, cap: float | None = None) -> bool:
     """大陆视角 RTT 是否落在大陆簇（≤ cap）。无数值/非正按非大陆。"""
     if cap is None:

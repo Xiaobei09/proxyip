@@ -50,7 +50,7 @@ from common import (
     LATENCY_RE,
     REPUTATION_FILE,
     SPEED_RE,
-    cn_display_ms,
+    cn_fastest_ms,
     line_to_key,
     load_china_stable_keys,
     load_speed_keys,
@@ -128,7 +128,7 @@ def build_china_set(data: dict) -> set[str]:
     """``china.json`` -> 当期全可达集。
 
     CN good-tier 与 all_cn.txt 口径一致：清单保持完整（全可达集，≥1 万），
-    不按延迟门槛精简；延迟/速度语义交给 cn_display_ms —— 每行展示大陆视角
+    不按延迟门槛精简；延迟/速度语义交给 cn_fastest_ms —— 每行展示大陆视角
     实测读数而非海外 TLS 值。
     """
     result: set[str] = set()
@@ -139,10 +139,10 @@ def build_china_set(data: dict) -> set[str]:
 
 
 def build_cn_ms_map(data: dict) -> dict[str, float]:
-    """``china.json`` -> ``{key: 大陆实测 ms}``（优先可信探测，过滤噪声）。"""
+    """``china.json`` -> ``{key: 大陆实测 ms}``（最快运营商优先，同 all_cn.txt）。"""
     result: dict[str, float] = {}
     for key, entry in data.get("proxies", {}).items():
-        ms = cn_display_ms(entry)
+        ms = cn_fastest_ms(entry)
         if ms is not None:
             result[key] = ms
     return result
@@ -161,7 +161,7 @@ def is_cn_reachable(key: str | None, line: str, china_set: set[str]) -> bool:
 def to_cn_view(lines: list[str], cn_ms: dict | None) -> list[str]:
     """CN 视图：行内 ms 换成大陆实测（可信探测优先），速度换 ``≈XMB/s`` 估算。
 
-    与 all_cn.txt 同口径（common.cn_display_ms / _rewrite_cn_speed），
+    与 all_cn.txt 同口径（common.cn_fastest_ms / _rewrite_cn_speed），
     保证"每个 CN 文件用大陆延迟和速度"；无读数键速度 token 删除而非冒充。
     ``cn_ms`` 为空时原样返回。
     """

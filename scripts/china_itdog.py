@@ -44,28 +44,39 @@ def itdog_md5_16(s: str) -> str:
     return hashlib.md5(s.encode()).hexdigest()[8:24]
 
 
-def itdog_parse_nodes(html: str, per_isp: int) -> list[str]:
-    """从 batch_http 页面 optgroup 提取各大陆运营商节点 id。
+def itdog_parse_nodes_pairs(html: str, per_isp: int) -> list[tuple[str, str]]:
+    """从 batch_http 页面 optgroup 提取 ``(节点 id, 运营商标签)`` 对。
 
     每组按等距 stride 采样 ``per_isp`` 个（节点列表大致按省份排序，
     等距取样可覆盖南北方而非只取列表头部），不足则全取。
     """
-    ids: list[str] = []
+    pairs: list[tuple[str, str]] = []
     for label in ITDOG_ISP_GROUPS:
         m = re.search(r'<optgroup label="%s">(.*?)</optgroup>' % label, html, re.S)
         if not m:
             continue
         opts = re.findall(r'<option[^>]*value="([^"]+)"', m.group(1))
         stride = max(1, len(opts) // per_isp) if per_isp > 0 else 1
-        ids.extend(opts[::stride][:per_isp])
-    return ids
+        pairs.extend((oid, label) for oid in opts[::stride][:per_isp])
+    return pairs
 
 
-def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> list[str]:
+def itdog_parse_nodes(html: str, per_isp: int) -> list[str]:
+    """提取各大陆运营商节点 id（等价于 ``itdog_parse_nodes_pairs`` 的 id 列表）。"""
+    return [nid for nid, _ in itdog_parse_nodes_pairs(html, per_isp)]
+
+
+def itdog_isp_map(html: str, per_isp: int) -> dict[str, str]:
+    """``节点 id -> 运营商`` 映射（与 itdog_parse_nodes 同采样口径）。"""
+    return dict(itdog_parse_nodes_pairs(html, per_isp))
+
+
+def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> tuple[list[str], dict[str, str]]:
     """拉取当前节点列表（节点 id 会轮换，必须每次运行现取）。
 
     itdog.cn 对无头/GitHub 出口有指纹与会话风控：先 warmup 首页换 Cookie，
-    再用完整浏览器指纹请求批量页。风控放行则返回节点 id 列表，否则 []。
+    再用完整浏览器指纹请求批量页。风控放行则返回 ``(节点 id 列表, 节点->运营商映射)``，
+    否则 ``([], {})``。
     """
     hdrs = {
         "User-Agent": UA,
@@ -94,13 +105,14 @@ def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> list[str
     for _ in range(2):
         try:
             _, _, body = request_follow(page_url, hdrs, 20)
-            ids = itdog_parse_nodes(body.decode("utf-8", "replace"), per_isp)
+            html = body.decode("utf-8", "replace")
+            ids = itdog_parse_nodes(html, per_isp)
             if ids:
-                return ids
+                return ids, itdog_isp_map(html, per_isp)
         except Exception as exc:
             logging.debug("itdog fetch nodes: %s", exc)
         time.sleep(2)
-    return []
+    return [], {}
 
 
 def itdog_parse_submit(html: str) -> tuple[str | None, str]:
@@ -354,7 +366,35 @@ def itdog_rec_ok(rec: dict) -> tuple[bool | None, float | None, str | None]:
     return False, None, None
 
 
-def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
+# node_name/选项文案常见的运营商短名 → 规范标签（兼容「山东济南 - 联通」等）
+_ITDOG_ISP_KEYWORDS = {
+    "电信": "中国电信", "联通": "中国联通", "移动": "中国移动",
+    **{label: label for label in ITDOG_ISP_GROUPS},
+}
+
+
+def _itdog_rec_isp(rec: dict, node_isp: dict | None) -> str | None:
+    """单节点记录归属运营商：优先按 ``node_id`` 对照采样映射，未知 id 回退
+    记录里 ``node_name``/``node`` 字段的运营商关键词扫描（兼容 id 回声不一致
+    的节点）。两者都判不出返回 None——该记录不贡献 per-ISP RTT。
+    """
+    if isinstance(node_isp, dict):
+        nid = rec.get("node_id")
+        if isinstance(nid, str):
+            isp = node_isp.get(nid)
+            if isp:
+                return isp
+    for field in ("node_name", "node"):
+        name = rec.get(field)
+        if isinstance(name, str):
+            for kw, label in _ITDOG_ISP_KEYWORDS.items():
+                if kw in name:
+                    return label
+    return None
+
+
+def itdog_aggregate(records: list[dict], n_targets: int,
+                    node_isp: dict | None = None) -> dict:
     """按 task_num 聚合节点结果 → ``{task_num: source_result}``。
 
     ``level`` 反映证据强度：任一成功节点拿到 http_code → ``"http"``，
@@ -363,6 +403,10 @@ def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
     ``ok_nodes``/``nodes``/``ratio``：成功节点数与总节点数及比值——
     供 merge_verdict 做"单节点假阳性"抑制（例如仅 1/18 大陆节点可达
     不应独立支撑 reachable 判定）。
+
+    ``isp_ms``：per-ISP 最小 RTT（``{运营商: ms}``），供 china.json 落
+    per-key ``isp_ms`` 与最快运营商视角的速度估算；判不出运营商或全无读数
+    时为 ``{}``，下游自然回退既有单值口径。
     """
     out: dict = {}
     for tn in range(1, n_targets + 1):
@@ -372,10 +416,19 @@ def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
             out[tn] = {"status": "error", "ok": False, "ms": None,
                        "error": "no records" if not recs else "node_error",
                        "level": None, "ok_nodes": 0, "nodes": 0,
-                       "ratio": None}
+                       "ratio": None, "isp_ms": {}}
             continue
         oks = [(r, itdog_rec_ok(r)) for r in real]
         good = [(r, ok) for r, ok in oks if ok[0] is True]
+        isp_best: dict[str, float] = {}
+        for r, (_ok, ms, _lv) in good:
+            if not ms:
+                continue
+            isp = _itdog_rec_isp(r, node_isp)
+            if not isp:
+                continue
+            if ms < isp_best.get(isp, float("inf")):
+                isp_best[isp] = ms
         if good:
             mss = [ms for _, (_, ms, _lv) in good if ms]
             level = "http" if any(lv == "http" for _, (_o, _m, lv) in good) else "tcp"
@@ -385,12 +438,13 @@ def itdog_aggregate(records: list[dict], n_targets: int) -> dict:
                 "level": level,
                 "ok_nodes": len(good), "nodes": len(real),
                 "ratio": round(len(good) / len(real), 3),
+                "isp_ms": {isp: round(v, 1) for isp, v in isp_best.items()},
             }
         else:
             out[tn] = {"status": "fail", "ok": False, "ms": None,
                        "error": f"unreachable ({len(real)} nodes)",
                        "level": None, "ok_nodes": 0, "nodes": len(real),
-                       "ratio": 0.0}
+                       "ratio": 0.0, "isp_ms": {}}
     return out
 
 
@@ -399,6 +453,7 @@ def itdog_task(
     node_ids: list[str],
     args,
     page_url: str = ITDOG_BATCH_URL,
+    node_isp: dict | None = None,
 ) -> dict:
     """单批（≤5 目标）：提交 → 收记录 → 聚合；失败重试并降级。"""
     keys = [k for k, _ in batch]
@@ -409,7 +464,7 @@ def itdog_task(
         if task_id:
             expected = len(batch) * len(node_ids)
             records = itdog_collect(task_id, expected, args.itdog_timeout)
-            agg = itdog_aggregate(records, len(batch))
+            agg = itdog_aggregate(records, len(batch), node_isp)
             return {
                 key: dict(agg.get(i) or {"status": "error", "ok": False, "ms": None, "error": "missing"})
                 for i, key in enumerate(keys, start=1)
@@ -456,7 +511,7 @@ def itdog_batch_run(
         targets.append((key, f"{ip}:{port}"))
     if not targets:
         return {}
-    node_ids = itdog_fetch_nodes(nodes_per_isp or args.itdog_nodes, page_url)
+    node_ids, node_isp = itdog_fetch_nodes(nodes_per_isp or args.itdog_nodes, page_url)
     if not node_ids:
         return {key: {"status": "error", "ok": False, "ms": None, "error": "no itdog nodes"}
                 for key, _ in targets}
@@ -482,7 +537,7 @@ def itdog_batch_run(
             return {key: {"status": "error", "ok": False, "ms": None, "error": "itdog breaker"}
                     for key, _ in batch}
         _pace(args.itdog_pacing)
-        res = itdog_task(batch, node_ids, args, page_url)
+        res = itdog_task(batch, node_ids, args, page_url, node_isp)
         mark(any(r["status"] in ("ok", "fail") for r in res.values()))
         return res
 

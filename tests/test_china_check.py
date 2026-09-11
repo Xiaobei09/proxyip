@@ -714,6 +714,38 @@ class TestAnnotations(unittest.TestCase):
             "8.8.8.8:443#US": 174.8,
         })
 
+    def test_cn_fastest_ms_prefers_isp_min(self):
+        """最快运营商视角：isp_ms 全局最小优先，噪声（≤2ms）剔除，无则回退。"""
+        import common
+
+        cases = {
+            # itdog 三网：电信 45 / 联通 88 / 移动 120 → 取 45（最快运营商）
+            "a:443#US": {"sources": {
+                "xxapi": {"status": "ok", "ms": 60.0},
+                "itdog": {"status": "ok", "ms": 45.0}},
+                "isp_ms": {"中国电信": 45.0, "中国联通": 88.0, "中国移动": 120.0}},
+            # 无 per-ISP 数据 → 回退 cn_display_ms（可信探测）
+            "b:443#US": {"sources": {
+                "xxapi": {"status": "ok", "ms": 70.0},
+                "jkapi": {"status": "ok", "ms": 90.0}}},
+            # isp_ms 全部 ≤2ms（噪声）→ 剔除后回退
+            "c:443#US": {"sources": {"xxapi": {"status": "ok", "ms": 35.0}},
+                         "isp_ms": {"中国电信": 1.0, "中国移动": 2.0}},
+            # 仅一个运营商有值 → 取该值
+            "d:443#US": {"sources": {"xxapi": {"status": "ok", "ms": 40.0}},
+                         "isp_ms": {"中国联通": 88.0}},
+            # 无任何读数 → None
+            "e:443#US": {"sources": {"antping": {"status": "ok", "ms": 1.0}}},
+        }
+        got = {k: common.cn_fastest_ms(v) for k, v in cases.items()}
+        self.assertEqual(got, {
+            "a:443#US": 45.0,
+            "b:443#US": 70.0,
+            "c:443#US": 35.0,
+            "d:443#US": 88.0,
+            "e:443#US": None,
+        })
+
     def test_cn_health_report_counts_junk_and_no_ms(self):
         """清单自检：行数 / ≥2ms 之外必属噪声或缺失，须精确计数。"""
         text = (
@@ -1095,6 +1127,68 @@ class TestItdogAggregate(unittest.TestCase):
     def test_node_error_only_error(self):
         records = [{"task_num": 1, "node_id": "a", "type": "node_error"}]
         self.assertEqual(ci.itdog_aggregate(records, 1)[1]["status"], "error")
+
+    def test_isp_ms_per_isP(self):
+        node_isp = {"dx": "中国电信", "lt": "中国联通", "yd": "中国移动"}
+        records = [
+            {"task_num": 1, "node_id": "dx", "http_code": 0, "connect_time": 0.030},
+            {"task_num": 1, "node_id": "dx2", "http_code": 0, "connect_time": 0.040},
+            {"task_num": 1, "node_id": "lt", "http_code": 200, "connect_time": 0.120},
+            {"task_num": 1, "node_id": "yd", "http_code": 0, "connect_time": 0.080},
+        ]
+        agg = ci.itdog_aggregate(records, 1, node_isp)
+        self.assertEqual(agg[1]["isp_ms"], {"中国电信": 30.0, "中国联通": 120.0,
+                                            "中国移动": 80.0})
+        # 全局 ms 仍为全部节点最小值
+        self.assertEqual(agg[1]["ms"], 30.0)
+
+    def test_isp_ms_unknown_nodeid_falls_back_to_name(self):
+        node_isp = {"dx": "中国电信"}
+        records = [
+            # node_id 回声不一致（不在采样映射内），但 node_name 带运营商关键词
+            {"task_num": 1, "node_id": "zz",
+             "node_name": "湖北十堰-中国电信", "http_code": 0, "connect_time": 0.025},
+            {"task_num": 1, "node_id": "lt", "node_name": "山东济南-联通",
+             "http_code": 0, "connect_time": 0.130},
+        ]
+        agg = ci.itdog_aggregate(records, 1, node_isp)
+        self.assertEqual(
+            agg[1]["isp_ms"], {"中国电信": 25.0, "中国联通": 130.0}
+        )
+        self.assertEqual(agg[1]["ms"], 25.0)
+
+    def test_isp_ms_empty_without_strip(self):
+        records = [
+            {"task_num": 1, "node_id": "x", "http_code": 200, "connect_time": 0.020},
+        ]
+        agg = ci.itdog_aggregate(records, 1)
+        self.assertEqual(agg[1]["status"], "ok")
+        self.assertEqual(agg[1]["isp_ms"], {})
+
+
+class TestMergeIspMs(unittest.TestCase):
+    def test_merge_across_sources(self):
+        entries = {
+            "a:443#US": {"sources": {
+                "itdog": {"isp_ms": {"中国电信": 45.0, "中国联通": 88.0}},
+                "xxapi": {"ms": 60.0},
+                "tcptest": {"isp_ms": {"中国电信": 55.0}},
+            }},
+        }
+        cc.merge_isp_ms(entries)
+        e = entries["a:443#US"]
+        self.assertIn("isp_ms", e)
+        self.assertEqual(e["isp_ms"], {"中国电信": 45.0, "中国联通": 88.0})
+
+    def test_no_sources_no_isp_ms(self):
+        entries = {"a:443#US": {"ms": 10}}
+        cc.merge_isp_ms(entries)
+        self.assertNotIn("isp_ms", entries["a:443#US"])
+
+    def test_negative_ms_ignored(self):
+        entries = {"a:443#US": {"sources": {"itdog": {"isp_ms": {"电信": -1.0}}}}}
+        cc.merge_isp_ms(entries)
+        self.assertNotIn("isp_ms", entries["a:443#US"])
 
 
 class TestNewMultiSources(unittest.TestCase):
@@ -2193,7 +2287,7 @@ class TestItdogBreakerSkipsPacing(unittest.TestCase):
              f"10.{i}.0.1", "443", "US")
             for i in range(1, 201)
         ]
-        with mock.patch.object(ci, "itdog_fetch_nodes", return_value=[1, 2]), \
+        with mock.patch.object(ci, "itdog_fetch_nodes", return_value=([1, 2], {})), \
              mock.patch.object(ci, "itdog_task",
                                side_effect=lambda batch, *a, **k: {
                                    key: {"status": "error", "ok": False,
@@ -2347,7 +2441,7 @@ class TestItdogFullPoolTargets(unittest.TestCase):
                 "US",
             ),
         ]
-        with mock.patch.object(ci, "itdog_fetch_nodes", return_value=[]):
+        with mock.patch.object(ci, "itdog_fetch_nodes", return_value=([], {})):
             res = ci.itdog_batch_run(items, self._args())
         self.assertEqual(sorted(res), ["1.1.1.1:2087#US", "2.2.2.2:443#US"])
         self.assertTrue(all(v["status"] == "error" for v in res.values()))

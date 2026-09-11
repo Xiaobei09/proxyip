@@ -62,7 +62,7 @@ from common import (
     EXIT_FAMILY_FILE,
     IPINFO_FILE,
     REPUTATION_FILE,
-    cn_display_ms,
+    cn_fastest_ms,
     has_token,
     line_to_key,
     load_china_stable_keys,
@@ -121,10 +121,10 @@ def build_china_set(data: dict) -> set[str]:
 
 
 def build_cn_ms_map(data: dict) -> dict[str, float]:
-    """``china.json`` -> ``{key: 大陆实测 ms}``（优先可信探测，过滤噪声）。"""
+    """``china.json`` -> ``{key: 大陆实测 ms}``（最快运营商优先，同 all_cn.txt）。"""
     result: dict[str, float] = {}
     for key, entry in data.get("proxies", {}).items():
-        ms = cn_display_ms(entry)
+        ms = cn_fastest_ms(entry)
         if ms is not None:
             result[key] = ms
     return result

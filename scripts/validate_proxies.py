@@ -57,7 +57,7 @@ from common import (
     ALL_FILE,
     CHINA_FILE,
     _rewrite_cn_speed,
-    cn_display_ms,
+    cn_fastest_ms,
     deadline_open,
     EXIT_FAMILY_FILE,
     EXT_API_SOURCES,
@@ -429,9 +429,10 @@ def load_cn_reachable(path: Path | None = None) -> set[str]:
 def load_cn_ms(path: Path | None = None) -> dict[str, float]:
     """``china.json`` 的 ``key -> 大陆实测毫秒`` 映射（仅 reachable 条目）。
 
-    值取 ``common.cn_display_ms``（可信大陆探测优先、L3 复核源 1ms 噪声
-    必须 ≥2ms 才作数），与 all_cn.txt/CN good-tier 同口径。供 CN 系分组视图
-    把行内延迟替换为大陆 RTT；缺失/损坏 → 空 dict。
+    值取 ``common.cn_fastest_ms``——优先最快运营商视角（``isp_ms`` 全局
+    最小，即大陆用户体验上界），无 per-ISP 读数回退可信大陆探测，且 L3
+    复核源 1ms 噪声必须 ≥2ms 才作数），与 all_cn.txt/CN good-tier 同口径。
+    供 CN 系分组视图把行内延迟替换为大陆 RTT；缺失/损坏 → 空 dict。
     """
     path = path or CHINA_FILE
     if not path.exists():
@@ -449,7 +450,7 @@ def load_cn_ms(path: Path | None = None) -> dict[str, float]:
     for key, meta in proxies.items():
         if not isinstance(meta, dict) or meta.get("verdict") != "reachable":
             continue
-        ms = cn_display_ms(meta)
+        ms = cn_fastest_ms(meta)
         if ms is not None:
             out[key] = float(ms)
     return out
