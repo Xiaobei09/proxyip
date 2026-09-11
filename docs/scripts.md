@@ -130,7 +130,7 @@
 | `resproxy_asn` | 2 | iplogs `residential-proxy-backbones.csv` 住宅代理骨干 ASN 表，命中 -25（fail-open） |
 | `proxycheck` | 12 | `proxycheck.io/v3/{ip}`，免 key（100/天）；proxy/vpn/tor/hosting/scraper 标志罚分 + risk score |
 | `ip2location` | 5 | `api.ip2location.io/?ip={ip}`，免 key（1000/天）；`is_proxy` 标志 -30 |
-| `ipwhois` | 6 | `ipwho.is/{ip}`，免 key；`security.proxy/vpn/tor/hosting` 标志各 -25，`security.anonymous` -8，`connection.type` 为 residential 且无风险标志时 +5 |
+| `ipwhois` | 6 | `ipwho.is/{ip}`，免 key；`security.proxy/vpn/tor/hosting` 标志各 -25，`security.anonymous` -8；`connection.type` 不额外加分（唯一住宅/移动加分由共识 `_mobile_clean_bonus` +5 提供，见上） |
 | `tor_exit` | 5 | check.torproject.org 出口节点实时列表（免费），命中即投 `tor` 票 |
 | `spamhaus` | 4 | Spamhaus DROP + EDROP 端用户高风险网段静态表（免费，`<cidr> ; 描述`），命中即投 `listed` 票 |
 | `freeipapi` | 6 | `freeipapi.com/api/json/{ip}`，免 key；`isProxy` 标志 -30，附 ASN/org |

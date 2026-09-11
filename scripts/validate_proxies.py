@@ -912,9 +912,8 @@ def write_valid_outputs(
         海外 runner 的 TLS 延迟；无大陆观测的行保留海外值。
         """
         cn_view = (
-            name == "cn"
-            or name.startswith("cn_") or name.startswith("all_cn")
-            or name in ("cn4", "cn6", "cn46", "all_cn4", "all_cn6", "all_cn46")
+            name in ("cn", "cn4", "cn6", "cn46")
+            or name.startswith(("cn_", "cn4_", "cn6_", "cn46_", "all_cn"))
         )
         path = directory / f"{name}.txt"
         if entries:
