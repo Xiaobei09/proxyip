@@ -394,6 +394,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(
             qc.source_score("ip-api", {"proxy": False, "hosting": False}), 100)
         self.assertEqual(
+            qc.source_score("ip-api", {"proxy": True, "mobile": True}), 80)
+        self.assertEqual(
             qc.source_score(
                 "ipdata", {"security": {"tor": True}, "threat_score": 30}), 25)
         self.assertEqual(

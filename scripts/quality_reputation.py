@@ -1231,7 +1231,9 @@ def source_score(name: str, signal) -> int | None:
         if signal.get("hosting"):
             penalty += IPAPI_HOSTING_PENALTY
         if signal.get("mobile"):
-            bonus += 10
+            # 文档契约为 +5（与 consensus 的 _mobile_clean_bonus 一致），
+            # legacy 直用口径不再单独给 +10。
+            bonus += 5
         return max(0, min(100, 100 - penalty + bonus))
     if name == "ipdata":
         security = signal.get("security") or {}
