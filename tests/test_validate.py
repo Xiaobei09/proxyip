@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from unittest import mock
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import validate_proxies as vp
@@ -1398,6 +1400,43 @@ class TestVerifiedStableOutputs(unittest.TestCase):
         rs = (vp.VALID_DIR / "all_cn4_ltd_stable.txt").read_text().splitlines()
         self.assertEqual([l.split("#")[0] for l in rs], ["1.0.0.1:443"])
         self.assertIn("all_ltd_verified", stats["__sets__"])
+
+    def test_cn_group_variants_use_cn_latency_speed(self):
+        alive = {
+            "1.0.0.1:443#US": ("1.0.0.1", "443", "US", "tls", 100.0, 1.5, None),
+            "2.0.0.1:443#US": ("2.0.0.1", "443", "US", "tls", 200.0, None, None),
+        }
+        families = {"1.0.0.1:443#US": "ipv4", "2.0.0.1:443#US": "ipv4"}
+        with mock.patch(
+            "validate_proxies.load_cn_ms",
+            return_value={"1.0.0.1:443#US": 88.0, "2.0.0.1:443#US": 77.0},
+        ):
+            vp.write_valid_outputs(
+                alive,
+                per_country_limit=2,
+                families=families,
+                cn_reachable={"1.0.0.1:443#US", "2.0.0.1:443#US"},
+                prev_keys={"1.0.0.1:443#US"},
+            )
+        us = vp.VALID_DIR / "countries" / "US"
+        for name in ("cn4", "cn4_ltd", "cn4_verified", "cn4_stable",
+                     "cn4_ltd_verified", "cn4_ltd_stable"):
+            lines = (us / f"{name}.txt").read_text().splitlines()
+            self.assertGreater(
+                len(lines), 0, f"{name}.txt must keep CN entries after rewrite"
+            )
+            self.assertIn(
+                "-88ms-", lines[0], f"{name}.txt must use CN latency (not overseas)"
+            )
+            self.assertIn(
+                "≈", lines[0], f"{name}.txt must use CN-aware ≈ speed (not plain)"
+            )
+        self.assertIn(
+            "-88ms-≈1.5MB/s", (us / "cn4_ltd.txt").read_text()
+        )
+        self.assertNotIn(
+            "-100ms-", (us / "cn4.txt").read_text(), "Overseas TLS latency must be replaced"
+        )
 
     def test_empty_variant_files_cleaned(self):
         vp.VALID_DIR.mkdir(parents=True, exist_ok=True)
