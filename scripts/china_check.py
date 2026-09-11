@@ -95,7 +95,7 @@ from common import (
     request_follow,
     rewrite_latency,
     clear_note_buckets,
-    cn_display_ms,
+    cn_fastest_ms,
     cn_l2_ms,
     cn_mainland_ok,
     CN_LATENCY_CAP_MS,
@@ -2351,6 +2351,35 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
 
 # ------------------------------------------------------------ 判定合成
 
+def merge_isp_ms(entries: dict) -> None:
+    """就地合并各源 ``isp_ms`` 到 per-key ``entry["isp_ms"]``（各运营商最小 RTT）。
+
+    源结果只需带 ``isp_ms``（``{运营商: ms}``，当前 itdog 提供，其他源缺省
+    {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
+    per-ISP 读数的条目不写该字段，下游回退 ``cn_display_ms`` 单值口径。
+    """
+    for e in entries.values():
+        if not isinstance(e, dict):
+            continue
+        sources = e.get("sources")
+        if not isinstance(sources, dict):
+            continue
+        merged: dict[str, float] = {}
+        for _name, r in sources.items():
+            if not isinstance(r, dict):
+                continue
+            im = r.get("isp_ms")
+            if not isinstance(im, dict):
+                continue
+            for isp, v in im.items():
+                if isinstance(v, (int, float)) and v > 0:
+                    merged[isp] = min(merged.get(isp, v), v)
+        if merged:
+            e["isp_ms"] = {
+                isp: round(v, 1) for isp, v in sorted(merged.items())
+            }
+
+
 def merge_verdict(sources: dict) -> dict:
     """跨源合成大陆可达性判定。
 
@@ -2505,7 +2534,9 @@ STREAK_GAP_TOLERANCE_S = 6 * 3600  # 连续轮时间窗：基线观测早于此�
 # 间隔可容忍跳过一到两班，同时仍能在长时间停更时如实降温。
 FLIP_FORGIVE_STREAK = 4  # 连续可达达此轮数后清零 flip（稳定恢复赦免历史抖动）
 STABLE_MAX_FLIP = 1  # stable 准入：历史翻转次数上限（排除慢性抖动源）
-# CN 清单延迟语义（common.cn_display_ms / cn_l2_ms）：每行展示大陆视角读数，
+# CN 清单延迟语义（common.cn_fastest_ms / cn_l2_ms）：每行展示大陆视角读数，
+# 最快运营商视角（entry isp_ms 全局最小）优先，无 per-ISP 读数回退可信大陆
+# 探测 cn_l2_ms；
 # 绝不让 L3 复核源的 1ms 噪声冒充真实延迟。CN 清单保持完整（全可达集），
 # --cn-latency-cap 只用于信息性 cn_mainland 打标，不砍清单。
 
@@ -3471,6 +3502,9 @@ def main(argv=None) -> int:
         f"flappers: {flappers} cn-l2-ms: {cn_ms_covered}/{len(entries)}",
         file=sys.stderr,
     )
+    # per-key isp_ms（各运营商最小 RTT，来自 itdog 等 per-ISP 源）——
+    # 必须在中国 check 写 china.json 之前合并进 entries，单一事实源。
+    merge_isp_ms(entries)
     write_json(
         CHINA_FILE,
         {
@@ -3480,12 +3514,13 @@ def main(argv=None) -> int:
     )
 
     all_pool_text = load_cn_pool()
-    # CN 清单展示用大陆延迟图：优先可信大陆探测（xxapi/jkapi/check_host），
-    # 无读数时回退 entry 合并 ms —— 绝不让 L3 复核源的 1ms 噪声冒充真实延迟。
+    # CN 清单展示用大陆延迟图：优先最快运营商视角（isp_ms 全局最小，
+    # 即大陆用户体验上界），无 per-ISP 读数回退可信大陆探测
+    # （xxapi/jkapi/check_host）；绝不让 L3 复核源的 1ms 噪声冒充真实延迟。
     cn_ms = {
-        key: cn_display_ms(entry)
+        key: cn_fastest_ms(entry)
         for key, entry in entries.items()
-        if isinstance(entry, dict) and cn_display_ms(entry) is not None
+        if isinstance(entry, dict) and cn_fastest_ms(entry) is not None
     }
     # 兜底键未复测，无当轮读数：从其上一轮 entry 补大陆延迟（历史同源读数，
     # 比海外 TLS 更贴近大陆视角；实在无读数则保持"不伪饰、删除速度"）。
@@ -3494,7 +3529,7 @@ def main(argv=None) -> int:
             if k not in cn_ms:
                 m = prev_entries.get(k)
                 if isinstance(m, dict):
-                    v = cn_display_ms(m)
+                    v = cn_fastest_ms(m)
                     if v is not None:
                         cn_ms[k] = v
     cn_text, cn_count = generate_all_cn(

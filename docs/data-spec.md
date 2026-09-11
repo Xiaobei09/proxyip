@@ -291,11 +291,11 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 
 ### `data/quality/china.json`（china-check CI 输出）
 
-顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）、`fallback`（上一轮可达、本轮仅因源配额/抖动未获确认而经 `compute_fallback_merge` 并入历史兜底的键置位）、`flip`（本轮起连续翻转计数，稳定子集准入排除 `> STABLE_MAX_FLIP` 的慢性抖动源）、`cn_mainland`（大陆视角 RTT 是否低于 `--cn-latency-cap` 门槛）。（历史字段 `cf_heuristic` 随 L1 启发式移除，不再写入）。
+顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `check_host`/`xxapi`/`itdog`/`itdog_tcping`/`pingpe`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）、`fallback`（上一轮可达、本轮仅因源配额/抖动未获确认而经 `compute_fallback_merge` 并入历史兜底的键置位）、`flip`（本轮起连续翻转计数，稳定子集准入排除 `> STABLE_MAX_FLIP` 的慢性抖动源）、`cn_mainland`（大陆视角 RTT 是否低于 `--cn-latency-cap` 门槛）、`isp_ms`（各运营商最小 RTT 汇聚，`{运营商: ms}`，取 fastest-isp 时即用户当前的最快运营商视角；来源 itdog 等 per-ISP 节点，无读数则不写该字段）。（历史字段 `cf_heuristic` 随 L1 启发式移除，不再写入）。
 
 ### `data/valid/all_cn.txt`
 
-**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 的行（缺 all.txt 时回退 `all_ltd.txt`；含经 `compute_fallback_merge` 并入的历史兜底键，其 verdict 已在写 `china.json` 前改写为 reachable，见 `logic.md`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。**清单保持完整（全可达集，正常水平 ≥1 万），不按大陆延迟门槛精简**。每行的 ms 为大陆视角读数（`common.cn_display_ms`：可信大陆探测源 xxapi/jkapi/checkhost 优先，L3 复核源 1ms 噪声不落地），速度 token 同步改写为 `≈XMB/s` 大陆视角估算。逐条检测明细见 `china.json`；落地自带健康自检（行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，见 `check_cn_health`）。
+**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 的行（缺 all.txt 时回退 `all_ltd.txt`；含经 `compute_fallback_merge` 并入的历史兜底键，其 verdict 已在写 `china.json` 前改写为 reachable，见 `logic.md`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。**清单保持完整（全可达集，正常水平 ≥1 万），不按大陆延迟门槛精简**。每行的 ms 为大陆视角读数（`common.cn_fastest_ms`：最快运营商视角优先，即取 `isp_ms` 各运营商最小 RTT 的全局最小——大陆用户体验上界；无 per-ISP 读数回退 `cn_display_ms` 可信大陆探测源 xxapi/jkapi/checkhost；L3 复核源 1ms 噪声不落地），速度 token 同步改写为 `≈XMB/s` 大陆视角估算。逐条检测明细见 `china.json`；落地自带健康自检（行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，见 `check_cn_health`）。
 
 ### `data/valid/all_cn_http.txt` / `data/valid/all_cn_stable.txt`
 
@@ -308,7 +308,7 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/valid/all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`
 
-**根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。**CN 系分组（`cn*`/`all_cn*`）行内 ms 为大陆实测 RTT、速度为 `≈XMB/s` 大陆估算**（`common.cn_display_ms` 可信探测优先，同 all_cn.txt 口径）。
+**根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。**CN 系分组（`cn*`/`all_cn*`）行内 ms 为大陆实测 RTT、速度为 `≈XMB/s` 大陆估算**（`common.cn_fastest_ms` 最快运营商视角优先，同 all_cn.txt 口径）。
 
 ### `data/quality/history.jsonl`（每行一条）
 
