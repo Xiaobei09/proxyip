@@ -2110,7 +2110,7 @@ def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict
     """17ce.com 17跟踪站 多节点 TCPing（key/token（HMAC 风格）反爬）。
 
     GET 壳页提取 session/cookie 与内联 token；后续 GET ``/api.php``（action=tcping）
-    携带 token+时间戳防重放。token 也可经 ``--17ce-token`` 显式提供。纯 TCP →
+    携带 token 防重放。token 也可经 ``--17ce-token`` 显式提供。纯 TCP →
     ``level="tcp"``。整站异常/验证码 → ``error``（fail-open）。
     """
     extra = {}
@@ -2187,9 +2187,9 @@ def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict
 def ping0_check(ip: str, port: str, timeout: float) -> dict:
     """ping0.cc 多节点 TCPing（HTTP + localStorage/header token；遇 Turnstile 即 fail-open）。
 
-    免挑战路径：GET 节点表，再 POST ``/api/probe``（header 带 x-token）→ 轮询结果。
-    若站点返回验证码/挑战（首字节含 turnstile/challenge 特征）则直接判 ``error``，
-    避免伪造手柄。纯 TCP → ``level="tcp"``。
+    免挑战路径：GET 首页（无 Turnstile/挑战）后直接 POST ``/api/probe``（JSON body），
+    从响应解析节点结果。若站点返回验证码/挑战（首字节含 turnstile/challenge 特征）则
+    直接判 ``error``，避免伪造手柄。纯 TCP → ``level="tcp"``。
     """
     headers = {"User-Agent": UA, "Accept": "text/html"}
     try:
