@@ -3181,7 +3181,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         print("chinaz review: skipped (limit=0)", file=sys.stderr)
 
     # 新增多节点 TCP 复核源：ce98（socket.io-WS，34 大陆节点）、biuping
-    # （HTTP-SSE，21 节点）。均已实测出数、零 key；达标即可独立判 reachable，
+    # （HTTP-SSE，节点数动态，实测 ~39 测量单元）。均已实测出数、零 key；达标即可独立判 reachable，
     # 整站失败也可与单节点源联动判 unreachable。默认 -1=全部未定键，0=跳过。
     ce98_limit = getattr(args, "ce98_limit", 0)
     if ce98_limit != 0:
