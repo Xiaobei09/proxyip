@@ -989,6 +989,44 @@ class TestMainResilience(unittest.TestCase):
         self.assertEqual(rc, 1)
         wo.assert_not_called()
 
+    def test_only_non_cf_ports_refuses_to_truncate(self):
+        # 源池非空但全为 CF 白名单之外端口（如 zip 回退/extra 源只产普通端口）
+        # 时修复前会通过判空、write_outputs 过滤后整树清空；应同样拒绝覆写。
+        wo = unittest.mock.Mock()
+        patchers = [
+            unittest.mock.patch.object(
+                dp, "load_source",
+                return_value=({"8080": {"US": ["1.2.3.4"]}}, {}),
+            ),
+            unittest.mock.patch.object(
+                dp, "load_extras", return_value=({}, set(), {})
+            ),
+            unittest.mock.patch.object(dp, "enrich_countries", return_value=0),
+            unittest.mock.patch.object(dp, "write_outputs", wo),
+            unittest.mock.patch.object(dp, "write_source_attribution"),
+            unittest.mock.patch.object(dp, "_append_source_history"),
+            unittest.mock.patch.object(
+                dp, "_build_source_stats", return_value={
+                    "main (zip.cm.edu.kg)": {"total": 1, "unique": 1, "overlap": 0},
+                }
+            ),
+            unittest.mock.patch.object(dp, "write_text_if_changed"),
+            unittest.mock.patch.object(dp, "load_previous_all", return_value=[]),
+            unittest.mock.patch.object(dp, "write_diff", return_value=(0, 0)),
+            unittest.mock.patch.object(dp, "append_history"),
+            unittest.mock.patch.object(dp, "print_stats"),
+        ]
+        for p in patchers:
+            p.start()
+        try:
+            rc = dp.main(["--no-extra-sources"])
+        finally:
+            for p in patchers:
+                p.stop()
+
+        self.assertEqual(rc, 1)
+        wo.assert_not_called()
+
 
 class TestWriteDiff(unittest.TestCase):
     def test_same_second_runs_keep_both_archives(self):

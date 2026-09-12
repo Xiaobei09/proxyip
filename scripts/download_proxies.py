@@ -1207,6 +1207,18 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError(
                 "no proxies from any source; refusing to truncate the pool"
             )
+        # 端口白名单在判空**之后即刻过滤**：write_outputs 内部同样按
+        # CF_EDGE_PORTS 过滤，但若守卫只用全池判空，源头只产出非 CF 端口的
+        # 情况下过滤后产物会整树清空、覆写掉既有连接池。故在此提前过滤并
+        # 再判一次空，同时保持 write_outputs 内过滤作为幂等兜底。
+        by_port = {
+            _p: _c for _p, _c in by_port.items() if _p in CF_EDGE_PORTS
+        }
+        if not any(by_port.values()):
+            raise RuntimeError(
+                "no CF-edge proxies after port whitelist; "
+                "refusing to truncate the pool"
+            )
         all_ips = _collect_all_ips(by_port)
         source_stats = _build_source_stats(main_ips, source_ip_sets, all_ips)
         src_stats_file = SOURCE_STATS_FILE
