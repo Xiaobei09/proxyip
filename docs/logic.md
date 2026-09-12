@@ -257,7 +257,10 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
   china.json 前合并回 ``verdict=reachable`` 并标注 ``fallback:true``。因此
   build_good/annotate/all_cn.txt 全从 china.json 读到**同一集合**，杜绝
   "all_cn.txt 有而 all.txt/CN 分组找不到来源"的口径分裂，且维持全量池规模
-  （用户硬约束），兜底行仍经大陆延迟/速度重写。
+  （用户硬约束）。兜底键若本轮无大陆读数（来源全 error），沿用其上一轮条目
+  的 ``ms``/``isp_ms`` 读数写入 china.json，保证 build_good（只读 china.json）
+  与 all_cn.txt（run 尾从 prev 回填）对同一键渲染同一大陆读数——兜底行仍经
+  大陆延迟/速度重写，且 read-only 下游不会因读数缺口退化为海外 TLS 延迟。
 
 ## 6. 出口 IP 家族检测（exit_family.py）
 
