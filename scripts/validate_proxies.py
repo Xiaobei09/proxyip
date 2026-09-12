@@ -361,10 +361,15 @@ def merge_old_note(base_line: str, old_note: str) -> str:
     从 old_note 中提取出口区域（``→XXX``）以及剥离延迟/测速后的附注 token
     （CN、streaming、reputation、speed tier、IP type 等），拼接到重生成的
     基础行之后，使跨 update 周期的附注不丢失。
+
+    若基础行已带出口区（如 ``--ext-check`` 时 ``line()`` 已用 ext colo 写入
+    新的 ``→XXX``），旧区不得再拼接，否则产出 ``→LAX→US`` 双箭头畸形行。
     """
     m = re.match(r"^(→[A-Z]{2,5})?(-\d+(?:\.\d+)?ms)?(-\d+(?:\.\d+)?MB/s)?(.*)", old_note)
     region = m.group(1) or ""
     trailing = (m.group(4) or "").rstrip()
+    if "→" in base_line:
+        region = ""
     if not region and not trailing:
         return base_line
     head, sep, tail = base_line.partition("-")
