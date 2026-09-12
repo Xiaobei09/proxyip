@@ -15,10 +15,13 @@ A set of Cloudflare 反代 (reverse-proxy) sources from :data:`EXTRA_SOURCES`
 is also fetched and merged (port/country bucket aware); entries without a country
 tag get one via a best-effort ``ip-api.com/batch`` lookup (``#ALL`` otherwise).
 The merged pool is constrained to the Cloudflare edge ports :data:`CF_EDGE_PORTS`
-(``443/8443/2053/2083/2087/2096``) and excludes Cloudflare-owned AS13335 IPs,
-so the output doubles as a non-Cloudflare connection pool usable from
-``connect()`` inside Cloudflare Workers (where connecting to CF IP ranges is
-blocked). Per-source failures are non-fatal and never break a scheduled run.
+(``443/8443/2053/2083/2087/2096``). NOTE: there is **no code-level AS13335
+filter**; the "non-Cloudflare ASN" property is achieved only by construction —
+only self-claimed third-party CF reverse-proxy sources are ingested (see
+:data:`EXTRA_SOURCES`). The output is intended as a non-Cloudflare connection
+pool usable from ``connect()`` inside Cloudflare Workers (where connecting to CF
+IP ranges is blocked), but no ip-api/ASN gate enforces it.
+Per-source failures are non-fatal and never break a scheduled run.
 
 Each run also archives the added/removed entries versus the previous committed
 list into ``data/diff/`` and records the change counts in ``data/quality/history.jsonl``.
@@ -107,8 +110,8 @@ SMALL_SETS: dict[str, list[str]] = {
 #            缺失国家字段的条目归入 ALL；容忍畸形载荷）
 #
 # 维护目标是「非 Cloudflare AS13335 + Cloudflare 边缘常用端口」的可直连
-# 连接池（用于 Cloudflare Worker `connect()` 等自建链路）。因此：不收录
-# Cloudflare 官方边缘 IP（AS13335，Workers 出站 TCP 禁止连接 CF IP 网段）。
+# 连接池（用于 Cloudflare Worker `connect()` 等自建链路）。AS13335 排除仅靠
+# 「只收录自证第三方反代来源」实现，代码层不做 ASN 校验（无 ip-api/ASN 门）。
 EXTRA_SOURCES: list[tuple[str, str]] = [
     # --- CF 第三方反代（优选 proxyip）池：全部自称 CF 反代、端口落 CF 边缘 ---
     # 收录来源仅限库名/榜单自证 CF 第三方优选反代（含 443/8443/2053/2083/2087/2096），
