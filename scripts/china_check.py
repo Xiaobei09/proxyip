@@ -3283,6 +3283,12 @@ def compute_fallback_merge(
     并把 reachable 计入返回后的集合。
 
     就地修改 ``entries``/``reachable`` 并返回 fallback 键集合。
+    大陆读数沿用：落入 uncertain/skipped 但无失败源的键虽然本轮成功合并，但
+    其来源全 error 时 ``ms``/``isp_ms`` 为空，若不沿用上一轮读数，下游
+    ``common.cn_fastest_ms`` 会读成 None，导致 all_cn.txt（到 run 尾部从
+    prev_entries 回填）与 build_good/annotate（只读 china.json）对同一键渲染出
+    不同大陆读数，破坏"同口径"承诺。故本分支与下方"本轮未采样"分支（``dict(p)``
+    整条复制含读数）对齐：当前条目缺失读数时回填上一轮同名字段。
     """
     fallback_keys: set[str] = set()
     for k, p in prev_entries.items():
@@ -3306,6 +3312,13 @@ def compute_fallback_merge(
                     # 连续可达（stable 计算在合并前已严格排除；此处再显式清 0，
                     # 防止任何按 streak 消费 china.json 的下游误把它当 stable）。
                     cur["streak"] = 0
+                    # 大陆读数沿用上一轮（未复测成功，宁用历史读数也不用海外
+                    # TLS 延迟冒充大陆视角；与下方 unsampled 分支 dict(p) 对齐）。
+                    for _f in ("ms", "isp_ms"):
+                        if cur.get(_f) is None:
+                            _v = p.get(_f)
+                            if _v is not None:
+                                cur[_f] = _v
                     reachable.add(k)
                     fallback_keys.add(k)
         else:

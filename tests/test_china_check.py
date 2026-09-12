@@ -2516,6 +2516,42 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(entries["a:443#US"]["streak"], 0)
         self.assertIn("a:443#US", reachable)
 
+    def test_merged_keeps_prev_readings(self):
+        # 本轮全源 error 被兜底回 reachable 的键，若当轮无大陆读数（ms/isp_ms
+        # 为空），须沿用上一轮读数——否则 china.json 里 cn_fastest_ms 读成
+        # None，all_cn.txt（run 尾从 prev 回填）与 build_good/annotate（只读
+        # china.json）对同一键渲染出不同大陆读数，破坏同口径。
+        from common import cn_fastest_ms
+        prev = {
+            "a:443#US": {
+                "verdict": "reachable", "streak": 2, "sources": {},
+                "ms": 289.0, "isp_ms": {"CT": 289.0, "CM": 301.0},
+            },
+        }
+        entries = {"a:443#US": {
+            "verdict": "uncertain",
+            "sources": {"xxapi": {"status": "error"}, "itdog": {"status": "error"}},
+        }}
+        reachable = set()
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, {"a:443#US"})
+        e = entries["a:443#US"]
+        self.assertEqual(e["ms"], 289.0)
+        self.assertEqual(e["isp_ms"], {"CT": 289.0, "CM": 301.0})
+        self.assertEqual(cn_fastest_ms(e), 289.0)
+        self.assertIn("a:443#US", reachable)
+
+    def test_merged_keeps_cur_reading_if_present(self):
+        # 当轮已有读数时不覆盖：仅回填缺失字段，不以历史值顶掉新读数。
+        prev = {"a:443#US": {"verdict": "reachable", "streak": 2, "sources": {},
+                             "ms": 500.0}}
+        entries = {"a:443#US": {"verdict": "uncertain", "sources": {},
+                                "ms": 110.0}}
+        reachable = set()
+        fb = cc.compute_fallback_merge(entries, prev, reachable)
+        self.assertEqual(fb, {"a:443#US"})
+        self.assertEqual(entries["a:443#US"]["ms"], 110.0)
+
 
 class TestCe98Source(unittest.TestCase):
     """98ce.com socket.io-WS 适配器单测（mock _SocketIOClient，不触网）。"""
