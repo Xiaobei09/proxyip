@@ -152,6 +152,22 @@ class TestMergeOldNote(unittest.TestCase):
         base = "1.2.3.4:443#US-90ms"
         self.assertEqual(vp.merge_old_note(base, ""), "1.2.3.4:443#US-90ms")
 
+    def test_base_already_has_exit_region_no_double_arrow(self):
+        base = "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192LAX-90ms-1.00MB/s"
+        old = "\u2192US-120ms-0.44MB/s-RES-72-V4-CN"
+        self.assertEqual(
+            vp.merge_old_note(base, old),
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US\u2192LAX-90ms-1.00MB/s-RES-72-V4-CN",
+        )
+
+    def test_base_region_same_as_old_region(self):
+        base = "1.2.3.4:443#US\u2192US-90ms-1.00MB/s"
+        old = "\u2192US-120ms-0.44MB/s-DC-60"
+        self.assertEqual(
+            vp.merge_old_note(base, old),
+            "1.2.3.4:443#US\u2192US-90ms-1.00MB/s-DC-60",
+        )
+
 
 class TestWriteIndex(unittest.TestCase):
     def setUp(self):
