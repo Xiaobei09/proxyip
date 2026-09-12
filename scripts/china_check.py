@@ -35,9 +35,7 @@
   判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
   `biuping.com`（HTTP SSE，约 39 个 ISP×节点测量单元 TCPing，零 key）；可选
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
-- 已评估并放弃：`api.hostmonit.com/check_port`（已 404）；`ping.chinaz.com`
-  （表单 POST 仅返回渲染壳页，结果经混淆 JS 加载，反爬成本过高）；
-  `tcping.cn`（PoW + 私有 WS 授权，纯 Python 无法收结果）。
+- 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
 
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/antping/
@@ -317,7 +315,8 @@ _SOURCE_MIN_RATIO = {
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
 WS_MAX_BUF = 4 * 1024 * 1024  # WS 帧重组缓冲上限（防坏帧长撑爆内存）
 
-# itdog.cn —— 无账号批量 HTTP 探活（每任务约 5 目标 × 3 节点，需走 WebSocket 收结果）
+# itdog.cn —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × ITDOG_NODES_PER_ISP
+# 节点（默认 6 → 18），需走 WebSocket 收结果，任务级另出 per-ISP 最小 RTT）
 
 CN_TOKEN = "CN"
 
