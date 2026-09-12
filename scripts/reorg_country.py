@@ -2,7 +2,7 @@
 """Reorganize country/set/port files by exit IP country.
 
 出口国观测经三源汇聚（``common.build_exit_cc_map``：external_check >
-upstream_meta > ipinfo），将代理行标注/迁移为 ``#<IC>→<OC>``
+upstream_meta > ipinfo，exit_family.json 仅并入键候选），将代理行标注/迁移为 ``#<IC>→<OC>``
 格式。已有 ``→CC`` 但与新观测不同视为陈旧，直接替换；同国行也补齐标记。
 
 Idempotent: running twice with the same quality JSONs produces no changes.
@@ -161,7 +161,8 @@ def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
     """Main entry: reorganize all country/set/port files.  Returns moved count.
 
     出口国观测三源汇聚（external_check > upstream_meta >
-    ipinfo，见 common.build_exit_cc_map），不再仅依赖 ipinfo 的
+    ipinfo，exit_family 仅并入键候选，见 common.build_exit_cc_map），
+    不再仅依赖 ipinfo 的
     country_match（历史覆盖不足 1%）。
     """
     quality_dir = data_dir / "quality"

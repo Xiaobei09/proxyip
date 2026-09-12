@@ -848,7 +848,8 @@ def build_family(family_data: dict) -> str:
 
 
 def build_exit_cc(quality_dir: Path) -> str:
-    """出口国分布 Top15（common.build_exit_cc_map 三源汇聚，→CC 观测）。"""
+    """出口国分布 Top15（common.build_exit_cc_map：external_check/upstream_meta/
+    ipinfo 三源按优先级汇聚 →CC 观测；exit_family 仅并入键候选）。"""
     from common import build_exit_cc_map
 
     m = build_exit_cc_map(
