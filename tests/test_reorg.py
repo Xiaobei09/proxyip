@@ -160,5 +160,28 @@ class TestReorganizeFile(unittest.TestCase):
         self.assertEqual(stats["moved"], 2)
 
 
+class TestMergeOrdered(unittest.TestCase):
+    def test_inserts_by_latency_keeps_relative_order(self):
+        existing = "1.1.1.1:443#US-10ms\n2.2.2.2:443#US-50ms\n9.9.9.9:443#US"
+        new = ["8.8.8.8:443#US-5ms", "3.3.3.3:443#US-30ms"]
+        self.assertEqual(
+            rc._merge_ordered(existing, new),
+            "8.8.8.8:443#US-5ms\n1.1.1.1:443#US-10ms\n"
+            "3.3.3.3:443#US-30ms\n2.2.2.2:443#US-50ms\n9.9.9.9:443#US\n",
+        )
+
+    def test_no_latency_lines_sort_last_stable(self):
+        existing = "5.5.5.5:443#US-1ms\n6.6.6.6:443#US"
+        out = rc._merge_ordered(existing, ["7.7.7.7:443#US"])
+        self.assertEqual(
+            out,
+            "5.5.5.5:443#US-1ms\n6.6.6.6:443#US\n7.7.7.7:443#US\n",
+        )
+
+    def test_empty_existing(self):
+        self.assertEqual(rc._merge_ordered("", ["1.1.1.1:443#US-5ms"]),
+                         "1.1.1.1:443#US-5ms\n")
+
+
 if __name__ == "__main__":
     unittest.main()
