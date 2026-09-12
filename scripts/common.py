@@ -462,6 +462,10 @@ def build_exit_cc_map(
     3. ``ipinfo.json`` —— ``country_code``（ip-api 地理）。历史轮次可能是
        入口 IP 的地理，故仅作末位兜底
     （流媒体解锁国作为第 3 源已随解锁检查一并移除。）
+
+    ``family_data``（exit_family.json）**不作为出口国值来源**：它是历史聚合
+    （family 级出口画像），非本键当下的出口观测证据。仅把其键并入候选集，
+    使仅存在于 exit_family 的键仍可按入口 IP 命中 ``upstream_meta`` 的观测。
     """
     result: dict[str, str] = {}
 

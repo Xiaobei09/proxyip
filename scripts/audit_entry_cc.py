@@ -5,7 +5,8 @@
 
 1. **入口 IP 地理**（ip-api batch，``countryCode`` + ``as``）——与订阅标签对比；
    入口为 Cloudflare 边缘（AS13335）时标签无法经入口验证（源站在 CF 之后）。
-2. **出口国观测**（``common.build_exit_cc_map`` 三源汇聚：external_check/upstream_meta/ipinfo）——区分
+2. **出口国观测**（``common.build_exit_cc_map``：external_check/upstream_meta/ipinfo
+   三源按优先级汇聚，exit_family.json 仅并入键候选）——区分
    "标签错" 与正常的 "出口漂移"。
 
 判定（verdict）：
