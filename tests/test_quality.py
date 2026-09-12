@@ -2482,5 +2482,47 @@ class TestBuildMetaRepMedian(unittest.TestCase):
         self.assertIsNone(self._meta([])["rep_median"])
 
 
+class TestContinuousPenalty(unittest.TestCase):
+    def test_single_source(self):
+        merged, used = qr.continuous_penalty(
+            {"netcoffee": {"trust_score": 80}},
+            {"netcoffee": 10},
+        )
+        self.assertEqual(merged, 20)
+        self.assertEqual(used, ["netcoffee"])
+
+    def test_weighted_blend(self):
+        merged, used = qr.continuous_penalty(
+            {
+                "netcoffee": {"trust_score": 80},
+                "getipintel": {"probability": 0.5},
+            },
+            {"netcoffee": 10, "getipintel": 20},
+        )
+        self.assertEqual(merged, 40)
+        self.assertEqual(sorted(used), ["getipintel", "netcoffee"])
+
+    def test_no_responding_sources(self):
+        merged, used = qr.continuous_penalty({"netcoffee": {}}, {"netcoffee": 10})
+        self.assertIsNone(merged)
+        self.assertEqual(used, [])
+
+    def test_zero_weight_ignored(self):
+        merged, used = qr.continuous_penalty(
+            {"getipintel": {"probability": 0.9}},
+            {"getipintel": 0},
+        )
+        self.assertIsNone(merged)
+        self.assertEqual(used, [])
+
+    def test_invalid_getipintel_probability_ignored(self):
+        merged, used = qr.continuous_penalty(
+            {"getipintel": {"probability": 1.5}},
+            {"getipintel": 20},
+        )
+        self.assertIsNone(merged)
+        self.assertEqual(used, [])
+
+
 if __name__ == "__main__":
     unittest.main()

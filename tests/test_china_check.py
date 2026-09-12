@@ -2830,5 +2830,66 @@ class TestTcpingcnHttpParity(unittest.TestCase):
                 cc._tcpingcn_post("http://tcping.cn/x", {"probe": "t"}, cookie="")
 
 
+class TestNeedsProbe(unittest.TestCase):
+    def test_no_entry_needs_probe(self):
+        self.assertTrue(cc.needs_probe({}, "1.1.1.1:80#US"))
+
+    def test_two_single_node_ok_stops(self):
+        entries = {
+            "1.1.1.1:80#US": {
+                "check_host": {"status": "ok", "ok": True, "ms": 100, "level": "http"},
+                "xxapi": {"status": "ok", "ok": True, "ms": 120, "level": "http"},
+            }
+        }
+        self.assertFalse(cc.needs_probe(entries, "1.1.1.1:80#US"))
+
+    def test_two_single_node_fail_stops(self):
+        entries = {
+            "1.1.1.1:80#US": {
+                "check_host": {"status": "fail", "ok": False, "ms": None},
+                "xxapi": {"status": "fail", "ok": False, "ms": None},
+            }
+        }
+        self.assertFalse(cc.needs_probe(entries, "1.1.1.1:80#US"))
+
+    def test_single_node_ok_uncertain_keeps(self):
+        entries = {
+            "1.1.1.1:80#US": {
+                "check_host": {"status": "ok", "ok": True, "ms": 100, "level": "http"}
+            }
+        }
+        self.assertTrue(cc.needs_probe(entries, "1.1.1.1:80#US"))
+
+    def test_error_only_keeps(self):
+        entries = {
+            "1.1.1.1:80#US": {
+                "jkapi": {"status": "error", "ok": False, "ms": None, "error": "x"}
+            }
+        }
+        self.assertTrue(cc.needs_probe(entries, "1.1.1.1:80#US"))
+
+    def test_multi_node_strong_stops(self):
+        entries = {
+            "1.1.1.1:80#US": {
+                "itdog": {
+                    "status": "ok", "ok": True, "ms": 50, "level": "http",
+                    "ratio": 0.9, "nodes": 18,
+                }
+            }
+        }
+        self.assertFalse(cc.needs_probe(entries, "1.1.1.1:80#US"))
+
+    def test_multi_node_weak_keeps(self):
+        entries = {
+            "1.1.1.1:80#US": {
+                "itdog": {
+                    "status": "ok", "ok": True, "ms": 50, "level": "http",
+                    "ratio": 0.1, "nodes": 18,
+                }
+            }
+        }
+        self.assertTrue(cc.needs_probe(entries, "1.1.1.1:80#US"))
+
+
 if __name__ == "__main__":
     unittest.main()

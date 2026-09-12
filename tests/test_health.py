@@ -3,6 +3,7 @@
 import json
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import health_alert as ha  # noqa: E402
 from health_alert import (  # noqa: E402
+    _alert_fingerprint,
+    _median,
+    _suppress_repeat,
     check_artifact_stale,
     check_cn,
     check_cn_stale,
@@ -412,6 +416,48 @@ class TestLoadHistory(unittest.TestCase):
             )
             recs = load_history(p)
             self.assertEqual([r["alive"] for r in recs], [7, 5])
+
+
+class TestMedian(unittest.TestCase):
+    def test_odd_takes_middle(self):
+        self.assertEqual(_median([3, 1, 2]), 2)
+
+    def test_even_averages_mid_two(self):
+        self.assertEqual(_median([4, 1, 3, 2]), 2.5)
+
+
+class TestSuppressRepeat(unittest.TestCase):
+    def test_first_alert_not_suppressed(self):
+        self.assertFalse(_suppress_repeat({}, ["pool crash: -50%"]))
+        self.assertFalse(
+            _suppress_repeat(
+                {"last_alert_at": time.time() - 1, "last_alert_hash": ""},
+                ["pool crash: -50%"],
+            )
+        )
+
+    def test_same_alerts_within_cooldown_suppressed(self):
+        alerts = ["pool crash: -50%"]
+        st = {
+            "last_alert_at": time.time() - 10,
+            "last_alert_hash": _alert_fingerprint(alerts),
+        }
+        self.assertTrue(_suppress_repeat(st, alerts))
+
+    def test_same_alerts_after_cooldown_fire(self):
+        alerts = ["pool crash: -50%"]
+        st = {
+            "last_alert_at": time.time() - ha.ALERT_REPEAT_COOLDOWN_S - 1,
+            "last_alert_hash": _alert_fingerprint(alerts),
+        }
+        self.assertFalse(_suppress_repeat(st, alerts))
+
+    def test_different_alerts_fire(self):
+        st = {
+            "last_alert_at": time.time() - 1,
+            "last_alert_hash": _alert_fingerprint(["old alert"]),
+        }
+        self.assertFalse(_suppress_repeat(st, ["pool crash: -50%"]))
 
 
 if __name__ == "__main__":

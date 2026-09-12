@@ -1167,3 +1167,27 @@ class TestMirrorUrls(unittest.TestCase):
                     resp.read()
             elapsed = time.monotonic() - t0
         self.assertLess(elapsed, 4.0)
+
+
+class TestStripSpeed(unittest.TestCase):
+    def test_parenthesized_token(self):
+        self.assertEqual(dp._strip_speed("256.85(MB/s)HK香港"), "HK香港")
+
+    def test_plain_token(self):
+        self.assertEqual(dp._strip_speed("50.2MB/s"), "")
+
+    def test_lowercase_with_space_and_equals(self):
+        self.assertEqual(dp._strip_speed("101250.1234(MB/s)=US"), "US")
+
+
+class TestExtractRegion(unittest.TestCase):
+    def test_chinese_region_including_prefix(self):
+        self.assertEqual(dp._extract_region("256.85(MB/s)HK香港"), "HK")
+        self.assertEqual(dp._extract_region("88.3(MB/s)CN香港"), "HK")
+
+    def test_iso2_token(self):
+        self.assertEqual(dp._extract_region("US"), "US")
+
+    def test_unmappable_defaults_all(self):
+        self.assertEqual(dp._extract_region("50.2MB/s"), "ALL")
+        self.assertEqual(dp._extract_region(""), "ALL")
