@@ -244,8 +244,13 @@ async def batch_ipapi(ips: list) -> dict:
         except Exception as exc:
             logging.debug("ipapi batch failed: %s", exc)
             continue
-        for item, ip in zip(data, chunk):
-            if isinstance(item, dict) and item.get("status") == "success":
+        for idx, item in enumerate(data):
+            if not isinstance(item, dict) or item.get("status") != "success":
+                continue
+            ip = item.get("query")
+            if not (isinstance(ip, str) and ip in chunk):
+                ip = chunk[idx] if idx < len(chunk) else None
+            if ip:
                 out[ip] = item
         await asyncio.sleep(IPAPI_BATCH_DELAY)
     if any_batch_ok or out:

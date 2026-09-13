@@ -687,7 +687,7 @@ class TestReputation(unittest.TestCase):
              unittest.mock.patch.object(
                 qr, "fetch_socks_proxy",
                 new=unittest.mock.AsyncMock(side_effect=lambda: _set(["10.0.0.5"]))):
-            out = asyncio.get_event_loop().run_until_complete(
+            out = asyncio.run(
                 qr.fetch_static_lists(["c2_tracker", "botscout", "greensnow",
                                        "sslproxies", "socks_proxy"]))
         self.assertIn("10.0.0.1", out["c2_tracker"])
@@ -2162,7 +2162,7 @@ class TestExternalCheck(unittest.TestCase):
             return FakeResp()
 
         with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 qs.check_external_api("1.2.3.4", "443", timeout=5)
             )
         self.assertTrue(result["success"])
@@ -2179,7 +2179,7 @@ class TestExternalCheck(unittest.TestCase):
             raise ConnectionError("nope")
 
         with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 qs.check_external_api("1.2.3.4", "443", timeout=5)
             )
         self.assertFalse(result["success"])
@@ -2332,7 +2332,7 @@ class TestNewReputationSources(unittest.TestCase):
 
         with unittest.mock.patch.object(qr, "fetch_text_list",
                                         side_effect=_fake):
-            ipset = asyncio.get_event_loop().run_until_complete(
+            ipset = asyncio.run(
                 qr.fetch_cins_badguys())
         for ip in ("1.2.3.4", "5.6.7.8", "9.9.9.9"):
             self.assertIn(ip, ipset)
@@ -2348,7 +2348,7 @@ class TestNewReputationSources(unittest.TestCase):
                                         side_effect=_c), \
              unittest.mock.patch.object(qr, "fetch_et_compromised",
                                         side_effect=_e):
-            out = asyncio.get_event_loop().run_until_complete(
+            out = asyncio.run(
                 qr.fetch_static_lists(["cins", "et_compromised"]))
         self.assertIn("1.1.1.1", out["cins"])
         self.assertIn("2.2.2.2", out["et_compromised"])
@@ -2379,7 +2379,7 @@ class TestNewReputationSources(unittest.TestCase):
                 qr, "fetch_dan_tor", side_effect=_d), \
              unittest.mock.patch.object(
                 qr, "fetch_tor_bulk", side_effect=_e):
-            out = asyncio.get_event_loop().run_until_complete(
+            out = asyncio.run(
                 qr.fetch_static_lists([
                     "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
                     "danmeuk_tor", "tor_bulk",
