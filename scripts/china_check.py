@@ -1258,7 +1258,9 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
     salt = _tcpcn_bc(r, s, request_hash)
     try:
         nonce, _ = _tcpcn_pow_solve(r, salt, request_hash, d)
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
+        # RuntimeError=PoW 超限；ValueError=远端 d 非数字（int() 提早失败）。
+        # 二者都按探测失败处理，绝不让异常逃逸到整轮 runner。
         return {"status": "error", "ok": False, "ms": None,
                 "error": str(e)[:120], "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
