@@ -1470,6 +1470,18 @@ class TestNewMultiSources(unittest.TestCase):
             out = cc.tcpingcn_check("1.2.3.4", "80", 10)
         self.assertEqual(out["status"], "error")
 
+    def test_tcpingcn_pow_valueerror_kept_inline(self):
+        """远端 d 非数字（int() 抛 ValueError）→ 按探测失败处理，不逃逸整轮。"""
+        with mock.patch.object(cc, "_tcpingcn_page_cookie", return_value=""), \
+             mock.patch.object(cc, "_tcpingcn_get", return_value={"r": "r", "s": "s", "ts": 1, "d": "abc"}), \
+             mock.patch.object(cc, "_tcpcn_yc", return_value="p"), \
+             mock.patch.object(cc, "_tcpcn_bc", return_value="salt"), \
+             mock.patch.object(cc, "_tcpcn_pow_solve",
+                               side_effect=ValueError("invalid literal for int()")):
+            out = cc.tcpingcn_check("1.2.3.4", "80", 10)
+        self.assertEqual(out["status"], "error")
+        self.assertIn("invalid literal", out["error"])
+
     def test_tcpingcn_pow_zero_bits(self):
         # 16 位清 0 → 头 2 字节为 0
         self.assertTrue(cc._tcpcn_check_zero_bits(b"\x00\x00\x01", 16))
