@@ -111,6 +111,18 @@ class TestMaps(unittest.TestCase):
         # 无 cn_ms → 原样
         self.assertEqual(bg.to_cn_view(lines, None), lines)
 
+    def test_to_cn_view_key_missing_keeps_latency_drops_speed(self):
+        """可达但无大陆读数的键：延迟保留海外值（validate write_variant 规则），
+        速度 token 删除而非冒充大陆值。"""
+        lines = [
+            "9.9.9.9:443#US→US-24ms-8.00MB/s-RES-fast-V4-CN-98-U100",
+        ]
+        cn_ms = {"OTHER:443#US": 1.0}  # 键缺失
+        out = bg.to_cn_view(lines, cn_ms)
+        self.assertIn("-24ms-", out[0])            # 海外延迟回退保留
+        self.assertNotIn("MB/s", out[0])           # 速度删除
+        self.assertNotIn("≈", out[0])
+
     def test_is_cn_reachable_current_only(self):
         china = {"1.2.3.4:443#US"}
         # judged reachable this run

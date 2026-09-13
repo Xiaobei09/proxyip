@@ -24,9 +24,14 @@ the line notes is only the fallback when no CN measurement exists.
 Every ``good`` list only contains CN-reachable lines (a ``-CN``-only list by
 construction), so all outputs render the **CN view**: inline latency is the
 mainland-measured ``china.json`` reading and the speed token is rewritten to
-the ``≈XMB/s`` mainland-side estimate (``common._rewrite_cn_speed``), the
-same semantics as ``all_cn.txt``. Without ``cn_ms`` data the lines are kept
-verbatim.
+the ``≈XMB/s`` mainland-side estimate (``common._rewrite_cn_speed``), the same
+semantics as ``all_cn.txt``. Per-key dispatch:
+``cn_ms`` map empty -> lines kept verbatim; key present in ``cn_ms`` ->
+latency replaced with mainland RTT and speed rewritten to ``≈XMB/s``; key
+missing from ``cn_ms`` (reachable but no usable reading) -> speed token is
+removed (no data, do not fake) while the inline latitude stays as the
+overseas TLS fallback (kept verbatim, same rule as
+``validate_proxies.write_variant``).
 
 Outputs are the CN-viewed annotated lines:
 
