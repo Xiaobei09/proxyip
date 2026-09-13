@@ -480,6 +480,9 @@ def main(argv: list[str] | None = None) -> int:
             all_pool.read_text(encoding="utf-8"), family_proxies, rep_map
         )
         stats["all_diverse"] = write_good_file(valid_dir / "all_diverse.txt", diverse)
+    # proxy_count = 全部 good 清单（全局/国家/集合 × 各可靠性/档位变体 × ltd）
+    # 的行数合计——同一节点会同时出现在多种视图里（非去重节点数）。
+    # 仅作状态/时效展示，无下游消费其数值（health_alert 只看文件龄）。
     total = sum(stats.values())
     for name in sorted(stats):
         print(f"  {name}.txt: {stats[name]}")

@@ -327,6 +327,8 @@ def main(argv: list[str] | None = None) -> int:
     stats = write_premium_files(
         valid_dir, china_set, rep_map, ip_type_map, cn_ms, family_map,
     )
+    # proxy_count = 全部 premium 清单的行数合计（多视图镜像，非去重节点数），
+    # 仅作状态/时效展示，无下游消费数值。
     total = sum(stats.values())
     for name in sorted(stats):
         print(f"  {name}.txt: {stats[name]}")
