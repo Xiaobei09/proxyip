@@ -168,6 +168,21 @@ class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(out), ["1.1.1.1", "3.3.3.3"])
         get.assert_not_called()
 
+    async def test_query_preferred_over_position(self):
+        """带 query 自回填且乱序/缺项 → 按 query 键控，不错位到相邻 IP。"""
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync",
+            return_value=[
+                {"status": "success", "query": "2.2.2.2", "countryCode": "FR"},
+                {"status": "success", "query": "1.1.1.1", "countryCode": "US"},
+            ],
+        ), unittest.mock.patch.object(qp, "ipapi_get_sync") as get:
+            out = await qp.batch_ipapi(["1.1.1.1", "2.2.2.2", "3.3.3.3"])
+        self.assertEqual(out["1.1.1.1"]["countryCode"], "US")
+        self.assertEqual(out["2.2.2.2"]["countryCode"], "FR")
+        self.assertNotIn("3.3.3.3", out)  # 缺失项不得错位占用相邻键
+        get.assert_not_called()
+
     async def test_fallback_to_per_ip_when_batch_all_fail(self):
         with unittest.mock.patch.object(
             qp, "ipapi_batch_sync", side_effect=RuntimeError("network down"),
