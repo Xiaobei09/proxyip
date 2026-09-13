@@ -516,6 +516,12 @@ class TestCommittedCnViewInvariant(unittest.TestCase):
             if path.name.startswith(("good", "premium")):
                 out.append(path)
                 continue
+            # 根级 flatten 家族（all_good*.txt / all_premium*.txt）——以 good/
+            # premium 前缀命名的判断抓不到它们，须显式纳入，否则护栏对
+            # 主清单文件失联
+            if path.name.startswith(("all_good", "all_premium")):
+                out.append(path)
+                continue
             if path.name.startswith("all_cn"):
                 out.append(path)
                 continue
