@@ -116,6 +116,30 @@ class TestAnalyze(unittest.TestCase):
         self.assertEqual(main["china_reachable_count"], 1)
         self.assertAlmostEqual(main["china_reachable_rate"], 1.0)
 
+    def test_china_reachable_only_among_alive(self):
+        """china.json 可达判定含 valid 集外键时，reachable_count 不得超 alive
+        （曾实测 proxyip 源 22/19 → 105.79% 破界）。"""
+        ip_sources = {
+            "1.1.1.1:443#US": "main",
+            "2.2.2.2:443#DE": "main",
+            "3.3.3.3:443#JP": "main",  # 存活
+        }
+        valid_lines = ["3.3.3.3:443#🇯🇵JP-200ms"]
+        china_data = {
+            "1.1.1.1:443#US": {"verdict": "reachable"},  # 非存活键：不计
+            "2.2.2.2:443#DE": {"verdict": "reachable"},  # 非存活键：不计
+            "3.3.3.3:443#JP": {"verdict": "reachable"},  # 存活 + 可达
+        }
+        result = asrc.analyze(
+            ip_sources, valid_lines,
+            rep_data={}, china_data=china_data,
+            family_data={},
+        )
+        main = result["sources"]["main"]
+        self.assertEqual(main["alive"], 1)
+        self.assertEqual(main["china_reachable_count"], 1)
+        self.assertAlmostEqual(main["china_reachable_rate"], 1.0)
+
     def test_exit_family(self):
         ip_sources = {
             "1.1.1.1:443#US": "main",
