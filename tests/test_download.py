@@ -1191,3 +1191,56 @@ class TestExtractRegion(unittest.TestCase):
     def test_unmappable_defaults_all(self):
         self.assertEqual(dp._extract_region("50.2MB/s"), "ALL")
         self.assertEqual(dp._extract_region(""), "ALL")
+
+
+class TestRegistrableHost(unittest.TestCase):
+    def test_strips_common_suffix(self):
+        self.assertEqual(
+            dp._registrable_host("https://raw.githubusercontent.com/a/b.txt"),
+            "raw.githubusercontent",
+        )
+        self.assertEqual(
+            dp._registrable_host("https://sub.mirror-a.net/x"), "sub.mirror-a"
+        )
+
+    def test_bare_tld_host_untouched(self):
+        self.assertEqual(dp._registrable_host("https://com/x"), "com")
+
+    def test_empty_host_falls_back_mirror(self):
+        self.assertEqual(dp._registrable_host(""), "mirror")
+
+
+class TestDecode(unittest.TestCase):
+    def test_bytes_utf8(self):
+        self.assertEqual(dp._decode("你好".encode("utf-8")), "你好")
+
+    def test_invalid_utf8_replaced(self):
+        self.assertEqual(dp._decode(b"\xff\xfe"), "\ufffd\ufffd")
+
+    def test_str_passthrough(self):
+        self.assertEqual(dp._decode("已解码"), "已解码")
+
+
+class TestBuildSourceStats(unittest.TestCase):
+    def test_overlap_and_unique_counts(self):
+        stats = dp._build_source_stats(
+            {"1.1.1.1", "2.2.2.2", "3.3.3.3"},
+            {"srcA": {"9.9.9.9", "2.2.2.2", "3.3.3.3"}},
+            {"1.1.1.1", "2.2.2.2", "3.3.3.3", "9.9.9.9"},
+        )
+        main = stats["main (zip.cm.edu.kg)"]
+        self.assertEqual(main["total"], 3)
+        self.assertEqual(main["overlap"], 2)
+        self.assertEqual(main["unique"], 1)
+        src = stats["srcA"]
+        self.assertEqual(src["total"], 3)
+        self.assertEqual(src["overlap"], 2)
+        self.assertEqual(src["unique"], 1)
+
+    def test_no_overlap(self):
+        stats = dp._build_source_stats(
+            {"1.1.1.1"}, {"a": {"2.2.2.2"}}, {"1.1.1.1", "2.2.2.2"}
+        )
+        self.assertEqual(stats["main (zip.cm.edu.kg)"]["overlap"], 0)
+        self.assertEqual(stats["main (zip.cm.edu.kg)"]["unique"], 1)
+        self.assertEqual(stats["a"]["overlap"], 0)

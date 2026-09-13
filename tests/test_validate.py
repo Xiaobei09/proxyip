@@ -1474,3 +1474,24 @@ class TestVerifiedStableOutputs(unittest.TestCase):
         vp.write_valid_outputs(alive, per_country_limit=0, prev_keys=None)
         self.assertFalse((vp.VALID_DIR / "all_stable.txt").exists())
         self.assertTrue((vp.VALID_DIR / "all_verified.txt").exists())
+
+
+class TestExtractToicfExitGeo(unittest.TestCase):
+    def test_first_ok_probe_with_exit_ip_wins(self):
+        data = {"probe_results": [
+            {"ok": False, "exit_ip": "9.9.9.9"},
+            {"ok": True, "exit_ip": "8.8.8.8", "exit_country": "US",
+             "exit_city": "LA", "exit_asn": 15169, "exit_org": "G"},
+            {"ok": True, "exit_ip": "1.1.1.1", "exit_country": "AU"},
+        ]}
+        geo = vp._extract_toicf_exit_geo(data)
+        self.assertEqual(geo["countryCode"], "US")
+        self.assertEqual(geo["city"], "LA")
+        self.assertEqual(geo["asn"], 15169)
+
+    def test_none_when_no_ok_probe_with_exit_ip(self):
+        self.assertIsNone(vp._extract_toicf_exit_geo(
+            {"probe_results": [{"ok": False}, {"ok": True}]}
+        ))
+        self.assertIsNone(vp._extract_toicf_exit_geo({}))
+        self.assertIsNone(vp._extract_toicf_exit_geo({"probe_results": []}))
