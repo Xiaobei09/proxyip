@@ -131,9 +131,12 @@ def analyze(
                 rep_dist[risk] = rep_dist.get(risk, 0) + 1
         avg_rep = round(statistics.mean(rep_scores), 1) if rep_scores else None
 
-        # China reachability
+        # China reachability —— 仅统计**存活键**：china.json 的可达判定属于当轮
+        # 全池快照，可能含本轮 valid 集外的键；分子若不限存活，reachable_count
+        # 可超过 alive → 比率破 100%（曾实测 proxyip 源 22/19=115.79%）。
+        alive_keys = {k for k in keys if k in valid_keys}
         china_reachable = 0
-        for k in keys:
+        for k in alive_keys:
             c = china_data.get(k)
             if c and isinstance(c, dict) and c.get("verdict") == "reachable":
                 china_reachable += 1
