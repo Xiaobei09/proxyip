@@ -2524,5 +2524,79 @@ class TestContinuousPenalty(unittest.TestCase):
         self.assertEqual(used, [])
 
 
+class TestBuildRanked(unittest.TestCase):
+    def test_sorts_score_desc_latency_asc_key(self):
+        text = "\n".join([
+            "1.0.0.1:443#US-10ms",
+            "1.0.0.2:443#US-5ms",
+            "1.0.0.3:443#US-5ms",
+            "1.0.0.4:443#US-3ms",
+        ])
+        annotations = {
+            "1.0.0.1:443#US": "80",
+            "1.0.0.2:443#US": "50",
+            "1.0.0.3:443#US": "80",
+        }
+        rep_map = {
+            "1.0.0.1:443#US": {"score": 80},
+            "1.0.0.2:443#US": {"score": 50},
+            "1.0.0.3:443#US": {"score": 80},
+        }
+        self.assertEqual(
+            qc.build_ranked(text, annotations, rep_map),
+            [
+                "1.0.0.3:443#US-5ms-80",
+                "1.0.0.1:443#US-10ms-80",
+                "1.0.0.2:443#US-5ms-50",
+                "1.0.0.4:443#US-3ms",
+            ],
+        )
+
+    def test_unscored_lines_keep_relative_order_at_end(self):
+        text = "\n".join([
+            "1.0.0.5:443#US-10ms",
+            "1.0.0.6:443#US-20ms",
+            "1.0.0.7:443#US-30ms",
+        ])
+        self.assertEqual(
+            qc.build_ranked(text, {}, {}),
+            [
+                "1.0.0.5:443#US-10ms",
+                "1.0.0.6:443#US-20ms",
+                "1.0.0.7:443#US-30ms",
+            ],
+        )
+
+    def test_missing_latency_sorts_last_within_score(self):
+        text = "1.0.0.1:443#US-10ms\n1.0.0.2:443#US-1ms\n1.0.0.3:443#US\n"
+        rep = {f"1.0.0.{i}:443#US": {"score": 90} for i in (1, 2, 3)}
+        out = qc.build_ranked(text, {}, rep)
+        self.assertEqual(out[:2], ["1.0.0.2:443#US-1ms", "1.0.0.1:443#US-10ms"])
+        self.assertEqual(out[2], "1.0.0.3:443#US")
+
+    def test_existing_score_not_duplicated(self):
+        text = "1.0.0.1:443#US-10ms-50\n"
+        annotations = {"1.0.0.1:443#US": "50"}
+        rep_map = {"1.0.0.1:443#US": {"score": 50}}
+        out = qc.build_ranked(text, annotations, rep_map)
+        self.assertTrue(out[0].endswith("-50"))
+        self.assertEqual(out[0].count("-50"), 1)
+
+
+class TestBuildAnnotations(unittest.TestCase):
+    def test_score_from_rep_map(self):
+        results = {"1.0.0.1:443#US": {"key": "1.0.0.1:443#US"}}
+        rep_map = {"1.0.0.1:443#US": {"score": 73}}
+        self.assertEqual(qc.build_annotations(results, rep_map), {
+            "1.0.0.1:443#US": "73",
+        })
+
+    def test_missing_rep_yields_empty_string(self):
+        results = {"1.0.0.1:443#US": {"key": "1.0.0.1:443#US"}}
+        self.assertEqual(qc.build_annotations(results, {}), {
+            "1.0.0.1:443#US": "",
+        })
+
+
 if __name__ == "__main__":
     unittest.main()
