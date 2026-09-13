@@ -55,6 +55,25 @@ class TestCheckPool(unittest.TestCase):
     def test_needs_two_baseline_points(self):
         self.assertIsNone(check_pool([{"ts": _ts(1), "alive": 10}]))
 
+    def test_window_caps_at_24(self):
+        # 30 轮基线中间夹杂远古低点，暴跌仍应对最近 24 轮中位数触发
+        hist = [
+            {"ts": _ts(50 - i), "alive": 100 if i < 6 else 10000}
+            for i in range(30)
+        ]
+        hist.append({"ts": _ts(0), "alive": 5000})
+        alert = check_pool(hist)
+        self.assertIsNotNone(alert)
+        self.assertIn("-50%", alert)
+
+    def test_recovery_higher_than_median_no_alert(self):
+        hist = [
+            {"ts": _ts(3), "alive": 10000},
+            {"ts": _ts(2), "alive": 10000},
+            {"ts": _ts(1), "alive": 12000},
+        ]
+        self.assertIsNone(check_pool(hist))
+
 
 class TestCheckStale(unittest.TestCase):
     def test_fresh_ok(self):
@@ -100,6 +119,23 @@ class TestCheckCn(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             alert, _ = check_cn({"cn_reachable": 10}, self.make_file(td, 1))
             self.assertIsNone(alert)  # prev ≤ 20 不触发
+
+    def test_empty_proxies_keeps_snapshot(self):
+        # 文件存在但载荷为空 → 不评估、不覆盖历史快照（防瞬时空窗误报全塌方）
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "china.json"
+            p.write_text(json.dumps({"proxies": {}}))
+            alert, state = check_cn({"cn_reachable": 100}, p)
+            self.assertIsNone(alert)
+            self.assertEqual(state.get("cn_reachable"), 100)
+
+    def test_missing_file_keeps_snapshot(self):
+        with tempfile.TemporaryDirectory() as td:
+            alert, state = check_cn(
+                {"cn_reachable": 100}, Path(td) / "nope.json"
+            )
+            self.assertIsNone(alert)
+            self.assertNotIn("cn_ts", state)
 
 
 class TestCheckCnStale(unittest.TestCase):
