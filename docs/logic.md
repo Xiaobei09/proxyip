@@ -95,7 +95,7 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 3. 叠加连续型风险源（`trust_score`、`probability`、`risk_score`、`fraud_score`、`score`、otx reputation/pulse、proxycheck risk）的加权罚分。
 4. 查到出口地理（`countryCode`）即把 `ip-api` 计入投票；无任何信号则该项无分（不误判满分）。
 
-扣分表与默认源/权重见 `docs/scripts.md:105` 正文（tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅 mobile 与其余风险维度均不成立时有 +5 加分）。
+扣分表与默认源/权重见 `docs/scripts.md`「scripts/quality_check.py」段的「跨源共识合成」说明与「默认源与权重」表（tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅 mobile 与其余风险维度均不成立时有 +5 加分）。
 
 **滥用分优先级**：若 AbuseIPDB/IPQS 滥用分可用，直接取 `100 - abuse_score`，不走多源合成。
 
@@ -292,16 +292,23 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 （互斥桶先清后设）。规范段顺序：
 
 ```
-入口CC[→出口CC] - 延迟ms - 速度MB/s - 流媒体(并集) - 类型 - CF标 - 速度档 - 家族 - CN/CNH - 信誉分
+入口CC[→出口CC] - 延迟ms - 速度MB/s - 流媒体(并集) - 类型 - 速度档 - 家族 - CN/CNH - 信誉分 - U<NN>
 ```
 
 - 单值桶（类型/档位/家族/分数）取最右（最新）；多轮 CI 堆叠的历史快照自动收敛。
-- `CF`（边缘标记）与出口类型正交：出现过即保留，不参与类型互斥。
+- `CF`（边缘标记）已废弃：池子全为 CF 边缘端口恒真、无信息量，`normalize_note`
+  归一化时直接丢弃，历史行含 `CF` 也不再保留，新行不再生成该 token；故其不参与
+  出口类型互斥判断，本规范段序中也无 `CF` 位。
 - 流媒体为并集去重；`CNH` 蕴含 `CN`。
 - 互斥桶由权威源"先清后设"：ipinfo 类型覆盖历史类型，exit_family 家族覆盖旧家族，
   重算的速度档替换旧档——避免 `-DC-…-RES` 新旧并存。
 
 ### 7.1 Token 追加顺序
+
+> 本节描述各 token 的**处理追加先后**；任何追加都经 `merge_note_tokens`
+> （内部先 `normalize_note`）落盘，最终行内布局一律重建为 §7.0 的规范段序，
+> 故追加顺序不影响落盘顺序。下面的编号顺序已按当前 annotate_classify
+> 实现核对。
 
 1. 出口国家标记：`→CC`（有出口观测即标注，含同国）
 2. 大陆可达：`-CN`
@@ -364,7 +371,7 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 ### 7.3 行格式示例
 
 ```
-1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-GPT-72-DC-fast-V4-CN
+1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-GPT-DC-fast-V4-CN-72
 ```
 
 ## 8. 并发与容错
