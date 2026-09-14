@@ -433,6 +433,8 @@ python scripts/analyze_sources.py --data-dir /path/to/data
 ALERT_WEBHOOK_URL=https://example.com/hook python scripts/health_alert.py
 ```
 
+- `--strict`：默认无论有无告警都正常退出（0），供例行检查使用；加 `--strict` 后有告警以非零码退出，用于 CI 门控（如关键行为中断时让工作流失败）。
+
 ### `scripts/uptime.py`
 
 滚动节点可用率跟踪（质量链在 `quality_check.py` 之后、提交之前运行）。读取本轮存活键集，按
