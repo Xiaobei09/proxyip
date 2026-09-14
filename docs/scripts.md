@@ -1,6 +1,6 @@
 # 脚本与 CLI
 
-本文件归档全部入口脚本的参数、默认值与行为说明（含 `common.py` 共享模块与拆分子模块）。各脚本仍以 `python scripts/<name>.py` 独立运行。
+本文件归档全部入口脚本的参数、默认值与行为说明（含 `common.py` 共享模块与拆分子模块）。各脚本仍以 `python3 scripts/<name>.py` 独立运行。
 
 ## 脚本与 CLI
 
@@ -294,9 +294,9 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 支持 5 类操作系统（windows/macos/linux/android/ios），每个指纹的 UA、平台、分辨率、时区、语言、WebGL 渲染器、canvas 哈希均取自同一设备配置：
 
 ```bash
-python scripts/generate_fingerprint.py
-python scripts/generate_fingerprint.py -n 5
-python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
+python3 scripts/generate_fingerprint.py
+python3 scripts/generate_fingerprint.py -n 5
+python3 scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 ```
 
 示例输出：
@@ -347,8 +347,8 @@ After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-DC-fast-V6-CN-77-U92
 **处理范围**：`data/valid/all.txt`、`all_ltd.txt`、`countries/*/all.txt`、`countries/*/ltd.txt`、`sets/*/all.txt`、`sets/*/ltd.txt`、`ports/*.txt`
 
 ```bash
-python scripts/annotate_classify.py
-python scripts/annotate_classify.py --data-dir /path/to/data
+python3 scripts/annotate_classify.py
+python3 scripts/annotate_classify.py --data-dir /path/to/data
 ```
 
 ### `scripts/build_good.py`
@@ -370,8 +370,8 @@ python scripts/annotate_classify.py --data-dir /path/to/data
 每一份 `good` 清单都只含大陆可达行（仅 CN 列表），因此全部输出统一渲染 **CN 视图**：行内延迟改写为大陆实测 `china.json` 读数、速度令牌改写为 `≈XMB/s` 大陆估算值（语义与 `all_cn.txt` 一致）；无 `cn_ms` 数据时行保持原样。CI 在 `build-good.yml` 专职工作流中运行（与其后 `build_premium.py` 同 job）；`annotate-classify.yml` 与 `exit-family.yml` 的后缀填充步骤后亦运行。
 
 ```bash
-python scripts/build_good.py
-python scripts/build_good.py --data-dir /path/to/data
+python3 scripts/build_good.py
+python3 scripts/build_good.py --data-dir /path/to/data
 ```
 
 ### `scripts/build_premium.py`
@@ -394,8 +394,8 @@ python scripts/build_good.py --data-dir /path/to/data
 每一份 `premium` 清单都只含大陆可达行（仅 CN 列表），因此全部输出统一渲染 **CN 视图**：行内延迟改写为大陆实测 `china.json` 读数、速度令牌改写为 `≈XMB/s` 大陆估算值（语义与 `all_cn.txt` 一致）；无 `cn_ms` 数据时行保持原样。CI 在 `build-good.yml` 专职工作流中与 `build_good.py` 同 job 运行。
 
 ```bash
-python scripts/build_premium.py
-python scripts/build_premium.py --data-dir /path/to/data
+python3 scripts/build_premium.py
+python3 scripts/build_premium.py --data-dir /path/to/data
 ```
 
 ### `scripts/analyze_sources.py`
@@ -411,8 +411,8 @@ python scripts/build_premium.py --data-dir /path/to/data
 - `data/output/source_quality_report.txt`：人类可读汇总表
 
 ```bash
-python scripts/analyze_sources.py
-python scripts/analyze_sources.py --data-dir /path/to/data
+python3 scripts/analyze_sources.py
+python3 scripts/analyze_sources.py --data-dir /path/to/data
 ```
 
 ### `scripts/health_alert.py`
@@ -430,7 +430,7 @@ python scripts/analyze_sources.py --data-dir /path/to/data
 | `check_stale` | `data/valid/history.jsonl` 最新轮距今超过 8 小时 |
 
 ```bash
-ALERT_WEBHOOK_URL=https://example.com/hook python scripts/health_alert.py
+ALERT_WEBHOOK_URL=https://example.com/hook python3 scripts/health_alert.py
 ```
 
 - `--strict`：默认无论有无告警都正常退出（0），供例行检查使用；加 `--strict` 后有告警以非零码退出，用于 CI 门控（如关键行为中断时让工作流失败）。

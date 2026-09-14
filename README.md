@@ -54,14 +54,14 @@
 git clone https://github.com/Xiaobei09/proxyip.git
 cd proxyip
 
-python -m unittest discover -s tests -v     # 0. 运行测试套件（可选）
-python scripts/download_proxies.py          # 1. 下载解压整理
-python scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止；上一轮未存活条目先经 TCP 预筛除朽尸）
-python scripts/generate_stats.py            # 3. 统计与趋势图
-python scripts/quality_check.py             # 4. 出口 IP 质量检测（可选）
-python scripts/uptime.py                   # 5. 滚动可用率统计
-python scripts/export_json.py              # 6. 结构化 JSON 导出
-python scripts/health_alert.py             # 7. 池健康告警（可选 webhook）
+python3 -m unittest discover -s tests -v    # 0. 运行测试套件（可选）
+python3 scripts/download_proxies.py          # 1. 下载解压整理
+python3 scripts/validate_proxies.py             # 2. 连通性验证与测速（默认不设时间限制，跑完为止；上一轮未存活条目先经 TCP 预筛除朽尸）
+python3 scripts/generate_stats.py            # 3. 统计与趋势图
+python3 scripts/quality_check.py             # 4. 出口 IP 质量检测（可选）
+python3 scripts/uptime.py                   # 5. 滚动可用率统计
+python3 scripts/export_json.py              # 6. 结构化 JSON 导出
+python3 scripts/health_alert.py             # 7. 池健康告警（可选 webhook）
 ```
 
 ### 消费数据
