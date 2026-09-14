@@ -150,6 +150,30 @@ python3 scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `history_records` / `alive_history_records` | 历史记录条数 |
 | `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable`=china.json 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served`=实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（china_check 空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts`=china.json 生成时间 |
 
+### `data/output/badge.json`
+
+Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与外部 `![](…badge.json)` 消费），字段：
+
+| 字段 | 含义 |
+|---|---|
+| `schemaVersion` | 恒为 `1`（shields.io 端点规范） |
+| `label` | 恒为 `status` |
+| `message` | `fresh`（数据未过期）或 `stale`（年龄超过 3 小时） |
+| `color` | 对应 `brightgreen` / `red` |
+
+### `data/output/country_speed.json`
+
+按国家（ISO2 代码）的出口测速分布，供 `chart_country_speed.svg` 与外部消费。键为 `cc`，值为：
+
+| 字段 | 含义 |
+|---|---|
+| `n` | 该国参与测速的代理数 |
+| `p25` / `p50` / `p75` | 速度分位数（MB/s） |
+| `max` | 该国测速最大值（MB/s） |
+| `spread_pct` | 国内容量差异度：`round((p75-p25)/p50×100)`，取整 |
+
+示例：`"US": {"max": 47.64, "n": 2000, "p25": 3.43, "p50": 3.94, "p75": 6.2, "spread_pct": 70}`
+
 ### `data/valid/meta.json`
 
 | 字段 | 含义 |
