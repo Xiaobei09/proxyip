@@ -143,7 +143,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每小时定时（`cron: 11 * * * *`）+ `workflow_dispatch` 手动触发（原 workflow_run 依赖已移除，独立于质量链节奏）
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，全免费 CN 验证源分层判定：itdog 批量 http + batch_tcping 238 节点降级、check-host.cc 呼和浩特/xxapi.cn 北京单节点，多源复核集：tcptest.cn（800 键/20 并发）、ip.net.coffee（1200/40）、pingloc（600/12）、antping（500/8）、tcping.cn（400/8）、chinaz（200/8）、ping.pe（300））→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，全免费 CN 验证源分层判定：itdog 批量 http + batch_tcping 大节点池降级、check-host.cc 呼和浩特/xxapi.cn 北京单节点，多源复核集：tcptest.cn（800 键/20 并发）、ip.net.coffee（1200/40）、pingloc（600/12）、antping（500/8）、tcping.cn（400/8）、chinaz（200/8）、ping.pe（300））→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
 - **细节**：作业超时 360 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流提交经 `.github/scripts/commit_data.sh`——只提交本 job
   实际写入的文件（mtime 标记），push 冲突时其余文件对齐 origin，
