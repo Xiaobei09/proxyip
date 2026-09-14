@@ -113,9 +113,9 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 ### 常用命令
 
 ```bash
-python scripts/validate_proxies.py                    # 验证全部
-python scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
-python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
+python3 scripts/validate_proxies.py                    # 验证全部
+python3 scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
+python3 scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 ```
 
 ## 更新差异
