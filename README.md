@@ -275,7 +275,7 @@ data/output/chart_entry_audit.svg        入口国标签审计汇总
 data/output/chart_ip_type.svg            出口 IP 类型（机房/住宅/移动）分布
 data/output/chart_exit.svg               出口国家 top-15
 data/output/chart_rep.svg                信誉分分布条形图
-data/output/country_speed.json           各国测速汇总（中位速度，质量 CI）
+data/output/country_speed.json           各国测速汇总（中位速度，stats 工作流）
 
 data/raw/<port>/<CC>.txt                 下载中间产物（历史已入库；由 CI 周期生成重建）
 data/diff/                               更新差异归档（历史已入库）
