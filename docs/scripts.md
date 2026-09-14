@@ -263,7 +263,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
 
-- 分别请求仅 IPv4 与仅 IPv6 的回显服务（纯 IP 文本），**每族双服务商**：`ipv4.icanhazip.com` + `api4.ipify.org`（v4）、`ipv6.icanhazip.com` + `api6.ipify.org`（v6）；一族两源结果不一致即本轮不采信该族（双源互证，防单栈劫持），`verify_pinning()` 对回显做来源钉扎自检。两者全失败则尝试 `cloudflare.com/cdn-cgi/trace` 兜底。注意：CF 边缘代理的出口由 Worker fetch() 决定、与入口/目标主机名无关，故 CF 类代理 `dual` 恒为 0 属架构固有行为
+- 分别请求仅 IPv4 与仅 IPv6 的回显服务（纯 IP 文本），**每族双服务商**：`ipv4.icanhazip.com` + `api4.ipify.org`（v4）、`ipv6.icanhazip.com` + `api6.ipify.org`（v6）。同族两源**按序尝试、首个成功者生效**（互备而非必双侧一致）；「双源互证」体现在跨家族：v4/v6 两族各自拿到非空字面量且**不同** → `evidence=cross` 硬 dual 证据，字面量**相同** → `single_path`（跨服务商一致的单栈强证据）；仅一族可达 → `one_sided`。`verify_pinning()` 对回显源做记录钉扎自检（仅诊断日志，不阻断探测）。两族全失败则尝试 `cloudflare.com/cdn-cgi/trace` 兜底。注意：CF 边缘代理的出口由 Worker fetch() 决定、与入口/目标主机名无关（trace 只回显单 IP），故 CF 类代理 `dual` 恒为 0 属架构固有行为
 
 家族判定：仅 v4 → `ipv4`；仅 v6 → `ipv6`；双通 → `dual`；探测全失败 → `unknown`。结果写入：
 
@@ -340,8 +340,8 @@ python scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 **行格式变化**：
 
 ```
-Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-77
-After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-CN-V6-77-DC-fast-U92
+Before: 1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-V6-CN-77
+After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-DC-fast-V6-CN-77-U92
 ```
 
 **处理范围**：`data/valid/all.txt`、`all_ltd.txt`、`countries/*/all.txt`、`countries/*/ltd.txt`、`sets/*/all.txt`、`sets/*/ltd.txt`、`ports/*.txt`
@@ -432,3 +432,47 @@ python scripts/analyze_sources.py --data-dir /path/to/data
 ```bash
 ALERT_WEBHOOK_URL=https://example.com/hook python scripts/health_alert.py
 ```
+
+### `scripts/uptime.py`
+
+滚动节点可用率跟踪（质量链在 `quality_check.py` 之后、提交之前运行）。读取本轮存活键集，按
+UTC 日期记入 `data/quality/node_seen.json`，滚动裁剪 `WINDOW_DAYS`(45) 天的运行日计数，
+再以「窗口内实际有质量轮的日期数」为分母产出 7d/30d 存活率写入 `data/quality/uptime.json`
+（字段见 `docs/data-spec.md`）。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--alive-file` | 本轮存活键所在 JSON（其顶层 `proxies` 键集即为存活集） | `data/quality/ipinfo.json` |
+| `--out-dir` | `node_seen.json` / `uptime.json` 输出目录 | `data/quality/` |
+
+### `scripts/deep_speed.py`
+
+深测带宽：对**选定国家**的候选节点做大样本（默认 20 MB / 30s 上限）× 多并发流（默认 3）的
+多目标下载深测，稳态窗口远大于慢启动，用于同一国家内拉开真实带宽差异。结果写
+`data/quality/deep_speed.json`（keyed，含每流明细与 `tls_ms`；`meta` 记录本次参数快照），
+**不改动清单行备注**——深测结论供人工/下游参考，与全局档位语义解耦。Ci 为 weekly workflow
+`deep-speed.yml`（每周六 `7 3 * * 6`）。quality_check 消费最优目标 `agg_mbps`
+（`min(agg/50,1)×10`，封顶 +10，仅对已有信誉分节点生效；数据超 `DEEP_SPEED_TTL_DAYS`(10)
+天视为过期）。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--cc` | 逗号分隔国家码，选取该国之国池候选 | 空（配合 `--source` 使用） |
+| `--source` | 显式池文件（优先于 `--cc`） | 无 |
+| `--limit` | 每轮最多探测节点数（0=全部） | 30 |
+| `--bytes-mb` | 单流下载上限（MB） | 20 |
+| `--streams` | 每节点并发流数 | 3 |
+| `--timeout` | 连接/下载超时（秒） | 30 |
+| `--workers` | 同时深测的节点数 | 6 |
+| `--sni` | 覆盖入口 SNI | 无 |
+| `--targets` | 逗号分隔目标：`cf_speed`/`cdnjs`/`ovh`/`cf_trace` | `cdnjs` |
+
+### `scripts/export_json.py`
+
+结构化代理池导出：读取 `data/valid/` 全部带注解行，输出单行 JSON 数组到 `data/valid/all.json`
+（字段：`line`/`key`/`ip`/`port`/`flag`/`cc`/`exit`/`latency_ms`/`speed_mbps`/
+`family`/`cn`/`type`/`tier`/`rep`/`uptime7`，详见 `docs/data-spec.md`）。stats workflow 提交前运行。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--data-dir` | 数据根目录 | `data/` |

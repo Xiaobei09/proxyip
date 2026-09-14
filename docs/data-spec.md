@@ -148,7 +148,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `ip_type` / `family` / `dual_stack` / `country_mismatch` | 出口 IP 类型分布 / 地址族分布 / 双栈数 / 错区数 |
 | `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
-| `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable`=china.json 当前判定可达数（真相）；`http`/`stable`/`served`=实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（china_check 空组不落盘、横波后旧子集短暂残留属设计，消费此口径所见即所得）；`ts`=china.json 生成时间 |
+| `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable`=china.json 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served`=实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（china_check 空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts`=china.json 生成时间 |
 
 ### `data/valid/meta.json`
 
@@ -162,7 +162,7 @@ python scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `speed` | 测速统计（avg/median/p90/max，MB/s） |
 | `speed_dist` | 速度分桶直方图（MB/s） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
-| `prefiltered` | 进入完整检测的条目数（`--prefilter` 启用时为 TCP 预筛后保留数，未启用时等于 `total`） |
+| `prefiltered` | 进入完整检测的条目数（`--quick-prefilter` 启用时为 TCP 预筛后保留数，未启用时等于 `total`） |
 | `sets` | 各集合存活条数 |
 | `ext_check` | 外部 API 检测汇总（仅 `--ext-check` 时出现）：`ext_check_total`/`ext_check_ok`/`ext_check_uncertain`/`ext_check_dead`/`ext_avg_response_ms` |
 

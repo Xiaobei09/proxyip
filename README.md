@@ -80,9 +80,9 @@ data/valid/countries/US/cn.txt             # 该国大陆可达的代理
 data/valid/countries/US/cn4.txt            # 该国大陆可达且出口为 IPv4 的代理
 data/valid/countries/US/rep.txt            # 该国按信誉分降序（质量 CI 生成）
 data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 信誉≥80 + 非高风险，综合分降序，CN 视图）
- data/valid/all_premium.txt                  # 全局高端优质（CN 可达 + 信誉≥95 + 真实住宅IP，综合分降序，CN 视图）
- data/valid/all_premium_v4.txt               # 高端优质（出口为 IPv4 的家族分支，另有 _v6 / _46）
- data/valid/countries/US/premium.txt         # 该国高端优质（质量 CI 生成）
+data/valid/all_premium.txt                  # 全局高端优质（CN 可达 + 信誉≥95 + 真实住宅IP，综合分降序，CN 视图）
+data/valid/all_premium_v4.txt               # 高端优质（出口为 IPv4 的家族分支，另有 _v6 / _46）
+data/valid/countries/US/premium.txt         # 该国高端优质（质量 CI 生成）
 data/valid/sets/hot/premium.txt             # 热门集合高端优质（质量 CI 生成）
 data/valid/sets/europe/all.txt             # 欧洲集合存活代理（集合也是目录多件套）
 data/valid/all_46.txt                      # 全部出口为双栈的代理（根级分组）
@@ -95,8 +95,8 @@ data/download/all.txt                       # 全量去重清单（未验证）
 > **关于"不同国家速度差异大"**：日常轮中的 MB/s 是小文件短窗口采样，同一 CDN
 > 本地化边缘下同国趋同、跨国差异明显属正常现象；需要精确对比时以
 > `data/output/chart_country_speed.svg`（各国中位速度）和深测
-> （`scripts/deep_speed.py`，默认 `speed.cloudflare.com` 25MB 大文件多流，
-> `cf_speed,ovh` 目标）为准——深测的意义是**在同一国家内拉开真实带宽差异**，
+> （`scripts/deep_speed.py`，默认 20MB / 3 并发流 / `cdnjs` 目标，可选
+> `cf_speed`、`ovh` 多目标对照）为准——深测的意义是**在同一国家内拉开真实带宽差异**，
 > 而不是消除国家间线路差距（那是真实的主干网延迟/损耗，无法用节点选择抹平）。
 
 ## 中国大陆使用建议
@@ -129,7 +129,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/update-proxies.yml`：
 
 - **触发**：每 2 小时定时（`cron: 0 */2 * * *`）；支持 `workflow_dispatch` 手动触发
-- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip；另并 9 个 CF 反代补充源 + 5 个免费 `ip:port` 主线镜像源，产出 `data/quality/upstream_meta.json`）→ 验证与测速（`--time-budget 3600`，上一轮未存活的条目先经 2 秒 TCP 预连通筛除朽尸）→ 有变更则自动提交并推送回仓库
+- **流程**：跑测试（`unittest`）→ 下载整理（上游 `all.json`，失败回退 zip；另并 17 个第三方 CF 反代 / 免费 `ip:port` 补充源，完整清单见 `docs/scripts.md`「CF 反代补充来源」；产出 `data/quality/upstream_meta.json`）→ 验证与测速（`--time-budget 3600`，上一轮未存活的条目先经 2 秒 TCP 预连通筛除朽尸）→ 有变更则自动提交并推送回仓库
 - **细节**：作业超时 120 分钟；`concurrency` 组防重入；`contents: write` 权限；以 `github-actions[bot]` 身份提交
 - **徽章**：五个徽章分别取 `data/output/stats.json` 的 `unique`、`alive`、`alive_rate`、`updated_ago`、`cn_reachable`；`data/output/badge.json` 驱动状态徽章——正常时按数据年龄显示 fresh/stale（超过 3 小时变红），看门狗触发告警时直接替换为告警名（如 `stale data`、`valid-lists stale`）并标红，停机原因对访客可见
 
@@ -148,7 +148,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - **说明**：各工作流提交经 `.github/scripts/commit_data.sh`——只提交本 job
   实际写入的文件（mtime 标记），push 冲突时其余文件对齐 origin，
   杜绝旧 checkout 快照回滚他人并发更新；china.json 另有 `last_ok_ts`
-  时间窗（≤3h）保护 streak 连续计数不被陈旧基线清零
+  时间窗（≤6h，`STREAK_GAP_TOLERANCE_S`）保护 streak 连续计数不被陈旧基线清零
 
 `.github/workflows/exit-family.yml`（实际出口家族独立 CI）：
 
