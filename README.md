@@ -109,13 +109,13 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - **可靠性叠加**：代理池 churn 快（检测时活着、使用时可能已死），且"TLS 握手存活"≠"能用"。
   按家族分组清单（`v4`/`v6`/`46`/`cn`/`cn4`/`cn6`/`cn46`）派生两个可靠性维度
   （如 `countries/US/cn4_stable.txt`、根级 `all_cn4_verified.txt`）；根级
-  `all_cn`/`all_ipv4`/`all_ipv6` 及 rep 信誉排行不派生这两种变体：
+  `all_cn`/`all_ipv4`/`all_ipv6` 无此直接变体（`all_cn` 自带 http/stable 子集）：
   - `*_verified` — **全链路验证**：本轮测速成功 = TLS + HTTP 2xx + 真实下载全部通过，
     过滤"能握手但不吐数据"的半死代理
   - `*_stable` — **连续两轮存活**：上一轮与本轮存活的交集，对抗快速 churn
-  - **跨家族联动**：`ltd`/`good` 家族同样派生（如 `all_ltd_verified.txt`、
-    `all_cn46_ltd_stable.txt`、`all_good_stable.txt`；`rep` 为纯信誉排行，不派生
-    `_verified/_stable`）；质量侧 `_stable` = 连续两轮大陆可达（china.json streak≥2）
+  - **跨家族联动**：`ltd`/`rep`/`good` 家族同样派生（如 `all_ltd_verified.txt`、
+    `all_cn46_rep_ltd_verified.txt`、`all_good_stable.txt`）；质量侧 `_stable` =
+    连续两轮大陆可达（china.json streak≥2）
 - **行内备注**：`-CN` = 大陆可达；`-CNH` = 大陆可达且应用层（HTTP）确认；
   `-V4/-V6/-DS` = 实际出口家族（CF 边缘代理入口是 v4，实际出口常为 v6）；`→XXX` = 出口地区
 - **本地运行**：脚本访问 `raw.githubusercontent.com` 失败时自动回退 gh-proxy.com /
