@@ -99,6 +99,11 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 **滥用分优先级**：若 AbuseIPDB/IPQS 滥用分可用，直接取 `100 - abuse_score`，不走多源合成。
 
+**密钥防护约束**：滥用/信誉 key 只经环境变量注入（`ABUSEIPDB_KEY`/`IPQS_KEY`，
+不进 CLI 参数与配置文件）；key 不得进入任何日志、`TimeoutError`/异常文本或
+traceback——IPQS 分支超时异常已净化（`from None` 断开因果链），后继改动该
+分支时须保持此面不变（另见 R212/R213）。
+
 ### 4.2 风险等级
 
 | 分数区间 | 风险 |
@@ -148,8 +153,43 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 - 按 IP 的 API 源信号缓存在 `data/quality/reputation_cache.json`
 - TTL 默认 7 天，TTL 内复用缓存信号重新计算分数
-- 只查询缺失/过期的 IP
+- 只查询缺失/过期的 IP；过期条目不删除——每轮尝试刷新，刷新失败时
+  回退使用最近缓存信号（保持数据最新而非过期即丢），直至被新条目
+  挤出缓存上限（`REP_CACHE_MAX`）
 - 静态列表不缓存，每轮重拉
+
+### 4.5 执行相位与墙钟预算门控
+
+`quality_check.py run()` 依序执行下列相位（探测定序、网络相位后处理）：
+
+1. **探测相位**（`quality_probe.run_checks`，TLS 判定 + 出口地理回显）
+2. **出口解析**（`resolve_exit_ips`，本地映射，无网络）
+3. **geo 相位**（`batch_ipapi`，批量地理位置）
+4. **信誉相位**（`lookup_all_risk`，按 IP 风险源 + ASN 归一）
+5. **滥用相位**（`run_abuse`，key 存在时才开启）
+6. **本地收尾**（建 ipinfo/rep_map、写 reputation.json/all_rep*.txt、
+   ipinfo.json、quality_meta.json、注解 valid 文件——均无网络，总是执行）
+
+`--time-budget N`（N>0）时套用**墙钟预算门控**：
+
+- 探测相位拿到 `max(1, N - POST_RESERVE_S)` 作为自己的 `time_budget`
+  （`POST_RESERVE_S = 600`s 为后处理预留窗口，使预算内仍能产出信誉分）；
+- 三个网络相位各自在进入前检查 `_within_budget(start, N)`
+  （`elapsed < N` 才允许开启），超时则跳过该相位并 stderr 警告（含合并汇总）；
+- 相位内部同样止损：`batch_ipapi` 的分块与 per-IP 兜底循环、`run_abuse`
+  的出口 IP 顺序查询都接受绝对 `deadline`（`start + N`），上游全挂时不再
+  逐 IP 空转 1.5s/0.3s 睡满无限时长，到龄即提前退出（防 ip-api/滥用 API
+  停机把网络相位拖到 CI 硬杀）；截断发生且结果不全时，stderr 会各发一条
+  归因警告（`Warning: ip-api geo truncated by time deadline; returning
+  partial results (N/M)` / `Warning: abuse scores truncated by time
+  deadline; returning partial results (N/M)`），`N/M` 为已得/应得数量——
+  批量相位部分成功即返回（互斥短路，per-IP 兜底不再触发）；
+- 本地收尾不受门控，保证已得结果照常落盘——**提交部分结果而非整链丢失**；
+- `N=0`（默认）不设门控，行为与历史完全一致。
+
+超时跳过后 `quality_meta.reputation_checked` 为 0、`rep_avg` 为 `null`，
+旧轮 `reputation.json`/`all_rep*.txt` 保持上一轮快照（charts 显示"暂无信誉
+分数据"占位），不产生脏数据。
 
 ## 5. 大陆连通性检测（china_check.py）
 

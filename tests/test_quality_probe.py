@@ -1,7 +1,10 @@
 """Tests for quality_probe.py pure parsers and ip-api batch cascades."""
 
 import asyncio
+import contextlib
+import io
 import sys
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -196,3 +199,81 @@ class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
             out = await qp.batch_ipapi(["1.1.1.1", "2.2.2.2"])
         self.assertEqual(list(out), ["1.1.1.1"])
         self.assertEqual(out["1.1.1.1"]["countryCode"], "DE")
+
+    async def test_deadline_stops_batch_chunks(self):
+        """deadline 超龄：批量分块阶段直接退出，不再发起任何请求。"""
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync",
+            side_effect=RuntimeError("network down"),
+        ) as batch, unittest.mock.patch.object(
+            qp, "ipapi_get_sync",
+            side_effect=RuntimeError("network down"),
+        ) as get:
+            out = await qp.batch_ipapi(["1.1.1.1", "2.2.2.2"], deadline=-1)
+        self.assertEqual(out, {})
+        batch.assert_not_called()
+        get.assert_not_called()
+
+    async def test_deadline_stops_per_ip_fallback(self):
+        """批量全挂 + deadline 即将超龄：per-IP 兜底首个请求后即止损。"""
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync", side_effect=RuntimeError("network down"),
+        ) as batch, unittest.mock.patch.object(
+            qp, "ipapi_get_sync", side_effect=RuntimeError("network down"),
+        ) as get:
+            out = await qp.batch_ipapi(
+                ["1.1.1.1", "2.2.2.2", "3.3.3.3"],
+                deadline=time.monotonic() + 0.05,
+            )
+        self.assertEqual(out, {})
+        # 批量：3 IP 在 <0.05s 内全部失败后进入兜底；兜底至多 2 次即超龄退出
+        self.assertLessEqual(batch.call_count, 3)
+        self.assertLessEqual(get.call_count, 2)
+
+    async def test_deadline_truncation_warns_stderr(self):
+        """deadline 截断：partial geo 返回 + stderr 含截断警告文案。"""
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync", side_effect=RuntimeError("network down"),
+        ), unittest.mock.patch.object(
+            qp, "ipapi_get_sync", side_effect=RuntimeError("network down"),
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                out = await qp.batch_ipapi(["1.1.1.1"], deadline=-1)
+        self.assertEqual(out, {})
+        self.assertIn("truncated by time deadline", buf.getvalue())
+
+    async def test_batch_partial_ok_short_circuits_fallback(self):
+        """批量部分成功（any_batch_ok=True）→ per-IP 兜底永不触发。"""
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync",
+            return_value=[
+                {"status": "success", "countryCode": "US"},
+                {"status": "success", "countryCode": "JP"},
+            ],
+        ) as batch, unittest.mock.patch.object(
+            qp, "ipapi_get_sync",
+        ) as get:
+            out = await qp.batch_ipapi(["1.1.1.1", "2.2.2.2", "3.3.3.3"])
+        self.assertEqual(sorted(out), ["1.1.1.1", "2.2.2.2"])
+        get.assert_not_called()
+
+    async def test_deadline_truncation_warns_scale(self):
+        """per-IP 兜底被截断 → partial 结果 + stderr 含 (N/M) 规模文案。"""
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync",
+            side_effect=RuntimeError("network down"),
+        ), unittest.mock.patch.object(
+            qp, "ipapi_get_sync",
+            side_effect=RuntimeError("network down"),
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                out = await qp.batch_ipapi(
+                    ["1.1.1.1", "2.2.2.2", "3.3.3.3"],
+                    deadline=-1,
+                )
+        self.assertEqual(out, {})
+        # 已完成请求数/总量为 (0/3)，截断文案同时含子串与规模
+        self.assertIn("truncated by time deadline", buf.getvalue())
+        self.assertIn("(0/3)", buf.getvalue())
