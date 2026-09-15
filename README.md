@@ -102,7 +102,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 ## 中国大陆使用建议
 
 - **优先消费**：`data/valid/all_cn_stable.txt`（连续 ≥2 轮大陆可达，抗误判/churn）、
-  `data/valid/all_cn_http.txt`（应用层 HTTP 确认，过滤"TCP 通但被干扰"）、
+  `data/valid/all_cn_http.txt`（应用层 HTTP 确认，过滤"TCP 通但被干扰"；**条件产物——当前无应用层证据时 `cn_http=0` 且不生成此文件，属预期**）、
   `data/valid/all_cn.txt`（全量大陆可达，按**大陆实测延迟升序**）、
   `data/valid/all_good.txt`（综合最优：CN 可达 + 信誉≥80 + 非高风险；延迟分优先采用大陆实测值）、
   `data/valid/countries/<CC>/cn4.txt`（该国大陆可达且 IPv4 出口）
