@@ -306,8 +306,18 @@ def notify(alerts: list[str]) -> bool:
     try:
         with deadline_open(req, 15):
             return True
+    except TimeoutError:
+        print("webhook delivery timed out (token redacted)",
+              file=sys.stderr)
+        return False
     except OSError as exc:
-        print(f"webhook delivery failed: {exc}", file=sys.stderr)
+        # OSError 属类含 URLError/HTTPError，str(exc) 会内嵌完整请求 URL
+        # （Discord webhook URL 含 token），净化到不含 URL 的通用文案。
+        print(
+            f"webhook delivery failed: {type(exc).__name__} "
+            "(details redacted; webhook token must not leak)",
+            file=sys.stderr,
+        )
         return False
 
 
