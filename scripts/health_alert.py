@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import statistics
 import sys
 import time
@@ -289,6 +290,11 @@ def notify(alerts: list[str]) -> bool:
     print(msg, file=sys.stderr)
     url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
     if not url:
+        return False
+    if not re.match(r"^https://", url):
+        # 合规硬约束：仅允许 https，防止 webhook  token/内容经 http 明文泄露
+        print("webhook delivery skipped: only https:// is allowed",
+              file=sys.stderr)
         return False
     body = json.dumps({"content": msg, "text": msg}).encode()
     req = urllib.request.Request(
