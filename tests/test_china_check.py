@@ -1480,7 +1480,7 @@ class TestNewMultiSources(unittest.TestCase):
                                side_effect=ValueError("invalid literal for int()")):
             out = cc.tcpingcn_check("1.2.3.4", "80", 10)
         self.assertEqual(out["status"], "error")
-        self.assertIn("invalid literal", out["error"])
+        self.assertEqual(out["error"], "ValueError")
 
     def test_tcpingcn_pow_zero_bits(self):
         # 16 位清 0 → 头 2 字节为 0
