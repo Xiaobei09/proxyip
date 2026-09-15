@@ -441,9 +441,11 @@ def write_data_json(path: Path, data: dict) -> None:
 def write_state(state: dict, path: Path | None = None) -> None:
     p = path or STATE_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(
         json.dumps(state, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+    tmp.replace(p)
 
 
 if __name__ == "__main__":
