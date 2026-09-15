@@ -32,6 +32,7 @@ stay visible, and attach hover tooltips via inline ``<title>`` elements
 import argparse
 import json
 import math
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -40,7 +41,7 @@ from pathlib import Path
 
 from common import DATA_DIR, OUTPUT_DIR, line_to_key, now_ts, read_json, write_text_if_changed
 
-SPEED_NOTE_RE = __import__("re").compile(r"(\d+(?:\.\d+)?)MB/s")
+SPEED_NOTE_RE = re.compile(r"(\d+(?:\.\d+)?)MB/s")
 
 WIDTH = 800
 HEIGHT = 300
