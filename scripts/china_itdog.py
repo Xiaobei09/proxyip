@@ -147,7 +147,7 @@ def itdog_submit_task(
     except urllib.error.HTTPError as e:
         return None, f"http {e.code}"
     except Exception as e:
-        return None, str(e)[:120]
+        return None, type(e).__name__
     if status != 200:
         return None, f"http {status}"
     return itdog_parse_submit(resp.decode("utf-8", "replace"))
