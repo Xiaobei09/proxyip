@@ -1,4 +1,4 @@
-"""Every scripts/*.py entrypoint must exit 0 on ``--help`` (argparse intact)."""
+"""Every CLI scripts/*.py must exit 0 on ``--help``；库模块（common.py）须带提示以非零码退出。"""
 import ast
 import subprocess
 import sys
@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = sorted(ROOT.glob("scripts/*.py"))
+LIBRARY_MODULES = {"common.py"}  # 无 CLI、`__main__` 守卫以退出码 2 提示
 
 
 class _TopLevelPrint(ast.NodeVisitor):
@@ -28,6 +29,7 @@ class TestCliHealth(unittest.TestCase):
     def test_every_script_parses_help(self):
         for script in SCRIPTS:
             with self.subTest(script=script.name):
+                want = 2 if script.name in LIBRARY_MODULES else 0
                 proc = subprocess.run(
                     [sys.executable, str(script), "--help"],
                     capture_output=True,
@@ -36,8 +38,8 @@ class TestCliHealth(unittest.TestCase):
                 )
                 self.assertEqual(
                     proc.returncode,
-                    0,
-                    f"{script.name} --help failed:\n"
+                    want,
+                    f"{script.name} --help wrong exit (want {want}):\n"
                     f"STDOUT: {proc.stdout[-400:]}\n"
                     f"STDERR: {proc.stderr[-400:]}",
                 )
