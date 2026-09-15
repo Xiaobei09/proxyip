@@ -479,3 +479,32 @@ UTC 日期记入 `data/quality/node_seen.json`，滚动裁剪 `WINDOW_DAYS`(45) 
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--data-dir` | 数据根目录 | `data/` |
+
+### `scripts/quality_reputation.py`
+
+多源 IP 信誉/风险评分（自 `quality_check.py` 拆出的独立模块，被 `quality_check` import）：各源产出 0-100 纯净度信号，按 `REPUTATION_WEIGHTS` 加权合并为单一信誉分；静态黑名单（FireHOL abuse / iplogs ASN）每轮重取，逐 IP API 信号缓存于 `reputation_cache.json`（带 TTL）。规则同 `quality_check.py` 信誉段：abuse 分存在时取 `100 - score` 为最高优先级；否则把各源布尔标志归一为语义维度（tor/proxy/vpn/hosting/mobile/abuse/listed/scraper/crawler/anonymous），按源权重做**加权多数投票**（正票总权重大于负票才认定维度为真，打平无结论不扣分）；再叠加连续型风险源的加权罚分；greynoise 确认的恶意类别按 60/35/15 差异化罚分。共识扣分表：tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；mobile 仅当其余维度均不成立时 +5。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs），key 从 `ABUSEIPDB_KEY`/`IPQS_KEY` 环境变量读取，缺 key 自动跳过 | none |
+| `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
+| `--reputation-sources` | multi 时启用源（逗号分隔，清单见 quality_check.py 表） | netcoffee,ncgy,ip-api,otx,... |
+| `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见 quality_check.py 表 |
+| `-t, --timeout` | 单源 HTTP 超时（秒） | 6 |
+| `--read-cap` | 单次响应读取上限（字节） | 524288 |
+| `-w, --workers` | 并发上限 | 10 |
+| `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
+| `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
+
+### `scripts/china_itdog.py`
+
+itdog.cn 批量大陆可达性探测（WebSocket 收结果）：自 `china_check` 拆出的独立核心——抓取电信/联通/移动节点 → 提交批量 HTTP/TCPing 任务 → 经 `wss://www.itdog.cn` 轮询收集 → 聚合成源判定。仅依赖 `common` 的 `UA`/`request_follow`；8 次连续批量失败触发断路器暂停，任务带 pacing + 并发上限。供 `china_check.py` import 复用。
+
+| 参数 | 说明 | 默认 |
+|---|---|---|
+| `--itdog-batch-size` | 每任务目标数 | 5 |
+| `--itdog-concurrency` | 同时批量任务数 | 见 china_check 表 |
+| `--itdog-nodes` | 抓取节点数 | 见 china_check 表 |
+| `--itdog-pacing` | 任务间隔节流（秒） | 见 china_check 表 |
+| `--skip-itdog` | 跳过 itdog 批量 HTTP 探测 | 关 |
+| `--skip-itdog-tcping` | 跳过 itdog TCPing 探测 | 关 |
