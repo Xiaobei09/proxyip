@@ -2,10 +2,13 @@
 
 import argparse
 import asyncio
+import contextlib
+import io
 import json
 import sys
 import time
 import tempfile
+import traceback
 import unittest
 import unittest.mock
 from datetime import datetime, timedelta, timezone
@@ -143,6 +146,25 @@ class TestIpTypeAndRisk(unittest.TestCase):
         self.assertEqual(qc.derive_risk({}, {"score": 90}, w), "high")
         self.assertEqual(qc.derive_risk({}, {"score": 50}, w), "medium")
         self.assertEqual(qc.derive_risk({}, {"score": 10}, w), "low")
+
+
+class TestTimeBudgetGate(unittest.TestCase):
+    """D-42：``--time-budget`` 墙钟相位感知止损门槛（到点停开新相位、已得结果仍落盘）。"""
+
+    def test_unlimited_always_in_budget(self):
+        self.assertTrue(qc._within_budget(time.monotonic(), 0))
+        self.assertTrue(qc._within_budget(time.monotonic() - 1e6, 0))
+
+    def test_budget_boundary(self):
+        start = time.monotonic()
+        self.assertTrue(qc._within_budget(start, 5))
+        time.sleep(0.01)
+        # 未到期（起点后不足 5s）
+        self.assertTrue(qc._within_budget(start, 5))
+        # 模拟超期：起点大幅早于现在
+        self.assertFalse(qc._within_budget(time.monotonic() - 10, 5))
+        # 恰好边界：已用 == 预算视为超期（< 而非 <=）
+        self.assertFalse(qc._within_budget(start - 5, 5))
 
 
 class TestBuildIpinfo(unittest.TestCase):
@@ -356,6 +378,22 @@ class TestReputation(unittest.TestCase):
             "ip-api": {"proxy": True, "hosting": True},
         }
         self.assertEqual(qc.compute_reputation(signals, {"score": 90}, self.W), 10)
+
+    def test_otx_cached_string_signal_tolerated(self):
+        """缓存投毒韧性：otx 信号数值字段为非 int 字符串 → 不崩、按 0 计分。"""
+        sigs = {"otx": {"reputation": "abc", "pulse_count": "xyz"}}
+        # 主路径 vote_reputation 内部连续罚分与 flag 判定均不抛 ValueError
+        self.assertEqual(qc.compute_reputation(sigs, None, self.W), 100)
+        self.assertEqual(qc.vote_reputation(sigs, self.W)[0], 100)
+
+    def test_as_int_coercion(self):
+        self.assertEqual(qr._as_int(90), 90)
+        self.assertEqual(qr._as_int("90"), 90)
+        self.assertEqual(qr._as_int("abc"), 0)
+        self.assertEqual(qr._as_int(None), 0)
+        self.assertEqual(qr._as_int(3.0), 3)
+        self.assertEqual(qr._as_int(3.7), 0)
+        self.assertEqual(qr._as_int(True), 0)
 
     def test_trust_score_direct(self):
         self.assertEqual(
@@ -1671,6 +1709,78 @@ class TestReputationCache(unittest.TestCase):
         self.assertEqual(calls, ["1.1.1.1", "2.2.2.2"])
         self.assertEqual(len(calls), 2)
 
+    def test_stale_fallback_on_refresh_failure(self):
+        # 过期 + 刷新失败 → 回退使用最近缓存信号（不因过期而丢弃），
+        # 且过期条目不随写回被删除。
+        now = time.time()
+        qc.save_rep_cache({
+            "1.1.1.1": {"netcoffee": {"ts": now - 2 * 604800, "data": {"risk": "low"}}},
+        })
+        calls = []
+        orig = qr.netcoffee_lookup_sync
+
+        def boom(ip):
+            calls.append(ip)
+            raise RuntimeError("api down")
+
+        qr.netcoffee_lookup_sync = boom
+        try:
+            out = asyncio.run(qc.lookup_all_risk(
+                ["1.1.1.1"], self._args()
+            ))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        # 过期后确实尝试刷新（回调被调用；batch_sync 默认重试 1 次 → 2 calls）
+        self.assertEqual(calls, ["1.1.1.1", "1.1.1.1"])
+        # 刷新失败 → 旧缓存信号仍在结果中，未被当作「无信号」丢弃
+        self.assertEqual(out["1.1.1.1"]["netcoffee"], {"risk": "low"})
+        # 写回时过期条目保留（不删除）
+        data = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))
+        self.assertIn("1.1.1.1", data["proxies"])
+
+    def test_stale_fallback_token_priority_partial_failure(self):
+        """混合场景：fresh(不重查) vs 到期成功(刷新覆盖) vs 到期失败
+        (兜底旧信号)，一次 run 内三路优先级必须正确，写回 ts 只更新成功者。"""
+        now = time.time()
+        ttl = 7 * 86400
+        qc.save_rep_cache({
+            "1.1.1.1": {"netcoffee": {"ts": now, "data": {"risk": "low"}}},
+            "2.2.2.2": {"netcoffee": {"ts": now - 2 * ttl, "data": {"risk": "medium"}}},
+            "3.3.3.3": {"netcoffee": {"ts": now - 2 * ttl, "data": {"risk": "medium"}}},
+        })
+        calls: list[str] = []
+        orig = qr.netcoffee_lookup_sync
+
+        def mock(ip):
+            calls.append(ip)
+            if ip == "2.2.2.2":
+                raise RuntimeError("api down")
+            return {"risk": "high"}
+
+        qr.netcoffee_lookup_sync = mock
+        try:
+            out = asyncio.run(qc.lookup_all_risk(
+                ["1.1.1.1", "2.2.2.2", "3.3.3.3"], self._args()
+            ))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        # fresh 不清命：1.1.1.1 不被查询，直接复用
+        self.assertEqual(out["1.1.1.1"]["netcoffee"], {"risk": "low"})
+        self.assertNotIn("1.1.1.1", calls)
+        # 到期失败 → 兜底旧信号（medium 未被"无信号"丢弃）
+        self.assertEqual(out["2.2.2.2"]["netcoffee"], {"risk": "medium"})
+        # 到期成功 → 刷新信号覆盖
+        self.assertEqual(out["3.3.3.3"]["netcoffee"], {"risk": "high"})
+        # 每 IP 只被查一次（排除 batch_sync 重试对成功者的再查；2.2.2.2 失败重试 1 次）
+        self.assertEqual(
+            {ip: calls.count(ip) for ip in set(calls)},
+            {"2.2.2.2": 2, "3.3.3.3": 1},
+        )
+        # 写回 ts：只有成功刷新的 3.3.3.3 被更新；失败者保留旧 ts（下轮再试）
+        cache = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))["proxies"]
+        self.assertGreaterEqual(cache["3.3.3.3"]["netcoffee"]["ts"], now)
+        self.assertEqual(cache["2.2.2.2"]["netcoffee"]["ts"], now - 2 * ttl)
+
     def test_no_rep_cache_flag(self):
         calls = []
         orig = qr.netcoffee_lookup_sync
@@ -1683,6 +1793,62 @@ class TestReputationCache(unittest.TestCase):
             qr.netcoffee_lookup_sync = orig
         self.assertEqual(len(calls), 2)
         self.assertFalse(qr.REP_CACHE_FILE.exists())
+
+    def test_abuse_deadline_truncates_loop(self):
+        """abuse 顺序查询超 deadline → 立即截断，不发任何请求（D-42 相位内止损）。"""
+        args = argparse.Namespace(
+            abuse_service="abuseipdb", abuse_key="k",
+            reputation_weights={"abuseipdb": 35},
+        )
+        results = {"1.2.3.4:443#US": {}}
+        ipinfo = {"1.2.3.4:443#US": {"exit_ip": "5.6.7.8"}}
+        calls: list[str] = []
+        orig = qr.abuse_lookup_sync
+
+        def fake(ip, service, key):
+            calls.append(ip)
+            return {"score": 10}
+
+        qr.abuse_lookup_sync = fake
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(buf):
+                out = asyncio.run(qr.run_abuse(
+                    results, ipinfo, args, deadline=-1.0
+                ))
+        finally:
+            qr.abuse_lookup_sync = orig
+        self.assertEqual(out, {})
+        self.assertEqual(calls, [])
+        self.assertIn("(0/1)", buf.getvalue())
+
+    def test_ipqs_timeout_redacts_key(self):
+        """IPQS 超时异常净化：DEBUG 日志面不泄露 key（R212 安全维度闭环）。"""
+        secret = "s3cr3t-ipqs-key-0001"
+        leaked_url = f"https://ipqualityscore.com/api/json/ip/{secret}/5.6.7.8"
+
+        def fake_deadline_open(req, timeout, max_bytes=None):
+            raise TimeoutError(f"fetch deadline exceeded (10s): {req.full_url}")
+
+        class _FakeReq:
+            full_url = leaked_url
+
+        captured_tb = None
+        orig = qr.deadline_open
+        qr.deadline_open = fake_deadline_open
+        try:
+            with self.assertRaises(TimeoutError) as ctx:
+                qr.abuse_lookup_sync("5.6.7.8", "ipqualityscore", secret)
+            captured_tb = traceback.format_exc()
+        finally:
+            qr.deadline_open = orig
+        msg = str(ctx.exception)
+        self.assertNotIn(secret, msg)
+        self.assertIn("5.6.7.8", msg)
+        self.assertIn("redacted", msg)
+        # traceback 面（logging exc_info / format_exc）也不得残留 key（R213 修正）
+        self.assertIsNotNone(captured_tb)
+        self.assertNotIn(secret, captured_tb)
 
     def test_malformed_cache_tolerated(self):
         qr.REP_CACHE_FILE.write_text("{not json\n", encoding="utf-8")
