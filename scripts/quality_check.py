@@ -41,6 +41,7 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -498,10 +499,23 @@ def build_meta(
     }
 
 
+POST_RESERVE_S = 600
+
+
+def _within_budget(start: float, budget: int) -> bool:
+    """``True`` 只要墙钟预算仍有余量；``budget <= 0``（不限）恒为 ``True``。
+
+    供 run() 相位感知止损：超过预算后不再开启新的网络密集相位，已得的
+    探测/解析结果仍照常落盘（提交部分结果，而不撞 120min 硬杀整链）。
+    """
+    return budget <= 0 or time.monotonic() - start < budget
+
+
 async def run(args: argparse.Namespace) -> int:
     if not args.source.exists():
         print(f"Error: {args.source} not found", file=sys.stderr)
         return 1
+    start = time.monotonic()
     entries = [
         p for p in (parse_ltd_line(line) for line in args.source.read_text(
             encoding="utf-8"
@@ -513,12 +527,24 @@ async def run(args: argparse.Namespace) -> int:
         print(f"No entries in {args.source}")
         return 0
     methods = load_methods()
+    budget = args.time_budget if args.time_budget and args.time_budget > 0 else 0
+    skipped: list[str] = []
+    if budget:
+        print(
+            f"Time budget {budget}s; will stop opening new phases at "
+            f"deadline and commit partial results"
+        )
     print(
         f"Checking {len(entries)} proxies "
         f"(timeout={args.timeout}s, workers={args.workers}) ..."
     )
 
-    results = await run_checks(entries, methods, args)
+    # 探测相位让出 POST_RESERVE_S 给后处理（geo/信誉/滥用），使预算内
+    # 仍能产出信誉数据；后处理仍受全局 deadline 硬门控，不会撞超时。
+    probe_args = argparse.Namespace(**vars(args))
+    if budget:
+        probe_args.time_budget = max(1, budget - POST_RESERVE_S)
+    results = await run_checks(entries, methods, probe_args)
     print(f"Completed {len(results)} checks")
 
     # 出口 IP 解析后，信誉/地理/滥用全部查真实出口——CF 中转代理的
@@ -526,20 +552,44 @@ async def run(args: argparse.Namespace) -> int:
     fam_map = read_json(EXIT_FAMILY_FILE).get("proxies", {})
     results = resolve_exit_ips(results, fam_map)
 
-    geo = await batch_ipapi([res["exit_ip"] for res in results.values()])
+    # 相位外部受 _within_budget 门控；相位内部（batch_ipapi 分块/per-IP
+    # 兜底）也接收绝对 deadline 止损，防止上游全挂时长时间空转突破预算。
+    phase_deadline = (start + budget) if budget else None
+    geo: dict = {}
+    if _within_budget(start, budget):
+        geo = await batch_ipapi(
+            [res["exit_ip"] for res in results.values()],
+            deadline=phase_deadline,
+        )
+    else:
+        skipped.append("ip-api geo")
+        print("Warning: time budget exhausted; skipping ip-api geo",
+              file=sys.stderr)
 
     rep_ips = [res["exit_ip"] for res in results.values()]
     asn_map = {ip: norm_asn(geo[ip].get("asn")) for ip in rep_ips
                if ip in geo and norm_asn(geo[ip].get("asn"))}
-    risk_data = await lookup_all_risk(rep_ips, args, asn_map)
+    risk_data: dict = {}
+    if _within_budget(start, budget):
+        risk_data = await lookup_all_risk(rep_ips, args, asn_map)
+    else:
+        skipped.append("reputation lookup")
+        print("Warning: time budget exhausted; skipping reputation lookup",
+              file=sys.stderr)
     if risk_data:
         print(
             f"Reputation: {len(risk_data)}/{len(set(rep_ips))} IPs from "
             f"{', '.join(args.reputation_sources)}"
         )
-    abuse_map = await run_abuse(results, {
-        k: {"exit_ip": res["exit_ip"]} for k, res in results.items()
-    }, args)
+    abuse_map: dict = {}
+    if _within_budget(start, budget):
+        abuse_map = await run_abuse(results, {
+            k: {"exit_ip": res["exit_ip"]} for k, res in results.items()
+        }, args, deadline=phase_deadline)
+    else:
+        skipped.append("abuse scores")
+        print("Warning: time budget exhausted; skipping abuse scores",
+              file=sys.stderr)
     ipinfo = build_ipinfo_map(
         results, geo, abuse_map, risk_data, args.reputation_weights
     )
@@ -577,6 +627,13 @@ async def run(args: argparse.Namespace) -> int:
         f"by_type={meta['by_type']} "
         f"rep_avg={meta['rep_avg']} rep_dist={meta['rep_dist']}"
     )
+    if budget and skipped:
+        print(
+            f"Warning: {len(skipped)} phase(s) skipped under time budget "
+            f"{budget}s (skipped: {', '.join(skipped)}); committed "
+            f"{len(results)} proxies, rep_avg={meta['rep_avg']}",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -614,7 +671,9 @@ def main(argv: list[str] | None = None) -> int:
         "--rep-cache-ttl",
         type=int,
         default=REP_CACHE_TTL,
-        help="Reputation signal cache TTL in seconds (default: %(default)s)",
+        help="Reputation signal cache TTL in seconds; expired entries are "
+             "re-queried and kept as fallback on refresh failure "
+             "(default: %(default)s)",
     )
     parser.add_argument(
         "--no-rep-cache",
@@ -635,7 +694,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Max proxies to check (0 = all)")
     parser.add_argument(
         "--time-budget", type=int, default=0,
-        help="Stop after this many seconds (0 = unlimited)",
+        help="Stop after this many seconds (0 = unlimited); at deadline new "
+             "phases are skipped (600s reserved for geo/reputation/abuse) "
+             "and partial results are still committed",
     )
     args = parser.parse_args(argv)
     import os

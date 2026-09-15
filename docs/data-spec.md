@@ -88,7 +88,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 - **asyncio 并发**：默认 500 个在飞任务（`-w` 可调），有界任务池实现严格限时
 - **超时**：单代理 5s（`-t`）
 - **自动重试**：TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降低单次丢包误杀
-- **时间预算**：`--time-budget N` 到时立即停止，到期只取消少量在飞任务；脚本默认 `0` = 不限制（跑完全部存活代理），实践中 CI 为控制流程时点显式设置预算（update 3600s、quality 5400s，见 README 流程两段）
+- **时间预算**：`--time-budget N` 是运行级墙钟上限：`quality_check.py` 在到点后停止开启新相位（探测相位让出 600s 给地理/信誉/滥用后处理）、已得结果仍落盘提交部分产物；`validate_proxies.py` 到点直接停止并提交已验证子集。默认 `0` = 不限制（跑完全部存活代理），实践中 CI 为控制流程时点显式设置预算（update 3600s、quality 5400s，见 README 流程两段）
 
 ### 输出
 
@@ -141,9 +141,9 @@ python3 scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `sets` | 各集合条数 |
 | `alive` / `alive_checked` / `alive_rate` | 存活数 / 检测数 / 存活率 |
 | `alive_countries` / `alive_sets` | 存活国家数 / 存活集合条数 |
-| `latency` | 延迟统计（avg/median/p90/max，毫秒） |
+| `latency` | 延迟统计（`avg_ms`/`median_ms`/`p90_ms`/`max_ms`，毫秒） |
 | `latency_dist` | 延迟分桶直方图（如 `0-100`、`1000+`，毫秒） |
-| `speed` | 测速统计（avg/median/p90/max，MB/s） |
+| `speed` | 测速统计（`avg_mbps`/`median_mbps`/`p90_mbps`/`max_mbps`，MB/s） |
 | `speed_dist` | 速度分桶直方图（如 `0-0.5`、`5+`，MB/s） |
 | `ip_type` / `family` / `dual_stack` / `country_mismatch` | 出口 IP 类型分布 / 地址族分布 / 双栈数 / 错区数 |
 | `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
@@ -181,9 +181,9 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 | `total` / `checked` / `alive` / `dead` | 总条目 / 实际检测数（含重试）/ 存活 / 失效 |
 | `elapsed_s` / `checked_per_s` | 耗时（秒）/ 吞吐（条/秒） |
 | `by_method` | 各判定方法（tls）的存活数 |
-| `latency` | 延迟统计（avg/median/p90/max） |
+| `latency` | 延迟统计（`avg_ms`/`median_ms`/`p90_ms`/`max_ms`，毫秒） |
 | `latency_dist` | 延迟分桶直方图（毫秒） |
-| `speed` | 测速统计（avg/median/p90/max，MB/s） |
+| `speed` | 测速统计（`avg_mbps`/`median_mbps`/`p90_mbps`/`max_mbps`，MB/s） |
 | `speed_dist` | 速度分桶直方图（MB/s） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
 | `prefiltered` | 进入完整检测的条目数（`--quick-prefilter` 启用时为 TCP 预筛后保留数，未启用时等于 `total`） |
@@ -286,7 +286,7 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 
 ### `data/quality/reputation_cache.json`
 
-单行 JSON，顶层 `proxies` 键为出口 IP，值为 `{<source>: {"ts": …, "data": …}}`——每个源独立记录最近一次查询的 epoch 秒时间戳与原始信号（逐源独立 TTL），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP×源发起外部查询；静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存；表按每个 IP 最近信号时间封顶 4 万条，超限裁剪最旧。
+单行 JSON，顶层 `proxies` 键为出口 IP，值为 `{<source>: {"ts": …, "data": …}}`——每个源独立记录最近一次查询的 epoch 秒时间戳与原始信号（逐源独立 TTL），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP×源发起外部查询；**过期条目不删除**：过期后每轮尝试刷新，若刷新失败则回退使用最近一次缓存信号（尽可能保持数据最新而非过期即丢失），直至被新条目挤出缓存上限。静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存；表按每个 IP 最近信号时间封顶 4 万条，超限裁剪最旧。
 
 ### `data/valid/all_rep.txt`
 

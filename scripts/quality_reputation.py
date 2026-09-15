@@ -4,7 +4,9 @@
 Each source yields a 0-100 cleanliness signal merged by ``REPUTATION_WEIGHTS``
 into a single reputation score; static lists (FireHOL abuse / iplogs
 ASN lists) are re-fetched every run, per-IP API signals are cached in
-``reputation_cache.json`` with a TTL. Imported by ``quality_check``.
+``reputation_cache.json`` with a TTL. Expired entries are re-queried on the
+next run but retained as a fallback (used if the refresh fails) rather than
+deleted. Imported by ``quality_check``.
 """
 
 import argparse
@@ -475,7 +477,7 @@ def ipdata_lookup_sync(ip: str) -> dict | None:
             key: bool(security.get(key))
             for key in ("anonymous", "proxy", "vpn", "tor", "hosting")
         },
-        "threat_score": int(threat.get("score") or 0),
+        "threat_score": _as_int(threat.get("score")),
     }
 
 
@@ -1241,7 +1243,7 @@ def source_score(name: str, signal) -> int | None:
             amt for flag, amt in IPDATA_FLAG_PENALTIES.items()
             if security.get(flag)
         )
-        penalty += int(signal.get("threat_score") or 0)
+        penalty += _as_int(signal.get("threat_score"))
         return max(0, min(100, 100 - penalty))
     if name == "getipintel":
         prob = signal.get("probability")
@@ -1310,8 +1312,8 @@ def source_score(name: str, signal) -> int | None:
         # OTX reputation：负值=恶意、正值=洁净（官方信誉为 -3..+3，负号幅值
         # 越大越脏）。罚分按负侧幅值计，正/零声誉不罚——与 _flag_opinions 的
         # listed 语义一致（此前把正声誉当脏、负声誉当净是符号反转）。
-        rep = int(signal.get("reputation") or 0)
-        pulses = int(signal.get("pulse_count") or 0)
+        rep = _as_int(signal.get("reputation"))
+        pulses = _as_int(signal.get("pulse_count"))
         bad = min(max(0, -rep) * 5, 80)
         penalty = bad + min(pulses * 2, 20)
         return max(0, min(100, 100 - penalty))
@@ -1415,6 +1417,23 @@ FLAG_PENALTIES = {
     "noise": 15,
 }
 _HOSTING_TYPES = ("hosting", "datacenter", "cloud")
+
+
+def _as_int(value, default: int = 0):
+    """int 安全强转：保留数值/数字字符串语义，非数值/异常类型回退 default
+    （缓存投毒韧性：字符串"abc"不再抛 ValueError，也不致放大罚分）。"""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value == int(value) else default
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
 
 
 def _flag_opinions(name: str, signal) -> dict:
@@ -1557,8 +1576,8 @@ def _flag_opinions(name: str, signal) -> dict:
             }
         return {}
     if name == "otx":
-        if int(signal.get("pulse_count") or 0) > 0 or \
-           int(signal.get("reputation") or 0) < 0:
+        if _as_int(signal.get("pulse_count")) > 0 or \
+           _as_int(signal.get("reputation")) < 0:
             return {"listed": True}
         return {}
     if name == "proxycheck":
@@ -1705,8 +1724,8 @@ def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
         return round(prob * 100)
     if name == "otx":
         # 负声誉=恶意（见 source_score 同名段注释），正/零声誉不罚。
-        rep = int(signal.get("reputation") or 0)
-        pulses = int(signal.get("pulse_count") or 0)
+        rep = _as_int(signal.get("reputation"))
+        pulses = _as_int(signal.get("pulse_count"))
         return min(max(0, -rep) * 5, 80) + max(0, min(pulses * 2, 20))
     for key in ("risk_score", "fraud_score", "score", "risk", "threat_score"):
         value = signal.get(key)
@@ -1915,8 +1934,13 @@ def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
     req = urllib.request.Request(
         url, headers={"User-Agent": "proxyip/quality 1.0"}
     )
-    with deadline_open(req, 10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with deadline_open(req, 10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except TimeoutError:
+        raise TimeoutError(
+            f"ipqualityscore fetch timed out for {ip} (key redacted)"
+        ) from None
     return {
         "service": "ipqs",
         "score": data.get("fraud_score"),
@@ -1930,15 +1954,22 @@ def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
 
 
 async def run_abuse(
-    results: dict, ipinfo: dict, args: argparse.Namespace
+    results: dict, ipinfo: dict, args: argparse.Namespace,
+    deadline: float | None = None,
 ) -> dict:
+    """按出口 IP 查询滥用分；``deadline``（monotonic 绝对时刻）墙钟止损，
+    顺序循环超龄即截断（防滥用 API 卡死把整个相位拖到 CI 硬杀）。"""
     if args.abuse_service == "none" or not args.abuse_key:
         return {}
     exit_ips = sorted(
         {info["exit_ip"] for info in ipinfo.values() if info.get("exit_ip")}
     )
     by_ip: dict[str, dict] = {}
+    cut_by_deadline = False
     for ip in exit_ips:
+        if deadline is not None and time.monotonic() >= deadline:
+            cut_by_deadline = True
+            break
         try:
             by_ip[ip] = await asyncio.to_thread(
                 abuse_lookup_sync, ip, args.abuse_service, args.abuse_key
@@ -1946,6 +1977,12 @@ async def run_abuse(
         except Exception as exc:
             logging.debug("abuse lookup %s: %s", ip, exc)
         await asyncio.sleep(0.3)
+    if cut_by_deadline and len(by_ip) < len(exit_ips):
+        print(
+            "Warning: abuse scores truncated by time deadline; "
+            f"returning partial results ({len(by_ip)}/{len(exit_ips)})",
+            file=sys.stderr,
+        )
     abuse_map: dict[str, dict] = {}
     for key, info in ipinfo.items():
         item = by_ip.get(info.get("exit_ip"))
@@ -1995,8 +2032,10 @@ async def lookup_all_risk(
     """Query all enabled reputation sources; ``{ip: {source: signal}}``.
 
     Per-IP API source signals are served from ``REP_CACHE_FILE`` when still
-    fresh (``--rep-cache-ttl``); only missing/expired IPs are re-queried.
-    Static-list signals (abuse/ASN lists) are re-computed every run.
+    fresh (``--rep-cache-ttl``); missing/expired IPs are re-queried, and an
+    expired entry whose refresh fails falls back to the last cached signal
+    instead of being dropped. Static-list signals (abuse/ASN lists) are
+    re-computed every run.
     """
     sources = args.reputation_sources
     if not sources:
@@ -2015,14 +2054,20 @@ async def lookup_all_risk(
         name: str, fn, cap: int = 0, workers: int = REP_WORKERS,
         delay: float = REP_DELAY,
     ) -> None:
-        """Fill from fresh cache, query only missing/expired IPs, cache back."""
+        """Fill from fresh cache; stale entries are re-queried but kept as a
+        fallback (used if the refresh fails) instead of being dropped."""
         need = []
+        fallback = {}
         for ip in uniq:
             sig = cached_signal(cache, ip, name, now, cache_ttl)
             if sig is not None:
                 put(name, ip, sig)
-            else:
-                need.append(ip)
+                continue
+            src_entry = cache.get(ip, {}).get(name)
+            if isinstance(src_entry, dict) and \
+               isinstance(src_entry.get("data"), dict):
+                fallback[ip] = src_entry["data"]
+            need.append(ip)
         res = await batch_sync(
             need, fn, cap=cap, workers=workers, delay=delay
         )
@@ -2030,6 +2075,9 @@ async def lookup_all_risk(
             put(name, ip, sig)
             entry = cache.setdefault(ip, {})
             entry[name] = {"ts": now, "data": sig}
+        for ip, sig in fallback.items():
+            if ip not in res:
+                put(name, ip, sig)
 
     pacing = SOURCE_PACING
     api_tasks = []
@@ -2158,18 +2206,10 @@ async def lookup_all_risk(
             put("vpn_asn", ip, {"is_vpn": True, "asn": asn})
         if asn in static["resproxy_asn"]:
             put("resproxy_asn", ip, {"is_proxy": True, "asn": asn})
-    if cache_ttl:
-        pruned = {}
-        for ip, entry in cache.items():
-            fresh = {}
-            for src, src_entry in entry.items():
-                if isinstance(src_entry, dict) and \
-                   (src_entry.get("ts") or 0) + cache_ttl >= now:
-                    fresh[src] = src_entry
-            if fresh:
-                pruned[ip] = fresh
-        if len(pruned) > REP_CACHE_MAX:
-            # 超上限：按每个 IP 最近一次信号时间裁剪最旧的
+    if cache_ttl and cache:
+        # 过期条目不删除：保留作为刷新失败时的兜底信号，仅受
+        # REP_CACHE_MAX 上限约束（按每个 IP 最近一次信号时间裁最旧）。
+        if len(cache) > REP_CACHE_MAX:
             def last_ts(item) -> float:
                 _ip, entry = item
                 ts = 0.0
@@ -2177,10 +2217,11 @@ async def lookup_all_risk(
                     if isinstance(src_entry, dict):
                         ts = max(ts, src_entry.get("ts") or 0)
                 return ts
-            for ip, _ in sorted(
-                pruned.items(), key=last_ts, reverse=True
-            )[REP_CACHE_MAX:]:
-                del pruned[ip]
+            pruned = dict(sorted(
+                cache.items(), key=last_ts, reverse=True
+            )[:REP_CACHE_MAX])
+        else:
+            pruned = cache
         save_rep_cache(pruned)
     return risk_data
 

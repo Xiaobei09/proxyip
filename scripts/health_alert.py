@@ -306,6 +306,11 @@ def notify(alerts: list[str]) -> bool:
     try:
         with deadline_open(req, 15):
             return True
+    except TimeoutError:
+        # 超时异常含 full_url（webhook URL 内嵌 Discord token），净化入日志
+        # 并维持「webhook 失败不阻断主流程」语义（return False）。
+        print("webhook delivery timed out (token redacted)", file=sys.stderr)
+        return False
     except OSError as exc:
         print(f"webhook delivery failed: {exc}", file=sys.stderr)
         return False

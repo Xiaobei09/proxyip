@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import ssl
+import time
 import urllib.request
 
 from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...)
@@ -233,11 +234,32 @@ def ipapi_get_sync(ip: str) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
-async def batch_ipapi(ips: list) -> dict:
-    """Batch geo lookup for exit IPs; falls back to rate-limited per-IP GET."""
+async def batch_ipapi(ips: list, deadline: float | None = None) -> dict:
+    """Batch geo lookup for exit IPs; falls back to rate-limited per-IP GET.
+
+    ``deadline``（``time.monotonic()`` 绝对时刻）用于墙钟止损：批量分块与
+    per-IP 兜底循环都会在超龄后提前退出，避免上游全挂时 1.5s/IP 的顺序
+    兜底把整个质量相位拖到 CI 硬杀（D-42 时间预算因此也覆盖相位内部）。
+    """
+    def _over() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
+    def _warn_cut(got: int, total: int) -> None:
+        print(
+            "Warning: ip-api geo truncated by time deadline; "
+            f"returning partial results ({got}/{total})",
+            file=sys.stderr,
+        )
+
+    ips_uniq = list(dict.fromkeys(ips))
+    chunks = group_chunks(ips_uniq)
     out: dict[str, dict] = {}
     any_batch_ok = False
-    for chunk in group_chunks(list(dict.fromkeys(ips))):
+    cut_by_deadline = False
+    for chunk in chunks:
+        if _over():
+            cut_by_deadline = True
+            break
         try:
             data = await asyncio.to_thread(ipapi_batch_sync, chunk)
             any_batch_ok = True
@@ -254,8 +276,13 @@ async def batch_ipapi(ips: list) -> dict:
                 out[ip] = item
         await asyncio.sleep(IPAPI_BATCH_DELAY)
     if any_batch_ok or out:
+        if cut_by_deadline and len(out) < len(ips_uniq):
+            _warn_cut(len(out), len(ips_uniq))
         return out
-    for ip in dict.fromkeys(ips):
+    for ip in ips_uniq:
+        if _over():
+            cut_by_deadline = True
+            break
         try:
             item = await asyncio.to_thread(ipapi_get_sync, ip)
             if item.get("status") == "success":
@@ -263,4 +290,6 @@ async def batch_ipapi(ips: list) -> dict:
         except Exception as exc:
             logging.debug("ipapi get %s: %s", ip, exc)
         await asyncio.sleep(1.5)
+    if cut_by_deadline and len(out) < len(ips_uniq):
+        _warn_cut(len(out), len(ips_uniq))
     return out

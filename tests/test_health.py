@@ -1,6 +1,9 @@
 """Tests for health_alert.py — pool watchdog rules."""
 
+import contextlib
+import io
 import json
+import os
 import sys
 import tempfile
 import time
@@ -494,6 +497,43 @@ class TestSuppressRepeat(unittest.TestCase):
             "last_alert_hash": _alert_fingerprint(["old alert"]),
         }
         self.assertFalse(_suppress_repeat(st, ["pool crash: -50%"]))
+
+
+class TestNotifyWebhookRedaction(unittest.TestCase):
+    """URL 内嵌 webhook token 不泄漏进 stderr/异常（R230 安全维度闭环）。"""
+
+    def setUp(self):
+        self._orig_deadline_open = ha.deadline_open
+        self._orig_webhook_url = os.environ.get("ALERT_WEBHOOK_URL")
+
+    def tearDown(self):
+        ha.deadline_open = self._orig_deadline_open
+        if self._orig_webhook_url is None:
+            os.environ.pop("ALERT_WEBHOOK_URL", None)
+        else:
+            os.environ["ALERT_WEBHOOK_URL"] = self._orig_webhook_url
+
+    def test_webhook_timeout_redacts_token(self):
+        secret = "https://discord.com/api/webhooks/98765/d1sc0rd-t0k3n"
+
+        class _FakeCtx:
+            def __enter__(self):
+                raise TimeoutError(
+                    f"fetch deadline exceeded (15s): {secret}"
+                )
+
+            def __exit__(self, *exc):
+                return False
+
+        ha.deadline_open = unittest.mock.MagicMock(return_value=_FakeCtx())
+        os.environ["ALERT_WEBHOOK_URL"] = secret
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            delivered = ha.notify(["pool size dropped"])
+        err = buf.getvalue()
+        self.assertFalse(delivered)
+        self.assertNotIn(secret, err)
+        self.assertIn("token redacted", err)
 
 
 if __name__ == "__main__":
