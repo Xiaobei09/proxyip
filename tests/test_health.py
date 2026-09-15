@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 import unittest.mock
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -534,6 +535,35 @@ class TestNotifyWebhookRedaction(unittest.TestCase):
         self.assertFalse(delivered)
         self.assertNotIn(secret, err)
         self.assertIn("token redacted", err)
+
+
+class TestNotifyRedaction(unittest.TestCase):
+    def _notify_with_oserror(self, exc: Exception) -> tuple[bool, str]:
+        url = "https://discord.com/api/webhooks/12345/SECRET_TOKEN_ABC"
+        with unittest.mock.patch.dict(
+            os.environ, {"ALERT_WEBHOOK_URL": url}, clear=False
+        ), unittest.mock.patch(
+            "health_alert.deadline_open", side_effect=exc
+        ):
+            with contextlib.redirect_stderr(io.StringIO()) as buf:
+                ok = ha.notify(["pool crash: -50%"])
+        return ok, buf.getvalue()
+
+    def test_oserror_urlerror_redacts_token(self):
+        err = urllib.error.URLError("connection refused to https://discord.com/api/webhooks/12345/SECRET_TOKEN_ABC")
+        ok, out = self._notify_with_oserror(err)
+        self.assertFalse(ok)
+        self.assertIn("details redacted", out)
+        self.assertNotIn("SECRET_TOKEN_ABC", out)
+
+    def test_timeout_redacts_token(self):
+        class _T(TimeoutError):
+            def __str__(self):
+                return "timed out after 15 https://discord.com/api/webhooks/12345/SECRET_TOKEN_ABC"
+        ok, out = self._notify_with_oserror(_T())
+        self.assertFalse(ok)
+        self.assertIn("token redacted", out)
+        self.assertNotIn("SECRET_TOKEN_ABC", out)
 
 
 if __name__ == "__main__":
