@@ -114,6 +114,11 @@ from china_itdog import (
     itdog_batch_run,
 )
 
+def _err(e: Exception) -> str:
+    """异常类型名（不带 ``str(e)``：URLError 的 str 含完整 URL 与 token）。"""
+    return type(e).__name__
+
+
 FALLBACK_SOURCE = DEFAULT_SOURCE
 
 LIMIT_DEFAULT = 250
@@ -417,7 +422,7 @@ def jkapi_check(ip: str, port: str, timeout: float) -> dict:
         return {"status": "rate_limited" if e.code == 429 else "error",
                 "ok": False, "ms": None, "error": f"http {e.code}"}
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120]}
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e)}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"http {status}"}
     return parse_jkapi(resp.decode("utf-8", "replace"))
@@ -580,7 +585,7 @@ def check_host_check(ip: str, port: str, limiter: RateLimiter, timeout: float, a
         return {"status": "rate_limited" if e.code == 429 else "error",
                 "ok": False, "ms": None, "error": f"http {e.code}"}
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120]}
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e)}
     if status == 429:
         return {"status": "rate_limited", "ok": False, "ms": None, "error": "rate limited"}
     if status != 200:
@@ -622,7 +627,7 @@ def xxapi_check(ip: str, port: str, timeout: float) -> dict:
         return {"status": "rate_limited" if e.code == 429 else "error",
                 "ok": False, "ms": None, "error": f"http {e.code}"}
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120]}
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e)}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"http {status}"}
     try:
@@ -638,7 +643,7 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
     try:
         _, _, body = request_follow(base, hdrs, timeout)
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120], "count": 0, "ok_count": 0}
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e), "count": 0, "ok_count": 0}
     html = body.decode("utf-8", "replace")
     parsed = parse_pingpe_page(html)
     cookie = parsed["cookie"]
@@ -673,7 +678,7 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
             _, _, body = request_follow(PINGPE_START_URL, shdrs, timeout, method="POST", data=form)
             payload = json.loads(body.decode("utf-8", "replace"))
         except Exception as e:
-            return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120], "count": 0, "ok_count": 0}
+            return {"status": "error", "ok": False, "ms": None, "error": _err(e), "count": 0, "ok_count": 0}
         if isinstance(payload, dict) and payload.get("ok"):
             stream_id = (payload.get("data") or {}).get("stream_id")
             break
@@ -726,7 +731,7 @@ def tcpping_check(ip: str, port: str, token: str, timeout: float) -> dict:
     except urllib.error.HTTPError as e:
         return {"status": "error", "ok": False, "ms": None, "error": f"http {e.code}"}
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120]}
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e)}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"http {status}"}
     try:
@@ -842,7 +847,7 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str]) -> 
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status == 429:
         return {"status": "rate_limited", "ok": False, "ms": None,
@@ -892,7 +897,7 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str]) -> 
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -948,7 +953,7 @@ def coffee_check(ip: str, timeout: float, nodes: list[str] | None = None) -> dic
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status == 429:
         return {"status": "rate_limited", "ok": False, "ms": None,
@@ -1043,7 +1048,7 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -1073,7 +1078,7 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -1109,7 +1114,7 @@ def pingloc_check(ip: str, timeout: float, method: str = "ping") -> dict:
             sse = chunks.decode("utf-8", "replace")
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     ok_nodes = 0
     totals = 0
@@ -1163,7 +1168,7 @@ def antping_check(ip: str, port: str, timeout: float) -> dict:
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -1189,7 +1194,7 @@ def antping_check(ip: str, port: str, timeout: float) -> dict:
         }, ensure_ascii=False))
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     results: list[dict] = []
     deadline = time.monotonic() + ANTPING_WS_IDLE
@@ -1238,7 +1243,7 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
         page = _tcpingcn_get(f"{TCPINGCN_URL}/api/probe/page", cookie=cookie)
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if not isinstance(page, dict):
         return {"status": "error", "ok": False, "ms": None,
@@ -1262,7 +1267,7 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
         # RuntimeError=PoW 超限；ValueError=远端 d 非数字（int() 提早失败）。
         # 二者都按探测失败处理，绝不让异常逃逸到整轮 runner。
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     u2 = dict(u, r=r, ts=int(ts), p=p, nonce=nonce,
               via="0", user_agent="", method="", referer="", cookie="")
@@ -1270,7 +1275,7 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
         task = _tcpingcn_post(f"{TCPINGCN_URL}/api/probe/task", u2, cookie=cookie)
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if not isinstance(task, dict) or not task.get("k") or not task.get("u"):
         return {"status": "error", "ok": False, "ms": None,
@@ -1282,7 +1287,7 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
         ws.send_text(json.dumps({"k": task["k"], "r": task["r"]}))
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     rows: list[dict] = []
     deadline = time.monotonic() + TCPINGCN_WS_IDLE
@@ -1452,7 +1457,7 @@ def chinaz_check(ip: str, port: str, timeout: float) -> dict:
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -1470,7 +1475,7 @@ def chinaz_check(ip: str, port: str, timeout: float) -> dict:
         ws.send_text(json.dumps({"keyword": ip, "token": token}))
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     ok_nodes = 0
     totals = 0
@@ -1705,7 +1710,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -1756,7 +1761,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         })
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     ok_nodes = 0
     totals = 0
@@ -1833,7 +1838,7 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
         )
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None,
@@ -1871,7 +1876,7 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
             sse = chunks.decode("utf-8", "replace")
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
-                "error": str(e)[:120], "level": None,
+                "error": _err(e), "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     ok_nodes = 0
     totals = 0
@@ -1944,7 +1949,7 @@ def boce_check(ip: str, port: str, timeout: float) -> dict:
             BOCE_REQ_TIMEOUT,
         )
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
@@ -1966,7 +1971,7 @@ def boce_check(ip: str, port: str, timeout: float) -> dict:
             method="POST", data=payload,
         )
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"probe http {status}",
@@ -2058,7 +2063,7 @@ def ipip_check(ip: str, port: str, timeout: float) -> dict:
         status, _, resp = request_follow(IPIP_URL, headers, IPIP_REQ_TIMEOUT,
                                          method="POST", data=body)
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"http {status}",
@@ -2125,7 +2130,7 @@ def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict
             SEVENTEEN_REQ_TIMEOUT,
         )
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
@@ -2145,7 +2150,7 @@ def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict
         status, _, resp = request_follow(f"{SEVENTEEN_URL}/api.php?{qs}", hdrs,
                                          SEVENTEEN_REQ_TIMEOUT)
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"api http {status}",
@@ -2197,7 +2202,7 @@ def ping0_check(ip: str, port: str, timeout: float) -> dict:
     try:
         status, headers_r, resp = request_follow(PING0_URL, headers, PING0_REQ_TIMEOUT)
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
@@ -2213,7 +2218,7 @@ def ping0_check(ip: str, port: str, timeout: float) -> dict:
         status, _, resp = request_follow(f"{PING0_URL}/api/probe", api_headers,
                                          PING0_REQ_TIMEOUT, method="POST", data=body)
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"probe http {status}",
@@ -2270,7 +2275,7 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
             WANSUI_REQ_TIMEOUT,
         )
     except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     if status != 200:
         return {"status": "error", "ok": False, "ms": None, "error": f"page http {status}",
@@ -2305,7 +2310,7 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
     except Exception as e:
         if client:
             client.close()
-        return {"status": "error", "ok": False, "ms": None, "error": str(e)[:120],
+        return {"status": "error", "ok": False, "ms": None, "error": _err(e),
                 "level": None, "ok_nodes": 0, "nodes": 0, "ratio": None}
     ok_nodes = 0
     totals = 0
