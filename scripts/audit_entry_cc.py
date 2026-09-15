@@ -39,7 +39,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import (
     DATA_DIR, line_to_key, parse_ltd_line, read_json, build_exit_cc_map,
