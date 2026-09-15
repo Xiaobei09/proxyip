@@ -17,6 +17,7 @@ on it without creating import cycles.
 import json
 import re
 import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -1066,6 +1067,14 @@ def merge_note_tokens(line: str, *tokens: str) -> str:
         if not has_token(note, tok):
             out += "-" + tok
     return normalize_note(out)
+
+
+if __name__ == "__main__":
+    print(
+        "common.py 是共享库模块，由 scripts/ 下各脚本 import，无独立 CLI。",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 
