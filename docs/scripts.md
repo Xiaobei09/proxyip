@@ -434,6 +434,7 @@ ALERT_WEBHOOK_URL=https://example.com/hook python3 scripts/health_alert.py
 ```
 
 - `--strict`：默认无论有无告警都正常退出（0），供例行检查使用；加 `--strict` 后有告警以非零码退出，用于 CI 门控（如关键行为中断时让工作流失败）。
+- `--data-dir`：数据根目录（含 `data/valid/`、`data/quality/`），默认自动定位（脚本所在目录的上级），本地复刻/非标准布局时指定。
 
 ### `scripts/uptime.py`
 
