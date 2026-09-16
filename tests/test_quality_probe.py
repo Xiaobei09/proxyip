@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import io
+import json
 import sys
 import time
 import unittest
@@ -325,3 +326,17 @@ class TestCheckExternalApiBoolGuard(unittest.IsolatedAsyncioTestCase):
     def test_success_missing_is_false(self):
         res = asyncio.run(self._run(b'{}'))
         self.assertIs(res["success"], False)
+
+    def test_exit_geo_and_booleans_mapped(self):
+        payload = json.dumps({
+            "success": True,
+            "responseTime": 123,
+            "probe_results": {
+                "ipv4": {"ok": True, "exit": {"ip": "9.9.9.9", "country": "US"}},
+                "ipv6": {"ok": False, "exit": None},
+            },
+        }).encode()
+        res = asyncio.run(self._run(payload))
+        self.assertIs(res["ipv4_ok"], True)
+        self.assertIs(res["ipv6_ok"], False)
+        self.assertEqual(res["exit_geo"]["ip"], "9.9.9.9")
