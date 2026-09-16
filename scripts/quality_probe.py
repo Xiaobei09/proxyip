@@ -28,6 +28,7 @@ READ_CAP = 524288
 READ_TIMEOUT = 3
 HEADER_CAP = 65536
 WORKERS = 60
+PROGRESS_EVERY_S = 120  # 探针相位进度上报间隔（CI 长时间静默的可观测性）
 
 
 async def read_until(
@@ -198,7 +199,15 @@ async def run_checks(
             results[key] = res
 
     tasks = [asyncio.create_task(work(e)) for e in entries]
-    done, pending = await asyncio.wait(tasks, timeout=args.time_budget or None)
+    total = len(entries)
+    reporter = asyncio.create_task(_progress_reporter(results, lock, total))
+    try:
+        done, pending = await asyncio.wait(
+            tasks, timeout=args.time_budget or None
+        )
+    finally:
+        reporter.cancel()
+        await asyncio.gather(reporter, return_exceptions=True)
     for task in pending:
         task.cancel()
     if pending:
@@ -209,6 +218,23 @@ async def run_checks(
         except Exception as exc:
             logging.debug("probe task result: %s", err_name(exc))
     return results
+
+
+async def _progress_reporter(
+    results: dict, lock: asyncio.Lock, total: int
+) -> None:
+    """周期上报探针完成数，打破长时子进程/CI 静默（含 budget 截断前可见性）。
+
+    纯观测：除 print 外无副作用；锁保护下只读计数，不扰动 wait 语义。
+    """
+    while True:
+        await asyncio.sleep(PROGRESS_EVERY_S)
+        try:
+            async with lock:
+                n = len(results)
+            print(f"Progress: {n}/{total} proxies checked", flush=True)
+        except Exception:
+            logging.exception("progress reporter")
 
 
 def group_chunks(items: list, size: int = IPAPI_BATCH_SIZE) -> list[list]:
