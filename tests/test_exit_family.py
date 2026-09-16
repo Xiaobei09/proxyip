@@ -377,6 +377,17 @@ class TestSplit(unittest.TestCase):
         for lines in (v4, v6):
             self.assertFalse(any("4.4.4.4" in l for l in lines))
 
+    def test_unknown_stale_token_not_leak_to_branches(self):
+        """unknown 行即使残留旧 -V6 也绝不出现在任何家族清单（R165/R166）。"""
+        with_family = dict(self.results)
+        with_family["4.4.4.4:80#US"] = {
+            "line": "4.4.4.4:80#US-4ms-V6",
+            "family": "unknown",
+        }
+        v4, v6 = ef.split_by_family(with_family)
+        for lines in (v4, v6):
+            self.assertFalse(any("4.4.4.4" in l for l in lines))
+
     def test_annotated_output(self):
         v4, _ = ef.split_by_family(self.results)
         self.assertIn("1.1.1.1:80#US-1ms-V4", v4)
