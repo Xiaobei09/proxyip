@@ -197,5 +197,40 @@ class TestMergeOrdered(unittest.TestCase):
                          "1.1.1.1:443#US-5ms\n")
 
 
+class TestReorgCountryConsistency(unittest.TestCase):
+    """回归守护：countries/*/all.txt 行数总和 = valid/all.txt 总行数（R177）。
+    本地无数据文件则跳过。"""
+
+    def _valid(self):
+        return Path(__file__).resolve().parent.parent / "data" / "valid"
+
+    def test_sum_equals_all_txt(self):
+        all_path = self._valid() / "all.txt"
+        if not all_path.exists():
+            self.skipTest("no data/valid/all.txt")
+        all_lines = len(all_path.read_text(encoding="utf-8").splitlines())
+        cdir = self._valid() / "countries"
+        if not cdir.exists():
+            self.skipTest("no data/valid/countries")
+        total = 0
+        for d in sorted(cdir.iterdir()):
+            if not d.is_dir():
+                continue
+            f = d / "all.txt"
+            if f.exists():
+                total += len(f.read_text(encoding="utf-8").splitlines())
+        self.assertEqual(total, all_lines, f"countries sum {total} != all.txt {all_lines}")
+
+    def test_no_orphan_dirs(self):
+        cdir = self._valid() / "countries"
+        if not cdir.exists():
+            self.skipTest("no data/valid/countries")
+        orphan_dirs = sorted(
+            d.name for d in cdir.iterdir()
+            if d.is_dir() and not (d / "all.txt").exists()
+        )
+        self.assertEqual(orphan_dirs, [], f"orphan country dirs (no all.txt): {orphan_dirs}")
+
+
 if __name__ == "__main__":
     unittest.main()
