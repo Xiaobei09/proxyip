@@ -227,6 +227,43 @@ class TestCheckArtifactStale(unittest.TestCase):
             )
 
 
+class TestCheckDeepSpeedArtifact(unittest.TestCase):
+    def _file(self, td, ts: str | None, n=200):
+        p = Path(td) / "deep_speed.json"
+        data = {"proxies": {f"{i}:443#US": {"tls_ms": 1} for i in range(n)}}
+        if ts is not None:
+            data["generated"] = ts
+        p.write_text(json.dumps(data))
+        return p
+
+    def test_stale_generated_field_alerts(self):
+        with tempfile.TemporaryDirectory() as td:
+            a = check_artifact_stale(
+                "deep-speed", self._file(td, _ts(20 * 24 * 100)), 240, 1,
+                ts_field="generated",
+            )
+        self.assertIsNotNone(a)
+        self.assertIn("deep-speed", a)
+
+    def test_fresh_generated_field_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(
+                check_artifact_stale(
+                    "deep-speed", self._file(td, _ts(1)), 240, 1,
+                    ts_field="generated",
+                )
+            )
+
+    def test_small_pool_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(
+                check_artifact_stale(
+                    "deep-speed", self._file(td, _ts(20 * 24 * 100), n=0), 240, 1,
+                    ts_field="generated",
+                )
+            )
+
+
 class TestCheckCountries(unittest.TestCase):
     def _meta(self, td, per_country):
         p = Path(td) / "meta.json"

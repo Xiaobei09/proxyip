@@ -52,6 +52,7 @@ EXIT_FAMILY_MIN_ENTRIES = 100
 QUALITY_META_HOURS = 12     # quality_meta.json 超龄 → 质量链疑似静默停机
 GOOD_META_HOURS = 12        # good_meta.json 超龄 → build-good 链疑似静默停机
 VALID_LISTS_HOURS = 5       # valid/meta.json 超龄 → validate(update) 链停机
+DEEP_SPEED_HOURS = 240      # deep_speed.json 超龄（10 天 = DEEP_SPEED_TTL_DAYS）→ deep-speed 链停机；深测数据过期即 quality 链失去 deep_bonus，无此告警时会静默降级
 COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
 COUNTRY_MIN_BASELINE = 60
 STALE_HOURS = 8
@@ -408,6 +409,15 @@ def main(argv: list[str] | None = None) -> int:
         root / "data" / "valid" / "meta.json",
         hours=VALID_LISTS_HOURS,
         require_proxies=False,
+    )
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "deep-speed",
+        root / "data" / "quality" / "deep_speed.json",
+        hours=DEEP_SPEED_HOURS,
+        min_entries=1,
+        ts_field="generated",
     )
     if a:
         alerts.append(a)
