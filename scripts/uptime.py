@@ -69,6 +69,8 @@ def merge_seen(
     """
     days: dict[str, int] = dict(seen.get("runs", {}))
     if alive_keys:
+        # 值（同日轮次计数）仅作历史偏移保留、不被下游消费：``runs_in``
+        # 只按去重日期 key 计数（见 uptime_stats 注释「同日多轮不稀释分母」）。
         days[today] = days.get(today, 0) + 1
     days = prune_days(days, today)
     valid_dates = set(days)
