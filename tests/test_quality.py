@@ -1841,6 +1841,25 @@ class TestReputationCache(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertFalse(qr.REP_CACHE_FILE.exists())
 
+    def test_rep_cache_pruned_to_max_keeps_recent(self):
+        """REP_CACHE_MAX 上限：超过时按每个 IP 最近信号 ts 裁最旧（防无限膨胀）。"""
+        now = time.time()
+        qc.save_rep_cache({
+            ip: {"netcoffee": {"ts": now - i, "data": {"risk": "low"}}}
+            for i, ip in enumerate(["1.1.1.1", "2.2.2.2", "3.3.3.3",
+                                    "4.4.4.4", "5.5.5.5"])
+        })
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: {"risk": "low"}
+        try:
+            with unittest.mock.patch.object(qr, "REP_CACHE_MAX", 3):
+                asyncio.run(qc.lookup_all_risk(["1.1.1.1"], self._args()))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        data = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(len(data["proxies"]), 3)
+        self.assertEqual(set(data["proxies"]), {"1.1.1.1", "2.2.2.2", "3.3.3.3"})
+
     def test_abuse_deadline_truncates_loop(self):
         """abuse 顺序查询超 deadline → 立即截断，不发任何请求（D-42 相位内止损）。"""
         args = argparse.Namespace(
