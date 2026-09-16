@@ -303,6 +303,21 @@ class TestResolveExitIps(unittest.TestCase):
         self.assertEqual(out["c"]["exit_ip"], "3.3.3.3")
         self.assertEqual(out["c"]["exit_ip_source"], "proxy")
 
+    def test_dual_prefers_v4_only_v6_falls_back(self):
+        results = {
+            "dual": {"ip": "1.1.1.1"},
+            "v6": {"ip": "2.2.2.2"},
+        }
+        fam_map = {
+            "dual": {"exit_v4": "4.4.4.4", "exit_v6": "2001:db8::1"},
+            "v6": {"exit_v4": None, "exit_v6": "2001:db8::2"},
+        }
+        out = qc.resolve_exit_ips(results, fam_map)
+        self.assertEqual(out["dual"]["exit_ip"], "4.4.4.4")
+        self.assertEqual(out["dual"]["exit_ip_source"], "exit_family")
+        self.assertEqual(out["v6"]["exit_ip"], "2001:db8::2")
+        self.assertEqual(out["v6"]["exit_ip_source"], "exit_family")
+
     def test_malformed_family_entries_ignored(self):
         results = {"a": {"ip": "1.1.1.1"}}
         out = qc.resolve_exit_ips(results, {"a": "junk", "b": None})
