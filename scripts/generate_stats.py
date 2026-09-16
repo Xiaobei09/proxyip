@@ -912,10 +912,15 @@ def build_cn_7d(cn_history: list[dict]) -> str:
 
     继承 COMBO_WINDOW_DAYS 窗口语义：_windowed 按 ts 只保留最近 7 天，
     与 combo/churn 同源同窗口，避免"图表里 7 天没正确运用"的歧义。
+    窗口内所有记录 ``cn_by_isp`` 均为空（itdog 等 per-ISP 读数尚未采集）时
+    落占位提示而非三条全 0 线——避免把"暂无分运营商数据"伪装成"三运营商
+    各自 0 可达"的误导性表现。
     """
     history = _windowed(cn_history, COMBO_WINDOW_DAYS)
     if not history:
         return empty_svg(text="暂无 7 天大陆可达性历史（cn_history.jsonl）")
+    if not any(r.get("cn_by_isp") for r in history):
+        return empty_svg(text="暂无分运营商历史（cn_by_isp 为空，itdog 读数未采到）")
     ts = [r.get("ts", "") for r in history]
     series = []
     for isp, color in (

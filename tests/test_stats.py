@@ -268,6 +268,18 @@ class TestBuilders(unittest.TestCase):
         svg_ok(svg)
         self.assertIn("暂无 7 天", svg)
 
+    def test_cn_7d_no_carrier_data_placeholder(self):
+        """窗口内有历史但 cn_by_isp 全空（itdog 未采到 per-ISP 读数）时，不得
+        绘三条全 0 序列冒充"三运营商各 0 可达"，应落占位提示。"""
+        hist = [
+            {"ts": _ago(1), "cn_reachable": 20873, "cn_by_isp": {}},
+            {"ts": _ago(0.1), "cn_reachable": 20873, "cn_by_isp": {}},
+        ]
+        svg = gs.build_cn_7d(hist)
+        svg_ok(svg)
+        self.assertIn("暂无分运营商历史", svg)
+        self.assertNotIn("中国移动", svg)
+
     def test_collect_cn_summary_rules(self):
         data = {
             "ts": "2026-08-29T00:00:00Z",
