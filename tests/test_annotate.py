@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from annotate_classify import reconcile_views
+from annotate_classify import reconcile_views, verify_country_split
 
 
 class TestReconcileViews(unittest.TestCase):
@@ -99,6 +99,39 @@ class TestReconcileViews(unittest.TestCase):
             (valid / "sets" / "asia" / "ltd.txt").read_text(encoding="utf-8"),
             "1.1.1.1:443#US\n2.2.2.2:443#HK\n",
         )
+
+    def test_verify_country_split_consistent(self):
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US", "2.2.2.2:443#US"],
+            countries={"all.txt": ["1.1.1.1:443#US", "2.2.2.2:443#US"]},
+        )
+        r = verify_country_split(valid)
+        self.assertEqual((r["master"], r["countries"]), (2, 2))
+        self.assertEqual(r["missing"], [])
+        self.assertEqual(r["excess"], [])
+
+    def test_verify_country_split_excess_detected(self):
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US"],
+            countries={"all.txt": ["1.1.1.1:443#US", "9.9.9.9:443#US"]},
+        )
+        r = verify_country_split(valid)
+        self.assertEqual(r["excess"], ["9.9.9.9:443"])
+        self.assertEqual(r["missing"], [])
+
+    def test_verify_country_split_missing_detected(self):
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US", "2.2.2.2:443#US"],
+            countries={"all.txt": ["1.1.1.1:443#US"]},
+        )
+        r = verify_country_split(valid)
+        self.assertEqual(r["missing"], ["2.2.2.2:443"])
+
+    def test_verify_country_split_no_all_txt(self):
+        d = Path(tempfile.mkdtemp())
+        r = verify_country_split(d / "valid")
+        self.assertEqual((r["master"], r["countries"]), (0, 0))
+        self.assertEqual(r["missing"] + r["excess"], [])
 
     def test_empty_all_returns_zero(self):
         d, valid = self._tree(all_lines=[], ports={"443.txt": ["9.9.9.9:443#US"]})

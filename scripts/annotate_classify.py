@@ -208,6 +208,33 @@ def _key_of(text: str) -> set[str]:
     return {line.split("#", 1)[0] for line in text.splitlines() if line}
 
 
+def verify_country_split(valid_dir: Path) -> dict:
+    """R208 漂移防护：``countries/*/all.txt`` 行键集必须与 ``all.txt`` 大师清单
+    **恰好 1:1**（reconcile_views 只向下裁剪、不补缺行；若上游工作流在注解步之后
+    又改了 ``all.txt`` 行集，分目录会带出超集/缺集，跨工作流数据流断裂就在此处）。
+
+    返回 ``{"master": int, "countries": int, "missing": [...], "excess": [...]}``；
+    ``missing`` = 大师有而分目录缺（新键待 validate 重切分），``excess`` =
+    分目录有而大师无（死代残留漏裁）。两者任非空即跨工作流漂移。
+    """
+    all_txt = valid_dir / "all.txt"
+    if not all_txt.exists():
+        return {"master": 0, "countries": 0, "missing": [], "excess": []}
+    master = _key_of(all_txt.read_text(encoding="utf-8"))
+    cdir = valid_dir / "countries"
+    seen: set[str] = set()
+    if cdir.is_dir():
+        for d in sorted(cdir.glob("*")):
+            if d.is_dir() and (d / "all.txt").exists():
+                seen |= _key_of((d / "all.txt").read_text(encoding="utf-8"))
+    return {
+        "master": len(master),
+        "countries": len(seen),
+        "missing": sorted(master - seen)[:5],
+        "excess": sorted(seen - master)[:5],
+    }
+
+
 def reconcile_views(valid_dir: Path) -> int:
     """把全部数据视图约束到 ``all.txt`` 权威活池之内。
 
@@ -312,6 +339,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     stale = reconcile_views(valid_dir)
     print(f"Done: {len(files)} files, {total} lines updated, {stale} stale view lines removed")
+    split = verify_country_split(valid_dir)
+    if split["missing"] or split["excess"]:
+        print(
+            f"ERROR: countries split drifted from all.txt "
+            f"(master={split['master']} countries={split['countries']} "
+            f"missing={split['missing'][:3]} excess={split['excess'][:3]})"
+            " — 阻断提交，待 validate 重切分自愈",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
