@@ -88,6 +88,12 @@ class TestFamilyOf(unittest.TestCase):
     def test_untagged(self):
         self.assertIsNone(bp.family_of("9.9.9.9:443#US", "9.9.9.9:443#US-80ms-RES-CN-96", {}))
 
+    def test_unknown_in_json_not_fall_back_to_token(self):
+        """exit_family 显式 unknown 时，不得用行内旧 token 兜底冒称家族
+        （R165：annotate/exit-family 已清桶，这里锁死下游不复活旧值）。"""
+        line = "1.1.1.1:443#US-80ms-RES-V6-CN-96"
+        self.assertIsNone(bp.family_of("1.1.1.1:443#US", line, {"1.1.1.1:443#US": "unknown"}))
+
     def test_none_key(self):
         self.assertIsNone(bp.family_of(None, "9.9.9.9:443#US-80ms", {}))
 
