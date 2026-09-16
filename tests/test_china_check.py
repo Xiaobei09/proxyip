@@ -2500,6 +2500,23 @@ class TestComputeFallbackMerge(unittest.TestCase):
     def _prev(self, *keys):
         return {k: {"verdict": "reachable", "streak": 2, "sources": {}} for k in keys}
 
+    def test_source_fault_states_do_not_block_fallback(self):
+        # 与 merge_verdict 的 fail_sources 口径一致：仅 status=="fail"（明确不可
+        # 达证据）算"证伪"；error/poll timeout/rate_limited 均为源侧故障，
+        # 不得阻断上一轮可达键的兜底复活——三态逐一显式锁定防改口径。
+        for fault in ("error", "timeout", "rate_limited"):
+            with self.subTest(fault=fault):
+                prev = self._prev("a:443#US")
+                entries = {"a:443#US": {
+                    "verdict": "uncertain",
+                    "sources": {"check_host": {"status": fault}},
+                }}
+                reachable = set()
+                fb = cc.compute_fallback_merge(entries, prev, reachable)
+                self.assertEqual(fb, {"a:443#US"})
+                self.assertEqual(entries["a:443#US"]["verdict"], "reachable")
+                self.assertIn("a:443#US", reachable)
+
     def test_uncertain_no_fail_merged(self):
         # 上轮可达、本轮 uncertain 且无失败源 → 合并回 reachable + fallback, streak 保留(当轮已标 0)
         prev = self._prev("a:443#US", "b:443#US", "c:443#US")
