@@ -2511,6 +2511,16 @@ class TestExternalCheck(unittest.TestCase):
         self.assertEqual(meta["ext_check_total"], 2)
         self.assertEqual(meta["ext_check_ok"], 1)
 
+    def test_build_meta_contract_field_set(self):
+        # 契约锁：build_meta 输出与 data-spec.md:277 quality_meta 文档一致
+        meta = qc.build_meta({"k1": {"ip": "1.1.1.1"}}, {}, {}, {})
+        self.assertEqual(
+            set(meta),
+            {"ts", "total", "tls", "by_type", "risk", "abuse_checked",
+             "reputation_checked", "rep_dist", "rep_avg", "rep_median",
+             "country_mismatch", "ext_check_total", "ext_check_ok"},
+        )
+
     def test_build_meta_rep_aggregates(self):
         results = {"k%d" % i: {"ip": "1.1.1.%d" % i} for i in range(1, 6)}
         ipinfo = {"k1": {"ip_type": "datacenter", "risk": "low",
