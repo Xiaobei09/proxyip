@@ -3,6 +3,7 @@
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -634,6 +635,64 @@ class TestFetchWithMirrorMaxBytes(unittest.TestCase):
                 fetch_with_mirror("http://h/x", 10, max_bytes=0),
                 b"static-body",
             )
+
+
+class TestFetchWithMirrorOrdering(unittest.TestCase):
+    """``fetch_with_mirror`` 候选次序：主源成功即返回不碰镜像；主源失败按
+    镜像兜底；全部候选失败时抛*最后*一个候选的错误（不吞错不假成功）。"""
+
+    def _req_ok(self):
+        """单请求成功替身：主源（非 raw）无镜像时也应只请求一次。"""
+        calls = {"n": 0}
+
+        def ok(req, timeout=None):
+            calls["n"] += 1
+            return TestFetchWithMirrorMaxBytes._OkResp()
+
+        return ok, calls
+
+    def test_primary_success_does_not_touch_mirror(self):
+        from common import fetch_with_mirror
+
+        ok, calls = self._req_ok()
+        with mock.patch("common.urllib.request.urlopen", side_effect=ok):
+            with mock.patch(
+                "common.mirror_urls",
+                return_value=["http://mirror/x"],
+            ):
+                self.assertEqual(fetch_with_mirror("http://h/x", 10), b"static-body")
+        self.assertEqual(calls["n"], 1)
+
+    def test_primary_failure_falls_back_to_mirror(self):
+        from common import fetch_with_mirror
+
+        se = [
+            urllib.error.HTTPError("http://h/x", 404, "nf", None, None),
+            TestFetchWithMirrorMaxBytes._OkResp(),
+        ]
+        with mock.patch("common.urllib.request.urlopen", side_effect=se):
+            with mock.patch(
+                "common.mirror_urls",
+                return_value=["http://mirror/x"],
+            ):
+                body = fetch_with_mirror("http://h/x", 10)
+        self.assertEqual(body, b"static-body")
+
+    def test_all_candidates_failed_raises_last(self):
+        from common import fetch_with_mirror
+
+        se = [
+            urllib.error.HTTPError("http://h/x", 404, "nf", None, None),
+            urllib.error.HTTPError("http://mirror/x", 502, "bad", None, None),
+        ]
+        with mock.patch("common.urllib.request.urlopen", side_effect=se):
+            with mock.patch(
+                "common.mirror_urls",
+                return_value=["http://mirror/x"],
+            ):
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    fetch_with_mirror("http://h/x", 10)
+        self.assertEqual(cm.exception.code, 502)
 
 
 class TestErrName(unittest.TestCase):
