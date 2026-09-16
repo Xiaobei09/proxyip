@@ -15,6 +15,13 @@ MSG="${1:?usage: commit_data.sh <message>}"
 MARKER=".jobstart"
 EXCL='^(data/raw/|data/diff/)'
 
+# 无 .jobstart 标记 = 前置 touch 步缺失（改 workflow 时的常见失误）→ 明明有
+# 产出也会被 find -newer 静默吞掉并 no-op，数据永远不会提交。显式 fail-fast。
+if [ ! -e "$MARKER" ]; then
+  echo "missing .jobstart marker (checkout 后需 touch .jobstart)" >&2
+  exit 1
+fi
+
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
