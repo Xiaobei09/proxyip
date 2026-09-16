@@ -101,7 +101,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 
 ## 中国大陆使用建议
 
-- **优先消费**：`data/valid/all_cn_stable.txt`（连续 ≥2 轮大陆可达，抗误判/churn）、
+- **优先消费**：`data/valid/all_cn_stable.txt`（连续 ≥2 轮大陆可达且历史判定翻转 ≤1，抗误判/churn）、
   `data/valid/all_cn_http.txt`（应用层 HTTP 确认，过滤"TCP 通但被干扰"；**条件产物——当前无应用层证据时 `cn_http=0` 且不生成此文件，属预期**）、
   `data/valid/all_cn.txt`（全量大陆可达，按**大陆实测延迟升序**）、
   `data/valid/all_good.txt`（综合最优：CN 可达 + 信誉≥80 + 非高风险；延迟分优先采用大陆实测值）、
@@ -115,7 +115,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
   - `*_stable` — **连续两轮存活**：上一轮与本轮存活的交集，对抗快速 churn
   - **跨家族联动**：`ltd`/`rep`/`good` 家族同样派生（如 `all_ltd_verified.txt`、
     `all_cn46_rep_ltd_verified.txt`、`all_good_stable.txt`）；质量侧 `_stable` =
-    连续两轮大陆可达（china.json streak≥2）
+    连续两轮大陆可达（china.json streak≥2 且翻转 ≤1）
 - **行内备注**：`-CN` = 大陆可达；`-CNH` = 大陆可达且应用层（HTTP）确认；
   `-V4/-V6/-DS` = 实际出口家族（CF 边缘代理入口是 v4，实际出口常为 v6）；`→XXX` = 出口地区
 - **本地运行**：脚本访问 `raw.githubusercontent.com` 失败时自动回退 gh-proxy.com /
