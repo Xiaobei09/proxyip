@@ -20,6 +20,9 @@ from common import (
     normalize_note,
     parse_ltd_line,
     err_name,
+    load_china_stable_keys,
+    load_speed_keys,
+    load_uptime_keys,
 )
 
 
@@ -604,6 +607,41 @@ class TestErrName(unittest.TestCase):
         import urllib.error
         err = urllib.error.HTTPError("https://x/?token=S", 403, "x", {}, None)
         self.assertEqual(err_name(err), "HTTPError")
+
+
+class TestLoadKeysGuards(unittest.TestCase):
+    def _write(self, td: Path, data) -> Path:
+        p = Path(td) / "x.json"
+        p.write_text(__import__("json").dumps(data), encoding="utf-8")
+        return p
+
+    def test_speed_keys_tolerates_malformed_top_level(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = self._write(Path(td), {"proxies": ["not-a-dict"]})
+            self.assertEqual(load_speed_keys(p), set())
+            p2 = self._write(Path(td), "not-a-dict")
+            self.assertEqual(load_speed_keys(p2), set())
+
+    def test_uptime_keys_filters_below_min_pct_and_non_int(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = self._write(Path(td), {"proxies": {
+                "a": {"pct7": 95}, "b": {"pct7": 79}, "c": {"pct7": "90"}}})
+            self.assertEqual(load_uptime_keys(path=p), {"a"})
+
+    def test_china_stable_requires_reachable_streak2_flip1(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = self._write(Path(td), {"proxies": {
+                "ok": {"verdict": "reachable", "streak": 2, "flip": 1},
+                "flip2": {"verdict": "reachable", "streak": 2, "flip": 2},
+                "streak1": {"verdict": "reachable", "streak": 1, "flip": 0},
+                "unreach": {"verdict": "unreachable", "streak": 5, "flip": 0},
+                "no_flip": {"verdict": "reachable", "streak": 3},
+                "non_int": {"verdict": "reachable", "streak": "2", "flip": 0},
+            }})
+            self.assertEqual(load_china_stable_keys(p), {"ok", "no_flip"})
 
 
 if __name__ == "__main__":

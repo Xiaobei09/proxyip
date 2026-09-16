@@ -279,7 +279,8 @@ def read_json(path: Path) -> dict:
 
 def load_speed_keys(path: Path | None = None) -> set[str]:
     """speed.json 的 key 集合（本轮全链路验证通过的代理）。"""
-    proxies = read_json(path or SPEED_FILE).get("proxies", {})
+    data = read_json(path or SPEED_FILE)
+    proxies = data.get("proxies", {}) if isinstance(data, dict) else {}
     return (
         {k for k in proxies if isinstance(k, str)}
         if isinstance(proxies, dict)
