@@ -183,8 +183,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out = args.data_dir / "quality" / "entry_audit.json"
     write_text_if_changed(
-        out, json.dumps(report, ensure_ascii=False, indent=1) + "\n",
-        encoding="utf-8")
+        out, json.dumps(report, ensure_ascii=False, indent=1) + "\n")
 
     total = report["total"] or 1
     print(f"Entry CC audit: {report['total']} lines -> {out}")
