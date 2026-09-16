@@ -137,6 +137,44 @@ class TestMaps(unittest.TestCase):
         self.assertFalse(bg.is_cn_reachable(None, "", china))
 
 
+class TestTopSlice(unittest.TestCase):
+    def setUp(self):
+        self.z1 = "203.0.0.1:443#DE-40ms"
+        self.z2 = "204.0.0.1:443#DE-40ms"
+
+    def _mk(self, mbps_values, no_speed_at_end=()):
+        lines = []
+        for i, mb in enumerate(mbps_values):
+            lines.append(f"p{i}.0.0.1:443#US-40ms-{mb}MB/s")
+        lines.extend(no_speed_at_end)
+        return lines
+
+    def test_line_mbps(self):
+        self.assertEqual(bg._line_mbps("1.2.3.4:443#US-80ms-1.86MB/s"), 1.86)
+        self.assertEqual(bg._line_mbps("1.2.3.4:443#US-80ms"), -1.0)
+        self.assertEqual(bg._line_mbps("1.2.3.4:443#US-80ms-≈2MB/s"), -1.0)
+
+    def test_top_slice_skips_missing_speed(self):
+        lines = self._mk([10, 30, 20, 40, 50, 60, 70, 80],
+                         no_speed_at_end=[self.z1, self.z2])
+        picked, thr = bg.top_slice(lines)
+        self.assertEqual(thr, 60.0)      # vals=10..80 升序, idx max(0,int(8*.75)-1)=5
+        self.assertEqual(len(picked), 3)  # 60/70/80
+        self.assertTrue(all(self.z1 not in m for m in picked))
+        self.assertTrue(all(self.z2 not in m for m in picked))
+
+    def test_top_slice_picks_top_fraction_with_ties(self):
+        lines = self._mk([10, 20, 30, 40, 50, 60, 70, 70.0])
+        picked, thr = bg.top_slice(lines)
+        self.assertEqual(thr, 60.0)
+        self.assertEqual(len(picked), 3)  # 60,70,70 → 并列同保留
+
+    def test_top_slice_insufficient_samples(self):
+        lines = self._mk([10, 20, 30, 40, 50, 60, 70])
+        picked, thr = bg.top_slice(lines)  # 7 < min_samples=8
+        self.assertEqual((picked, thr), ([], None))
+
+
 class TestFilterRank(unittest.TestCase):
     LINES = (
         "9.9.9.9:443#US-500ms-2.00MB/s-CN-90\n"

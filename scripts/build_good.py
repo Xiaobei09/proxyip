@@ -219,7 +219,11 @@ TIER_TOKENS = ("fast", "mid", "slow")
 
 def _line_mbps(line: str) -> float:
     m = SPEED_RE.search(line)
-    return float(m.group(1)) if m else -1.0
+    if not m:
+        return -1.0
+    if m.start() > 0 and line[m.start() - 1] == "≈":
+        return -1.0
+    return float(m.group(1))
 
 
 def top_slice(lines: list[str], frac: float = 0.25,
