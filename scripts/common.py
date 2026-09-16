@@ -784,6 +784,7 @@ CN_SPEED_FLOOR = 0.4     # 估算下限（MB/s），防极端高延迟给出夸�
 # 打标只是"信息性/可选"——CN 清单保持完整（全可达集≥1万），不加 gating 精简。
 # 默认 150 仅用于打标参考（纯度档 100≈319、150≈808 供人了解规模），不砍清单。
 CN_LATENCY_CAP_MS = 150.0
+CN_ISP_SHORT = {"中国移动": "移动", "中国电信": "电信", "中国联通": "联通"}
 
 # 可作大陆延迟证据的探测源：xxapi（北京）/ jkapi（宁波）/ check_host（呼市）
 # 三处大陆视角。L3 复核源（tcptest/antping/pingpe/tcpingcn/chinaz/coffee）的
@@ -880,6 +881,27 @@ def cn_fastest_ms(entry) -> float | None:
             if vals:
                 return min(vals)
     return cn_display_ms(entry)
+
+
+def cn_best_isp(entry) -> tuple[str, float] | None:
+    """最快运营商 ``(短名, ms)``：``isp_ms`` 各运营商最小 RTT 里取全局最小者。
+
+    用于 CN 清单后缀标记"表现最好的运营商的名字与其数据"（如 ``-移动=57ms``）。
+    无 per-ISP 读数（itdog 未启用/被风控）或全读数 ≤2ms（ICMP 噪声）时返回
+    ``None``——调用方据此不追加后缀，绝不伪造运营商。
+    """
+    if not isinstance(entry, dict):
+        return None
+    im = entry.get("isp_ms")
+    if not isinstance(im, dict):
+        return None
+    best: tuple[str, float] | None = None
+    for isp, v in im.items():
+        if not isinstance(v, (int, float)) or v <= 2.0:
+            continue
+        if best is None or v < best[1]:
+            best = (CN_ISP_SHORT.get(isp, isp), v)
+    return best
 
 
 def cn_mainland_ok(ms, cap: float | None = None) -> bool:

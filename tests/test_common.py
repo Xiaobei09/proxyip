@@ -16,6 +16,7 @@ from common import (
     cn_display_ms,
     cn_l2_ms,
     cn_mainland_ok,
+    cn_best_isp,
     clear_note_buckets,
     line_to_key,
     merge_note_tokens,
@@ -349,6 +350,33 @@ class TestCnDisplayMs(unittest.TestCase):
             "tcptest": {"status": "ok", "ok": True, "ms": 50.0, "level": "tcp"},
         }}
         self.assertEqual(cn_display_ms(e2), 50.0)
+
+
+class TestCnBestIsp(unittest.TestCase):
+    def test_picks_global_min_carrier_with_short_name(self):
+        e = {"isp_ms": {"中国电信": 45.0, "中国移动": 38.0, "中国联通": 60.0}}
+        self.assertEqual(cn_best_isp(e), ("移动", 38.0))
+
+    def test_tie_picks_first_best(self):
+        e = {"isp_ms": {"中国移动": 30.0, "中国联通": 30.0}}
+        self.assertEqual(cn_best_isp(e), ("移动", 30.0))
+
+    def test_no_isp_ms_returns_none(self):
+        self.assertIsNone(cn_best_isp({}))
+        self.assertIsNone(cn_best_isp({"sources": {}}))
+        self.assertIsNone(cn_best_isp({"isp_ms": {}}))
+
+    def test_icmp_noise_rejected(self):
+        e = {"isp_ms": {"中国移动": 1.0, "中国电信": 2.5}}
+        self.assertEqual(cn_best_isp(e), ("电信", 2.5))
+
+    def test_all_noise_returns_none(self):
+        e = {"isp_ms": {"中国移动": 1.0, "中国联通": 2.0}}
+        self.assertIsNone(cn_best_isp(e))
+
+    def test_unmapped_isp_name_preserved(self):
+        e = {"isp_ms": {"其他运营商": 42.0}}
+        self.assertEqual(cn_best_isp(e), ("其他运营商", 42.0))
 
 
 class TestMergeNoteTokens(unittest.TestCase):

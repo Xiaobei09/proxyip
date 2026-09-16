@@ -95,6 +95,7 @@ from common import (
     rewrite_latency,
     clear_note_buckets,
     cn_fastest_ms,
+    cn_best_isp,
     cn_l2_ms,
     cn_mainland_ok,
     CN_LATENCY_CAP_MS,
@@ -2624,8 +2625,12 @@ def generate_all_cn(
     http_keys: set | None = None,
     strict: bool = False,
     fallback_keys: set | None = None,
+    best_isp: dict | None = None,
 ) -> tuple[str, int]:
     """大陆可达清单：本次判可达的行（源为全量池文本）。
+
+    - ``best_isp``（``key -> '移动=57ms'`` 之类）：追加"表现最好的运营商
+      名字与其数据"后缀（仅当 itdog 等 per-ISP 读数存在时构造，缺省不追加）。
 
     - ``http_keys``：应用层（HTTP）确认的 key 集合，对应行追加 ``-CNH``
     - ``strict=True``：保留参数以兼容调用方（行为与假等同，均已不收历史兜底）
@@ -2666,6 +2671,8 @@ def generate_all_cn(
             if cn_ms:
                 out = rewrite_latency(out, cn_ms.get(key))
                 out = _rewrite_cn_speed(out, cn_ms)
+            if best_isp and key in best_isp:
+                out = merge_note_tokens(out, best_isp[key])
             lines.append(out)
     lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
@@ -2675,12 +2682,14 @@ def generate_cn_subset(
     pool_text: str,
     keep,
     cn_ms: dict | None = None,
+    best_isp: dict | None = None,
 ) -> tuple[str, int]:
     """按谓词过滤全量池文本，保持行原文；``keep(key, line)`` 为真则保留。
 
     排序规则同 :func:`generate_all_cn`（``cn_ms`` 升序，缺失垫底）；
     ``cn_ms`` 提供时同样将行内延迟替换为大陆实测 RTT（CN 视图语义），
-    并将速度替换为大陆视角估算（``≈XMB/s``，见 :func:`generate_all_cn`）。
+    并将速度替换为大陆视角估算（``≈XMB/s``，见 :func:`generate_all_cn`）；
+    ``best_isp`` 同 :func:`generate_all_cn`，追加最快运营商品牌后缀。
     """
     lines = []
     for line in pool_text.splitlines():
@@ -2694,6 +2703,8 @@ def generate_cn_subset(
             if cn_ms:
                 out = rewrite_latency(out, cn_ms.get(key))
                 out = _rewrite_cn_speed(out, cn_ms)
+            if best_isp and key in best_isp:
+                out = merge_note_tokens(out, best_isp[key])
             lines.append(out)
     lines = _sort_by_ms(lines, cn_ms)
     return "\n".join(lines) + ("\n" if lines else ""), len(lines)
@@ -3545,6 +3556,15 @@ def main(argv=None) -> int:
         for key, entry in entries.items()
         if isinstance(entry, dict) and cn_fastest_ms(entry) is not None
     }
+    # CN 清单"最佳运营商"后缀：仅当 itdog 等 per-ISP 读数真实存在时，
+    # 标记表现最好的运营商名字与其大陆 RTT（如 `-移动=57ms`）；无读数不伪造。
+    cn_best = {
+        key: f"{isp}={round(ms)}ms"
+        for key, entry in entries.items()
+        if isinstance(entry, dict)
+        for isp, ms in [cn_best_isp(entry)]  # noqa: C419
+        if isp is not None and ms is not None
+    }
     # 兜底键未复测，无当轮读数：从其上一轮 entry 补大陆延迟（历史同源读数，
     # 比海外 TLS 更贴近大陆视角；实在无读数则保持"不伪饰、删除速度"）。
     if fallback_keys:
@@ -3556,7 +3576,7 @@ def main(argv=None) -> int:
                     if v is not None:
                         cn_ms[k] = v
     cn_text, cn_count = generate_all_cn(
-        all_pool_text, reachable, cn_ms, http_keys=http_keys,
+        all_pool_text, reachable, cn_ms, http_keys=http_keys, best_isp=cn_best,
     )
     if cn_text:
         write_text_if_changed(VALID_ALL_CN_FILE, cn_text)
@@ -3564,12 +3584,14 @@ def main(argv=None) -> int:
         all_pool_text,
         lambda k, l: k in http_keys or has_token(_note(l), "CNH"),
         cn_ms,
+        best_isp=cn_best,
     )
     write_cn_subset(VALID_ALL_CN_HTTP_FILE, http_text)
     stable_text, stable_count = generate_cn_subset(
         all_pool_text,
         lambda k, l: k in stable_keys,
         cn_ms,
+        best_isp=cn_best,
     )
     write_cn_subset(VALID_ALL_CN_STABLE_FILE, stable_text)
     annotate_cn_files(reachable)

@@ -645,6 +645,28 @@ class TestAnnotations(unittest.TestCase):
         self.assertNotIn("3.00MB/s", cn_text2)
         self.assertIn("2.2.2.2:443#US-77ms-CN", cn_text2)
 
+    def test_generate_all_cn_best_isp_suffix(self):
+        """best_isp 提供时追加最快运营商名字+数据后缀；缺失键不追加。"""
+        text = "1.1.1.1:443#US-42ms-5.00MB/s-fast\n2.2.2.2:443#US-77ms\n"
+        reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
+        best = {"1.1.1.1:443#US": "移动=57ms"}
+        cn_text, count = cc.generate_all_cn(text, reachable, best_isp=best)
+        self.assertEqual(count, 2)
+        # 后缀随行追加（在 CN 之后），键级缺失则不出现
+        lines = cn_text.strip().splitlines()
+        self.assertIn("-CN-移动=57ms", lines[0])
+        self.assertNotIn("=", lines[1])
+
+    def test_generate_cn_subset_best_isp_suffix(self):
+        text = "1.1.1.1:443#US-42ms\n2.2.2.2:443#US-77ms-5.00MB/s\n"
+        keep = {"1.1.1.1:443#US"}
+        best = {"1.1.1.1:443#US": "电信=81ms"}
+        cn_text, count = cc.generate_cn_subset(
+            text, lambda k, l: k in keep, best_isp=best
+        )
+        self.assertEqual(count, 1)
+        self.assertIn("-电信=81ms", cn_text)
+
     def test_rewrite_latency_helper(self):
         import common
         line = "1.2.3.4:80#US-1000ms-x"
