@@ -38,5 +38,37 @@ class TestTargets(unittest.TestCase):
             ds.main([])
 
 
+class TestSummarize(unittest.TestCase):
+    def _run(self, results, target, top=10):
+        import io
+        buf = io.StringIO()
+        old = sys.stderr
+        sys.stderr = buf
+        try:
+            ds.summarize(results, target, top)
+        finally:
+            sys.stderr = old
+        return buf.getvalue()
+
+    def test_sorted_desc_and_top_cut(self):
+        out = self._run(
+            {"a": {"cdn": {"agg_mbps": 1.0, "streams_ok": 1}},
+             "b": {"cdn": {"agg_mbps": 9.0, "streams_ok": 1}},
+             "c": {"cdn": {"agg_mbps": 5.0, "streams_ok": 1}}},
+            "cdn", top=2,
+        )
+        self.assertLess(out.index("9.00"), out.index("5.00"))
+        self.assertNotIn("1.00", out)
+
+    def test_empty_reports_no_success(self):
+        self.assertIn("no successful probes", self._run({}, "cdn"))
+
+    def test_zero_streams_excluded(self):
+        out = self._run(
+            {"x": {"cdn": {"agg_mbps": 99.0, "streams_ok": 0}}}, "cdn"
+        )
+        self.assertIn("no successful probes", out)
+
+
 if __name__ == "__main__":
     unittest.main()
