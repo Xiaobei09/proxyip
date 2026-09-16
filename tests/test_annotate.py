@@ -109,6 +109,7 @@ class TestReconcileViews(unittest.TestCase):
         self.assertEqual((r["master"], r["countries"]), (2, 2))
         self.assertEqual(r["missing"], [])
         self.assertEqual(r["excess"], [])
+        self.assertEqual(r["dup_endpoints"], 0)
 
     def test_verify_country_split_excess_detected(self):
         d, valid = self._tree(
@@ -132,6 +133,29 @@ class TestReconcileViews(unittest.TestCase):
         r = verify_country_split(d / "valid")
         self.assertEqual((r["master"], r["countries"]), (0, 0))
         self.assertEqual(r["missing"] + r["excess"], [])
+        self.assertEqual(r["dup_endpoints"], 0)
+
+    def test_verify_country_split_dup_endpoint_detected(self):
+        # 同一 ip:port 出现在两个国家目录（#SG 与 #CO）→ dup_endpoints 计 1；
+        # 键集 1:1 不受影响（missing/excess 为空）
+        d = Path(tempfile.mkdtemp())
+        valid = d / "valid"
+        (valid / "countries" / "SG").mkdir(parents=True)
+        (valid / "countries" / "CO").mkdir(parents=True)
+        (valid / "countries" / "CN").mkdir(parents=True)
+        all_lines = ["1.1.1.1:443#SG→US", "1.1.1.1:443#CO→US", "2.2.2.2:443#CN"]
+        (valid / "all.txt").write_text("\n".join(all_lines) + "\n", encoding="utf-8")
+        (valid / "countries" / "SG" / "all.txt").write_text(
+            "1.1.1.1:443#SG→US\n", encoding="utf-8")
+        (valid / "countries" / "CO" / "all.txt").write_text(
+            "1.1.1.1:443#CO→US\n", encoding="utf-8")
+        (valid / "countries" / "CN" / "all.txt").write_text(
+            "2.2.2.2:443#CN\n", encoding="utf-8")
+        r = verify_country_split(valid)
+        self.assertEqual((r["master"], r["countries"]), (2, 2))
+        self.assertEqual(r["missing"], [])
+        self.assertEqual(r["excess"], [])
+        self.assertEqual(r["dup_endpoints"], 1)
 
     def test_empty_all_returns_zero(self):
         d, valid = self._tree(all_lines=[], ports={"443.txt": ["9.9.9.9:443#US"]})

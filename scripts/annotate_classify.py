@@ -17,6 +17,7 @@ where ``<type>`` is ``DC``/``RES``/``MOB``/``PROXY`` and ``<tier>`` is
 
 import argparse
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -213,25 +214,38 @@ def verify_country_split(valid_dir: Path) -> dict:
     **恰好 1:1**（reconcile_views 只向下裁剪、不补缺行；若上游工作流在注解步之后
     又改了 ``all.txt`` 行集，分目录会带出超集/缺集，跨工作流数据流断裂就在此处）。
 
-    返回 ``{"master": int, "countries": int, "missing": [...], "excess": [...]}``；
+    返回 ``{"master", "countries", "missing", "excess", "dup_endpoints"}``；
     ``missing`` = 大师有而分目录缺（新键待 validate 重切分），``excess`` =
     分目录有而大师无（死代残留漏裁）。两者任非空即跨工作流漂移。
+    ``dup_endpoints`` = 同一 ``ip:port`` 出现在 ≥2 个国家目录（入口国标注矛盾，
+    如同端点被标注 ``#SG`` 与 ``#CO``）：属数据质量告警，不影响键集 1:1。
     """
     all_txt = valid_dir / "all.txt"
     if not all_txt.exists():
-        return {"master": 0, "countries": 0, "missing": [], "excess": []}
+        return {"master": 0, "countries": 0, "missing": [], "excess": [],
+                "dup_endpoints": 0}
     master = _key_of(all_txt.read_text(encoding="utf-8"))
     cdir = valid_dir / "countries"
     seen: set[str] = set()
+    endpoint_cc: dict[str, set[str]] = defaultdict(set)
     if cdir.is_dir():
         for d in sorted(cdir.glob("*")):
             if d.is_dir() and (d / "all.txt").exists():
-                seen |= _key_of((d / "all.txt").read_text(encoding="utf-8"))
+                text = (d / "all.txt").read_text(encoding="utf-8")
+                seen |= _key_of(text)
+                cc = d.name
+                for line in text.splitlines():
+                    if line:
+                        endpoint_cc[line.split("#", 1)[0]].add(cc)
+    dup_endpoints = sum(
+        1 for eps in endpoint_cc.values() if len(eps) > 1
+    )
     return {
         "master": len(master),
         "countries": len(seen),
         "missing": sorted(master - seen)[:5],
         "excess": sorted(seen - master)[:5],
+        "dup_endpoints": dup_endpoints,
     }
 
 
@@ -349,6 +363,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if split["dup_endpoints"]:
+        print(
+            f"WARN: {split['dup_endpoints']} ip:port 出现在多个国家目录"
+            "（入口国标注矛盾，如 #SG 与 #CO），不阻断但请留意",
+            file=sys.stderr,
+        )
     return 0
 
 
