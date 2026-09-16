@@ -2511,6 +2511,36 @@ class TestExternalCheck(unittest.TestCase):
         self.assertEqual(meta["ext_check_total"], 2)
         self.assertEqual(meta["ext_check_ok"], 1)
 
+    def test_build_meta_rep_aggregates(self):
+        results = {"k%d" % i: {"ip": "1.1.1.%d" % i} for i in range(1, 6)}
+        ipinfo = {"k1": {"ip_type": "datacenter", "risk": "low",
+                         "country_match": False}}
+        rep_map = {
+            "k1": {"score": 10}, "k2": {"score": 40},
+            "k3": {"score": 70}, "k4": {"score": 90},
+        }
+        meta = qc.build_meta(results, ipinfo, {}, rep_map)
+        # reps=[10,40,70,90] → 均值 52.5、中位 55、四桶各 1、country_mismatch 1
+        self.assertEqual(meta["rep_avg"], 52.5)
+        self.assertEqual(meta["rep_median"], 55.0)
+        self.assertEqual(meta["rep_dist"],
+                         {"0-25": 1, "25-50": 1, "50-75": 1, "75-100": 1})
+        self.assertEqual(meta["reputation_checked"], 4)
+        self.assertEqual(meta["by_type"], {"datacenter": 1})
+        self.assertEqual(meta["country_mismatch"], 1)
+
+    def test_build_meta_rep_odd_median_and_empty(self):
+        results = {"k%d" % i: {"ip": "1.1.1.%d" % i} for i in range(1, 6)}
+        rep_map = {"k1": {"score": 60}}
+        # 单值中位=自身
+        self.assertEqual(qc.build_meta(results, {}, {}, rep_map)["rep_median"], 60.0)
+        # 无评分 → None，不除零
+        meta = qc.build_meta(results, {}, {})
+        self.assertIsNone(meta["rep_avg"])
+        self.assertIsNone(meta["rep_median"])
+        self.assertEqual(meta["rep_dist"], {k: 0 for k in (
+            "0-25", "25-50", "50-75", "75-100")})
+
 
 class TestNewReputationSources(unittest.TestCase):
     """+5 free reputation sources: freeipapi / scamalytics / iplocation /
