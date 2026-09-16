@@ -337,6 +337,8 @@ python3 scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 
 后缀填充 + 节点分类（CI 在 quality-check 完成后自动运行）。读取 7 个 JSON 数据源，向所有 `data/valid/*.txt` 文件填充缺失后缀并追加分类 token。幂等设计：多次运行结果一致。所有备注写入统一经 `common.normalize_note` / `merge_note_tokens` / `clear_note_buckets` 处理（规范段序 + 互斥桶先清后设），禁止裸拼接。
 
+**触发语义**：`annotate-classify.yml` 由 Quality check 完成触发，但 **gate 不因触发工作流失败而跳过**——它从仓库 checkout 的自洽数据（上次成功轮快照）运行，上游单次失败不应冻结 CN 连通性追踪（streak）与后缀应用，否则 IP 未变更期间 stable 永远无法累积。
+
 | 参数 | 说明 | 默认 |
 |---|---|---|
 | `--data-dir` | 数据根目录（含 `valid/` 子目录） | `data` |
