@@ -72,6 +72,31 @@ class TestExtract(unittest.TestCase):
         by_port = dp.extract(data)
         self.assertEqual(by_port["80"]["DE"], ["1.1.1.1"])
 
+    def test_extract_annotated_ports_flag(self):
+        content = (
+            "# 200 best cf ips scanned at 2026-09-16 20:00\n"
+            "172.64.52.198:443#JP 🇯🇵\n"
+            "162.159.39.69:443#JP 🇯🇵\n"
+            "162.159.196.1:2053#SG 🇸🇬\n"
+            "not-a-line\n"
+        )
+        by_port = dp.extract_annotated_ports(content)
+        self.assertEqual(set(by_port), {"443", "2053"})
+        self.assertEqual(by_port["443"]["JP"], ["162.159.39.69", "172.64.52.198"])
+        self.assertEqual(by_port["2053"]["SG"], ["162.159.196.1"])
+
+    def test_extract_annotated_ports_chinese_bracket(self):
+        content = (
+            "23.147.172.135:443#HK [优选高速 56.86ms 9.1Mbps]\n"
+            "116.49.177.246:8443#HK [优选高速 60.17ms 8.66Mbps]\n"
+            "119.28.162.39:8443#KR 优选\n"
+        )
+        by_port = dp.extract_annotated_ports(content)
+        self.assertEqual(set(by_port), {"443", "8443"})
+        self.assertEqual(by_port["443"]["HK"], ["23.147.172.135"])
+        self.assertEqual(by_port["8443"]["HK"], ["116.49.177.246"])
+        self.assertEqual(by_port["8443"]["KR"], ["119.28.162.39"])
+
 
 class TestWriteOutputs(unittest.TestCase):
     def setUp(self):
@@ -879,9 +904,10 @@ class TestProxyMirrorSources(unittest.TestCase):
 
     def test_all_extra_sources_are_cf_proxyip_kind(self):
         # 策略总闸：EXTRA_SOURCES 任何一项的端口来源都必须是 CF 反代池。
-        # kind 仅允许 ip（裸 IP→443）/plain（ip:443#CC）/csv（443 端口优选榜单）。
+        # kind 仅允许 ip（裸 IP→443）/plain（ip:443#CC）/csv（443 端口优选榜单）
+        # /ipnote（ip:port#CC [注解] 榜单）。
         for kind, url in dp.EXTRA_SOURCES:
-            self.assertIn(kind, ("ip", "plain", "csv"))
+            self.assertIn(kind, ("ip", "plain", "csv", "ipnote"))
 
     def test_five_cf_proxyip_sources_registered(self):
         # 新一批 A 类：Wwuyi123/CF-Proxyip（3 文件）与 wanwushequ/ProxyIP
@@ -901,6 +927,24 @@ class TestProxyMirrorSources(unittest.TestCase):
         ):
             self.assertIn(u, urls)
             self.assertEqual(dp.source_label(u), label)
+
+    def test_r214_new_proxyip_sources_registered(self):
+        # R214 新增：byJoey/cfnew-ipdb（CF 边缘 102k all.txt，plain ip:port）
+        # 与 LancelotRar/best-cf-ips（top200 榜单，ipnote #CC [注解]）。
+        urls = [u for _kind, u in dp.EXTRA_SOURCES]
+        self.assertIn(
+            "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt", urls)
+        self.assertIn(
+            "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt",
+            urls)
+        self.assertEqual(
+            dp.source_label(
+                "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt"),
+            "byjoey_cfedge")
+        self.assertEqual(
+            dp.source_label(
+                "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt"),
+            "lancelot_cfip")
 
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"

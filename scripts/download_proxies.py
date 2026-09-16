@@ -135,6 +135,9 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt"),
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt"),
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt"),
+    # --- 新增 proxyip 源（R214） ---
+    ("plain", "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt"),
+    ("ipnote", "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
@@ -145,6 +148,8 @@ SOURCE_LABELS: dict[str, str] = {
     "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy": "ipdb_bestproxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy&country=true": "ipdb_bestproxy_cc",
+    "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt": "byjoey_cfedge",
+    "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt": "lancelot_cfip",
     "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt": "leilao_cfproxy",
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt": "wwuyi_proxyip",
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt": "wwuyi_proxyip_cc",
@@ -464,6 +469,10 @@ BARE_IP_RE = re.compile(r"^\s*([0-9A-Fa-f:.]+)(?:#(\S*))?\s*$")
 CSV_LINE_RE = re.compile(
     r'^\s*"?\[?([0-9A-Fa-f:.]+)\]?"?\s*,\s*"?(\d{2,5})"?\s*(?:,\s*([^,\n]*))?'
 )
+IPNOTE_LINE_RE = re.compile(
+    r"^\s*([0-9A-Fa-f:.]+):(\d{2,5})#([A-Z]{2})"
+    r"(?:\s+\[[^\]]*\]|\s+\S+)?\s*$"
+)
 
 
 def _decode(content) -> str:
@@ -525,6 +534,31 @@ def extract_csv_ports(content) -> dict:
         if not is_valid_ip(ip):
             continue
         country = normalize_country(m.group(3))
+        by_port[port].setdefault(country, []).append(ip)
+    for port in by_port:
+        for country in by_port[port]:
+            by_port[port][country] = sorted(set(by_port[port][country]),
+                                            key=ip_sort_key)
+    return by_port
+
+
+def extract_annotated_ports(content) -> dict:
+    """Parse ``IP:port#CC [注解]`` 榜单行（CC 后跟空格+方括号说明）。
+
+    典型来源：LancelotRar/best-cf-ips ``IP:port#CC 🇯🇵``、svip-s
+    ``IP:port#HK [优选高速 56ms]`` —— 现有 PLAIN_LINE_RE 会被尾部的
+    ``[注解]``/旗标整行拒绝，此解析器只取 ``ip:port + 2 字母 CC``。
+    """
+    by_port: dict[str, dict[str, list[str]]] = defaultdict(dict)
+    text = _decode(content)
+    for line in text.splitlines():
+        m = IPNOTE_LINE_RE.match(line)
+        if not m:
+            continue
+        ip, port, cc = m.group(1), m.group(2), m.group(3)
+        if not is_valid_ip(ip):
+            continue
+        country = normalize_country(cc)
         by_port[port].setdefault(country, []).append(ip)
     for port in by_port:
         for country in by_port[port]:
@@ -1064,6 +1098,8 @@ def load_extras(
             return extract_csv_ports(content)
         if kind == "json":
             return extract_json_extra(content)
+        if kind == "ipnote":
+            return extract_annotated_ports(content)
         print(f"Skipping unknown extra source kind {kind!r} ({url})",
               file=sys.stderr)
         return {}

@@ -19,13 +19,13 @@
 
 检测分层（均为无账号/免登录）：
 
-- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 18 节点
-  （电信/联通/移动各 6，池子 ~80/ISP，跨省等距采样），经 WebSocket 收结果，
+- L2 itdog.cn 批量实测（主源，全量）：`batch_http` 每任务 5 目标 × 24 节点
+  （电信/联通/移动各 8，池子 ~80/ISP，跨省等距采样），经 WebSocket 收结果，
   TCP 连通即判可达；节点返回 http_code>0 时计应用层确认（level=http）——
   TLS 端口上明文探测会收到 CF 的 400 响应，同样证明完整数据往返无 TCP 层干扰。
 - L2 itdog batch_tcping 补测（降级通道）：batch_http 对某目标失败/被限时，
   改用 `batch_tcping` 纯 TCPING 复测——节点池大得多（每 ISP ~75-88 个，
-  默认取 6×3=18 节点），结果记为独立多节点源 ``itdog_tcping``。
+  默认取 8×3=24 节点），结果记为独立多节点源 ``itdog_tcping``。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+
   `xxapi.cn`（北京节点，免 key）+ `jkapi.com/zz_tcping`（浙江宁波电信，
   免 key）——两只免额单节点源独力即可双确认（single_ok≥2→reachable），
@@ -323,7 +323,7 @@ WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
 WS_MAX_BUF = 4 * 1024 * 1024  # WS 帧重组缓冲上限（防坏帧长撑爆内存）
 
 # itdog.cn —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × ITDOG_NODES_PER_ISP
-# 节点（默认 6 → 18），需走 WebSocket 收结果，任务级另出 per-ISP 最小 RTT）
+# 节点（默认 8 → 24），需走 WebSocket 收结果，任务级另出 per-ISP 最小 RTT）
 
 CN_TOKEN = "CN"
 
@@ -2452,7 +2452,7 @@ def merge_verdict(sources: dict) -> dict:
     if len(single_ok) >= 2:
         basis = ok_sources[:]
         return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
-    # 多节点源只有弱确认（如 itdog 仅 1/18 节点可达）→ 不能单独定论
+    # 多节点源只有弱确认（如 itdog 仅 1/24 节点可达）→ 不能单独定论
     if multi_ok:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}

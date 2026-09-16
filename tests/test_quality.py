@@ -748,6 +748,26 @@ class TestReputation(unittest.TestCase):
             self.assertIn(name, qc.STATIC_LIST_SCORES)
             self.assertGreater(qc.REPUTATION_WEIGHTS[name], 0)
 
+    def test_r214_rep_static_sources_registered(self):
+        """R214：vpn_ips（X4BNet VPN 出口 CIDR）+ dshield（DShield /24
+        攻击子网）默认启用、有权重、能打分。"""
+        for name in ("vpn_ips", "dshield"):
+            self.assertIn(name, qc.DEFAULT_REP_SOURCES)
+            self.assertIn(name, qc.REPUTATION_WEIGHTS)
+            self.assertIn(name, qc.STATIC_LIST_SCORES)
+            self.assertGreater(qc.REPUTATION_WEIGHTS[name], 0)
+        self.assertEqual(
+            qr._flag_opinions("vpn_ips", {"is_vpn": True}), {"vpn": True})
+        self.assertEqual(
+            qc.source_score("vpn_ips", {"is_vpn": True}),
+            qc.STATIC_LIST_SCORES["vpn_ips"])
+        self.assertEqual(
+            qr._flag_opinions("dshield", {"is_abuse": True}), {"abuse": True})
+        self.assertEqual(
+            qc.source_score("dshield", {"is_abuse": True}),
+            qc.STATIC_LIST_SCORES["dshield"])
+        self.assertIsNone(qc.source_score("vpn_ips", {}))
+
     def test_new_rep_abuse_sources_vote_abuse(self):
         """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
         for name in ("c2_tracker", "botscout", "greensnow"):

@@ -100,6 +100,12 @@ FIREHOL_BOTSCOUT_URL = (
     "master/botscout_7d.ipset"
 )
 GREENSNOW_URL = "https://blocklist.greensnow.co/greensnow.txt"
+X4BNET_VPN_URL = (
+    "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt"
+)
+FIREHOL_DSHIELD_URL = (
+    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/dshield_1d.netset"
+)
 FIREHOL_SSLPROXIES_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/sslproxies_1d.ipset"
@@ -213,6 +219,8 @@ STATIC_LIST_SCORES = {
     "greensnow": 50,       # is_abuse（GreenSnow 活跃攻击/DDoS/扫描）
     "sslproxies": 60,      # is_proxy（活跃 SSL 代理，独立代理族证据）
     "socks_proxy": 60,     # is_proxy（活跃 SOCKS 代理，独立代理族证据）
+    "vpn_ips": 55,          # is_vpn（X4BNet VPN 出口 CIDR，覆盖面大）
+    "dshield": 50,          # is_abuse（DShield 社区封禁攻击 /24 子网）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -258,6 +266,8 @@ REPUTATION_WEIGHTS = {
     "greensnow": 4,
     "sslproxies": 3,
     "socks_proxy": 3,
+    "vpn_ips": 3,
+    "dshield": 3,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -275,6 +285,7 @@ DEFAULT_REP_SOURCES = (
     "firehol_level1", "binarydefense",
     "c2_tracker", "botscout", "greensnow",
     "sslproxies", "socks_proxy",
+    "vpn_ips", "dshield",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -831,6 +842,16 @@ async def fetch_socks_proxy() -> IpSet:
     return IpSet(await fetch_text_list(FIREHOL_SOCKSPROXY_URL))
 
 
+async def fetch_x4bnet_vpn() -> IpSet:
+    """X4BNet lists_vpn ``VPN 出口 IP/CIDR``（社区维护，覆盖面大）。"""
+    return IpSet(await fetch_text_list(X4BNET_VPN_URL))
+
+
+async def fetch_dshield() -> IpSet:
+    """FireHOL ``dshield_1d`` DShield 社区封禁攻击 /24 子网。"""
+    return IpSet(await fetch_text_list(FIREHOL_DSHIELD_URL))
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -1102,6 +1123,8 @@ async def fetch_static_lists(sources: list) -> dict:
         "greensnow": IpSet(),
         "sslproxies": IpSet(),
         "socks_proxy": IpSet(),
+        "vpn_ips": IpSet(),
+        "dshield": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -1144,6 +1167,10 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("sslproxies", fetch_sslproxies()))
     if "socks_proxy" in sources:
         mapping.append(("socks_proxy", fetch_socks_proxy()))
+    if "vpn_ips" in sources:
+        mapping.append(("vpn_ips", fetch_x4bnet_vpn()))
+    if "dshield" in sources:
+        mapping.append(("dshield", fetch_dshield()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -1415,6 +1442,8 @@ def source_score(name: str, signal) -> int | None:
             "greensnow": "is_abuse",
             "sslproxies": "is_proxy",
             "socks_proxy": "is_proxy",
+            "vpn_ips": "is_vpn",
+            "dshield": "is_abuse",
         }.get(name)
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
@@ -1682,6 +1711,10 @@ def _flag_opinions(name: str, signal) -> dict:
         return {"proxy": True} if signal.get("is_proxy") else {}
     if name == "socks_proxy":
         return {"proxy": True} if signal.get("is_proxy") else {}
+    if name == "vpn_ips":
+        return {"vpn": True} if signal.get("is_vpn") else {}
+    if name == "dshield":
+        return {"abuse": True} if signal.get("is_abuse") else {}
     if name == "greynoise":
         opinions = {}
         if signal.get("is_abuse"):

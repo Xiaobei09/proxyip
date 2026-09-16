@@ -203,7 +203,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 **itdog.cn 批量 HTTP 探活**：
 
-- 每任务 5 个目标 × 每 ISP 6 个节点（电信/联通/移动共 18 节点，池子 ~80/ISP，跨省等距采样）
+- 每任务 5 个目标 × 每 ISP 8 个节点（电信/联通/移动共 24 节点，池子 ~80/ISP，跨省等距采样）
 - 通过 WebSocket 收集结果
 - TCP 连通即判可达；节点返回 `http_code>0` 时另计**应用层确认**（`level=http`）。
   注意：TLS 端口（443 等）上 itdog 发明文 HTTP，CF 边缘会回 `400`——这同样
@@ -221,7 +221,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 - batch_http 对某目标失败/被限时（captcha、风控、熔断），改用
   `itdog.cn/batch_tcping` 纯 TCPING 复测
-- 节点池大得多（电信/联通/移动各 ~75-88 个，默认等距取 6×3=18 节点）
+- 节点池大得多（电信/联通/移动各 ~75-88 个，默认等距取 8×3=24 节点）
 - 结果记为独立多节点源 `itdog_tcping`（`result>0` → 可达，`-1` → 失败），
   单独 ok 即可判 reachable
 
@@ -251,7 +251,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
    antping/tcpingcn/chinaz/ce98/biuping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
 2. 单节点源（check_host/xxapi/jkapi）≥2 个 ok → reachable
-3. 多节点源仅弱确认（如 itdog 仅 1/18 节点）+ 无 ≥2 单节点 ok → uncertain
+3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
    或多节点源 ≥1 fail 且单节点源 ≥1 fail → unreachable
