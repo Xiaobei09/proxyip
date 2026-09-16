@@ -224,6 +224,23 @@ class TestNormalizeNote(unittest.TestCase):
             "1.2.3.4:443#US-42ms-≈5.0MB/s-fast-90",
         )
 
+    def test_rewrite_cn_speed_floor_cap(self):
+        # 极端高延迟：8×60/RTT 参考上限跌破 CN_SPEED_FLOOR(0.4) → 被托底，
+        # 估算不为 0 也不留海外的夸张实测值（floor 路径此前无测试锁定）。
+        cn_slow = {"9.9.9.9:443#US": 5000.0}
+        self.assertEqual(
+            _rewrite_cn_speed("9.9.9.9:443#US-42ms-5.00MB/s-fast-90", cn_slow),
+            "9.9.9.9:443#US-42ms-≈0.4MB/s-fast-90",
+        )
+        # RTT 缺失/非正数 → 速度 token 删除（宁缺勿假），floor 不适用
+        for bad in (0.0, -1.0, 0):
+            with self.subTest(bad=bad):
+                line = "8.8.8.8:443#US-42ms-5.00MB/s-fast-90"
+                self.assertEqual(
+                    _rewrite_cn_speed(line, {"8.8.8.8:443#US": bad}),
+                    "8.8.8.8:443#US-42ms-fast-90",
+                )
+
     def test_idempotent_on_messy_real_lines(self):
         messy = (
             "137.220.38.195:443#🇺🇸US→US-18ms-39.33MB/s-CN-V6-GPT-CF-74"
