@@ -397,6 +397,8 @@ python3 scripts/annotate_classify.py --data-dir /path/to/data
 
 每一份 `good` 清单都只含大陆可达行（仅 CN 列表），因此全部输出统一渲染 **CN 视图**：行内延迟改写为大陆实测 `china.json` 读数、速度令牌改写为 `≈XMB/s` 大陆估算值（语义与 `all_cn.txt` 一致）；无 `cn_ms` 数据时行保持原样。CI 在 `build-good.yml` 专职工作流中运行（与其后 `build_premium.py` 同 job）；`annotate-classify.yml` 与 `exit-family.yml` 的后缀填充步骤后亦运行。
 
+**写入者与护栏**：`build_good.py`/`build_premium.py` 并非单一写入者——`annotate-classify` 与 `exit-family` 工作流也会调用它们，跨 runner 并发写 `data/valid/*.txt` 与 good 清单，各自后 push 胜出、数据链下一轮自愈（勿在别处声称「单一写入者」）。`build-good.yml` 在 `commit_data.sh` 提交前跑 `test_build_good.TestCommittedCnViewInvariant` 护栏：扫描仓库内全部 good/premium/tiers/`all_cn*` 文件，任一混入海外实测 `-\d+\.\d+MB/s` 纯速度即中止提交（防陈旧 `china.json`/空 `cn_ms` 让速度原样透传）；护栏由 `Quality check`/`China check` 任一成功完成触发，失败触发跳过。
+
 ```bash
 python3 scripts/build_good.py
 python3 scripts/build_good.py --data-dir /path/to/data
