@@ -42,6 +42,21 @@ class TestMergeSeen(unittest.TestCase):
         # 新节点从今天开始计数
         self.assertEqual(proxies["new:443#JP"], ["2026-08-23"])
 
+    def test_merge_dedupes_dates(self):
+        # 同日多次运行：历史 dates 列表可能已含 today，合并后仍去重——
+        # 这是 pct7/pct30 ≤100 的唯一屏障（uptime_stats 的 hits_in 逐条计数，
+        # 若 dates 出现重复日期，round(h×100/runs) 会超 100 写超界 U token）。
+        proxies, days = merge_seen(
+            {"runs": {"2026-08-20": 2},
+             "proxies": {"a:443#US": ["2026-08-20", "2026-08-23"]}},
+            ["a:443#US"],
+            "2026-08-23",
+        )
+        self.assertEqual(proxies["a:443#US"], ["2026-08-20", "2026-08-23"])
+        stats = uptime_stats(proxies, days)
+        pcts = [v["pct7"] for v in stats["proxies"].values()]
+        self.assertTrue(all(v is None or v <= 100 for v in pcts))
+
 
 class TestUptimeStats(unittest.TestCase):
     def test_full_attendance_is_100(self):
