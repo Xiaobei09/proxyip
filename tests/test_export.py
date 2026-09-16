@@ -28,6 +28,17 @@ class TestLineToObj(unittest.TestCase):
         self.assertEqual(o["rep"], 72)
         self.assertEqual(o["uptime7"], 92)
 
+    def test_field_set_stable(self):
+        """all.json 记录字段集为导出契约（data-spec E 节）：防误删字段。"""
+        o = line_to_obj(
+            "1.2.3.4:443#🇺🇸US→LAX-120ms-0.44MB/s-CN-V6-DC-fast-72-U92"
+        )
+        self.assertEqual(set(o), {
+            "key", "ip", "port", "flag", "cc", "exit",
+            "latency_ms", "speed_mbps", "family", "cn", "type",
+            "tier", "rep", "uptime7", "line",
+        })
+
     def test_minimal_line(self):
         o = line_to_obj("5.6.7.8:8443#JP-200ms")
         self.assertIsNone(o["exit"])
