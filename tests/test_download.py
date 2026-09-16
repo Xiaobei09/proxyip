@@ -269,6 +269,24 @@ class TestExtractJson(unittest.TestCase):
         _, meta = dp.extract_json(payload)
         self.assertIsNone(meta["1.1.1.1"]["colo_iata"])
 
+    def test_json_country_traversal_never_becomes_bucket_key(self):
+        # 恶意/失范上游把 ``meta.country`` 灌成路径控制串（``../../x``、反斜杠、
+        # URL 编码）——extract_json 的分桶键**必须是** ``[A-Z]{2}`` 或 ``ALL`` 哨兵，
+        # 杜绝「入口国即文件名」面上的任意目录穿越/跨目录写出；且三条 IP 一行都不
+        # 因桶收拢而丢。注意 ``%2e%2e%2fshadow`` 内嵌机场码 SHA→上海，属**合法**
+        # 语义映射（收拢为 CN 而非路径键），守卫锁的是「键绝不带路径元字符」。
+        payload = self._json([
+            {"ip": "1.1.1.1", "port": [443], "meta": {"country": "../../etc"}},
+            {"ip": "2.2.2.2", "port": [443], "meta": {"country": "..\\\\evil"}},
+            {"ip": "3.3.3.3", "port": [443], "meta": {"country": "%2e%2e%2fshadow"}},
+        ])
+        by_port, _ = dp.extract_json(payload)
+        flat = []
+        for key, ips in by_port["443"].items():
+            self.assertRegex(key, r"^[A-Z]{2}$|^ALL$")
+            flat.extend(ips)
+        self.assertEqual(len(flat), 3)
+
     def test_raises_when_no_data_list(self):
         with self.assertRaises(ValueError):
             dp.extract_json(b'{"generated_at": "x"}')
