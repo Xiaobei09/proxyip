@@ -416,6 +416,10 @@ def _parse_all_json_entries(
             if require_country:
                 continue
             country = "ALL"
+        # 入口国标注用于目录/文件命名（``countries/<CC>/all.txt``）；JSON 是低信任
+        # 上游镜像，必须经 normalize_country 收拢为 ``[A-Z]{2}`` 或 ``ALL`` 哨兵，
+        # 阻断 ``meta.country`` 携带 ``..``/`/` 等路径控制痕迹（跨源路径穿越面）。
+        country = normalize_country(country)
         ports = entry.get("port")
         if not isinstance(ports, list):
             continue
