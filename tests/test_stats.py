@@ -192,6 +192,12 @@ class TestBuilders(unittest.TestCase):
         svg = gs.build_churn([{"ts": '2026-08-12T00:00:00Z&"<x>', "added": 1, "removed": 0}])
         svg_ok(svg)
 
+    def test_empty_svg_escapes_text(self):
+        svg = gs.empty_svg(text='怪<文本>&"注入"')
+        svg_ok(svg)
+        self.assertNotIn("<文本>", svg)
+        self.assertIn("&lt;文本&gt;", svg)
+
     def test_legend_shows_latest_value(self):
         svg = gs.build_combo(self.HISTORY, self.VALID_HISTORY)
         self.assertIn("去重 110", svg)
