@@ -41,6 +41,24 @@ class TestTimeHelpers(unittest.TestCase):
         self.assertIsNone(gs.to_epoch(""))
         self.assertIsNone(gs.to_epoch("garbage"))
 
+    def test_load_history_skips_malformed_lines(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "history.jsonl"
+            p.write_text(
+                '{"ts": "2026-09-16T01:00:00Z", "unique": 1}\n'
+                '3\n'
+                '["not", "dict"]\n'
+                '"str"\n'
+                'not json\n'
+                '{"ts": "2026-09-16T02:00:00Z", "unique": 2}\n',
+                encoding="utf-8",
+            )
+            recs = gs.load_history(p)
+            # decode 失败与成功解析但非 dict 的 malformed 行都弃（R84）
+            self.assertEqual(len(recs), 2)
+            self.assertEqual(recs[1]["unique"], 2)
+
     def test_fmt_ago(self):
         self.assertEqual(gs.fmt_ago(35), "35s ago")
         self.assertEqual(gs.fmt_ago(90), "1m ago")

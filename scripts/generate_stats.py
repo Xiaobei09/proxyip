@@ -216,9 +216,12 @@ def load_history(path: Path) -> list[dict]:
     records = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
-            records.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(rec, dict):
+            continue  # malformed 行（"3"/"[]"）成功解析也弃掉，防下游 .get 崩
+        records.append(rec)
     return records
 
 
