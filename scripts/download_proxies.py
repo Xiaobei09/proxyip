@@ -1152,7 +1152,13 @@ def _append_source_history(ts: str, counts: dict[str, int]) -> None:
     history: list = []
     if SOURCE_HISTORY_FILE.exists():
         existing = read_json(SOURCE_HISTORY_FILE)
-        history = list((existing or {}).get("runs", []))
+        # malformed top-level（手写/旧版破坏成 3/"str" 等）防御：
+        # 丢弃而非让 .get 在非 dict 上 AttributeError 拖垮整轮下载。
+        history = list(
+            existing.get("runs", [])
+            if isinstance(existing, dict)
+            else []
+        )
     history.append({"ts": ts, "counts": dict(sorted(counts.items()))})
     history = history[-SOURCE_HISTORY_MAX:]
     write_text_if_changed(

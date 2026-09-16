@@ -1289,3 +1289,40 @@ class TestBuildSourceStats(unittest.TestCase):
         self.assertEqual(stats["main (zip.cm.edu.kg)"]["overlap"], 0)
         self.assertEqual(stats["main (zip.cm.edu.kg)"]["unique"], 1)
         self.assertEqual(stats["a"]["overlap"], 0)
+
+
+class TestAppendSourceHistory(unittest.TestCase):
+    def _patch(self, td):
+        return unittest.mock.patch.object(
+            dp, "SOURCE_HISTORY_FILE", Path(td) / "source_history.json"
+        )
+
+    def test_tolerates_malformed_top_level(self):
+        # malformed top-level（"3"）不 AttributeError 崩掉整轮下载（R82 防御）。
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "source_history.json"
+            bad.write_text("3\n", encoding="utf-8")
+            with self._patch(td):
+                dp._append_source_history("2026-09-16T04:00:00Z",
+                                           {"main": 10, "x": 3})
+            out = dp.read_json(bad)
+            runs = out["runs"]
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(runs[0]["counts"], {"main": 10, "x": 3})
+
+    def test_truncates_and_dedupes_labels(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            with self._patch(td):
+                for i in range(dp.SOURCE_HISTORY_MAX + 5):
+                    dp._append_source_history(
+                        f"2026-09-16T00:00:{i:02d}Z",
+                        {"main": i, "a": 1},
+                    )
+            runs = dp.read_json(self._path(td))["runs"]
+            self.assertLessEqual(len(runs), dp.SOURCE_HISTORY_MAX)
+
+    def _path(self, td):
+        import os
+        return Path(td) / "source_history.json"
