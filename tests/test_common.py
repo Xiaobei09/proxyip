@@ -241,6 +241,16 @@ class TestNormalizeNote(unittest.TestCase):
                     "8.8.8.8:443#US-42ms-fast-90",
                 )
 
+    def test_rewrite_cn_speed_idempotent_on_estimated(self):
+        # 已含 ≈ 估算 token 的行再经 rewrite（重入/CN 视图文件二次处理）——
+        # _CN_SPEED_RAW_RE 只匹配裸数值、不匹配 ≈ 前缀，行原样、绝不二次改写
+        # 或叠加第二个速度 token（幂等；备注段的历史教训正是 token 无限堆叠，
+        # 见 common.py 的 normalize_note 唯一出口注释）。
+        line = "7.7.7.7:443#US-42ms-≈2.0MB/s-fast-90"
+        cn = {"7.7.7.7:443#US": 236.4}
+        self.assertEqual(_rewrite_cn_speed(line, cn), line)
+        self.assertEqual(_rewrite_cn_speed(line, cn).count("MB/s"), 1)
+
     def test_idempotent_on_messy_real_lines(self):
         messy = (
             "137.220.38.195:443#🇺🇸US→US-18ms-39.33MB/s-CN-V6-GPT-CF-74"
