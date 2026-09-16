@@ -603,5 +603,36 @@ class TestNotifyRedaction(unittest.TestCase):
         self.assertNotIn("SECRET_TOKEN_ABC", out)
 
 
+class TestCheckWiring(unittest.TestCase):
+    """接线完备性：每个 check_* 定义必须在 main 直接调用（R45 型遗漏——
+    新增 check 忘记接入主流程即长期静默——用 AST 断言防回归）。"""
+
+    def test_all_check_functions_wired_in_main(self):
+        import ast
+
+        src = Path(ha.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        defined = {
+            n.name for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name.startswith("check_")
+        }
+        main = next(
+            n for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "main"
+        )
+        called = {
+            sub.func.id for sub in ast.walk(main)
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+        }
+        missing = sorted(defined - called)
+        self.assertEqual(
+            missing, [],
+            "以下 check_* 未接入 main（新增告警忘接线会静默丢失）:\n"
+            + "\n".join(missing),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
