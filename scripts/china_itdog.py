@@ -21,7 +21,13 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
-from common import UA, request_follow
+from common import UA, err_name, request_follow
+
+
+def _err(e: Exception) -> str:
+    """异常类型名（不带 ``str(e)``：URLError 的 str 含完整 URL 与 token）。"""
+    return err_name(e)
+
 
 ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
 ITDOG_TCPING_URL = "https://www.itdog.cn/batch_tcping/"
@@ -101,7 +107,7 @@ def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> tuple[li
         if cookie:
             hdrs["Cookie"] = cookie
     except Exception as exc:
-        logging.debug("itdog warmup: %s", exc)
+        logging.debug("itdog warmup: %s", _err(exc))
     for _ in range(2):
         try:
             _, _, body = request_follow(page_url, hdrs, 20)
@@ -110,7 +116,7 @@ def itdog_fetch_nodes(per_isp: int, page_url: str = ITDOG_BATCH_URL) -> tuple[li
             if ids:
                 return ids, itdog_isp_map(html, per_isp)
         except Exception as exc:
-            logging.debug("itdog fetch nodes: %s", exc)
+            logging.debug("itdog fetch nodes: %s", _err(exc))
         time.sleep(2)
     return [], {}
 
@@ -252,7 +258,7 @@ class _WebSocket:
             except socket.timeout:
                 return ("timeout", None)
             except (ConnectionError, ssl.SSLError, OSError) as e:
-                return ("err", {"error": str(e)[:80]})
+                return ("err", {"error": _err(e)})
             if not chunk:
                 return ("closed", None)
             self.buf += chunk
@@ -285,7 +291,7 @@ class _WebSocket:
         try:
             self.sock.close()
         except Exception as exc:
-            logging.debug("ws close: %s", exc)
+            logging.debug("ws close: %s", _err(exc))
 
 
 def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
@@ -310,7 +316,7 @@ def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
                 connected = True
                 break
             except Exception as exc:
-                logging.debug("itdog ws connect: %s", exc)
+                logging.debug("itdog ws connect: %s", _err(exc))
                 time.sleep(1.0)
         if connected:
             while time.monotonic() - t0 < timeout:
@@ -326,7 +332,7 @@ def itdog_collect(task_id: str, expected: int, timeout: float) -> list[dict]:
                 if len(records) >= expected:
                     break
     except Exception as exc:
-        logging.debug("itdog ws poll: %s", exc)
+        logging.debug("itdog ws poll: %s", _err(exc))
     finally:
         if ws:
             ws.close()

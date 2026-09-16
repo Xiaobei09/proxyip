@@ -19,6 +19,7 @@ from common import (
     merge_note_tokens,
     normalize_note,
     parse_ltd_line,
+    err_name,
 )
 
 
@@ -579,6 +580,30 @@ class TestFetchWithMirrorMaxBytes(unittest.TestCase):
                 fetch_with_mirror("http://h/x", 10, max_bytes=0),
                 b"static-body",
             )
+
+
+class TestErrName(unittest.TestCase):
+    """err_name 只返回异常类型名，不输出 URL/token（防日志泄漏契约）。"""
+
+    def test_returns_type_name(self):
+        self.assertEqual(err_name(TimeoutError(
+            "fetch deadline exceeded (15s): https://x/?token=secret"
+        )), "TimeoutError")
+        self.assertEqual(err_name(ValueError("boom")), "ValueError")
+
+    def test_urlerror_url_not_leaked(self):
+        import urllib.error
+        err = urllib.error.URLError(
+            "connection refused to https://api.example.com/?token=SECRET"
+        )
+        self.assertEqual(err_name(err), "URLError")
+        self.assertNotIn("SECRET", err_name(err))
+        self.assertNotIn("example.com", err_name(err))
+
+    def test_hpe_source_name(self):
+        import urllib.error
+        err = urllib.error.HTTPError("https://x/?token=S", 403, "x", {}, None)
+        self.assertEqual(err_name(err), "HTTPError")
 
 
 if __name__ == "__main__":

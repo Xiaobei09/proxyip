@@ -545,6 +545,15 @@ def mirror_urls(url: str) -> list[str]:
     return out
 
 
+def err_name(e: Exception) -> str:
+    """异常类型名，避免 ``str(e)``/``str(exc)`` 把完整 URL 与 token 写进日志。
+
+    URLError/HTTPError/``fetch_with_deadline`` 的 ``TimeoutError`` 的 str 都会
+    内嵌完整请求 URL（含 `?token=` 参数），日志/错误字段统一用它取类别名。
+    """
+    return type(e).__name__
+
+
 def fetch_with_mirror(
     url: str,
     timeout: float,

@@ -167,7 +167,7 @@ async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
             "exit_geo": ipv4.get("exit"),
         }
     except Exception as exc:  # noqa: BLE001
-        logging.debug("check_external_api %s:%s failed: %s", ip, port, exc)
+        logging.debug("check_external_api %s:%s failed: %s", ip, port, err_name(exc))
         return {"success": False}
 
 
@@ -203,7 +203,7 @@ async def run_checks(
         try:
             task.result()
         except Exception as exc:
-            logging.debug("probe task result: %s", exc)
+            logging.debug("probe task result: %s", err_name(exc))
     return results
 
 
@@ -264,7 +264,7 @@ async def batch_ipapi(ips: list, deadline: float | None = None) -> dict:
             data = await asyncio.to_thread(ipapi_batch_sync, chunk)
             any_batch_ok = True
         except Exception as exc:
-            logging.debug("ipapi batch failed: %s", exc)
+            logging.debug("ipapi batch failed: %s", err_name(exc))
             continue
         for idx, item in enumerate(data):
             if not isinstance(item, dict) or item.get("status") != "success":
@@ -288,7 +288,7 @@ async def batch_ipapi(ips: list, deadline: float | None = None) -> dict:
             if item.get("status") == "success":
                 out[ip] = item
         except Exception as exc:
-            logging.debug("ipapi get %s: %s", ip, exc)
+            logging.debug("ipapi get %s: %s", ip, err_name(exc))
         await asyncio.sleep(1.5)
     if cut_by_deadline and len(out) < len(ips_uniq):
         _warn_cut(len(out), len(ips_uniq))

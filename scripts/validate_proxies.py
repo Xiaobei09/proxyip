@@ -59,6 +59,7 @@ from common import (
     _rewrite_cn_speed,
     cn_fastest_ms,
     deadline_open,
+    err_name,
     EXIT_FAMILY_FILE,
     EXT_API_SOURCES,
     EXT_CHECK_FILE,
@@ -193,7 +194,7 @@ async def check_one_ext_api(
         data = await asyncio.to_thread(_fetch)
         return _normalize_ext_response(source, data)
     except Exception as exc:  # noqa: BLE001
-        logging.debug("ext_api %s %s:%s failed: %s", source["name"], ip, port, exc)
+        logging.debug("ext_api %s %s:%s failed: %s", source["name"], ip, port, err_name(exc))
         return {"name": source["name"], "ok": False, "error": str(exc)}
 
 
@@ -1219,7 +1220,7 @@ async def check_entries(
         try:
             status, method, latency, speed, _ext = await check_proxy(ip, port, args, speed_sem)
         except Exception as exc:
-            logging.debug("check_proxy %s:%s: %s", ip, port, exc)
+            logging.debug("check_proxy %s:%s: %s", ip, port, err_name(exc))
             status, method, latency, speed = "dead", None, None, None
         async with lock:
             if not is_retry:

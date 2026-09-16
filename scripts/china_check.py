@@ -85,6 +85,7 @@ from common import (
     VALID_ALL_LTD_FILE,
     VALID_DIR,
     deadline_open,
+    err_name,
     has_token,
     line_to_key,
     merge_note_tokens,
@@ -116,7 +117,7 @@ from china_itdog import (
 
 def _err(e: Exception) -> str:
     """异常类型名（不带 ``str(e)``：URLError 的 str 含完整 URL 与 token）。"""
-    return type(e).__name__
+    return err_name(e)
 
 
 FALLBACK_SOURCE = DEFAULT_SOURCE
@@ -611,7 +612,7 @@ def check_host_check(ip: str, port: str, limiter: RateLimiter, timeout: float, a
                 continue
             payload = json.loads(resp.decode("utf-8", "replace"))
         except Exception as exc:
-            logging.debug("check-host poll: %s", exc)
+            logging.debug("check-host poll: %s", _err(exc))
             continue
         last = parse_check_host_report(payload)
         if last["status"] in ("ok", "fail"):
@@ -658,7 +659,7 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
             if re_parsed["has_page"]:
                 parsed = re_parsed
         except Exception as exc:
-            logging.debug("ping.pe fetch: %s", exc)
+            logging.debug("ping.pe fetch: %s", _err(exc))
     token = parsed["token"]
     if not token:
         return {"status": "error", "ok": False, "ms": None, "error": "no start token", "count": 0, "ok_count": 0}
@@ -698,7 +699,7 @@ def pingpe_check(ip: str, port: str, timeout: float) -> dict:
             )
             payload = json.loads(body.decode("utf-8", "replace"))
         except Exception as exc:
-            logging.debug("ping.pe results poll: %s", exc)
+            logging.debug("ping.pe results poll: %s", _err(exc))
             time.sleep(POLL_INTERVAL)
             continue
         last_agg = parse_pingpe_results(payload, cn_ids)
@@ -767,7 +768,7 @@ def tcptest_fetch_nodes(
                 url, {"User-Agent": UA, "Accept": "application/json"}, timeout
             )
         except Exception as e:
-            logging.debug("tcptest nodes: %s", e)
+            logging.debug("tcptest nodes: %s", _err(e))
             break
         if status != 200:
             logging.debug("tcptest nodes http %s", status)
@@ -1638,7 +1639,7 @@ class _SocketIOClient:
             except socket.timeout:
                 return ("timeout", None)
             except (ConnectionError, ssl.SSLError, OSError) as e:
-                return ("err", {"error": str(e)[:80]})
+                return ("err", {"error": _err(e)})
             if not chunk:
                 return ("closed", None)
             self.buf += chunk
@@ -1691,7 +1692,7 @@ class _SocketIOClient:
         try:
             self.sock.close()
         except Exception as exc:
-            logging.debug("socketio close: %s", exc)
+            logging.debug("socketio close: %s", _err(exc))
 
 
 def ce98_check(ip: str, port: str, timeout: float) -> dict:
@@ -1746,7 +1747,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
                 connected = True
                 break
             except Exception as exc:
-                logging.debug("ce98 ws connect: %s", exc)
+                logging.debug("ce98 ws connect: %s", _err(exc))
                 if client:
                     client.close()
                     client = None
@@ -2296,7 +2297,7 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
                 connected = True
                 break
             except Exception as exc:
-                logging.debug("wansui ws connect: %s", exc)
+                logging.debug("wansui ws connect: %s", _err(exc))
                 if client:
                     client.close()
                     client = None
@@ -2814,9 +2815,9 @@ def _run_pingpe_slots(
             if tcpping["status"] != "skipped":
                 entries[key]["tcpping"] = tcpping
         except Exception as exc:
-            logging.debug("pingpe failed for %s: %s", key, exc)
+            logging.debug("pingpe failed for %s: %s", key, _err(exc))
             entries.setdefault(key, {})["pingpe"] = {
-                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+                "status": "error", "ok": False, "ms": None, "error": _err(exc)}
         time.sleep(PINGPE_SLOT_GAP)
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
@@ -2837,9 +2838,9 @@ def _run_tcptest_slots(
         try:
             entries[key]["tcptest"] = tcptest_check(ip, port, timeout, node_uuids)
         except Exception as exc:
-            logging.debug("tcptest failed for %s: %s", key, exc)
+            logging.debug("tcptest failed for %s: %s", key, _err(exc))
             entries.setdefault(key, {})["tcptest"] = {
-                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+                "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -2861,9 +2862,9 @@ def _run_coffee_slots(
                 # 快速冲掉偶发超时：再试一次
                 entries[key]["coffee"] = coffee_check(ip, timeout, COFFEE_POOL[:6])
         except Exception as exc:
-            logging.debug("coffee failed for %s: %s", key, exc)
+            logging.debug("coffee failed for %s: %s", key, _err(exc))
             entries.setdefault(key, {})["coffee"] = {
-                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+                "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -2888,9 +2889,9 @@ def _run_ws_source_slots(
         try:
             entries[key][source] = fn(ip, port)
         except Exception as exc:
-            logging.debug("%s failed for %s: %s", source, key, exc)
+            logging.debug("%s failed for %s: %s", source, key, _err(exc))
             entries.setdefault(key, {})[source] = {
-                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+                "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -2909,9 +2910,9 @@ def _run_pingloc_slots(
         try:
             entries[key]["pingloc"] = pingloc_check(ip, timeout, method="ping")
         except Exception as exc:
-            logging.debug("pingloc failed for %s: %s", key, exc)
+            logging.debug("pingloc failed for %s: %s", key, _err(exc))
             entries.setdefault(key, {})["pingloc"] = {
-                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+                "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -2939,9 +2940,9 @@ def _run_raw_slots(
         try:
             entries[key][source] = fn(ip, port)
         except Exception as exc:
-            logging.debug("%s failed for %s: %s", source, key, exc)
+            logging.debug("%s failed for %s: %s", source, key, _err(exc))
             entries.setdefault(key, {})[source] = {
-                "status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}
+                "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -2968,9 +2969,9 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             try:
                 out[name] = fn(ip, port, args.timeout)
             except Exception as exc:
-                logging.debug("l2 %s failed for %s: %s", name, key, exc)
+                logging.debug("l2 %s failed for %s: %s", name, key, _err(exc))
                 out[name] = {"status": "error", "ok": False, "ms": None,
-                             "error": str(exc)[:120]}
+                             "error": _err(exc)}
         return key, out
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -2987,9 +2988,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 "check_host": check_host_check(ip, port, ch_limiter, args.timeout, args.api_key)
             }
         except Exception as exc:
-            logging.debug("l2 check_host failed for %s: %s", key, exc)
-            return key, {"check_host": {"status": "error", "ok": False, "ms": None, "error": str(exc)[:120]}}
-
+            logging.debug("l2 check_host failed for %s: %s", key, _err(exc))
+            return key, {"check_host": {"status": "error", "ok": False, "ms": None, "error": _err(exc)}}
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
     # - xxapi/jkapi 都已 ok → 双免额单节点源已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
@@ -3025,7 +3025,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             for key, res in itdog_batch_run(_itdog_cands, args).items():
                 entries.setdefault(key, {})["itdog"] = res
         except Exception as exc:
-            logging.debug("itdog batch failed: %s", exc)
+            logging.debug("itdog batch failed: %s", _err(exc))
             print(f"itdog batch failed (skipped): {exc}", file=sys.stderr)
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
         if not getattr(args, "skip_itdog_tcping", False):
@@ -3058,7 +3058,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     ).items():
                         entries.setdefault(key, {})["itdog_tcping"] = res
                 except Exception as exc:
-                    logging.debug("itdog_tcping fallback failed: %s", exc)
+                    logging.debug("itdog_tcping fallback failed: %s", _err(exc))
                     print(f"itdog_tcping fallback failed (skipped): {exc}",
                           file=sys.stderr)
     print(

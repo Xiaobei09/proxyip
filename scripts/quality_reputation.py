@@ -760,7 +760,7 @@ async def fetch_threatfox() -> IpSet:
             ).decode("utf-8", errors="replace")
         )
     except Exception as exc:  # noqa: BLE001
-        logging.warning("fetch threatfox failed open: %s", exc)
+        logging.warning("fetch threatfox failed open: %s", err_name(exc))
         return IpSet()
     try:
         data = json.loads(text)
@@ -1015,8 +1015,8 @@ async def fetch_text_list(url: str) -> set[str]:
             ).decode("utf-8", errors="replace")
         )
     except Exception as exc:
-        logging.debug("fetch_text_list %s: %s", url, exc)
-        logging.warning("fetch_text_list failed open for %s: %s", url, exc)
+        logging.debug("fetch_text_list %s: %s", url, err_name(exc))
+        logging.warning("fetch_text_list failed open for %s: %s", url, err_name(exc))
         return out
     for line in text.splitlines():
         line = line.strip()
@@ -1182,7 +1182,7 @@ async def batch_sync(
             try:
                 res = await asyncio.to_thread(fn, ip)
             except Exception as exc:
-                logging.debug("batch_sync: %s failed: %s", ip, exc)
+                logging.debug("batch_sync: %s failed: %s", ip, err_name(exc))
                 res = None
             if res is not None:
                 out[ip] = res
@@ -1975,7 +1975,7 @@ async def run_abuse(
                 abuse_lookup_sync, ip, args.abuse_service, args.abuse_key
             )
         except Exception as exc:
-            logging.debug("abuse lookup %s: %s", ip, exc)
+            logging.debug("abuse lookup %s: %s", ip, err_name(exc))
         await asyncio.sleep(0.3)
     if cut_by_deadline and len(by_ip) < len(exit_ips):
         print(
