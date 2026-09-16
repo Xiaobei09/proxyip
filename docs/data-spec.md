@@ -266,6 +266,7 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 
 结构化代理池导出（`export_json.py`），数组元素：
 `{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`。
+`cn` 为该行 note 中存在 `CN`/`CN4`/`CN6`/`CN46`/`CNH` 任一 token 即 true（`CNH` 应用层确认蕴含 `CN`）；`exit` 为 `→CC` 后的实测出口 CC（无 `→` 时为 `null`）；`latency_ms`/`speed_mbps` 只取 note 中首个 `Nms`/`N.MB/s` token——`≈XMB/s` 大陆估算 token 因 `≈` 前缀开头的非数值无法经 `float()` 解析，`speed_mbps` 记 `null`（CN 视图估算不进入机器可读导出）。
 
 ### `data/valid/all_diverse.txt`
 
