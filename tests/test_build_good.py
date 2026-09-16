@@ -21,6 +21,17 @@ class TestParseMetrics(unittest.TestCase):
     def test_missing_metrics(self):
         self.assertEqual(bg.parse_metrics("1.2.3.4:443#US"), (None, None))
 
+    def test_estimated_speed_ignored(self):
+        # ≈ 大陆估算 token 不算实测速度——不进入综合分（R78 同族 ≈ 拒绝）。
+        # 延迟仍取（大陆视角展示），仅速度轴置 None。
+        self.assertEqual(
+            bg.parse_metrics("1.2.3.4:443#US-130ms-≈1.86MB/s"),
+            (130, None),
+        )
+        self.assertEqual(
+            bg.parse_metrics("1.2.3.4:443#US-≈99MB/s"), (None, None)
+        )
+
     def test_latency_only(self):
         self.assertEqual(bg.parse_metrics("1.2.3.4:443#US-80ms"), (80, None))
 

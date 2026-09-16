@@ -80,12 +80,21 @@ WEIGHT_SPEED = 0.2
 
 
 def parse_metrics(line: str) -> tuple[int | None, float | None]:
-    """Extract ``(latency_ms, speed_mbps)`` from an annotated line."""
+    """Extract ``(latency_ms, speed_mbps)`` from an annotated line.
+
+    ``≈XMB/s``（大陆估算 token）不算实测速度——mbps 返回 ``None``，
+    不进入综合分 speed 轴（与 ``_line_mbps``/``speed_tier``/``_parse_speed``
+    同族 ≈ 拒绝，见 R77/R78）。当前生产输入均为 all.txt 系（无 ≈），
+    此为防御性收紧。
+    """
     lat_match = LATENCY_RE.search(line)
     speed_match = SPEED_RE.search(line)
     ms = int(lat_match.group(1)) if lat_match else None
-    mbps = float(speed_match.group(1)) if speed_match else None
-    return ms, mbps
+    if speed_match is None:
+        return ms, None
+    if speed_match.start() > 0 and line[speed_match.start() - 1] == "≈":
+        return ms, None
+    return ms, float(speed_match.group(1))
 
 
 def latency_score(ms: int | None) -> float:
