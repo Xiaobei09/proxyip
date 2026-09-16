@@ -195,7 +195,7 @@ async def check_one_ext_api(
         return _normalize_ext_response(source, data)
     except Exception as exc:  # noqa: BLE001
         logging.debug("ext_api %s %s:%s failed: %s", source["name"], ip, port, err_name(exc))
-        return {"name": source["name"], "ok": False, "error": str(exc)}
+        return {"name": source["name"], "ok": False, "error": err_name(exc)}
 
 
 async def check_all_ext_apis(

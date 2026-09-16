@@ -3026,7 +3026,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 entries.setdefault(key, {})["itdog"] = res
         except Exception as exc:
             logging.debug("itdog batch failed: %s", _err(exc))
-            print(f"itdog batch failed (skipped): {exc}", file=sys.stderr)
+            print(f"itdog batch failed (skipped): {_err(exc)}", file=sys.stderr)
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
         if not getattr(args, "skip_itdog_tcping", False):
             pending = [
@@ -3059,7 +3059,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                         entries.setdefault(key, {})["itdog_tcping"] = res
                 except Exception as exc:
                     logging.debug("itdog_tcping fallback failed: %s", _err(exc))
-                    print(f"itdog_tcping fallback failed (skipped): {exc}",
+                    print(f"itdog_tcping fallback failed (skipped): {_err(exc)}",
                           file=sys.stderr)
     print(
         f"itdog phases: {time.monotonic() - _t0:.1f}s",

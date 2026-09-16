@@ -121,14 +121,14 @@ async def tls_get_direct(
             ip, int(port), ssl=_SSL_CTX, server_hostname=host
         )
     except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError) as exc:
-        return None, {}, b"", f"tls: {exc}"
+        return None, {}, b"", f"tls: {err_name(exc)}"
     try:
         writer.write(build_request("GET", path, host))
         await writer.drain()
         status, headers, body = await read_http_response(reader, read_cap)
         return status, headers, body, None
     except (OSError, asyncio.TimeoutError, ssl.SSLError, ConnectionError) as exc:
-        return None, {}, b"", str(exc)
+        return None, {}, b"", err_name(exc)
     finally:
         try:
             writer.close()

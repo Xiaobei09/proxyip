@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (
     DATA_DIR,
     QUALITY_DIR,
+    err_name,
     parse_ltd_line,
     write_json,
 )
@@ -203,7 +204,7 @@ async def main_async(args: argparse.Namespace) -> int:
         try:
             res = await task
         except Exception as exc:  # 单个节点异常不拖垮整轮
-            print(f"probe error for {key}: {exc}", file=sys.stderr)
+            print(f"probe error for {key}: {err_name(exc)}", file=sys.stderr)
             res = None
         if res:
             results[key] = res

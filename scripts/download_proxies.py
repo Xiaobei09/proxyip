@@ -48,6 +48,7 @@ from common import (
     COUNTRIES_DIR,
     DIFF_DIR,
     DOWNLOAD_DIR,
+    err_name,
     HISTORY_FILE,
     IPAPI_BATCH_URL,
     IPAPI_BATCH_SIZE,
@@ -1250,7 +1251,7 @@ def main(argv: list[str] | None = None) -> int:
         print_stats(stats)
         return 0
     except Exception as exc:  # noqa: BLE001
-        print(f"Error: {exc}", file=sys.stderr)
+        print(f"Error: {err_name(exc)}", file=sys.stderr)
         return 1
 
 
