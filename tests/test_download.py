@@ -960,6 +960,19 @@ class TestProxyMirrorSources(unittest.TestCase):
         self.assertEqual(by_port["3128"]["ALL"], ["9.9.9.9"])
         self.assertIn("9.9.9.9", source_ip_sets[url])
 
+    def test_load_extras_source_beyond_byte_cap_skipped(self):
+        url = "https://example.com/huge.txt"
+        # 正常源小于上限 → 解析正常
+        normal = b"1.2.3.4:443\n"
+        giant = b"x:443\n" * (dp.MAX_EXTRA_SOURCE_BYTES // 5 + 1000)  # > 4MB
+        calls = {"n": 0}
+        def fake_fetch(u, timeout):
+            calls["n"] += 1
+            return normal if calls["n"] == 1 else giant
+        with unittest.mock.patch.object(dp, "fetch", side_effect=fake_fetch):
+            by_port, _, _ = dp.load_extras([("plain", url), ("plain", url)], timeout=5)
+        self.assertEqual(by_port["443"]["ALL"], ["1.2.3.4"])
+
 
 class TestFetchExtraRetry(unittest.TestCase):
     def test_succeeds_after_transient_failure(self):

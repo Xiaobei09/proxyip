@@ -144,6 +144,7 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
 # 全链路输出只保留这些端口，其余桶一律丢弃。
 CF_EDGE_PORTS = frozenset({"443", "8443", "2053", "2083", "2087", "2096"})
 DEFAULT_EXTRA_PORT = "443"
+MAX_EXTRA_SOURCE_BYTES = 4_000_000  # 单源体积上限：超出则跳过解析，防止 10 万+ 级冲击
 
 SOURCE_LABELS: dict[str, str] = {
     "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
@@ -1090,6 +1091,13 @@ def load_extras(
 
     def parse_source(kind: str, url: str) -> dict:
         content = _fetch_extra_retry(url, timeout=timeout)
+        if len(content) > MAX_EXTRA_SOURCE_BYTES:
+            print(
+                f"Skipping extra source {url!r}: {len(content)} bytes "
+                f"> MAX_EXTRA_SOURCE_BYTES={MAX_EXTRA_SOURCE_BYTES}",
+                file=sys.stderr,
+            )
+            return {}
         if kind == "plain":
             return extract_plain(content)
         if kind == "ip":
