@@ -23,6 +23,7 @@ from common import (
     load_china_stable_keys,
     load_speed_keys,
     load_uptime_keys,
+    read_json,
 )
 
 
@@ -642,6 +643,31 @@ class TestLoadKeysGuards(unittest.TestCase):
                 "non_int": {"verdict": "reachable", "streak": "2", "flip": 0},
             }})
             self.assertEqual(load_china_stable_keys(p), {"ok", "no_flip"})
+
+
+class TestReadJsonNonObject(unittest.TestCase):
+    def test_non_object_top_level_returns_empty_dict(self):
+        import tempfile
+        for payload in ('[]', '"str"', '3', 'true', 'null'):
+            with tempfile.TemporaryDirectory() as td:
+                p = Path(td) / "x.json"
+                p.write_text(payload, encoding="utf-8")
+                self.assertEqual(read_json(p), {}, msg=payload)
+
+    def test_broken_and_missing_return_empty_dict(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "x.json"
+            p.write_text("{not json", encoding="utf-8")
+            self.assertEqual(read_json(p), {})
+            self.assertEqual(read_json(Path(td) / "nope.json"), {})
+
+    def test_object_passthrough(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "x.json"
+            p.write_text('{"a": [1, 2]}', encoding="utf-8")
+            self.assertEqual(read_json(p), {"a": [1, 2]})
 
 
 if __name__ == "__main__":

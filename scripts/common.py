@@ -268,13 +268,16 @@ def keyed_json(entries: dict) -> dict:
 
 
 def read_json(path: Path) -> dict:
-    """Read a JSON file; return ``{}`` on missing / broken / OS errors."""
+    """Read a JSON file; return ``{}`` on missing / broken / non-object / OS errors."""
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
+    # 顶层非对象（合法 JSON 的 list/str/int/bool/null）一律按缺失对待：
+    # 消费方都以 dict 形态调用 .get，裸 list/str 会让 51 处下游炸 AttributeError。
+    return data if isinstance(data, dict) else {}
 
 
 def load_speed_keys(path: Path | None = None) -> set[str]:
