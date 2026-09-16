@@ -340,3 +340,11 @@ class TestCheckExternalApiBoolGuard(unittest.IsolatedAsyncioTestCase):
         self.assertIs(res["ipv4_ok"], True)
         self.assertIs(res["ipv6_ok"], False)
         self.assertEqual(res["exit_geo"]["ip"], "9.9.9.9")
+
+    def test_error_shapes_minimal_dict(self):
+        """探测失败的返回形状：仅 success=False，不假定其它字段存在。"""
+        with unittest.mock.patch(
+                "quality_probe.fetch_with_deadline",
+                side_effect=OSError("api down")):
+            res = asyncio.run(qp.check_external_api("1.2.3.4", "443", timeout=5))
+        self.assertEqual(res, {"success": False})
