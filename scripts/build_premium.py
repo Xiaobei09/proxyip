@@ -153,8 +153,10 @@ def family_of(key: str | None, line: str, family_map: dict[str, str]) -> str | N
     返回 ``ipv4``/``ipv6``/``dual`` 之一，无法判定时 ``None``。
     """
     fam = family_map.get(key) if key else None
-    if fam in _FAMILY_BRANCH_TO_NAME:
-        return fam
+    if fam:
+        # 权威源有记录即可信分支；记录非可信（unknown/怪值）→ None，
+        # 不回落行内旧 token（R165/R166：宁未知不冒称）。
+        return fam if fam in _FAMILY_BRANCH_TO_NAME else None
     parsed = parse_line(line)
     note = parsed[4] if parsed else ""
     if has_token(note, "DS"):

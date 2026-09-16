@@ -640,6 +640,11 @@ class TestClassifyGroups(unittest.TestCase):
         self.assertEqual(vp.family_of("1.0.0.1:443#US", "-V4-V6", {}), "dual")
         self.assertEqual(vp.family_of("1.0.0.1:443#US", "-CN-V4-V6", {}), "dual")
 
+    def test_family_of_unknown_map_not_fall_back_to_token(self):
+        """权威源显式 unknown 时不得用行内旧 token 兜底（R165/R166）。"""
+        families = {"1.0.0.1:443#US": "unknown"}
+        self.assertIsNone(vp.family_of("1.0.0.1:443#US", "-V6", families))
+
     def test_load_family_map(self):
         tmp = Path(tempfile.mkdtemp(prefix="fm_"))
         j = tmp / "exit_family.json"

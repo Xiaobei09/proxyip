@@ -465,8 +465,9 @@ def load_cn_ms(path: Path | None = None) -> dict[str, float]:
 def family_of(entry: str, note: str, families: dict) -> str | None:
     """入口家族：优先 ``exit_family.json``，缺失时按行内 ``-V4``/``-V6``/``-DS`` 兜底。"""
     fam = families.get(entry)
-    if fam in ("ipv4", "ipv6", "dual"):
-        return fam
+    if fam:
+        # 权威源有记录即可信分支；unknown/怪值 → None，不回落行内旧 token
+        return fam if fam in ("ipv4", "ipv6", "dual") else None
     if has_token(note, "DS"):
         return "dual"
     if has_token(note, "V4") and has_token(note, "V6"):
