@@ -115,7 +115,11 @@ async def tls_get_direct(
     timeout: int,
     read_cap: int,
 ) -> tuple[int | None, dict, bytes, str | None]:
-    """Direct TLS to a Cloudflare-edge proxy with ``host`` as SNI."""
+    """Direct TLS to a Cloudflare-edge proxy with ``host`` as SNI.
+
+    .. legacy:: 无调用方（当前主探测路径是 ``check_external_api`` 外部 echo
+       API）；保留供直连 TLS 探测方案复用，移除前需同步清顶部 docstring。
+    """
     try:
         reader, writer = await asyncio.open_connection(
             ip, int(port), ssl=_SSL_CTX, server_hostname=host
