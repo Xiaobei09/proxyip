@@ -369,3 +369,6 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 ### `data/quality/deep_speed.json`
 
 深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）、`proxies`（逐键明细）与 `meta`（参数快照：`cc`/`source`/`limit`/`bytes_mb`/`streams`/`timeout`/`targets`）三个平级键。`proxies[key]` 的结构为 `{tls_ms: <TLS 建连耗时 ms>, <target>: {"agg_mbps": <该目标多流总吞吐 MB/s>, "streams_ok": <成功流数>, "streams_total": <并发流总数>, "samples": [<逐流 MB/s 或 null>]}, …}`——`tls_ms` 与各 target 平级置于顶层（最先测得）。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。
+### quality JSON 消费防御约定
+
+所有 quality 链 JSON 一律经 `common.read_json` 读取（解析失败或缺文件返回 `{}`；**合法非对象顶层**（数组/字符串/数字/布尔/null）也被规范化为 `{}`——一处防御覆盖全部 `.get("proxies", {}).items()` 消费点，避免 `None.get`/`str.get` 崩溃）。消费侧另加 entry 级 `isinstance(entry, dict)` 守卫（如 `annotate_classify` 的 `_build_china_sets`/`_build_family_map`/`_build_rep_map`/`_build_ip_type_map`、`uptime_map` 的 `isinstance(v, dict) and v.get("pct7") is not None` 过滤），形成顶层+条目双层防御。生产路径无消费真值依赖 list/str 顶层返回（下载链 `load_speed_keys` 局部 guard 保留为残余防御）。
