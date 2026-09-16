@@ -124,6 +124,43 @@ def check_stale(history: list[dict], hours: float = STALE_HOURS) -> str | None:
     return None
 
 
+def cn_carrier_stats(proxies: dict) -> dict:
+    """分运营商（移动/电信/联通）可达数与延迟统计。
+
+    仅在 per-key ``isp_ms`` 存在时产出（它它自 itdog 等 per-ISP 源）：
+    某运营商覆盖键=本轮有 ``isp_ms[isp]`` 读数的键；其中 ``verdict ==
+    "reachable"`` 计入可达；``min_ms``/``median_ms`` 取覆盖键读数。
+    全池无 isp_ms（itdog 被风控/未启用）时返回 ``{}``——调用方回退整体
+    聚合口径，绝不以其为据误报。
+    """
+    per: dict[str, dict] = {}
+    for v in proxies.values():
+        if not isinstance(v, dict):
+            continue
+        im = v.get("isp_ms")
+        if not isinstance(im, dict):
+            continue
+        reachable = v.get("verdict") == "reachable"
+        for isp, ms in im.items():
+            if not isinstance(ms, (int, float)) or ms <= 0:
+                continue
+            st = per.setdefault(isp, {"sampled": 0, "reachable": 0, "ms": []})
+            st["sampled"] += 1
+            st["ms"].append(float(ms))
+            if reachable:
+                st["reachable"] += 1
+    out: dict[str, dict] = {}
+    for isp, st in per.items():
+        lat = sorted(st["ms"])
+        out[isp] = {
+            "sampled": st["sampled"],
+            "reachable": st["reachable"],
+            "min_ms": round(lat[0], 1),
+            "median_ms": round(statistics.median(lat), 1),
+        }
+    return out
+
+
 def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple[str | None, dict]:
     """Reachable-count collapse vs persisted previous-round snapshot.
 
@@ -143,12 +180,76 @@ def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple
     new_state = dict(state or {})
     new_state["cn_reachable"] = cur
     new_state["cn_ts"] = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    by_isp = cn_carrier_stats(proxies)
+    new_state["cn_by_isp"] = by_isp
     prev = (state or {}).get("cn_reachable")
+    msgs: list[str] = []
     if isinstance(prev, int) and prev >= CN_MIN_BASELINE:
         drop = (prev - cur) / prev * 100
         if drop >= drop_pct:
-            return f"CN collapse: reachable {cur} vs {prev} (-{drop:.0f}%)", new_state
+            msgs.append(f"CN collapse: reachable {cur} vs {prev} (-{drop:.0f}%)")
+    prev_isp = (state or {}).get("cn_by_isp") or {}
+    for isp, st in by_isp.items():
+        pst = prev_isp.get(isp)
+        if not isinstance(pst, dict) or not isinstance(pst.get("reachable"), int):
+            continue
+        if pst["reachable"] < CN_MIN_BASELINE:
+            continue
+        drop = (pst["reachable"] - st["reachable"]) / pst["reachable"] * 100
+        if drop >= drop_pct:
+            msgs.append(
+                f"CN collapse ({isp}): reachable {st['reachable']} vs "
+                f"{pst['reachable']} (-{drop:.0f}%)"
+            )
+    if msgs:
+        return "\n".join(msgs), new_state
     return None, new_state
+
+
+CN_HISTORY_DAYS = 8     # cn_history.jsonl 保留天数（近 7 天趋势 + 冗余量）
+CN_HISTORY_FILE = "cn_history.jsonl"
+
+
+def record_cn_history(path: Path, state: dict) -> None:
+    """把本轮 CN 分运营商快照追加进趋势历史（每 2h stats 心跳 + 每轮链触发）。
+
+    ``state`` 为 ``check_cn`` 产物（含 ``cn_ts``/``cn_reachable``/``cn_by_isp``）。
+    保留最近 ``CN_HISTORY_DAYS`` 天；文件缺失/畸形时静默重建。写入不影响门控。
+    """
+    ts = (state or {}).get("cn_ts")
+    if not ts:
+        return
+    rec = {
+        "ts": ts,
+        "cn_reachable": state.get("cn_reachable", 0),
+        "cn_by_isp": state.get("cn_by_isp", {}),
+    }
+    try:
+        lines: list[str] = []
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").splitlines()
+        lines.append(json.dumps(rec, ensure_ascii=False))
+        cutoff = time.time() - CN_HISTORY_DAYS * 86400
+        kept: list[str] = []
+        for ln in lines[-2000:]:
+            try:
+                r = json.loads(ln)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            e = r.get("ts")
+            if e:
+                try:
+                    t = datetime.fromisoformat(
+                        e.replace("Z", "+00:00")
+                    ).timestamp()
+                except ValueError:
+                    continue
+                if t < cutoff:
+                    continue
+            kept.append(ln)
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except OSError:
+        logging.exception("record_cn_history")
 
 
 def check_cn_stale(
@@ -384,6 +485,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     if a:
         alerts.append(a)
+    if "cn_ts" in new_state:
+        record_cn_history(
+            root / "data" / "quality" / CN_HISTORY_FILE, new_state
+        )
     a, new_state = check_countries(
         new_state, root / "data" / "valid" / "meta.json"
     )

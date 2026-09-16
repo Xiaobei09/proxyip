@@ -71,7 +71,8 @@
 | `chart_churn.svg` | 每次更新 added / removed 分组条形图（近 7 天窗口） |
 | `chart_latency_speed.svg` | 延迟与速度分桶双面板条形图 |
 | `chart_sets.svg` | 各命名集合存活代理条形图 |
-| `chart_cn.svg` | 大陆连通性 verdict 分布条形图 |
+| `chart_cn.svg` | 大陆连通性分运营商状态（可达/覆盖 + min/中位延迟 ms；无 itdog 运营商数据时回退 verdict 分布） |
+| `chart_cn_7d.svg` | 分运营商可达数折线趋势（近 7 天窗口，数据源 `cn_history.jsonl`） |
 | `chart_family.svg` | 实际出口 IP 家族分布条形图 |
 | `chart_source_avail.svg` | IP 来源覆盖率 + 每代理源数量分布 |
 | `chart_source_stats.svg` | 每下载来源 IP 数量与重叠分布 |
@@ -453,7 +454,7 @@ python3 scripts/analyze_sources.py --data-dir /path/to/data
 
 ### `scripts/health_alert.py`
 
-池健康看门狗：读取仓库内的数据快照，检查多项异常条件，有告警时发往 `ALERT_WEBHOOK_URL`（未配置时仅打印并正常退出）。每一项都带各自的最小样本/阈值门槛，避免小样本抖动误报；诊断状态持久化于 `data/quality/alert_state.json`（上次 CN 可达数、各国家池快照）；相同告警组合在 6 小时冷却窗口内不重复投递（`last_alert_at` / `last_alert_hash`），防止持续故障期间刷屏 webhook。有告警时还会改写 `data/output/badge.json` 将 README 状态徽章标红为对应告警名（在 stats 同 job 内 render 之后顺序执行，无竞态）；无告警不改动徽章。投递硬约束：`ALERT_WEBHOOK_URL` 仅接受 `https://`（`http://` 明文会泄露 webhook token 与告警内容，一律拒绝并仅在 stderr 提示后跳过投递）；未配置或拒绝时不退出，仅打印。
+池健康看门狗：读取仓库内的数据快照，检查多项异常条件，有告警时发往 `ALERT_WEBHOOK_URL`（未配置时仅打印并正常退出）。每一项都带各自的最小样本/阈值门槛，避免小样本抖动误报；诊断状态持久化于 `data/quality/alert_state.json`（上次 CN 可达数、分运营商可达数 `cn_by_isp`、各国家池快照）；相同告警组合在 6 小时冷却窗口内不重复投递（`last_alert_at` / `last_alert_hash`），防止持续故障期间刷屏 webhook。CN 塌方检测除整体可达数骤降外，移动/电信/联通三运营商分别独立判定（`cn_by_isp` 上一轮基准回落 ≥50% → `CN collapse (<运营商>)`；仅当 per-key `isp_ms` 存在运营商维度读数时生效，无读数自动回退整体口径）。有告警时还会改写 `data/output/badge.json` 将 README 状态徽章标红为对应告警名（在 stats 同 job 内 render 之后顺序执行，无竞态）；无告警不改动徽章。投递硬约束：`ALERT_WEBHOOK_URL` 仅接受 `https://`（`http://` 明文会泄露 webhook token 与告警内容，一律拒绝并仅在 stderr 提示后跳过投递）；未配置或拒绝时不退出，仅打印。
 
 | 检查 | 触发条件 |
 |---|---|

@@ -227,6 +227,46 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("可达", svg)
         self.assertIn("uncertain", svg)
 
+    def test_cn_chart_carrier_view(self):
+        data = {
+            "proxies": {
+                "a:443#US": {"verdict": "reachable",
+                             "isp_ms": {"中国移动": 44.0, "中国电信": 88.0}},
+                "b:443#JP": {"verdict": "reachable",
+                             "isp_ms": {"中国移动": 60.0, "中国联通": 100.0}},
+                "c:443#DE": {"verdict": "blocked",
+                             "isp_ms": {"中国移动": 200.0}},
+            }
+        }
+        svg = gs.build_cn(data)
+        svg_ok(svg)
+        # 可达/覆盖 + min/med 均入标签
+        self.assertIn("中国移动  2/3", svg)
+        self.assertIn("44", svg)
+        self.assertIn("中国电信  1/1", svg)
+
+    def test_cn_7d_window_and_series(self):
+        hist = [
+            {"ts": _ago(10), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 90}}},
+            {"ts": _ago(8), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 91}}},
+            {"ts": _ago(1), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 95}}},
+            {"ts": _ago(0.1), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 96}}},
+        ]
+        svg = gs.build_cn_7d(hist)
+        svg_ok(svg)
+        self.assertIn("近 7 天", svg)
+        # 10 天与 8 天前的记录被窗口裁掉，趋势只含最近两天
+        self.assertIn("中国移动", svg)
+
+    def test_cn_7d_empty(self):
+        svg = gs.build_cn_7d([])
+        svg_ok(svg)
+        self.assertIn("暂无 7 天", svg)
+
     def test_collect_cn_summary_rules(self):
         data = {
             "ts": "2026-08-29T00:00:00Z",

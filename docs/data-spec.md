@@ -157,6 +157,10 @@ python3 scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 | `history_records` / `alive_history_records` | 历史记录条数 |
 | `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable`=china.json 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served`=实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（china_check 空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts`=china.json 生成时间 |
 
+### `data/quality/cn_history.jsonl`
+
+**CN 分运营商趋势**（health_alert 每心跳追加，generate_stats 渲染近 7 天）：每行一快照 `{ts, cn_reachable, cn_by_isp}`；`cn_by_isp` 为 `{运营商: {sampled, reachable, min_ms, median_ms}}`（仅当 china.json per-key `isp_ms` 有读数时出现，全无则为 `{}`）。保留最近 `CN_HISTORY_DAYS`（8）天，`chart_cn_7d.svg` 用 `_windowed(…, 7)` 取其近 7 天窗口。
+
 ### `data/output/badge.json`
 
 Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与外部 `![](…badge.json)` 消费），字段：

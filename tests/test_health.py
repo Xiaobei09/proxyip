@@ -28,6 +28,7 @@ from health_alert import (  # noqa: E402
     check_pool,
     check_sources,
     check_stale,
+    cn_carrier_stats,
     load_history,
 )
 
@@ -141,6 +142,75 @@ class TestCheckCn(unittest.TestCase):
             )
             self.assertIsNone(alert)
             self.assertNotIn("cn_ts", state)
+
+
+class TestCnCarrierStats(unittest.TestCase):
+    def test_per_carrier_split(self):
+        # 覆盖键=有 isp_ms 读数的键；可达键以 verdict==reachable 计入
+        proxies = {
+            "a:443#US": {"verdict": "reachable",
+                         "isp_ms": {"中国移动": 50.5, "中国联通": 60.0}},
+            "b:443#JP": {"verdict": "reachable",
+                         "isp_ms": {"中国电信": 90.1, "中国移动": 55.2}},
+            "c:443#US": {"verdict": "blocked",
+                         "isp_ms": {"中国移动": 100.0}},
+            "d:443#US": {"verdict": "uncertain"},  # 无 isp_ms → 不计任何运营商
+        }
+        stats = cn_carrier_stats(proxies)
+        self.assertEqual(stats["中国移动"]["sampled"], 3)
+        self.assertEqual(stats["中国移动"]["reachable"], 2)
+        self.assertEqual(stats["中国移动"]["min_ms"], 50.5)
+        self.assertEqual(stats["中国电信"]["reachable"], 1)
+        self.assertEqual(stats["中国联通"]["median_ms"], 60.0)
+        self.assertNotIn("no_carrier", stats)
+
+    def test_no_isp_ms_returns_empty(self):
+        proxies = {"a:443#US": {"verdict": "reachable"}}
+        self.assertEqual(cn_carrier_stats(proxies), {})
+
+    def test_invalid_ms_ignored(self):
+        proxies = {
+            "a:443#US": {"verdict": "reachable",
+                         "isp_ms": {"中国移动": 0, "中国电信": "x",
+                                    "中国联通": -3}},
+        }
+        self.assertEqual(cn_carrier_stats(proxies), {})
+
+
+class TestCheckCnByIspAlert(unittest.TestCase):
+    def test_carrier_collapse_alert(self):
+        def state(isp_prev):
+            return {"cn_reachable": 100, "cn_by_isp": isp_prev}
+
+        prev = state({"中国移动": {"reachable": 80, "sampled": 100},
+                      "中国电信": {"reachable": 60, "sampled": 80}})
+        proxies = {
+            f"{i}:443#US": {"verdict": "reachable",
+                            "isp_ms": {"中国移动": 50.0}}
+            for i in range(20)
+        }
+        for i in range(20, 60):
+            proxies[f"{i}:443#JP"] = {
+                "verdict": "reachable", "isp_ms": {"中国电信": 60.0}
+            }
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "china.json"
+            p.write_text(json.dumps({"proxies": proxies}))
+            alert, out = check_cn(prev, p)
+        self.assertIsNotNone(alert)
+        self.assertIn("CN collapse (中国移动)", alert)  # 80→20 = -75%
+        self.assertIn("中国电信", out["cn_by_isp"])
+        # 中国电信 60→40 = -33% < 50% 不报
+        self.assertNotIn("CN collapse (中国电信)", alert)
+
+    def test_no_carrier_collapse_without_prior(self):
+        proxies = {"a:443#US": {"verdict": "reachable",
+                                "isp_ms": {"中国移动": 40.0}}}
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "china.json"
+            p.write_text(json.dumps({"proxies": proxies}))
+            alert, _ = check_cn({}, p)
+        self.assertIsNone(alert)
 
 
 class TestCheckCnStale(unittest.TestCase):

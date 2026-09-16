@@ -838,17 +838,81 @@ VERDICT_ZH = {
 
 
 def build_cn(china_data: dict) -> str:
-    items = _count_by(china_data, "verdict")
+    """分运营商可达性状态：覆盖数 / 可达数 / 延迟（可从 china.json isp_ms 出）。
+
+    无 isp_ms 数据（itdog 未启用/被风控）时回退聚合 verdict 分布条形图，
+    不画空面板。延迟以最快运营商视角的 min/median 呈现（大陆体验上界）。
+    """
+    proxies = china_data.get("proxies", {}) or {}
+    per: dict[str, dict] = {}
+    for v in proxies.values():
+        if not isinstance(v, dict):
+            continue
+        im = v.get("isp_ms")
+        if not isinstance(im, dict):
+            continue
+        reachable = v.get("verdict") == "reachable"
+        for isp, ms in im.items():
+            if not isinstance(ms, (int, float)) or ms <= 0:
+                continue
+            st = per.setdefault(isp, {"sampled": 0, "reachable": 0, "ms": []})
+            st["sampled"] += 1
+            st["ms"].append(float(ms))
+            if reachable:
+                st["reachable"] += 1
+    if not per:
+        items = _count_by(china_data, "verdict")
+        if not items:
+            return empty_svg(text="暂无大陆可达性数据")
+        labels = [
+            (f"{VERDICT_ZH.get(cc, cc)} ({cc})", n) if cc in VERDICT_ZH
+            else (cc, n)
+            for cc, n in items
+        ]
+        return plot_hbars(
+            labels, color=COLOR_SPEED, title="中国大陆可达性判定"
+        )
+    items = []
+    for isp in ("中国电信", "中国联通", "中国移动"):
+        st = per.get(isp)
+        if not st:
+            continue
+        lat = sorted(st["ms"])
+        med = lat[len(lat) // 2]
+        label = f"{isp}  {st['reachable']}/{st['sampled']}  min{lat[0]:.0f}/med{med:.0f}ms"
+        items.append((label, st["reachable"]))
     if not items:
-        return empty_svg(text="暂无大陆可达性数据")
-    labels = [
-        (f"{VERDICT_ZH.get(cc, cc)} ({cc})", n) if cc in VERDICT_ZH
-        else (cc, n)
-        for cc, n in items
-    ]
+        return empty_svg(text="暂无分运营商可达性数据")
     return plot_hbars(
-        labels, color=COLOR_SPEED, title="中国大陆可达性判定"
+        items, color=COLOR_ALIVE,
+        title="大陆可达性（分运营商：可达/覆盖，min/中位延迟 ms）",
     )
+
+
+def build_cn_7d(cn_history: list[dict]) -> str:
+    """近 7 天分运营商可达数趋势（数据源 cn_history.jsonl）。
+
+    继承 COMBO_WINDOW_DAYS 窗口语义：_windowed 按 ts 只保留最近 7 天，
+    与 combo/churn 同源同窗口，避免"图表里 7 天没正确运用"的歧义。
+    """
+    history = _windowed(cn_history, COMBO_WINDOW_DAYS)
+    if not history:
+        return empty_svg(text="暂无 7 天大陆可达性历史（cn_history.jsonl）")
+    ts = [r.get("ts", "") for r in history]
+    series = []
+    for isp, color in (
+        ("中国电信", "#4c78a8"),
+        ("中国联通", "#54a24b"),
+        ("中国移动", "#f58518"),
+    ):
+        values = []
+        for r in history:
+            st = (r.get("cn_by_isp") or {}).get(isp) or {}
+            n = st.get("reachable")
+            values.append(float(n) if isinstance(n, (int, float)) else 0.0)
+        series.append(Series(isp, color, ts, values))
+    title = f"分运营商可达数（近 {COMBO_WINDOW_DAYS} 天）"
+    return plot_lines(series, title=title)
 
 
 def build_family(family_data: dict) -> str:
@@ -1233,6 +1297,7 @@ def main(argv: list[str] | None = None) -> int:
     meta = read_json(data_dir / "valid" / "meta.json")
     quality_meta = read_json(data_dir / "quality" / "quality_meta.json")
     china_data = read_json(data_dir / "quality" / "china.json")
+    cn_history = load_history(data_dir / "quality" / "cn_history.jsonl")
     family_data = read_json(data_dir / "quality" / "exit_family.json")
     family_counts = dict(_count_by(family_data, "family"))
     entry_audit = read_json(data_dir / "quality" / "entry_audit.json")
@@ -1313,6 +1378,7 @@ def main(argv: list[str] | None = None) -> int:
         "chart_latency_speed.svg": build_latency_speed(meta),
         "chart_sets.svg": build_sets(meta),
         "chart_cn.svg": build_cn(china_data),
+        "chart_cn_7d.svg": build_cn_7d(cn_history),
         "chart_family.svg": build_family(family_data),
         "chart_exit.svg": build_exit_cc(data_dir / "quality"),
         "chart_entry_audit.svg": build_entry_audit(entry_audit),
