@@ -38,6 +38,15 @@ class TestLineToObj(unittest.TestCase):
     def test_invalid_line(self):
         self.assertIsNone(line_to_obj("garbage"))
 
+    def test_estimated_speed_not_fabricated(self):
+        """CN 视图 ≈ 估算 token 不得被解析为实测速度（R50 同款防护）。"""
+        o = line_to_obj(
+            "1.2.3.4:443#🇺🇸US→US-35ms-≈2.5MB/s-CN"
+        )
+        self.assertIsNone(o["speed_mbps"])
+        self.assertEqual(o["latency_ms"], 35)
+        self.assertTrue(o["cn"])
+
 
 class TestDiverse(unittest.TestCase):
     POOL = (
