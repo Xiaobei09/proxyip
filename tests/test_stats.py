@@ -136,6 +136,24 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("暂无信誉分数据", gs.build_rep({}))
         self.assertIn("暂无信誉源数据", gs.build_source_avail({}))
         self.assertIn("暂无信誉源统计", gs.build_source_stats({}))
+        self.assertIn("暂无入口标签审计数据", gs.build_entry_audit({}))
+
+    def test_entry_audit_stale_marker(self):
+        """entry_audit 停摆（R58 前连冻 8 天型）在图表标题显式标注数据日期。"""
+        fresh = gs.build_entry_audit({
+            "generated_at": _ago(0.5),
+            "total": 1803, "summary": {"tag_match": 1500, "tag_mismatch": 303},
+        })
+        self.assertNotIn("停摆", fresh)
+        self.assertIn("303/1803", fresh)
+        legacy = gs.build_entry_audit({
+            "generated_at": "2026-09-08T04:41:33+00:00",
+            "total": 1803, "summary": {"tag_mismatch": 303},
+        }, stale_hours=1)
+        self.assertIn("停摆", legacy)
+        self.assertIn("2026-09-08", legacy)
+        self.assertIn("303/1803", legacy)
+        svg_ok(legacy)
 
     def test_build_port_skips_non_numeric_keys(self):
         svg = gs.build_port({"per_port": {"443": 120, "abc": 5, "": 3}})

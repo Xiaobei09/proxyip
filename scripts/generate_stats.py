@@ -68,6 +68,9 @@ COLOR_ERROR = "#9c9c9c"
 
 MAX_HOVER_POINTS = 600
 STALE_AFTER_S = 3 * 3600
+# 入口审计产物（audit_entry_cc.py）停摆误判阈值：与 badge fresh/stale 同判据
+# （R58 前曾 8 天未刷新且无人察觉——图表层须有显式停摆标注）。
+ENTRY_AUDIT_STALE_HOURS = STALE_AFTER_S / 3600
 COMBO_WINDOW_DAYS = 30  # chart_combo 只渲染最近这段时间，避免远古历史压缩近期走势
 
 
@@ -871,17 +874,28 @@ def build_exit_cc(quality_dir: Path) -> str:
     )
 
 
-def build_entry_audit(audit_data: dict) -> str:
-    """入口国家标签审计 verdict 分布（audit_entry_cc.py 产出）。"""
+def build_entry_audit(audit_data: dict, stale_hours: float = ENTRY_AUDIT_STALE_HOURS) -> str:
+    """入口国家标签审计 verdict 分布（audit_entry_cc.py 产出）。
+
+    ``generated_at`` 过旧（R58 前曾连冻 8 天无人察觉）时在标题标注数据
+    日期，让"审计产物停摆"在图表可视化层可察觉，而非烂图照绘。
+    """
     summary = audit_data.get("summary", {})
     total = audit_data.get("total", 0)
     items = sorted(summary.items(), key=lambda kv: kv[1], reverse=True)
     if not items:
         return empty_svg(text="暂无入口标签审计数据")
     mism = summary.get("tag_mismatch", 0)
+    stale = ""
+    ts = audit_data.get("generated_at")
+    if ts:
+        stamp = to_epoch(ts)
+        if stamp is not None and \
+                (time.time() - stamp) / 3600 > stale_hours:
+            stale = f"【数据停摆 {fmt_ts(ts)}】"
     return plot_hbars(
         items, color=COLOR_LATENCY,
-        title=f"入口国家标签审计（不匹配 {mism}/{total} "
+        title=f"{stale}入口国家标签审计（不匹配 {mism}/{total} "
               f"= {mism / max(total, 1) * 100:.1f}%）",
     )
 
