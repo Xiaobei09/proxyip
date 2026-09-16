@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import socket
 import sys
 import tempfile
 import unittest
@@ -1041,6 +1042,41 @@ class TestItdogCollect(unittest.TestCase):
     def test_timeout_returns_partial(self):
         out = self._collect([("rec", {"task_num": 1})], expected=5, timeout=0.05)
         self.assertEqual(len(out), 1)
+
+
+class TestWsReadContract(unittest.TestCase):
+    """真实 _WebSocket.read 契约：socket.timeout/连接错必须转译为
+    ("timeout"/"err")，否则 collect 的墙钟 deadline 会被阻塞 read 架空。"""
+
+    class _FakeSock:
+        def __init__(self, exc):
+            self._exc = exc
+
+        def recv(self, n):
+            raise self._exc
+
+        def settimeout(self, t):
+            pass
+
+    def _read(self, exc):
+        ws = ci._WebSocket.__new__(ci._WebSocket)
+        ws.sock = self._FakeSock(exc)
+        ws.buf = b""
+        return ws.read()
+
+    def test_socket_timeout_becomes_timeout(self):
+        self.assertEqual(self._read(socket.timeout()), ("timeout", None))
+
+    def test_connection_error_becomes_err(self):
+        kind, msg = self._read(ConnectionError("boom"))
+        self.assertEqual(kind, "err")
+        self.assertEqual(msg["error"], "ConnectionError")
+        self.assertNotIn("boom", msg["error"])
+
+    def test_socket_timeout_not_swallowed_as_oserror(self):
+        """socket.timeout 是 OSError 子类：须先被显式分支捕获为 timeout，
+        不得并入 err（否则上游静止时 collect 当作 err 提前放弃收尾）。"""
+        self.assertEqual(self._read(socket.timeout()), ("timeout", None))
 
 
 class TestItdogRecOk(unittest.TestCase):
