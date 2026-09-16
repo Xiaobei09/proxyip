@@ -93,7 +93,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 ### 输出
 
 - `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
-- `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按国家/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）、`good.txt`（综合最优，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
+- `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按**出口国**（详见 reorg_country，三源汇聚的 `→<出口>`；行内 `#<入口>` 不参与目录归属）/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）、`good.txt`（综合最优，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
  - 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
    - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
    - `cn.txt` — 大陆可达（行内 `-CN` 或 `china.json` `verdict==reachable`，含 fallback 兜底）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
