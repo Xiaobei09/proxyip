@@ -290,7 +290,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 ### `scripts/exit_family.py`
 
-由 `exit-family.yml` 在 **Quality check 完成时触发**（`workflow_run` type `completed`），并发组 `exit-family`（`cancel-in-progress: false`——不抢占在跑的家族轮，排队串行）。**触发者失败也照常运行**：与 `annotate-classify` 同策略——它 checkout 仓库自洽快照（上次成功轮），上游单次失败不应冻结家族判定（`-V4`/`-V6`/`-DS` token 与 `exit_family.json` 是后续分组/清单的权威来源）。
+由 `exit-family.yml` 在 **Quality check 完成时触发**（`workflow_run` type `completed`），并发组 `exit-family`（`cancel-in-progress: false`——不抢占在跑的家族轮，排队串行）。因此 `exit_family.json` 对齐的是**上一轮已完成**的 Quality 批次而非当前 in-progress 轮（批次错位属预期时序，对账时应取同一批快照）。**触发者失败也照常运行**：与 `annotate-classify` 同策略——它 checkout 仓库自洽快照（上次成功轮），上游单次失败不应冻结家族判定（`-V4`/`-V6`/`-DS` token 与 `exit_family.json` 是后续分组/清单的权威来源）。
 
 实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
 
