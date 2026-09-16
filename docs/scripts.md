@@ -285,6 +285,8 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict；itdog 源另含每运营商最小 RTT `isp_ms`）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，仅含本轮判定 reachable 的行，历史累积 `-CN` 不再自动纳入；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等，当前不可达者撤销失效 `-CN`）。
 
+**稳定子集准入**（`*_stable.txt` 系清单）：`china.json` 连续可达轮数 `streak` ≥ 2 **且** 历史翻转计数 `flip` ≤ `STABLE_MAX_FLIP`（1，排除可达↔不可达慢性振荡源）；`streak` 跨轮累计，间隔 ≤ 6h 容差（`STREAK_GAP_TOLERANCE_S=6×3600`）内延续计数，超容差重新从 1 起算。
+
 ### `scripts/exit_family.py`
 
 实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
