@@ -545,7 +545,13 @@ async def run(args: argparse.Namespace) -> int:
     )
 
     # 探测相位让出 POST_RESERVE_S 给后处理（geo/信誉/滥用），使预算内
-    # 仍能产出信誉数据；后处理仍受全局 deadline 硬门控，不会撞超时。
+    # 优先保住探针全检；后处理相位受全局 deadline _within_budget 门控
+    # （超时则跳过 geo/reputation/abuse 相位并计入 skipped 告警），本地
+    # 写盘照常短时完成，不会撞 CI 超时。
+    # 降级语义：budget 耗尽导致 reputation 相位被 skip 时，risk_data={}
+    # → rep_map 为空 → reputation.json 本轮不写（旧文件滞留不清理），
+    # quality_meta/ipinfo/abuse 仍照常产出。R18 后 probe 止损先行为主，
+    # 该降级仅在超载时触发。
     probe_args = argparse.Namespace(**vars(args))
     if budget:
         probe_args.time_budget = max(1, budget - POST_RESERVE_S)
