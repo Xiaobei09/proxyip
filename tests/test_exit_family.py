@@ -325,6 +325,15 @@ class TestNotes(unittest.TestCase):
         self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms", "unknown"),
                          "1.2.3.4:80#US-1ms")
 
+    def test_annotate_family_authoritative_replaces(self):
+        """权威探测结果直接替换旧家族 token（互斥桶，绝不双标）。"""
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-V4", "ipv6"),
+                         "1.2.3.4:80#US-1ms-V6")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-DS", "ipv4"),
+                         "1.2.3.4:80#US-1ms-V4")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-V6-CN-88", "dual"),
+                         "1.2.3.4:80#US-1ms-DS-CN-88")
+
 
 class TestSplit(unittest.TestCase):
     def setUp(self):
