@@ -304,6 +304,30 @@ class TestMain(unittest.TestCase):
             rc = gs.main(["--data-dir", td, "--out", td])
             self.assertEqual(rc, 0)
 
+    def _badge_with_history_ts(self, hours: float) -> dict:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            data_dir = base / "data"
+            (data_dir / "quality").mkdir(parents=True)
+            (data_dir / "valid").mkdir(parents=True)
+            (data_dir / "quality" / "history.jsonl").write_text(
+                json.dumps({"ts": _ago(hours), "unique": 10, "total": 20,
+                            "sets": {}}) + "\n"
+            )
+            out = base / "out"
+            gs.main(["--data-dir", str(data_dir), "--out", str(out)])
+            return json.loads((out / "badge.json").read_text())
+
+    def test_badge_stale_when_old_history(self):
+        badge = self._badge_with_history_ts(4.0)   # > STALE_AFTER_S (3h)
+        self.assertEqual(badge["message"], "stale")
+        self.assertEqual(badge["color"], "red")
+
+    def test_badge_fresh_when_recent_history(self):
+        badge = self._badge_with_history_ts(0.2)
+        self.assertEqual(badge["message"], "fresh")
+        self.assertEqual(badge["color"], "brightgreen")
+
 
 if __name__ == "__main__":
     unittest.main()
