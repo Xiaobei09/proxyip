@@ -317,6 +317,10 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | dual | v4 + v6 均成功 |
 | unknown | 全部失败 |
 
+`unknown` 的行内 `-V4`/`-V6`/`-DS` 旧 token 会被清桶（R165：宁可未知不冒称）；
+无权威记录的行保留既有 token（数据集缺失≠该行未知），下游分组对
+`unknown` 不做 v4/v6/46 分支（不回落行内 token，R166）。
+
 ### 6.3 交叉验证
 
 对照 `data/quality/upstream_meta.json` 的真实出口 `clientIp`，在 `exit_family.json` 中补充 `upstream_match` 字段。

@@ -50,7 +50,7 @@
 | `--ext-timeout` | 外部 API 单源超时（秒） | 10 |
 | `--ext-workers` | 外部 API 并发上限 | 10 |
 
-除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（缺失时回退行内 `-V4`/`-V6`/`-DS`），大陆可达取自行内 `-CN` 或 `china.json` `verdict==reachable`（含 fallback 兜底）；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
+除 `all.txt`/`ltd.txt` 外，每个国家/集合目录还会按 **出口家族 × 大陆可达** 生成分组文件 `v4.txt`/`v6.txt`/`46.txt`/`cn.txt`/`cn4.txt`/`cn6.txt`/`cn46.txt`（含对应 `*_ltd.txt`），根级另生成 `all_46.txt`/`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt`（含 `*_ltd.txt`）。家族优先取自 `exit_family.json`（无记录时回退行内 `-V4`/`-V6`/`-DS`；记录为 `unknown` 时判定无家族、不回落行内旧 token），大陆可达取自行内 `-CN` 或 `china.json` `verdict==reachable`（含 fallback 兜底）；空组不落盘并清理残留。详见 `docs/data-spec.md`「分组文件」。
 
 每个清单（含根级 `all*.txt` 与全部分组）同步派生两个可靠性维度：`*_verified.txt`（本轮测速成功 = TLS + HTTP 2xx + 真实下载全链路通过，过滤半死代理）与 `*_stable.txt`（上一轮 `index.json` 与本轮存活的交集，抗 churn；首轮无上一轮数据时不生成）。可与任意分组叠加，如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`；`ltd` 家族同样派生（`ltd_verified.txt`、根级 `all_ltd_stable.txt`）。空清单不落盘并清理残留，数量计入 `meta.json` 的 `sets.all_verified` / `sets.all_stable`。
 
@@ -425,7 +425,7 @@ python3 scripts/build_good.py --data-dir /path/to/data
 |---|---|---|
 | `--data-dir` | 数据根目录（含 `valid/` 与 `quality/`） | `data` |
 
-输出文件：`data/valid/all_premium.txt`、`data/valid/countries/<CC>/premium.txt`、`data/valid/sets/<name>/premium.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）、`*_stable.txt`（china.json streak≥2 跨轮稳定）与 `*_uptime.txt`（uptime.json 滚动可用率）可靠性变体，以及 `_<tier>.txt` 速度档变体。另按输出家族派生 **v4/v6/46 分支**：`*_v4.txt`、`*_v6.txt`、`*_46.txt`（含各自的派生变体），家族判定优先 `exit_family.json`，缺失时按行内 `-V4`/`-V6`/`-DS` 兜底（与 `v4`/`v6`/`46` 组文件同规则），无对应家族时分支空则不留盘并清理残留。另写 `data/quality/premium_meta.json` 汇总（`ts`/`file_count`/`proxy_count`，见 data-spec.md）。
+输出文件：`data/valid/all_premium.txt`、`data/valid/countries/<CC>/premium.txt`、`data/valid/sets/<name>/premium.txt`。每份同步派生 `*_verified.txt`（speed.json 全链路验证）、`*_stable.txt`（china.json streak≥2 跨轮稳定）与 `*_uptime.txt`（uptime.json 滚动可用率）可靠性变体，以及 `_<tier>.txt` 速度档变体。另按输出家族派生 **v4/v6/46 分支**：`*_v4.txt`、`*_v6.txt`、`*_46.txt`（含各自的派生变体），家族判定优先 `exit_family.json`（无记录时按行内 `-V4`/`-V6`/`-DS` 兜底、记录 `unknown` 不回落；与 `v4`/`v6`/`46` 组文件同规则），无对应家族时分支空则不留盘并清理残留。另写 `data/quality/premium_meta.json` 汇总（`ts`/`file_count`/`proxy_count`，见 data-spec.md）。
 
 每一份 `premium` 清单都只含大陆可达行（仅 CN 列表），因此全部输出统一渲染 **CN 视图**：行内延迟改写为大陆实测 `china.json` 读数、速度令牌改写为 `≈XMB/s` 大陆估算值（语义与 `all_cn.txt` 一致）；无 `cn_ms` 数据时行保持原样。CI 在 `build-good.yml` 专职工作流中与 `build_good.py` 同 job 运行。
 

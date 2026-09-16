@@ -97,7 +97,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
  - 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
    - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
    - `cn.txt` — 大陆可达（行内 `-CN` 或 `china.json` `verdict==reachable`，含 fallback 兜底）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
-   - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），缺失时回退行内 `-V4`/`-V6`/`-DS` 备注；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
+   - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），无记录时回退行内 `-V4`/`-V6`/`-DS` 备注；记录为 `unknown` 时判定无家族（不回落行内旧 token，R165/R166）；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
    - 根级另有 `all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`（及 `*_ltd.txt`）；v4/v6 复用既有 `all_ipv4.txt`/`all_ipv6.txt`，不重复生成
    - **可靠性变体**：家族×大陆分组清单（`v4`/`v6`/`46`/`cn`/`cn4`/`cn6`/`cn46`，含每目录分组与根级 `all_46`/`all_cn4`/`all_cn6`/`all_cn46`）同步派生 `*_verified.txt` 与 `*_stable.txt` 两个维度（如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`）；其余根级清单（`all_cn`、`all_ipv4`/`all_ipv6`）无此直接变体（`all_cn` 不经家族分支，自行产出 http/stable 子集）：
      - `*_verified` — **全链路验证**子集：本轮测速成功 = TLS 握手 + HTTP 2xx 响应 + 真实下载全部通过，过滤"能握手但不吐数据"的半死代理
@@ -340,7 +340,7 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/valid/all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`
 
-**根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。**CN 系分组（`cn*`/`all_cn*`）行内 ms 为大陆实测 RTT、速度为 `≈XMB/s` 大陆估算**（`common.cn_fastest_ms` 最快运营商视角优先，同 all_cn.txt 口径）。
+**根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，无记录回退行内 `-V4`/`-V6`/`-DS`，记录 `unknown` 不回落）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。**CN 系分组（`cn*`/`all_cn*`）行内 ms 为大陆实测 RTT、速度为 `≈XMB/s` 大陆估算**（`common.cn_fastest_ms` 最快运营商视角优先，同 all_cn.txt 口径）。
 
 ### `data/quality/history.jsonl`（每行一条）
 
