@@ -43,9 +43,16 @@ FAMILY_TOKENS = frozenset({"V4", "V6", "DS"})
 
 
 def speed_tier(note: str) -> str:
-    """Parse speed from note, return ``fast``/``mid``/``slow``/``unknown``."""
+    """Parse speed from note, return ``fast``/``mid``/``slow``/``unknown``.
+
+    ``≈XMB/s``（大陆估算 token，CN 视图）不算实测速度——拒绝给出档位，
+    否则估算会被当成实测档位消费（与 R50/R65/R67 的 ≈ 拒绝防护同族；
+    当前生产输入为 all.txt（无 ≈），此处系防御性收紧共享 SPEED_RE）。
+    """
     m = SPEED_RE.search(note)
     if not m:
+        return "unknown"
+    if m.start() > 0 and note[m.start() - 1] == "≈":
         return "unknown"
     mbps = float(m.group(1))
     if mbps >= 5:

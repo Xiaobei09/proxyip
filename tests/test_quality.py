@@ -1976,6 +1976,9 @@ class TestAnnotateClassify(unittest.TestCase):
         self.assertEqual(speed_tier("-10ms-3.2MB/s"), "mid")
         self.assertEqual(speed_tier("-10ms-0.5MB/s"), "slow")
         self.assertEqual(speed_tier("-10ms"), "unknown")
+        # ≈ 大陆估算 token 不是实测——不给档位（R77 防御收紧）
+        self.assertEqual(speed_tier("-10ms-≈2.0MB/s"), "unknown")
+        self.assertEqual(speed_tier("≈99MB/s"), "unknown")
 
     def test_fill_cn_token(self):
         from annotate_classify import fill_and_classify
