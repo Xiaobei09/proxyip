@@ -1495,3 +1495,19 @@ class TestExtractToicfExitGeo(unittest.TestCase):
         ))
         self.assertIsNone(vp._extract_toicf_exit_geo({}))
         self.assertIsNone(vp._extract_toicf_exit_geo({"probe_results": []}))
+
+
+class TestHistoryRecordShape(unittest.TestCase):
+    def test_valid_history_record_fields_exact(self):
+        meta = {"ts": "2026-09-16T00:00:00Z", "total": 100, "checked": 99,
+                "alive": 95, "dead": 4}
+        with tempfile.TemporaryDirectory() as td:
+            hist = Path(td) / "history.jsonl"
+            with mock.patch.object(vp, "VALID_HISTORY_FILE", hist):
+                vp.append_history(meta)
+            line = json.loads(hist.read_text().splitlines()[0])
+        self.assertEqual(
+            set(line),
+            {"ts", "total", "checked", "alive", "dead"},
+        )
+        self.assertEqual(len(line), 5)
