@@ -444,8 +444,9 @@ def update_badge(root: Path, alerts: list[str]) -> None:
     if not alerts:
         return
     # badge 名称 = 首条告警的冒号前段（如 "stale data"/"CN collapse"）；
-    # 无冒号消息（source/country collapsed）则回退整条文案
-    msg = alerts[0].split(":")[0].strip() if alerts[0] else "status"
+    # 无冒号消息（source/country collapsed）则回退整条文案。
+    # 截断防止超长文案撑爆 SVG 徽章尺寸。
+    msg = (alerts[0].split(":")[0].strip() if alerts[0] else "status")[:60]
     write_data_json(
         root / "data" / "output" / "badge.json",
         {"schemaVersion": 1, "label": "status", "message": msg, "color": "red"},

@@ -428,6 +428,17 @@ class TestBadgeSurfacing(unittest.TestCase):
             self.assertEqual(data["color"], "red")
             self.assertEqual(data["message"], "stale data")
 
+    def test_long_alert_message_truncated(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td, ts_ago_hours=9)
+            ha.update_badge(
+                root,
+                ["source-collapsed %s" % ("x" * 200)],
+            )
+            data = json.loads((root / "data" / "output" / "badge.json").read_text())
+            self.assertLessEqual(len(data["message"]), 60)
+            self.assertEqual(data["color"], "red")
+
     def test_no_alert_leaves_badge_untouched(self):
         with tempfile.TemporaryDirectory() as td:
             root = _build_stale_root(td, ts_ago_hours=0)
