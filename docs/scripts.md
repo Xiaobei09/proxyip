@@ -205,8 +205,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 入口国家标签准确性审计。订阅标签（`#CC`）此前无从验证，本脚本以两个
 独立信号交叉对比：① 入口 IP 地理（ip-api batch，含 ASN）；② 出口国观测
-（三源 exit map：external_check/upstream_meta/ipinfo，exit_family 仅贡献候选键）。判定写入 `data/quality/entry_audit.json`
-（`proxies[key].verdict`）并打印汇总：
+（三源 exit map：external_check/upstream_meta/ipinfo，exit_family 仅贡献候选键）。判定写入 `data/quality/entry_audit.json`（`proxies[key].verdict`）并打印汇总；入口地理以 `data/quality/entry_geo.json` 按轮缓存，仅查缺失 IP。
 
 | verdict | 含义 |
 |---|---|

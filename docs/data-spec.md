@@ -284,6 +284,10 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 
 **入口国家标签审计**（audit_entry_cc CI 输出）：顶层 `generated_at`/`total`/`summary`（verdict 计数），`proxies` 键为 `ip:port#国家`，值为 `{listed, exit_cc, entry_ip, entry_geo, verdict, asn}`：`listed` 为订阅行内 `#CC` 标签，`exit_cc` 为 `build_exit_cc_map` 三源汇聚的出口国（无观测时 `None`），`entry_ip` 为入口 IP（域名入口时为 `null`），`entry_geo`/`asn` 为 ip-api 实测（查询失败为 `null`），`verdict` 见 scripts.md 表（`ok`/`ok_with_drift`/`tag_mismatch`/`cf_fronted`/`domain_entry`/`entry_unknown`）。只读不改行、不参与门控。
 
+### `data/quality/entry_geo.json`
+
+**入口地理缓存**（audit_entry_cc 轮间复用）：顶层 `updated_at`（ISO-8601）与 `ips`（`{ip: {cc, asn}}`——当前批入口 IP 的 ip-api 实测结果）。audit_entry_cc 仅对 `all.txt` 中缺失于缓存的入口 IP 发批量查询，命中则跳过以消除冗余外部依赖；`ips` 仅保留当前批存在的入口，过期 IP 随批次自然淘汰。由脚本重生成（CI quality 链产出）。
+
 ### `data/quality/premium_meta.json`
 
 **premium 产物汇总**（build_premium 输出）：`{ts, file_count, proxy_count}`——生成时间与落盘的 `premium*.txt` 文件数/总行数（空清单时 `proxy_count=0`）。
