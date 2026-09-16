@@ -301,6 +301,8 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 - `exit_family.json` — 逐条明细（keyed，含 `family`、`exit_v4`/`exit_v6`、`method`）
 - 并在 `all.txt`/`all_ltd.txt` 对应行追加 `-V4`/`-V6`/`-DS` 备注（幂等，`DS` 与质量检测已有的双栈 token 一致）
 
+`family=unknown`（探测全失败）时**不追加任何家族 token，并清掉行内旧 token**：宁可未知也不冒称单栈/双栈——旧轮残留的 `-V4`/`-V6`/`-DS` 会误导下游 `v4`/`v6`/`46` 分组与 `premium`/`validated` 分支划分（`annotate_classify` 对 `family_map` 显式记 `unknown` 的 key 一并清桶；整体缺 family 数据时保持行内 token 不变）。
+
 交叉验证：若 `data/quality/upstream_meta.json` 存在（由 `download_proxies.py` 生成），逐条对照上游记录的真实出口 `clientIp`，在 `exit_family.json` 中补充 `upstream_client_ip` / `upstream_family` / `upstream_match` 字段，并在结束时输出对照统计（命中数、一致/不一致数、未命中数）；文件缺失时静默跳过，不影响实时探测结果。
 
 | 参数 | 说明 | 默认 |

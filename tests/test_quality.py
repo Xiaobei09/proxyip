@@ -2032,6 +2032,38 @@ class TestAnnotateClassify(unittest.TestCase):
         )
         self.assertIn("-V6", result)
 
+    def test_clears_family_token_when_family_unknown(self):
+        """exit_family 对该 key 显式记为 unknown（探测全失败）→ 清掉旧
+        V4/V6/DS token：宁可未知也不冒称，防止误导下游 v4/v6 划分。"""
+        from annotate_classify import fill_and_classify
+        stale = "1.2.3.4:443#🇺🇸US-100ms-5.00MB/s-V6-DC-77-CN"
+        result = fill_and_classify(
+            stale,
+            china_sets=(set(), set()),
+            family_map={"1.2.3.4:443#US": "unknown"},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertNotIn("-V6", result)
+        for t in ("-V4", "-DS"):
+            self.assertNotIn(t, result)
+        self.assertIn("-77", result)
+
+    def test_family_absent_preserves_token(self):
+        """整体无 family 数据（family_map 缺该 key）→ 不动既有家族 token
+        （数据集缺失≠该行未知，保持无侵入语义）。"""
+        from annotate_classify import fill_and_classify
+        stale = "1.2.3.4:443#🇺🇸US-100ms-5.00MB/s-DS-DC-50"
+        result = fill_and_classify(
+            stale,
+            china_sets=(set(), set()),
+            family_map={},
+            rep_map={},
+            ip_type_map={},
+        )
+        self.assertIn("-DS", result)
+        self.assertIn("-50", result)
+
 
     def test_fill_rep_score(self):
         from annotate_classify import fill_and_classify

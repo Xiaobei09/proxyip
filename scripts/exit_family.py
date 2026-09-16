@@ -379,7 +379,9 @@ def has_family_note(line: str) -> bool:
 def annotate_family(line: str, family: str) -> str:
     tok = FAMILY_TOKENS.get(family)
     if not tok:
-        return line
+        # 探测无结论（全部失败/无回显）时移除旧家族 token：
+        # 宁可未知也不冒称单栈/双栈，防止旧轮 token 误导下游划分。
+        return clear_note_buckets(line, "family")
     # 家族为互斥桶：权威探测结果直接替换旧值
     return merge_note_tokens(clear_note_buckets(line, "family"), tok)
 

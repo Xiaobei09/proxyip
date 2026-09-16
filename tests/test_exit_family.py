@@ -77,6 +77,27 @@ class TestEvidence(unittest.TestCase):
         self.assertEqual(ef.evidence_of(None, None), "none")
 
 
+class TestAnnotateFamily(unittest.TestCase):
+    def test_replace_bucket(self):
+        line = "1.2.3.4:443#US-100ms-0.5MB/s-V6"
+        self.assertEqual(
+            ef.annotate_family(line, "ipv4"),
+            "1.2.3.4:443#US-100ms-0.5MB/s-V4",
+        )
+
+    def test_unknown_clears_stale_token(self):
+        """探测无结论（unknown）→ 移除旧家族 token，不得残留误导下游。"""
+        line = "1.2.3.4:443#US-100ms-0.5MB/s-V6"
+        out = ef.annotate_family(line, "unknown")
+        self.assertNotIn("-V6", out)
+        self.assertIn("-100ms", out)
+
+    def test_no_token_when_family_unknown(self):
+        out = ef.annotate_family("1.2.3.4:443#US-100ms-0.5MB/s", "unknown")
+        self.assertNotIn("-V4", out)
+        self.assertNotIn("-V6", out)
+
+
 class TestProbeTargets(unittest.TestCase):
     def test_first_success_wins(self):
         calls = []

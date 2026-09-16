@@ -163,14 +163,17 @@ def fill_and_classify(
     if key in cnh_set:
         out = merge_note_tokens(out, "CNH")
 
-    # V4 / V6 / DS（互斥桶：先清后设，权威源替换旧值）
-    family = family_map.get(key, "")
-    if family:
-        fam_token = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}.get(family, "")
-        if fam_token and not any(has_token(out, t) for t in FAMILY_TOKENS):
-            out += "-" + fam_token
-        elif fam_token:
+    # V4 / V6 / DS（互斥桶：先清后设，权威源替换旧值）。
+    # 权威源对某 key 显式记为 unknown（探测全失败）时清桶——宁可未知
+    # 也不冒称单栈/双栈，防止旧轮 token 残留误导下游切换。整体无 family
+    # 数据（family_map 缺该 key）时保持既有 token 不动（无侵入语义）。
+    fav = family_map.get(key)
+    if fav:
+        fam_token = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}.get(fav, "")
+        if fam_token:
             out = merge_note_tokens(clear_note_buckets(out, "family"), fam_token)
+        else:
+            out = clear_note_buckets(out, "family")
 
     # reputation score (only if not already present)
     rep_score = rep_map.get(key)
