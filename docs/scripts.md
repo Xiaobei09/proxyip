@@ -518,3 +518,14 @@ itdog.cn 批量大陆可达性探测（WebSocket 收结果）：自 `china_check
 | `--itdog-pacing` | 任务间隔节流（秒） | 见 china_check 表 |
 | `--skip-itdog` | 跳过 itdog 批量 HTTP 探测 | 关 |
 | `--skip-itdog-tcping` | 跳过 itdog TCPing 探测 | 关 |
+
+## `common.py` 共享模块：错误日志脱敏约定
+
+`common.err_name(e)` 返回异常类型名（`type(e).__name__`）。**捕获异常后
+写入日志/错误字段时一律用它，禁止 `str(e)`/`str(exc)`/`format_exc`**——
+`URLError`/`HTTPError` 与 `fetch_with_deadline` 的 `TimeoutError` 其字符串
+表示会内嵌完整请求 URL；CI 的 `?token=`、`?key=` 等查询参数随 URL 泄漏。
+各脚本日志与 `{... "error": ...}` 字段统一经此 helper 取类别名；异常具体
+细节（errno 等）需保留时用 `type(exc).__name__ + (errno/strerror 白名单)`
+显式拼接，不得整串透传。`china_check.py`/`china_itdog.py` 另有本地别名
+`_err` 转调 `err_name`。
