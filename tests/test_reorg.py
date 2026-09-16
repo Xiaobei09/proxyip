@@ -159,6 +159,20 @@ class TestReorganizeFile(unittest.TestCase):
                          ["1.1.1.1:443#US→DE", "2.2.2.2:443#US→DE"])
         self.assertEqual(stats["moved"], 2)
 
+    def test_prune_orphan_dir_with_stale_subgroups(self):
+        # 全迁走后目录残留 cn/rep 等分支文件且无 all.txt → 整个目录清理
+        self._write("valid/countries/SC/all.txt",
+                    ["5.157.30.18:8443#SC→IE"])
+        self._write("valid/countries/SC/rep.txt", ["5.157.30.18:8443#SC-50"])
+        self._write("valid/countries/US/all.txt", ["1.1.1.1:443#US"])
+        # 场景 A：SC 的 all.txt 已被 reorg 删除（仅剩陈旧分支文件）→ 剪除
+        (self.country_dir / "SC" / "all.txt").unlink()
+        self.assertEqual(rc._prune_orphan_country_dirs(self.tmp / "valid"), 1)
+        self.assertFalse((self.country_dir / "SC").exists())
+        # 场景 B：有 all.txt 的合法国家目录保留
+        self.assertEqual(rc._prune_orphan_country_dirs(self.tmp / "valid"), 0)
+        self.assertTrue((self.country_dir / "US" / "all.txt").exists())
+
 
 class TestMergeOrdered(unittest.TestCase):
     def test_inserts_by_latency_keeps_relative_order(self):

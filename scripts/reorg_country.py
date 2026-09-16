@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 from common import (
@@ -157,6 +158,30 @@ def _path_country(path: Path) -> str | None:
     return None
 
 
+def _prune_orphan_country_dirs(valid_root: Path) -> int:
+    """Remove country dirs left without ``all.txt`` after all lines migrated out.
+
+    出口观测覆盖该国全行后，reorganize_file 会 unlink 该目录的 ``all.txt``，
+    但 cn/rep/ltd 等分支文件不会被触碰（docs:16 不重组子组文件），留下孤儿
+    目录宣称已不存在的出口国。全部文件处理完后整树清理，避免消费者读到陈旧
+    的国别分组。
+    """
+    pruned = 0
+    root = valid_root / "countries"
+    if not root.is_dir():
+        return 0
+    for cc_dir in sorted(root.glob("*")):
+        if not cc_dir.is_dir():
+            continue
+        cc = cc_dir.name
+        if not (len(cc) == 2 and cc.isalpha()):
+            continue
+        if not (cc_dir / "all.txt").exists():
+            shutil.rmtree(cc_dir)
+            pruned += 1
+    return pruned
+
+
 def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
     """Main entry: reorganize all country/set/port files.  Returns moved count.
 
@@ -186,7 +211,9 @@ def reorganize(ipinfo_path: Path, data_dir: Path) -> int:
     # ports/
     for port_txt in sorted((valid_root / "ports").glob("*.txt")):
         reorganize_file(port_txt, exit_map, stats)
-    print(f"Moved {stats['moved']} lines, wrote {stats['files_written']} files.")
+    pruned = _prune_orphan_country_dirs(valid_root)
+    print(f"Moved {stats['moved']} lines, wrote {stats['files_written']} files, "
+          f"pruned {pruned} orphan country dirs.")
     return stats["moved"]
 
 
