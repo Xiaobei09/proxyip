@@ -12,6 +12,7 @@ import json
 import logging
 import ssl
 import time
+import time
 import urllib.request
 
 from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...)
@@ -200,7 +201,10 @@ async def run_checks(
 
     tasks = [asyncio.create_task(work(e)) for e in entries]
     total = len(entries)
-    reporter = asyncio.create_task(_progress_reporter(results, lock, total))
+    t0 = time.monotonic()
+    reporter = asyncio.create_task(
+        _progress_reporter(results, lock, total, t0)
+    )
     try:
         done, pending = await asyncio.wait(
             tasks, timeout=args.time_budget or None
@@ -221,9 +225,9 @@ async def run_checks(
 
 
 async def _progress_reporter(
-    results: dict, lock: asyncio.Lock, total: int
+    results: dict, lock: asyncio.Lock, total: int, t0: float = 0.0
 ) -> None:
-    """周期上报探针完成数，打破长时子进程/CI 静默（含 budget 截断前可见性）。
+    """周期上报探针完成数与已耗时，打破长时子进程/CI 静默（含 budget 截断前可见性）。
 
     纯观测：除 print 外无副作用；锁保护下只读计数，不扰动 wait 语义。
     """
@@ -232,7 +236,12 @@ async def _progress_reporter(
         try:
             async with lock:
                 n = len(results)
-            print(f"Progress: {n}/{total} proxies checked", flush=True)
+            elapsed = int(time.monotonic() - t0) if t0 else 0
+            print(
+                f"Progress: {n}/{total} proxies checked "
+                f"({elapsed}s elapsed)",
+                flush=True,
+            )
         except Exception:
             logging.exception("progress reporter")
 
