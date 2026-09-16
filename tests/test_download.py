@@ -1374,3 +1374,23 @@ class TestAppendSourceHistory(unittest.TestCase):
     def _path(self, td):
         import os
         return Path(td) / "source_history.json"
+
+
+class TestDataPortsInWhitelist(unittest.TestCase):
+    """数据守护：发布池端口必须全部落在 CF_EDGE_PORTS 白名单内
+    （download_proxies.py:141 的强约束）。CI 检出最新 all.txt 时实际校验；
+    本地无数据文件则跳过。"""
+
+    def test_all_txt_ports_within_cf_edge_whitelist(self):
+        all_txt = Path(__file__).resolve().parent.parent / "data" / "valid" / "all.txt"
+        if not all_txt.exists():
+            self.skipTest("no data/valid/all.txt in working tree")
+        whitelist = {int(p) for p in dp.CF_EDGE_PORTS}
+        ports = set()
+        for ln in all_txt.read_text(encoding="utf-8").splitlines():
+            try:
+                ports.add(int(ln.split(":", 1)[1].split("#", 1)[0]))
+            except (IndexError, ValueError):
+                continue
+        self.assertTrue(ports, "all.txt has no parseable entries")
+        self.assertEqual(sorted(ports - whitelist), [])
