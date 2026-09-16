@@ -126,6 +126,11 @@ python3 scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
 - `data/diff/<时间戳>.json`：有变化时按次归档，最多保留最近 50 份
 - `data/quality/history.jsonl`：每条记录含 `added`/`removed` 计数
 
+`data/diff/` 由下载链每轮写在工作树，但**刻意不进版本库**（`commit_data.sh`
+按 `data/diff/` 路径排除，防提交面膨胀）；它只留存于 CI/本地磁盘供审计，
+版本库中 diff 属历史遗留（如 latest.json 的旧快照）。据此判断 diff 是否需要
+提交时，以工作树文件变化为准，而非 git 历史。
+
 ## 数据文件参考
 
 ### `data/output/stats.json`
