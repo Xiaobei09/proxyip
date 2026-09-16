@@ -107,7 +107,7 @@
 | `--read-cap` | 单次响应读取上限（字节） | 524288 |
 | `-w, --workers` | asyncio 并发上限 | 60 |
 | `--limit` | 只检测前 N 条（0 = 全部） | 0 |
-| `--time-budget` | 最多执行秒数（0 = 不限）；到点停止开启新相位、已得结果仍落盘提交（探测相位让出 600s 余量给地理/信誉/滥用后处理） | 0 |
+| `--time-budget` | 最多执行秒数（0 = 不限）；到点停止开启新相位、已得结果仍落盘提交（探测相位让出 600s 余量，且 probe / ip-api geo / reputation / abuse **四个相位均受绝对 deadline 硬门控**：超龄不再新开任务、已提交结果照常落盘，防止某相位把 job 拖过 CI 超时硬杀） | 0 |
 
 滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）**跨源共识合成**：abuse 分存在时取 `100 - score`（最高优先级）；否则先把各源的布尔标记归一为语义维度（`tor`/`proxy`/`vpn`/`hosting`(数据中心)/`mobile`/`abuse`/`listed`/`scraper`/`crawler`/`anonymous`），按源权重做**加权多数投票**——正票总权重 > 负票总权重才认定该维度为真，打平视为无结论（不扣分），避免单源误报独断与大权重单源主导；再叠加连续型风险源的加权罚分（`trust_score`、`probability`、`risk_score`、`fraud_score`、`score`、otx reputation/pulse、proxycheck risk）。查到出口地理（`countryCode`）即把 `ip-api` 计入（代理/机房/移动标志直接参与投票）；无任何信号则该项无分（不误判满分）。共识扣分表：tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅当 mobile 与其余风险维度均不成立时有 +5 加分。greynoise 源例外：经其确认的恶意类别直接按「60=恶意 / 35=僵尸(bot, riot) / 15=噪音」差异化罚分（覆盖 consensus 通用维度折算；同 IP 恶意确认时不再叠加噪音罚分）。**下表『说明』中的标志罚分/直用均为 legacy 单源口径；主路径统一折算为 consensus 语义维度 + 权重投票 + 共识扣分表（见上文），数值可能不同，以 consensus 为准。`ip-api` 的 mobile 奖励固定为 +5**。默认源与权重：
 
