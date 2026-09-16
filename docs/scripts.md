@@ -65,10 +65,10 @@
 
 | 输出文件 | 内容 |
 |---|---|
-| `chart_combo.svg` | 代理计数 + 存活率双轴折线图 |
+| `chart_combo.svg` | 代理计数 + 存活率双轴折线图（近 7 天窗口） |
 | `chart_country.svg` | 存活代理按国家 top-15 横向条形图 |
 | `chart_port.svg` | 存活代理按端口纵向条形图 |
-| `chart_churn.svg` | 每次更新 added / removed 分组条形图 |
+| `chart_churn.svg` | 每次更新 added / removed 分组条形图（近 7 天窗口） |
 | `chart_latency_speed.svg` | 延迟与速度分桶双面板条形图 |
 | `chart_sets.svg` | 各命名集合存活代理条形图 |
 | `chart_cn.svg` | 大陆连通性 verdict 分布条形图 |
