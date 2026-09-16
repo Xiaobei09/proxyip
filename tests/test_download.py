@@ -928,23 +928,24 @@ class TestProxyMirrorSources(unittest.TestCase):
             self.assertIn(u, urls)
             self.assertEqual(dp.source_label(u), label)
 
-    def test_r214_new_proxyip_sources_registered(self):
-        # R214 新增：byJoey/cfnew-ipdb（CF 边缘 102k all.txt，plain ip:port）
-        # 与 LancelotRar/best-cf-ips（top200 榜单，ipnote #CC [注解]）。
+    def test_r215_proxyip_source_policy_compliant(self):
+        # R214 首增 byJoey/cfnew-ipdb（CF 官方 AS13335 边缘 10 万+）与
+        # LancelotRar（同为 CF 官方段 top200）——与 EXTRA_SOURCES 政策
+        # 「非 AS13335 / 排除官方 CF 段」冲突，R215 回退，代之以实测
+        # 非 AS13335 的 svip-s/cloudflare_ip 第三方反代池（ipnote 格式）。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         self.assertIn(
+            "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt",
+            urls)
+        self.assertNotIn(
             "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt", urls)
-        self.assertIn(
+        self.assertNotIn(
             "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt",
             urls)
         self.assertEqual(
             dp.source_label(
-                "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt"),
-            "byjoey_cfedge")
-        self.assertEqual(
-            dp.source_label(
-                "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt"),
-            "lancelot_cfip")
+                "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt"),
+            "svip_cfip")
 
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"

@@ -135,9 +135,10 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt"),
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt"),
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt"),
-    # --- 新增 proxyip 源（R214） ---
-    ("plain", "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt"),
-    ("ipnote", "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt"),
+    # --- proxyip 源扩展（R214 首增 byJoey/LancelotRar 为 CF 官方 AS13335 段，
+    #     与池政策「非 AS13335/排除官方 CF 段」冲突已于 R215 回退）---
+    # svip-s/cloudflare_ip 实测为第三方反代 VPS（非 AS13335），格式 ip:port#CC [注解]
+    ("ipnote", "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt"),
 ]
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
@@ -148,8 +149,7 @@ SOURCE_LABELS: dict[str, str] = {
     "https://ipdb.api.030101.xyz/?type=proxy": "ipdb_proxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy": "ipdb_bestproxy",
     "https://ipdb.api.030101.xyz/?type=bestproxy&country=true": "ipdb_bestproxy_cc",
-    "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt": "byjoey_cfedge",
-    "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt": "lancelot_cfip",
+    "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt": "svip_cfip",
     "https://raw.githubusercontent.com/LeilaoMi/cf-proxyip-us/main/docs/all.txt": "leilao_cfproxy",
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt": "wwuyi_proxyip",
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt": "wwuyi_proxyip_cc",
