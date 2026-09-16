@@ -35,6 +35,11 @@ region is known it is inserted right after the entry country code as
 ``<cc>→<exit>`` (CF edge ``loc`` airport code), e.g.
 ``1.2.3.4:443#US→LAX-120ms-...``.
 Lines without results stay untouched.
+
+``--time-budget`` 墙钟感知止损：探测相位让出 ``POST_RESERVE_S`` 给后处理，
+四个网络相位（probe / ip-api geo / reputation / abuse）均受绝对 deadline
+硬门控——超龄不再新开任务、已提交结果照常落盘（partial commit），避免缓存
+大面积失效时某相位把 job 拖过 CI 的 ``timeout-minutes`` 硬杀。
 """
 
 import argparse
