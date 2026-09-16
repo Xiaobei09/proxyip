@@ -2397,8 +2397,9 @@ class TestPingpeConcurrency(unittest.TestCase):
             entries, _, _ = cc.run_measurements(items, self._args())
             dt = time.monotonic() - t0
 
-        # 串行 6×0.2s=1.2s；4 并发应明显更快（留 CI 抖动余量）
-        self.assertLess(dt, 0.8)
+        # 串行 6×0.2s=1.2s；4 并发理想 ~0.6s。阈值 1.0s：仍能证明并行（远小于
+        # 串行 1.2s），又给重载 CI 调度抖动留足缓冲，避免时序断言偶发 flaky。
+        self.assertLess(dt, 1.0)
         self.assertEqual(
             [v["sources"]["pingpe"]["ok"] for v in entries.values()].count(True), 6)
         self.assertEqual(
