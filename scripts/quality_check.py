@@ -454,6 +454,7 @@ def annotate_valid_files(annotations: dict) -> int:
 def build_meta(
     results: dict, ipinfo: dict, abuse_map: dict,
     rep_map: dict | None = None,
+    skipped: list | None = None,
 ) -> dict:
     rep_map = rep_map or {}
     by_type = Counter(info["ip_type"] for info in ipinfo.values())
@@ -502,6 +503,7 @@ def build_meta(
         "country_mismatch": country_mismatch,
         "ext_check_total": ext_total,
         "ext_check_ok": ext_ok,
+        "skipped": list(skipped or []),
     }
 
 
@@ -633,7 +635,7 @@ async def run(args: argparse.Namespace) -> int:
     STREAMING_FILE.unlink(missing_ok=True)  # 流媒体检查已移除，清理遗留产物
     if abuse_map:
         write_json(ABUSE_FILE, keyed_json(abuse_map))
-    meta = build_meta(results, ipinfo, abuse_map, rep_map)
+    meta = build_meta(results, ipinfo, abuse_map, rep_map, skipped)
     write_json(QUALITY_META_FILE, meta)
     annotate_valid_files(annotations)
 

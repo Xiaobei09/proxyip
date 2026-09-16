@@ -2533,8 +2533,18 @@ class TestExternalCheck(unittest.TestCase):
             set(meta),
             {"ts", "total", "tls", "by_type", "risk", "abuse_checked",
              "reputation_checked", "rep_dist", "rep_avg", "rep_median",
-             "country_mismatch", "ext_check_total", "ext_check_ok"},
+             "country_mismatch", "ext_check_total", "ext_check_ok",
+             "skipped"},
         )
+
+    def test_build_meta_skipped_persisted(self):
+        # R201：预算耗尽而跳过的相位须落盘，使降级批次机器可检测
+        meta = qc.build_meta(
+            {"k1": {"ip": "1.1.1.1"}}, {}, {}, {},
+            skipped=["ip-api geo", "reputation lookup"],
+        )
+        self.assertEqual(meta["skipped"], ["ip-api geo", "reputation lookup"])
+        self.assertEqual(qc.build_meta({"k1": {"ip": "1.1.1.1"}}, {}, {}, {})["skipped"], [])
 
     def test_build_meta_rep_aggregates(self):
         results = {"k%d" % i: {"ip": "1.1.1.%d" % i} for i in range(1, 6)}
