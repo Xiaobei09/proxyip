@@ -289,6 +289,8 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 ### `scripts/exit_family.py`
 
+由 `exit-family.yml` 在 **Quality check 完成时触发**（`workflow_run` type `completed`），并发组 `exit-family`（`cancel-in-progress: false`——不抢占在跑的家族轮，排队串行）。**触发者失败也照常运行**：与 `annotate-classify` 同策略——它 checkout 仓库自洽快照（上次成功轮），上游单次失败不应冻结家族判定（`-V4`/`-V6`/`-DS` token 与 `exit_family.json` 是后续分组/清单的权威来源）。
+
 实际出口 IP 家族（IPv4/IPv6）检测（独立 CI 运行）。默认对 `data/valid/all.txt`（全量存活池）逐条 **双栈探测** 真实出口家族：
 
 - 分别请求仅 IPv4 与仅 IPv6 的回显服务（纯 IP 文本），**每族双服务商**：`ipv4.icanhazip.com` + `api4.ipify.org`（v4）、`ipv6.icanhazip.com` + `api6.ipify.org`（v6）。同族两源**按序尝试、首个成功者生效**（互备而非必双侧一致）；「双源互证」体现在跨家族：v4/v6 两族各自拿到非空字面量且**不同** → `evidence=cross` 硬 dual 证据，字面量**相同** → `single_path`（跨服务商一致的单栈强证据）；仅一族可达 → `one_sided`。`verify_pinning()` 对回显源做记录钉扎自检（仅诊断日志，不阻断探测）。两族全失败则尝试 `cloudflare.com/cdn-cgi/trace` 兜底。注意：CF 边缘代理的出口由 Worker fetch() 决定、与入口/目标主机名无关（trace 只回显单 IP），故 CF 类代理 `dual` 恒为 0 属架构固有行为
