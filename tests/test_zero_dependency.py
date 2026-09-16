@@ -79,5 +79,33 @@ class TestNoPlaintextSecrets(unittest.TestCase):
         )
 
 
+CORE_FUNCS = ("write_text_if_changed",)
+
+
+class TestCallSignatureGuard(unittest.TestCase):
+    """R58 回归：write_text_if_changed 仅 (path, content)，杜绝悬空 kwarg。"""
+
+    def test_write_text_if_changed_no_kwargs(self):
+        offenders: list[str] = []
+        for py in SCRIPTS.glob("*.py"):
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in CORE_FUNCS
+                    and node.keywords
+                ):
+                    offenders.append(
+                        f"{py.name}:{node.lineno} "
+                        f"kwargs={[k.arg for k in node.keywords]}"
+                    )
+        self.assertEqual(
+            offenders, [],
+            "write_text_if_changed 不应接收 kwarg（签名仅 (path, content)）:\n"
+            + "\n".join(offenders),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
