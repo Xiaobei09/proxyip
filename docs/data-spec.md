@@ -110,7 +110,7 @@ CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 
 - `data/valid/speed.json`：每测速成功代理的实测速度（MB/s，按速度降序）
 - `data/valid/history.jsonl`：每次验证的历史记录（最多 1000 条，供趋势图）
 
-- `data/quality/exit_family.json`：实际出口家族探测结果（exit-family 工作流，随 Quality check 完成后触发）。顶层 `ts` + `proxies`：每个 `ip:port#国家` 的值为 `{method, ts, family(ipv4/ipv6/dual/unknown), evidence(详见 evidence 语法), v4_src/v6_src, exit_v4/exit_v6(实测出口), shared_exit(复用同一出口的条数>1 时标记), upstream_client_ip(上游观测出口), upstream_family, upstream_absent, upstream_match}`；探测字段之外（line/ip/port/cc 等可推导项）刻意不落盘。`family` 是分组/清单的权威来源（优先于行内 `-V4`/`-V6`/`-DS` 备注）。同时产出 `*_verified.txt` 家族判定依据。
+- `data/quality/exit_family.json`：实际出口家族探测结果（exit-family 工作流，随 Quality check 完成后触发）。顶层 `ts` + `proxies`：每个 `ip:port#国家` 的值为 `{method, ts, family(ipv4/ipv6/dual/unknown), evidence(详见 evidence 语法), v4_src/v6_src, exit_v4/exit_v6(实测出口), shared_exit(复用同一出口的条数>1 时标记), upstream_client_ip(上游观测出口), upstream_family, upstream_absent, upstream_match}`。**部分字段按需填充**：`upstream_*` 只在有 v6 出口探测结果时出现（ipv6/dual），`shared_exit` 在 ipv4/unknown/dual 有值；缺字段视为无上游数据。探测字段之外（line/ip/port/cc 等可推导项）刻意不落盘。`family` 是分组/清单的权威来源（优先于行内 `-V4`/`-V6`/`-DS` 备注）。同时产出 `*_verified.txt` 家族判定依据。
 
 ### 常用命令
 
