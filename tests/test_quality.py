@@ -167,6 +167,53 @@ class TestTimeBudgetGate(unittest.TestCase):
         self.assertFalse(qc._within_budget(start - 5, 5))
 
 
+class TestBatchSyncDeadline(unittest.TestCase):
+    """D-42 补漏：reputation 相位 batch_sync 透传 wall-clock deadline 止损。
+
+    deadline 前不再新开探测任务、已提交任务收尾、超龄不重试——防止
+    大面积缓存失效时把后处理拖过 120min job 硬杀。
+    """
+
+    def test_expired_deadline_truncates_all(self):
+        called = []
+        async def run():
+            res = await qr.batch_sync(
+                ["1.1.1.1", "2.2.2.2"],
+                lambda ip: called.append(ip) or {"ok": True},
+                deadline=time.monotonic() - 1,
+            )
+            return res
+        res = asyncio.run(run())
+        self.assertEqual(res, {})
+        self.assertEqual(called, [])
+
+    def test_fresh_deadline_runs_all(self):
+        called = []
+        async def run():
+            return await qr.batch_sync(
+                ["1.1.1.1", "2.2.2.2"],
+                lambda ip: called.append(ip) or {"ok": True},
+                deadline=time.monotonic() + 30,
+                delay=0,
+            )
+        res = asyncio.run(run())
+        self.assertEqual(len(res), 2)
+        self.assertEqual(len(called), 2)
+
+    def test_expired_deadline_skips_retry(self):
+        failed_once = {"pl": ["1.1.1.1"]}
+        async def run():
+            return await qr.batch_sync(
+                ["1.1.1.1"],
+                lambda ip: None,
+                deadline=time.monotonic() + 30,
+                delay=0,
+                retries=0,
+            )
+        res = asyncio.run(run())
+        self.assertEqual(res, {})
+
+
 class TestBuildIpinfo(unittest.TestCase):
     def test_tls_proxy_geo_match(self):
         results = {

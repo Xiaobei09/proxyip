@@ -1168,22 +1168,44 @@ async def batch_sync(
     workers: int = REP_WORKERS,
     delay: float = REP_DELAY,
     retries: int = 1,
+    deadline: float | None = None,
 ) -> dict:
-    """Run ``fn(ip)`` over unique IPs with a concurrency semaphore + pacing."""
+    """Run ``fn(ip)`` over unique IPs with a concurrency semaphore + pacing.
+
+    ``deadline``（``time.monotonic()`` 绝对时刻）为墙钟止损：超过后不再
+    新开探测任务，已提交任务正常收尾。补齐 D-42 遗漏的 reputation 相位
+    ——geo/abuse 已有 deadline，rep 的循环分批此前只受 per-call 超时约束，
+    缓存大面积失效时会把后处理拖过 120min job 硬杀。
+    """
     items = list(dict.fromkeys(ips))
     if cap > 0:
         items = items[:cap]
+    if deadline is not None:
+        remaining = [ip for ip in items
+                     if time.monotonic() < deadline]
+        if len(remaining) != len(items):
+            print(
+                f"Warning: batch_sync truncated {len(items) - len(remaining)} "
+                "IPs by deadline before first launch",
+                file=sys.stderr,
+            )
+        items = remaining
     sem = asyncio.Semaphore(workers)
     out: dict = {}
     failed: list[str] = []
 
     async def work(ip: str) -> None:
         async with sem:
+            if deadline is not None and time.monotonic() >= deadline:
+                return
             try:
                 res = await asyncio.to_thread(fn, ip)
             except Exception as exc:
                 logging.debug("batch_sync: %s failed: %s", ip, err_name(exc))
                 res = None
+            if deadline is not None and time.monotonic() >= deadline:
+                failed.append(ip)
+                return
             if res is not None:
                 out[ip] = res
                 await asyncio.sleep(delay)
@@ -1196,6 +1218,8 @@ async def batch_sync(
             break
         retry_list = list(failed)
         failed.clear()
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         await asyncio.sleep(1.0)
         await asyncio.gather(*(work(ip) for ip in retry_list))
     return out
@@ -2027,7 +2051,8 @@ def cached_signal(
 
 
 async def lookup_all_risk(
-    ips: list, args: argparse.Namespace, asn_map: dict | None = None
+    ips: list, args: argparse.Namespace, asn_map: dict | None = None,
+    deadline: float | None = None,
 ) -> dict:
     """Query all enabled reputation sources; ``{ip: {source: signal}}``.
 
@@ -2035,7 +2060,8 @@ async def lookup_all_risk(
     fresh (``--rep-cache-ttl``); missing/expired IPs are re-queried, and an
     expired entry whose refresh fails falls back to the last cached signal
     instead of being dropped. Static-list signals (abuse/ASN lists) are
-    re-computed every run.
+    re-computed every run. ``deadline`` 为 wall-clock 止损（monotonic 绝对
+    时刻），透传给各缓存批量查询的 ``batch_sync``，超龄后不再新开查询。
     """
     sources = args.reputation_sources
     if not sources:
@@ -2069,7 +2095,7 @@ async def lookup_all_risk(
                 fallback[ip] = src_entry["data"]
             need.append(ip)
         res = await batch_sync(
-            need, fn, cap=cap, workers=workers, delay=delay
+            need, fn, cap=cap, workers=workers, delay=delay, deadline=deadline
         )
         for ip, sig in res.items():
             put(name, ip, sig)

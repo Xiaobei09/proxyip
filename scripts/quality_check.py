@@ -571,7 +571,9 @@ async def run(args: argparse.Namespace) -> int:
                if ip in geo and norm_asn(geo[ip].get("asn"))}
     risk_data: dict = {}
     if _within_budget(start, budget):
-        risk_data = await lookup_all_risk(rep_ips, args, asn_map)
+        risk_data = await lookup_all_risk(
+            rep_ips, args, asn_map, deadline=phase_deadline
+        )
     else:
         skipped.append("reputation lookup")
         print("Warning: time budget exhausted; skipping reputation lookup",
