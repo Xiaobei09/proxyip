@@ -757,6 +757,47 @@ class TestWriteHelpers(unittest.TestCase):
         self.assertEqual(json.loads(j.read_text()), {"proxies": {"a": 2}})
 
 
+class TestAppendHistory(unittest.TestCase):
+    """history.jsonl 契约：compact 单行、5 字段投影、窗口截断、原子写。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="vp_hist_"))
+        self.orig = vp.VALID_HISTORY_FILE
+        vp.VALID_HISTORY_FILE = self.tmp / "history.jsonl"
+
+    def tearDown(self):
+        vp.VALID_HISTORY_FILE = self.orig
+
+    def test_writes_compact_projected_fields(self):
+        vp.append_history({
+            "ts": "2026-09-16T00:00:00Z", "total": 100, "checked": 95,
+            "alive": 70, "dead": 25, "elapsed_s": 9.1,
+        })
+        lines = vp.VALID_HISTORY_FILE.read_text().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn(" ", lines[0])  # compact separators
+        rec = json.loads(lines[0])
+        self.assertEqual(rec, {"ts": "2026-09-16T00:00:00Z", "total": 100,
+                               "checked": 95, "alive": 70, "dead": 25})
+        self.assertNotIn("elapsed_s", rec)
+
+    def test_truncates_to_window(self):
+        for i in range(vp.MAX_HISTORY_RECORDS + 5):
+            vp.append_history({"ts": "t%d" % i, "total": i, "checked": i,
+                               "alive": i, "dead": 0})
+        lines = vp.VALID_HISTORY_FILE.read_text().splitlines()
+        self.assertEqual(len(lines), vp.MAX_HISTORY_RECORDS)
+        first = json.loads(lines[0])
+        self.assertEqual(first["ts"], "t%d" % (5))
+
+    def test_appends_to_existing(self):
+        vp.append_history({"ts": "a", "total": 1, "checked": 1,
+                           "alive": 1, "dead": 0})
+        vp.append_history({"ts": "b", "total": 2, "checked": 2,
+                           "alive": 2, "dead": 0})
+        self.assertEqual(len(vp.VALID_HISTORY_FILE.read_text().splitlines()), 2)
+
+
 class TestParseLineAndToken(unittest.TestCase):
     """common.parse_line / common.has_token canonical parsing."""
 
