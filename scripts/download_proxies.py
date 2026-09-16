@@ -36,6 +36,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from collections import defaultdict
@@ -873,10 +874,25 @@ def write_source_attribution(
 
 
 def _fetch_retry(url: str, timeout: int, attempts: int) -> bytes:
-    """Download ``url`` with linear-backoff retries; raise on final failure."""
+    """Download ``url`` with linear-backoff retries; raise on final failure.
+
+    HTTP 4xx（408/429 限流除外）属**确定性失败**——上游改地址/禁访问时
+    重试无意义，直接 raise 省去空耗；5xx/网络错才进入线性退避重试。
+    """
     for attempt in range(attempts):
         try:
             return download(url, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code >= 400 and exc.code < 500 and exc.code not in (408, 429):
+                raise
+            if attempt == attempts - 1:
+                raise
+            print(
+                f"{url} HTTP {exc.code} attempt {attempt + 1}/{attempts}; "
+                f"retrying in {1.5 * (attempt + 1):.1f}s",
+                file=sys.stderr,
+            )
+            time.sleep(1.5 * (attempt + 1))
         except Exception as exc:  # noqa: BLE001
             if attempt == attempts - 1:
                 raise

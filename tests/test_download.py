@@ -6,6 +6,7 @@ import sys
 import time
 import unittest
 import unittest.mock
+import urllib.error
 import zipfile
 from pathlib import Path
 
@@ -341,6 +342,50 @@ class TestLoadSource(unittest.TestCase):
             by_port, meta = dp.load_source("https://example.com/x.zip", timeout=30)
         m.assert_called_once_with("https://example.com/x.zip", timeout=30)
         self.assertIsNone(meta)
+
+    def test_http_404_raises_without_retry(self):
+        """确定性 4xx（上游改址/禁访问）直接失败，不做无意义重试。"""
+        calls = {"n": 0}
+
+        def fake_download(url, timeout):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+        with unittest.mock.patch.object(dp, "download", side_effect=fake_download), \
+                unittest.mock.patch.object(dp.time, "sleep") as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                dp.load_source("https://example.com/x.json", timeout=30)
+        self.assertEqual(calls["n"], 1)
+        sleep.assert_not_called()
+
+    def test_http_500_retries_then_raises(self):
+        """5xx 服务端瞬态错误进入线性退避重试，耗尽才 raise。"""
+        calls = {"n": 0}
+
+        def fake_download(url, timeout):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(url, 500, "Internal", None, None)
+
+        with unittest.mock.patch.object(dp, "download", side_effect=fake_download), \
+                unittest.mock.patch.object(dp.time, "sleep"):
+            with self.assertRaises(urllib.error.HTTPError):
+                dp.load_source("https://example.com/x.json", timeout=30)
+        self.assertEqual(calls["n"], 3)
+
+    def test_http_429_retries(self):
+        """429 限流属瞬态，重试而非直接放弃。"""
+        def fake_download(url, timeout):
+            calls[0] += 1
+            if calls[0] < 2:
+                raise urllib.error.HTTPError(url, 429, "Rate limited", None, None)
+            return self.json_bytes
+
+        calls = [0]
+        with unittest.mock.patch.object(dp, "download", side_effect=fake_download), \
+                unittest.mock.patch.object(dp.time, "sleep"):
+            by_port, meta = dp.load_source("https://example.com/x.json", timeout=30)
+        self.assertEqual(calls[0], 2)
+        self.assertIsNotNone(meta)
 
 
 class TestWriteUpstreamMeta(unittest.TestCase):
