@@ -71,7 +71,7 @@ STALE_AFTER_S = 3 * 3600
 # 入口审计产物（audit_entry_cc.py）停摆误判阈值：与 badge fresh/stale 同判据
 # （R58 前曾 8 天未刷新且无人察觉——图表层须有显式停摆标注）。
 ENTRY_AUDIT_STALE_HOURS = STALE_AFTER_S / 3600
-COMBO_WINDOW_DAYS = 30  # chart_combo 只渲染最近这段时间，避免远古历史压缩近期走势
+COMBO_WINDOW_DAYS = 7  # 时序图只渲染最近这段时间，避免远古历史压缩近期走势
 
 
 @dataclass
@@ -653,12 +653,16 @@ def build_port(meta: dict) -> str:
 
 
 def build_churn(history: list[dict]) -> str:
+    history = _windowed(history, COMBO_WINDOW_DAYS)
     groups = [r.get("ts", "") for r in history]
     series = [
         Series("新增", COLOR_ADDED, groups, [r.get("added", 0) for r in history]),
         Series("移除", COLOR_REMOVED, groups, [r.get("removed", 0) for r in history]),
     ]
-    return plot_grouped_vbars(groups, series, title="每次更新 新增 / 移除")
+    title = "每次更新 新增 / 移除"
+    if COMBO_WINDOW_DAYS > 0:
+        title += f"（近 {COMBO_WINDOW_DAYS} 天）"
+    return plot_grouped_vbars(groups, series, title=title)
 
 
 def build_combo(history: list[dict], valid_history: list[dict]) -> str:

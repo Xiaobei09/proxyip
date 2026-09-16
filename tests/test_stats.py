@@ -210,7 +210,10 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(gs._windowed(recs, 30), recs)
 
     def test_combo_titles_window(self):
-        self.assertIn("近 30 天", gs.build_combo(self.HISTORY, self.VALID_HISTORY))
+        self.assertIn("近 7 天", gs.build_combo(self.HISTORY, self.VALID_HISTORY))
+
+    def test_churn_titles_window(self):
+        self.assertIn("近 7 天", gs.build_churn(self.HISTORY))
 
     def test_cn_chart_sorted_by_count(self):
         svg = gs.build_cn(self.CN_DATA)

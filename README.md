@@ -259,10 +259,10 @@ data/quality/history.jsonl               更新历史记录（每行一条，最
 data/output/                             展示输出
 data/output/stats.json                   统计汇总（供徽章与外部消费）
 data/output/badge.json                   状态徽章（fresh/stale）
-data/output/chart_combo.svg              代理计数 + 存活率双轴折线图（近 30 天窗口）
+data/output/chart_combo.svg              代理计数 + 存活率双轴折线图（近 7 天窗口）
 data/output/chart_country.svg            存活代理按国家 top-15 条形图
 data/output/chart_port.svg               存活代理按端口条形图
-data/output/chart_churn.svg              每次更新 added/removed 条形图
+data/output/chart_churn.svg              每次更新 added/removed 条形图（近 7 天窗口）
 data/output/chart_latency_speed.svg      延迟与速度分桶双面板条形图
 data/output/chart_sets.svg               各命名集合存活代理条形图
 data/output/chart_cn.svg                 大陆连通性 verdict 分布条形图
