@@ -446,6 +446,20 @@ class TestBadgeSurfacing(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse(badge.exists())  # 无告警不改写
 
+    def test_strict_gates_exit_1_on_alert(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td, ts_ago_hours=9)
+            with unittest.mock.patch.object(ha.time, "time", return_value=self.ts):
+                rc = ha.main(["--data-dir", str(root), "--strict"])
+            self.assertEqual(rc, 1)
+
+    def test_strict_ok_exit_0_no_alert(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _build_stale_root(td, ts_ago_hours=0)
+            with unittest.mock.patch.object(ha.time, "time", return_value=self.ts):
+                rc = ha.main(["--data-dir", str(root), "--strict"])
+            self.assertEqual(rc, 0)
+
 
 class TestCheckSources(unittest.TestCase):
     def _runs(self, series):
