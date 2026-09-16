@@ -1,6 +1,7 @@
 """normalize_note / merge_note_tokens —— 全仓库统一备注规范器的行为契约。"""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,6 +25,7 @@ from common import (
     load_speed_keys,
     load_uptime_keys,
     read_json,
+    write_text_if_changed,
 )
 
 
@@ -695,6 +697,30 @@ class TestReadJsonNonObject(unittest.TestCase):
             p = Path(td) / "x.json"
             p.write_text('{"a": [1, 2]}', encoding="utf-8")
             self.assertEqual(read_json(p), {"a": [1, 2]})
+
+
+class TestWriteTextIfChanged(unittest.TestCase):
+    def test_skip_when_content_identical(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "x.txt"
+            p.write_text("hello", encoding="utf-8")
+            mtime = p.stat().st_mtime_ns
+            self.assertFalse(write_text_if_changed(p, "hello"))
+            self.assertEqual(p.read_text(), "hello")
+            # mtime unchanged → no rewrite
+            self.assertEqual(p.stat().st_mtime_ns, mtime)
+
+    def test_writes_new_content(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "x.txt"
+            self.assertTrue(write_text_if_changed(p, "abc"))
+            self.assertEqual(p.read_text(), "abc")
+
+    def test_atomic_write_creates_parent(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "sub" / "dir" / "f.txt"
+            self.assertTrue(write_text_if_changed(p, "deep"))
+            self.assertEqual(p.read_text(), "deep")
 
 
 if __name__ == "__main__":
