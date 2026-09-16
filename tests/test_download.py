@@ -1104,6 +1104,43 @@ class TestWriteDiff(unittest.TestCase):
         self.assertEqual(len(archives), 2)
         self.assertTrue(all(p.is_file() for p in archives))
 
+    def test_archives_capped_at_max_diff_files(self):
+        """超限时按名排序裁掉最旧归档，仅保留最近 MAX_DIFF_FILES 份，
+        防止 data/diff（不入库的 CI 磁盘产物）无限膨胀。"""
+        import tempfile
+        from datetime import datetime, timezone
+
+        base = Path(tempfile.mkdtemp(prefix="dp_diff_cap_"))
+        base_dt = datetime(2026, 9, 2, 0, 0, 0, tzinfo=timezone.utc)
+
+        class _Clock:
+            now_calls = 0
+
+            @classmethod
+            def now(cls, tz=None):
+                cls.now_calls += 1
+                return base_dt.replace(microsecond=cls.now_calls * 1000)
+
+        buf = io.StringIO()
+        orig_dt = dp.datetime
+        orig_diff = dp.DIFF_DIR
+        try:
+            dp.datetime = _Clock
+            dp.DIFF_DIR = base
+            with unittest.mock.patch("sys.stdout", buf):
+                for i in range(dp.MAX_DIFF_FILES + 2):
+                    dp.write_diff([f"{i}:443#US"], [f"{i + 1}:443#US"])
+        finally:
+            dp.datetime = orig_dt
+            dp.DIFF_DIR = orig_diff
+
+        archives = sorted(
+            p.name for p in base.glob("*.json") if p.name != "latest.json"
+        )
+        self.assertEqual(len(archives), dp.MAX_DIFF_FILES)
+        self.assertNotIn("2026-09-02T00-00-00Z.000010", archives[0])
+        self.assertIn("2026-09-02T00-00-00Z.052000", archives[-1])
+
 
 class TestMirrorUrls(unittest.TestCase):
     def test_raw_url_yields_ordered_mirrors(self):
