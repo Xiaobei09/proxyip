@@ -396,6 +396,31 @@ class TestMergeNoteTokens(unittest.TestCase):
         self.assertEqual(once, merge_note_tokens(once, "CN", "CNH"))
         self.assertEqual(once.count("V6"), 1)
 
+    def test_best_isp_suffix_roundtrip_preserved(self):
+        """-移动=57ms 类最佳运营商后缀是『其他』段垫底 token：normalize_note
+        必须保序保留、不拆段、不撞延迟/速度正则，且 key/CN 判定不受影响。"""
+        from common import (
+            line_to_key, _note, has_token, _NOTE_LAT_RE, _NOTE_SPEED_RE,
+        )
+        samples = [
+            ("1.1.1.1:443#🇺🇸US-57ms-5.00MB/s-fast-V4-CN-移动=57ms",
+             "1.1.1.1:443#US"),
+            ("2.2.2.2:443#🇨🇳CN-236ms-≈2.0MB/s-fast-V6-CN-90-电信=81ms",
+             "2.2.2.2:443#CN"),
+            ("3.3.3.3:443#🇯🇵JP-328ms-RES-CN-62-U100-联通=120ms",
+             "3.3.3.3:443#JP"),
+        ]
+        for s, expect_key in samples:
+            out = normalize_note(s)
+            segs = out.split("#", 1)[-1].split("-") if "#" in out else []
+            for seg in segs:
+                if "=" in seg:
+                    self.assertFalse(_NOTE_LAT_RE.match(seg))
+                    self.assertFalse(_NOTE_SPEED_RE.match(seg))
+                    self.assertIn("ms", seg)
+            self.assertTrue(has_token(_note(out), "CN"))
+            self.assertEqual(line_to_key(out), expect_key)
+
 
 class TestBuildExitCcMap(unittest.TestCase):
     def test_upstream_by_entry_ip(self):
