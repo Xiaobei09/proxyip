@@ -269,7 +269,8 @@ def write_reputation_files(source_text: str, annotations: dict, rep_map: dict) -
 
     变体过滤信号（与 validate/build_good 共用）：
     - ``_verified``: speed.json（本轮全链路验证通过）
-    - ``_stable``:  china.json streak≥2（连续两轮大陆可达）
+    - ``_stable``:  china.json streak≥2（连续两轮大陆可达）且 flip≤1
+      （排除"可达↔不可达"慢性振荡源，见 common.load_china_stable_keys）
     根级 all_rep / all_rep_ltd / all_{g}_rep / all_{g}_rep_ltd 全覆盖；子目录
     产出 rep(+v/s)、rep_ltd(+v/s) 与 {g}_rep(_ltd) 单维度文件。源文件缺失
     时清理对应产物（空清单不落盘并清理上轮残留）。
