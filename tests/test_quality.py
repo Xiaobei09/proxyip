@@ -875,6 +875,14 @@ class TestReputation(unittest.TestCase):
         rep = qc.build_reputation_map(results, {}, self.W, deep)
         self.assertNotIn("a", rep)
 
+    def test_deep_speed_stale_produces_no_bonus(self):
+        """read_fresh 判过期返回 None → 消费端整链无带宽加分（组合契约）。"""
+        results = {"a": {"key": "a", "ip": "1.1.1.1"}}
+        risk_data = {"1.1.1.1": {"netcoffee": {"trust_score": 70}}}
+        rep = qc.build_reputation_map(results, risk_data, self.W, None)
+        self.assertEqual(rep["a"]["score"], 70)
+        self.assertNotIn("deep_bonus", rep["a"])
+
     def test_netcoffee_lookup_parsing(self):
         payload = (
             b'{"trust_score":61,"is_datacenter":true,"is_vpn":false,'
