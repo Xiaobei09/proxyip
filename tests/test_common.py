@@ -402,6 +402,27 @@ class TestBuildExitCcMap(unittest.TestCase):
         m = build_exit_cc_map({}, external, upstream)
         self.assertEqual(m["a:443#US"], "DE")
 
+    def test_external_countryCode_field_parsed(self):
+        # exit_geo 仅 countryCode（无 country）也应解析
+        from common import build_exit_cc_map
+        external = {"proxies": {
+            "a:443#US": {"exit_geo": {"countryCode": "FR"}},
+        }}
+        self.assertEqual(build_exit_cc_map({}, external, {})["a:443#US"], "FR")
+
+    def test_empty_external_geo_upstream_backfills(self):
+        # external 有行但 exit_geo 无值 → 仅候选，交给 upstream 按入口 IP 兜底
+        from common import build_exit_cc_map
+        external = {"proxies": {"b:443#US": {"exit_geo": {}}}}
+        upstream = {"proxies": {"b": {"country": "JP"}}}
+        self.assertEqual(build_exit_cc_map({}, external, upstream)["b:443#US"], "JP")
+
+    def test_bogus_external_geo_ignored(self):
+        # 三字母国家码非法 → 不产生幽灵键
+        from common import build_exit_cc_map
+        external = {"proxies": {"c:443#US": {"exit_geo": {"country": "SGP"}}}}
+        self.assertNotIn("c:443#US", build_exit_cc_map({}, external, {}))
+
 
 class TestRequestFollowBounded(unittest.TestCase):
     """``request_follow`` 的响应体读取须有墙钟截止与字节上限：上游无限滴灌
