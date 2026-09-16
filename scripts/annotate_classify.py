@@ -39,7 +39,7 @@ from common import (
 
 
 IP_TYPES = frozenset({"DC", "RES", "MOB", "PROXY"})
-FAMILY_TOKENS = frozenset({"V4", "V6", "DS"})
+FAMILY_MAP = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}
 
 
 def speed_tier(note: str) -> str:
@@ -169,7 +169,7 @@ def fill_and_classify(
     # 数据（family_map 缺该 key）时保持既有 token 不动（无侵入语义）。
     fav = family_map.get(key)
     if fav:
-        fam_token = {"ipv4": "V4", "ipv6": "V6", "dual": "DS"}.get(fav, "")
+        fam_token = FAMILY_MAP.get(fav, "")
         if fam_token:
             out = merge_note_tokens(clear_note_buckets(out, "family"), fam_token)
         else:
