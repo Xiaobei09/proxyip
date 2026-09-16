@@ -339,6 +339,21 @@ def _suppress_repeat(state: dict, alerts: list[str]) -> bool:
     return (time.time() - last_at) < ALERT_REPEAT_COOLDOWN_S
 
 
+def check_degraded_batch(meta_path: Path) -> str | None:
+    """quality_meta.json 的 ``skipped`` 非空 → 降级批告警（R201/R202）。
+
+    time-budget 穷尽时部分相位被跳过但 meta 照常生成且 ts 新鲜——单纯
+    时效检查无法发现「伪装成完整批的降级批」，故在此显式读 skipped。
+    """
+    meta = read_json(meta_path) or {}
+    skipped = meta.get("skipped")
+    if not isinstance(skipped, list) or not skipped:
+        return None
+    return "degraded batch: quality phases skipped: {}".format(
+        ", ".join(str(s) for s in skipped[:8])
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -394,6 +409,9 @@ def main(argv: list[str] | None = None) -> int:
         hours=QUALITY_META_HOURS,
         require_proxies=False,
     )
+    if a:
+        alerts.append(a)
+    a = check_degraded_batch(root / "data" / "quality" / "quality_meta.json")
     if a:
         alerts.append(a)
     a = check_artifact_stale(

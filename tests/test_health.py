@@ -24,6 +24,7 @@ from health_alert import (  # noqa: E402
     check_cn,
     check_cn_stale,
     check_countries,
+    check_degraded_batch,
     check_pool,
     check_sources,
     check_stale,
@@ -459,6 +460,43 @@ class TestBadgeSurfacing(unittest.TestCase):
             with unittest.mock.patch.object(ha.time, "time", return_value=self.ts):
                 rc = ha.main(["--data-dir", str(root), "--strict"])
             self.assertEqual(rc, 0)
+
+
+class TestCheckDegradedBatch(unittest.TestCase):
+    def _meta(self, td, skipped):
+        p = Path(td) / "quality_meta.json"
+        p.write_text(json.dumps({"ts": "2026-09-16T09:00:00Z", "skipped": skipped}))
+        return p
+
+    def test_alert_on_degraded(self):
+        with tempfile.TemporaryDirectory() as td:
+            alert = check_degraded_batch(self._meta(td, ["ip-api geo"]))
+        self.assertIsNotNone(alert)
+        self.assertIn("degraded batch", alert)
+        self.assertIn("ip-api geo", alert)
+
+    def test_no_alert_when_clean(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(check_degraded_batch(self._meta(td, [])))
+
+    def test_missing_or_malformed_skipped_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "quality_meta.json"
+            p.write_text(json.dumps({"ts": "2026-09-16T09:00:00Z"}))
+            self.assertIsNone(check_degraded_batch(p))
+            p.write_text("{")
+            self.assertIsNone(check_degraded_batch(p))
+
+    def test_wired_in_main(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "root"
+            (root / "data" / "quality").mkdir(parents=True)
+            (root / "data" / "quality" / "quality_meta.json").write_text(
+                json.dumps({"ts": "2026-09-16T09:00:00Z", "skipped": ["abuse scores"]})
+            )
+            with unittest.mock.patch.object(ha, "notify", unittest.mock.Mock()):
+                rc = ha.main(["--data-dir", str(root), "--strict"])
+            self.assertEqual(rc, 1)
 
 
 class TestCheckSources(unittest.TestCase):
