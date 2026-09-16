@@ -163,7 +163,7 @@ async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
         ipv4 = data.get("probe_results", {}).get("ipv4", {})
         ipv6 = data.get("probe_results", {}).get("ipv6", {})
         return {
-            "success": bool(data.get("success")),
+            "success": data.get("success") is True,
             "response_ms": data.get("responseTime"),
             "colo": data.get("colo"),
             "ipv4_ok": bool(ipv4.get("ok")),

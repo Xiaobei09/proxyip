@@ -277,3 +277,28 @@ class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
         # 已完成请求数/总量为 (0/3)，截断文案同时含子串与规模
         self.assertIn("truncated by time deadline", buf.getvalue())
         self.assertIn("(0/3)", buf.getvalue())
+
+
+class TestCheckExternalApiBoolGuard(unittest.IsolatedAsyncioTestCase):
+    """success 判定契约：仅 JSON 布尔 true 视为成功。
+
+    字符串 ``"false"``/``"true"``（部分 API 的字符串布尔）不得漂移成
+    成功判定；None/0/字符串均非显式 ``True``。
+    """
+
+    async def _run(self, payload: bytes) -> dict:
+        with unittest.mock.patch("quality_probe.fetch_with_deadline",
+                                 return_value=payload):
+            return await qp.check_external_api("1.2.3.4", "443", timeout=5)
+
+    def test_success_string_false_is_not_success(self):
+        res = asyncio.run(self._run(b'{"success": "false"}'))
+        self.assertIs(res["success"], False)
+
+    def test_success_real_true_is_success(self):
+        res = asyncio.run(self._run(b'{"success": true}'))
+        self.assertIs(res["success"], True)
+
+    def test_success_missing_is_false(self):
+        res = asyncio.run(self._run(b'{}'))
+        self.assertIs(res["success"], False)
