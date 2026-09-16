@@ -2297,6 +2297,48 @@ class TestReorgCountry(unittest.TestCase):
             self.assertIn("→EG", eg_lines[0])
             self.assertIn("#\U0001F1E6\U0001F1E8CA→EG", eg_lines[0])
 
+    def test_merge_ordered_preserves_sort_and_stable_order(self):
+        from reorg_country import _merge_ordered
+        existing = "a:443#US-10ms\nb:443#US-50ms\nc:443#US-999ms\n"
+        merged = _merge_ordered(existing, ["d:443#US-30ms", "e:443#US-no-ms"])
+        lines = merged.splitlines()
+        self.assertEqual(lines[0], "a:443#US-10ms")
+        self.assertEqual(lines[1], "d:443#US-30ms")
+        self.assertEqual(lines[2], "b:443#US-50ms")
+        self.assertEqual(lines[3], "c:443#US-999ms")
+        self.assertEqual(lines[4], "e:443#US-no-ms")
+
+    def test_merge_ordered_empty_target_starts_with_new(self):
+        from reorg_country import _merge_ordered
+        self.assertEqual(
+            _merge_ordered("", ["x:443#US-5ms"]),
+            "x:443#US-5ms\n",
+        )
+
+    def test_reorganize_all_moved_source_recreated(self):
+        """整文件全部线被移出（countries 源为目标不同 CC）时，源清空后 unlink，目标正常接管。"""
+        import json
+        import tempfile
+        from reorg_country import reorganize
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            valid = tmp_path / "data" / "valid"
+            countries = valid / "countries"
+            (countries / "CA").mkdir(parents=True)
+            (countries / "US").mkdir(parents=True)
+            (countries / "CA" / "all.txt").write_text("166.1.228.218:443#\U0001F1E6\U0001F1E8CA-10ms\n")
+            ipinfo = {"proxies": {
+                "166.1.228.218:443#CA": {"country_code": "US", "country_match": False},
+            }}
+            ipinfo_path = valid / "ipinfo.json"
+            ipinfo_path.write_text(json.dumps(ipinfo))
+            moved = reorganize(ipinfo_path, tmp_path / "data")
+            self.assertEqual(moved, 1)
+            self.assertFalse((countries / "CA" / "all.txt").exists())
+            self.assertIn(
+                "166.1.228.218", (countries / "US" / "all.txt").read_text()
+            )
+
 
 class TestFreshDeepSpeed(unittest.TestCase):
     def setUp(self):
