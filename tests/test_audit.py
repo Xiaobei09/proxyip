@@ -106,6 +106,11 @@ class TestAudit(unittest.TestCase):
             )
             self.assertEqual(out["total"], 2)
             self.assertIn("entry_unknown", out["summary"])
+            self.assertEqual(
+                set(out),
+                {"generated_at", "total", "summary", "proxies"},
+                msg="entry_audit.json 顶层字段契约漂移（data-spec:285）",
+            )
 
 
 if __name__ == "__main__":
