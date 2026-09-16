@@ -186,6 +186,29 @@ class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("3.3.3.3", out)  # 缺失项不得错位占用相邻键
         get.assert_not_called()
 
+    async def test_partial_batch_exception_keeps_success_skips_fallback(self):
+        """某 chunk 抛异常、其余成功（any_batch_ok）→ 只保成功 chunk，
+        失败 chunk 不触发 per-IP 兜底（deadline 止损优先，地理下轮补齐）。"""
+        ips = [f"1.0.0.{i}" for i in range(150)]
+        calls = {"n": 0}
+
+        def _batch(chunk):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("network down")
+            return [{"status": "success", "query": ip, "countryCode": "US"}
+                    for ip in chunk]
+
+        with unittest.mock.patch.object(
+            qp, "ipapi_batch_sync", side_effect=_batch,
+        ), unittest.mock.patch.object(qp, "ipapi_get_sync") as get:
+            out = await qp.batch_ipapi(ips)
+        self.assertEqual(calls["n"], 2)
+        self.assertIn("1.0.0.0", out)
+        self.assertIn("1.0.0.99", out)
+        self.assertEqual(len(out), 100)
+        get.assert_not_called()
+
     async def test_fallback_to_per_ip_when_batch_all_fail(self):
         with unittest.mock.patch.object(
             qp, "ipapi_batch_sync", side_effect=RuntimeError("network down"),
