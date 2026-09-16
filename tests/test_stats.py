@@ -344,6 +344,36 @@ class TestMain(unittest.TestCase):
                 self.assertTrue((out / f).exists(), f)
                 svg_ok((out / f).read_text())
 
+    def test_stats_json_contract_keys(self):
+        # stats.json 字段契约（对齐 docs/data-spec.md:138）
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            data_dir = base / "data"
+            (data_dir / "quality").mkdir(parents=True)
+            (data_dir / "valid").mkdir(parents=True)
+            (data_dir / "valid" / "meta.json").write_text(
+                json.dumps({
+                    "ts": "2026-09-16T01:00:00Z", "total": 100,
+                    "alive": 50, "dead": 50, "by_method": {"tls": 50},
+                })
+            )
+            out = base / "out"
+            rc = gs.main(["--data-dir", str(data_dir), "--out", str(out)])
+            self.assertEqual(rc, 0)
+            stats = json.loads((out / "stats.json").read_text())
+            self.assertEqual(
+                set(stats),
+                {"age_s", "alive", "alive_checked", "alive_countries",
+                 "alive_history_records", "alive_rate", "alive_sets",
+                 "cn_http", "cn_reachable", "cn_served", "cn_stable",
+                 "cn_ts", "countries", "country_mismatch", "dual_stack",
+                 "family", "history_records", "ip_type", "latency",
+                 "latency_dist", "ports", "sets", "speed", "speed_dist",
+                 "stale", "total", "ts", "unique", "updated_ago",
+                 "updated_at"},
+                msg="stats.json 字段契约漂移（docs/data-spec.md:138）",
+            )
+
     def test_missing_inputs_ok(self):
         with tempfile.TemporaryDirectory() as td:
             rc = gs.main(["--data-dir", td, "--out", td])
