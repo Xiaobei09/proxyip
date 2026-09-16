@@ -33,6 +33,18 @@ class TestParseSpeed(unittest.TestCase):
     def test_zero_speed(self):
         self.assertEqual(asrc._parse_speed("1.2.3.4:443#US-0MB/s"), 0.0)
 
+    def test_estimated_speed_rejected(self):
+        """CN 视图 ≈ 估算 token 不得冒充实测均值（R50 同款误匹配防护）。"""
+        self.assertIsNone(
+            asrc._parse_speed("1.2.3.4:443#US-120ms-≈2.5MB/s-CN")
+        )
+        self.assertIsNone(
+            asrc._parse_speed("1.2.3.4:443#US-≈1MB/s")
+        )
+        self.assertAlmostEqual(
+            asrc._parse_speed("1.2.3.4:443#US-120ms-12.50MB/s-CN"), 12.50
+        )
+
 
 class TestParseCc(unittest.TestCase):
     def test_standard(self):

@@ -36,7 +36,16 @@ def _parse_latency(line: str) -> float | None:
 
 
 def _parse_speed(line: str) -> float | None:
-    """Extract speed in MB/s from a proxy line (e.g. ``-0.44MB/s``)."""
+    """Extract speed in MB/s from a proxy line (e.g. ``-0.44MB/s``).
+
+    拒绝 ``≈`` 前缀的**估算** token（CN 视图 ``≈XMB/s`` 是大陆估算，未实测，
+    不得冒充实测均值）；实测行内为 ``-12.50MB/s`` 形态。
+    """
+    idx = line.find("MB/s") if "MB/s" in line else -1
+    if idx < 0:
+        return None
+    if "≈" in line[:idx]:
+        return None
     m = SPEED_RE.search(line)
     return float(m.group(1)) if m else None
 
