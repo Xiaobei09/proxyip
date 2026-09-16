@@ -357,7 +357,7 @@ python3 scripts/generate_fingerprint.py -n 1 -s 42 --pretty
 | `exit_family.json` | IP 家族 token（V4/V6/DS） |
 | `external_check.json` | 出口国标记 →CC（优先级最高） |
 | `upstream_meta.json` | 出口国标记 →CC（CF Worker 观测） |
-| `uptime.json` | 滚动可用率 token `-U<NN>`（7d 存活率） |
+| `uptime.json` | 滚动可用率 token `-U<NN>`（`pct7` 存活率四舍五入取整，来源 `uptime.py`：分母=窗口内实际有质量轮的天数） |
 
 **分类 token**：
 
