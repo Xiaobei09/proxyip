@@ -2970,5 +2970,33 @@ class TestBuildAnnotations(unittest.TestCase):
         })
 
 
+class TestRepParsers(unittest.TestCase):
+    """quality_reputation 的纯解析函数（abuse 分数与 ASN 归一）契约锁。"""
+
+    def test_abuser_score_numeric(self):
+        self.assertEqual(qr.parse_abuser_score(0.0039), 0.0039)
+        self.assertEqual(qr.parse_abuser_score(7), 7.0)
+
+    def test_abuser_score_string_label(self):
+        self.assertEqual(qr.parse_abuser_score("0.0039 (Low)"), 0.0039)
+        self.assertEqual(qr.parse_abuser_score("2.5 (High)"), 2.5)
+
+    def test_abuser_score_invalid_none(self):
+        self.assertIsNone(qr.parse_abuser_score("(Low)"))
+        self.assertIsNone(qr.parse_abuser_score("not-a-number"))
+        self.assertIsNone(qr.parse_abuser_score(None))
+
+    def test_norm_asn_variants(self):
+        self.assertEqual(qr.norm_asn("AS15169"), "AS15169")
+        self.assertEqual(qr.norm_asn("15169"), "AS15169")
+        self.assertEqual(qr.norm_asn("as3310"), "AS3310")
+        self.assertEqual(qr.norm_asn("ASN15169"), "AS15169")
+
+    def test_norm_asn_invalid_none(self):
+        self.assertIsNone(qr.norm_asn("garbage"))
+        self.assertIsNone(qr.norm_asn(None))
+        self.assertIsNone(qr.norm_asn(""))
+
+
 if __name__ == "__main__":
     unittest.main()
