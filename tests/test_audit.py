@@ -7,7 +7,14 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from audit_entry_cc import CF_ASN, audit, classify, is_literal_ip
+from audit_entry_cc import (
+    CF_ASN,
+    audit,
+    classify,
+    is_literal_ip,
+    load_entry_geo_cache,
+    save_entry_geo_cache,
+)
 
 
 class TestIsLiteralIp(unittest.TestCase):
@@ -41,6 +48,88 @@ class TestClassify(unittest.TestCase):
     def test_entry_unknown(self):
         for geo in (None, {}, {"cc": None, "asn": 1}):
             self.assertEqual(classify("US", geo, None), "entry_unknown")
+
+
+class TestEntryGeoCache(unittest.TestCase):
+    def _qdir(self, td):
+        qdir = Path(td) / "quality"
+        qdir.mkdir(parents=True)
+        return qdir
+
+    def test_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            qdir = self._qdir(td)
+            src = {"1.1.1.1": {"cc": "US", "asn": 13335},
+                   "2606:4700::1": {"cc": "DE", "asn": 13335}}
+            save_entry_geo_cache(qdir / "entry_geo.json", src)
+            got = load_entry_geo_cache(qdir / "entry_geo.json")
+        self.assertEqual(got, src)
+
+    def test_missing_and_corrupt(self):
+        with tempfile.TemporaryDirectory() as td:
+            qdir = self._qdir(td)
+            (qdir / "entry_geo.json").write_text("{bad", encoding="utf-8")
+            self.assertEqual(load_entry_geo_cache(qdir / "entry_geo.json"), {})
+            self.assertEqual(load_entry_geo_cache(qdir / "no_such.json"), {})
+
+    def test_cached_ip_not_re_queried(self):
+        """缓存命中即不重查 ip-api；仅缺失 IP 进入 lookup_geo。"""
+        from audit_entry_cc import audit as run_audit
+
+        with tempfile.TemporaryDirectory() as td:
+            qdir = self._qdir(td)
+            (qdir / "entry_geo.json").write_text(json.dumps({
+                "updated_at": "2026-09-16T00:00:00Z",
+                "ips": {"1.1.1.1": {"cc": "US", "asn": 1234}},
+            }), encoding="utf-8")
+            src = Path(td) / "valid" / "all.txt"
+            src.parent.mkdir(parents=True)
+            src.write_text(
+                "1.1.1.1:443#US-10ms\n2.2.2.2:443#US-10ms\n",
+                encoding="utf-8",
+            )
+            with mock.patch(
+                "audit_entry_cc.lookup_geo",
+                return_value={"2.2.2.2": {"cc": "US", "asn": 9}},
+            ) as lg:
+                report = run_audit(src, qdir, timeout=10, delay=0)
+            lg.assert_called_once_with(["2.2.2.2"], timeout=10, delay=0)
+            self.assertEqual(
+                report["proxies"]["1.1.1.1:443#US"]["entry_geo"], "US"
+            )
+            self.assertEqual(
+                report["proxies"]["2.2.2.2:443#US"]["entry_geo"], "US"
+            )
+            cached = json.loads(
+                (qdir / "entry_geo.json").read_text(encoding="utf-8")
+            )["ips"]
+            self.assertIn("1.1.1.1", cached)
+            self.assertIn("2.2.2.2", cached)
+
+
+class TestAuditEndToEndCacheWritten(unittest.TestCase):
+    def test_audit_creates_entry_geo_cache(self):
+        from audit_entry_cc import audit as run_audit
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            qdir = base / "quality"
+            qdir.mkdir(parents=True)
+            (base / "valid").mkdir(parents=True)
+            src = base / "valid" / "all.txt"
+            src.write_text("1.1.1.1:443#US-10ms\n", encoding="utf-8")
+            with mock.patch(
+                "audit_entry_cc.lookup_geo",
+                return_value={"1.1.1.1": {"cc": "US", "asn": 1234}},
+            ):
+                report = run_audit(src, qdir, timeout=10, delay=0)
+            self.assertEqual(report["proxies"]["1.1.1.1:443#US"]["asn"], 1234)
+            cache_file = qdir / "entry_geo.json"
+            self.assertTrue(cache_file.exists())
+            self.assertIn(
+                "1.1.1.1",
+                json.loads(cache_file.read_text(encoding="utf-8"))["ips"],
+            )
 
 
 class TestAudit(unittest.TestCase):
@@ -86,8 +175,6 @@ class TestAudit(unittest.TestCase):
                              ["5.5.5.5:443#US"]["entry_ip"], "5.5.5.5")
 
     def test_main_writes_entry_audit(self):
-        """main() 把 report 落到 quality/entry_audit.json（workflow 消费物）。
-        缺 ipinfo/external/upstream/exit_family 用空 {}（read_json 容错）。"""
         from audit_entry_cc import main as run_main
 
         with tempfile.TemporaryDirectory() as td:

@@ -19,7 +19,8 @@
 - ``entry_unknown`` 入口 geo 查询失败
 
 结果写 ``data/quality/entry_audit.json`` 并打印汇总；只读不改行，
-不影响任何门控。
+不影响任何门控。入口地理以 ``data/quality/entry_geo.json`` 缓存按轮复用，
+仅对缺失 IP 发 ip-api 查询（入口 geo 近乎静态，省 ~185 批/轮外部依赖）。
 
 Usage::
 
@@ -50,6 +51,37 @@ IPAPI_BATCH_URL = "http://ip-api.com/batch"
 IPAPI_BATCH_SIZE = 100
 IPAPI_BATCH_DELAY = 1.5
 CF_ASN = 13335
+ENTRY_GEO_CACHE = "entry_geo.json"
+
+
+def load_entry_geo_cache(path: Path | None) -> dict[str, dict]:
+    """读取入口 geo 缓存 ``{ip: {"cc": .., "asn": ..}}``（畸形/缺失 → 空）。"""
+    if path is None:
+        return {}
+    data = read_json(path) or {}
+    ips = data.get("ips") or {}
+    if not isinstance(ips, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for k, v in ips.items():
+        if not isinstance(v, dict):
+            continue
+        cc = v.get("cc")
+        out[k] = {"cc": cc if isinstance(cc, str) and cc else None,
+                  "asn": v.get("asn")}
+    return out
+
+
+def save_entry_geo_cache(path: Path, cache: dict[str, dict]) -> None:
+    """持久化当前批入口 geo；format 稳定（data-spec 消费物由脚本重生成）。"""
+    write_text_if_changed(
+        path,
+        json.dumps({
+            "updated_at": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds"),
+            "ips": cache,
+        }, ensure_ascii=False, indent=1) + "\n",
+    )
 
 
 def is_literal_ip(host: str) -> bool:
@@ -151,11 +183,16 @@ def audit(source: Path, quality_dir: Path, timeout: int, delay: float) -> dict:
             pending_ips.add(host)
         rows.append(row)
 
-    geo_map = lookup_geo(sorted(pending_ips), timeout=timeout, delay=delay) \
-        if pending_ips else {}
+    geo = load_entry_geo_cache(quality_dir / ENTRY_GEO_CACHE)
+    missing = pending_ips - set(geo)
+    if missing:
+        fresh = lookup_geo(sorted(missing), timeout=timeout, delay=delay) \
+            if missing else {}
+        geo.update(fresh)
+    save_entry_geo_cache(quality_dir / ENTRY_GEO_CACHE, geo)
     for row in rows:
         if row["verdict"] is None:
-            g = geo_map.get(row["entry_ip"])
+            g = geo.get(row["entry_ip"])
             row["entry_geo"] = (g or {}).get("cc")
             row["asn"] = (g or {}).get("asn")
             row["verdict"] = classify(row["listed"], g, row["exit_cc"])
