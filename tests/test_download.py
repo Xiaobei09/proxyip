@@ -1290,6 +1290,17 @@ class TestBuildSourceStats(unittest.TestCase):
         self.assertEqual(stats["main (zip.cm.edu.kg)"]["unique"], 1)
         self.assertEqual(stats["a"]["overlap"], 0)
 
+    def test_unique_plus_overlap_equals_total(self):
+        stats = dp._build_source_stats(
+            {"1.1.1.1", "5.5.5.5", "7.7.7.7"},
+            {"sA": {"9.9.9.9", "5.5.5.5"}, "sB": {"7.7.7.7", "9.9.9.9", "1.1.1.1"}},
+            {"1.1.1.1", "5.5.5.5", "7.7.7.7", "9.9.9.9"},
+        )
+        for label, row in stats.items():
+            self.assertEqual(row["unique"] + row["overlap"], row["total"], label)
+            for k in ("total", "unique", "overlap"):
+                self.assertGreaterEqual(row[k], 0, label)
+
 
 class TestAppendSourceHistory(unittest.TestCase):
     def _patch(self, td):
