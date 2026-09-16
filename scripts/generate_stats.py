@@ -39,7 +39,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import DATA_DIR, OUTPUT_DIR, line_to_key, now_ts, read_json, write_text_if_changed
+from common import (
+    CN_SPEED_BASE_CAP,
+    CN_SPEED_FLOOR,
+    CN_SPEED_REF_MS,
+    DATA_DIR,
+    OUTPUT_DIR,
+    line_to_key,
+    now_ts,
+    read_json,
+    write_text_if_changed,
+)
 
 SPEED_NOTE_RE = re.compile(r"(\d+(?:\.\d+)?)MB/s")
 
@@ -879,13 +889,21 @@ def build_cn(china_data: dict) -> str:
             continue
         lat = sorted(st["ms"])
         med = lat[len(lat) // 2]
-        label = f"{isp}  {st['reachable']}/{st['sampled']}  min{lat[0]:.0f}/med{med:.0f}ms"
+        # 速度按各运营商自身中位 RTT 推算单流参考上限（与 common._rewrite_cn_speed
+        # 同一估算，仅供跨运营商横向对比；无真实吞吐测量，故标注 ≈/上限）。
+        spd = max(
+            CN_SPEED_FLOOR, CN_SPEED_BASE_CAP * (CN_SPEED_REF_MS / med)
+        )
+        label = (
+            f"{isp}  可达 {st['reachable']}/{st['sampled']}  "
+            f"min{lat[0]:.0f}/med{med:.0f}ms  ≈{spd:.1f}MB/s"
+        )
         items.append((label, st["reachable"]))
     if not items:
         return empty_svg(text="暂无分运营商可达性数据")
     return plot_hbars(
         items, color=COLOR_ALIVE,
-        title="大陆可达性（分运营商：可达/覆盖，min/中位延迟 ms）",
+        title="大陆可达性（分运营商：可达/覆盖 · 延迟 min/med · 速度参考上限）",
     )
 
 

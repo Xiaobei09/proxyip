@@ -240,10 +240,11 @@ class TestBuilders(unittest.TestCase):
         }
         svg = gs.build_cn(data)
         svg_ok(svg)
-        # 可达/覆盖 + min/med 均入标签
-        self.assertIn("中国移动  2/3", svg)
+        # 可达/覆盖 + min/med + 速度参考上限均入标签（三运营商分别计算）
+        self.assertIn("中国移动  可达 2/3", svg)
         self.assertIn("44", svg)
-        self.assertIn("中国电信  1/1", svg)
+        self.assertIn("中国电信  可达 1/1", svg)
+        self.assertIn("MB/s", svg)
 
     def test_cn_7d_window_and_series(self):
         hist = [
