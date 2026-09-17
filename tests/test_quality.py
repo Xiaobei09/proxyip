@@ -1024,6 +1024,48 @@ class TestReputation(unittest.TestCase):
         self.assertIn("cap-truncated 4", out)
         self.assertEqual(len(risk), 2)
 
+    def test_batch_cap_priority_unseen_first(self):
+        """R258：cap 压力下优先查询从未有过信号的 IP。
+
+        有旧缓存（过期、fallback 可用）的 IP 被截断时仍有兜底注入；绝无
+        信号的新 IP 被截断则本轮完全无该源覆盖。排序让「无兜底新 IP」排
+        前，cap=1 时应只查新 IP、旧 IP 走 stale fallback。"""
+        args = argparse.Namespace(
+            reputation_sources=["dnsbl"],
+            no_rep_cache=False, rep_cache_ttl=604800,
+            getipintel_email="",
+        )
+        stale_ts = time.time() - 1_000_000  # 远超 7 天 TTL → 过期
+        seed = {
+            "10.0.0.1": {  # 有旧缓存（过期但有信号 → fallback）
+                "dnsbl": {"ts": stale_ts,
+                          "data": {"is_listed": True, "dnsbl_code": 2}},
+            },
+        }
+        calls = []
+
+        def stub(ip):
+            calls.append(ip)
+            return {"is_listed": True, "dnsbl_code": 2}
+
+        with unittest.mock.patch.object(qr, "load_rep_cache",
+                                        return_value=seed), \
+             unittest.mock.patch.object(qr, "save_rep_cache",
+                                        lambda _c: None), \
+             unittest.mock.patch.object(qr, "DNSBL_ZEN_CAP", 1), \
+             unittest.mock.patch.object(qr, "dnsbl_lookup_sync",
+                                        side_effect=stub), \
+             contextlib.redirect_stdout(io.StringIO()) as buf:
+            risk = asyncio.run(
+                qr.lookup_all_risk(["10.0.0.1", "10.0.0.2"], args))
+        # 只查了从未有信号的 10.0.0.2；10.0.0.1 未在线补查。
+        self.assertEqual(calls, ["10.0.0.2"])
+        self.assertIn("2 queried, 1 resolved", buf.getvalue())
+        self.assertIn("cap-truncated 1", buf.getvalue())
+        # 旧信号以 fallback 注入，10.0.0.1 仍出信号而不丢覆盖。
+        self.assertIn("dnsbl", risk.get("10.0.0.1", {}))
+        self.assertIn("dnsbl", risk.get("10.0.0.2", {}))
+
     def test_new_rep_abuse_sources_vote_abuse(self):
         """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
         for name in ("c2_tracker", "botscout", "greensnow"):
@@ -2248,6 +2290,8 @@ class TestReputationCache(unittest.TestCase):
     def test_cache_expired_requeries(self):
         # 用与运行时一致的 per-source schema，真正验证「过期 → 重查」语义：
         # 1.1.1.1 过期须重查；8.8.8.8 仍新鲜则不重查。
+        # R258：cap 压力下无兜底/从未见过的 2.2.2.2 优先于有旧兜底的
+        # 1.1.1.1 查询（本用例无 cap，顺序仍体现该优先级排序）。
         now = time.time()
         qc.save_rep_cache({
             "1.1.1.1": {"netcoffee": {"ts": now - 2 * 604800, "data": {"risk": "low"}}},
@@ -2262,7 +2306,7 @@ class TestReputationCache(unittest.TestCase):
             ))
         finally:
             qr.netcoffee_lookup_sync = orig
-        self.assertEqual(calls, ["1.1.1.1", "2.2.2.2"])
+        self.assertEqual(calls, ["2.2.2.2", "1.1.1.1"])
         self.assertEqual(len(calls), 2)
 
     def test_negative_signal_cached_and_not_requeried(self):

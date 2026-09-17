@@ -2457,6 +2457,10 @@ async def lookup_all_risk(
                isinstance(src_entry.get("data"), dict) and src_entry["data"]:
                 fallback[ip] = src_entry["data"]
             need.append(ip)
+        # cap 压力（首轮回填/缓存大面积失效）下优先查询「从未有过信号」的
+        # IP（无兜底：跳过即本轮完全无该源覆盖）；过期但有旧信号的 IP 保
+        # 底仍在（fallback 注入、下轮补查），放到队尾等截断时被优先让位。
+        need.sort(key=lambda ip: ip in fallback)
         res = await batch_sync(
             need, fn, cap=cap, workers=workers, delay=delay, deadline=deadline
         )
