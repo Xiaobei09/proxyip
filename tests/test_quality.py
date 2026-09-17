@@ -1000,6 +1000,30 @@ class TestReputation(unittest.TestCase):
             asyncio.run(qr.lookup_all_risk(["1.1.1.1"], args))
         self.assertIn("all empty", buf2.getvalue())
 
+    def test_batch_cap_truncation_reported(self):
+        """R257：cap 截断可见性——need>cap 时日志带 cap-truncated N。
+
+        缓存大面积失效/退出池增长时，dnsbl(12000) 等带 cap 源会静默只查
+        前 cap 个 IP；此前日志报的是传入 need 数，截断不可见，审计会误判
+        覆盖率。现在多余量显式标出，且返回集确实只含前 cap 个。"""
+        args = argparse.Namespace(
+            reputation_sources=["dnsbl"],
+            no_rep_cache=True, rep_cache_ttl=0, getipintel_email="",
+        )
+        ips = [f"10.0.{i}.{j}" for i in range(2) for j in (1, 2, 3)]
+        with unittest.mock.patch.object(qr, "DNSBL_ZEN_CAP", 2), \
+             unittest.mock.patch.object(
+                 qr, "dnsbl_lookup_sync",
+                 side_effect=lambda ip: {"is_listed": True, "dnsbl_code": 2}
+             ), \
+             contextlib.redirect_stdout(io.StringIO()) as buf:
+            risk = asyncio.run(qr.lookup_all_risk(ips, args))
+        out = buf.getvalue()
+        self.assertIn("Reputation source dnsbl:", out)
+        self.assertIn("6 queried", out)
+        self.assertIn("cap-truncated 4", out)
+        self.assertEqual(len(risk), 2)
+
     def test_new_rep_abuse_sources_vote_abuse(self):
         """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
         for name in ("c2_tracker", "botscout", "greensnow"):
