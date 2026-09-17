@@ -201,17 +201,19 @@ class TestBatchSyncDeadline(unittest.TestCase):
         self.assertEqual(len(called), 2)
 
     def test_expired_deadline_skips_retry(self):
-        failed_once = {"pl": ["1.1.1.1"]}
+        calls = []
         async def run():
             return await qr.batch_sync(
                 ["1.1.1.1"],
-                lambda ip: None,
+                lambda ip: calls.append(ip) or None,
                 deadline=time.monotonic() + 30,
                 delay=0,
-                retries=0,
+                retries=1,
             )
         res = asyncio.run(run())
-        self.assertEqual(res, {})
+        # None=成功响应但无信号：记录但**不重试**（R238 语义）
+        self.assertEqual(res, {"1.1.1.1": None})
+        self.assertEqual(calls, ["1.1.1.1"])
 
 
 class TestBuildIpinfo(unittest.TestCase):
@@ -1817,6 +1819,54 @@ class TestReputationCache(unittest.TestCase):
             qr.netcoffee_lookup_sync = orig
         self.assertEqual(calls, ["1.1.1.1", "2.2.2.2"])
         self.assertEqual(len(calls), 2)
+
+    def test_negative_signal_cached_and_not_requeried(self):
+        # R238：源返回 None（成功但无信号，如 greynoise 干净 IP）须写入负缓存
+        # 哨兵 data:{}，TTL 内下轮不再重查，且不进入 risk_data（不改共识面）。
+        calls = []
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), None)[1]
+        try:
+            first = asyncio.run(qc.lookup_all_risk(["1.1.1.1"], self._args()))
+            n1 = len(calls)
+            second = asyncio.run(qc.lookup_all_risk(["1.1.1.1"], self._args()))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        self.assertEqual(n1, 1)
+        self.assertEqual(len(calls), 1)  # 第二轮命中负缓存，未重查
+        self.assertNotIn("netcoffee", first.get("1.1.1.1", {}))
+        self.assertNotIn("netcoffee", second.get("1.1.1.1", {}))
+        cache = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))["proxies"]
+        self.assertEqual(cache["1.1.1.1"]["netcoffee"]["data"], {})
+
+    def test_negative_signal_not_retried(self):
+        # 无信号不是失败：不应触发 batch_sync 重试（旧行为会重查 2 次）。
+        calls = []
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), None)[1]
+        try:
+            asyncio.run(qc.lookup_all_risk(["1.1.1.1"], self._args()))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        self.assertEqual(calls, ["1.1.1.1"])
+
+    def test_negative_cache_refresh_failure_no_false_signal(self):
+        # 负缓存过期后刷新失败：兜底不得把空哨兵 {} 当作真实信号注入。
+        now = time.time()
+        qc.save_rep_cache({
+            "1.1.1.1": {"netcoffee": {"ts": now - 2 * 604800, "data": {}}},
+        })
+        orig = qr.netcoffee_lookup_sync
+
+        def boom(ip):
+            raise RuntimeError("api down")
+
+        qr.netcoffee_lookup_sync = boom
+        try:
+            out = asyncio.run(qc.lookup_all_risk(["1.1.1.1"], self._args()))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        self.assertNotIn("netcoffee", out.get("1.1.1.1", {}))
 
     def test_stale_fallback_on_refresh_failure(self):
         # 过期 + 刷新失败 → 回退使用最近缓存信号（不因过期而丢弃），

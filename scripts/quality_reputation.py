@@ -1203,6 +1203,11 @@ async def batch_sync(
     新开探测任务，已提交任务正常收尾。补齐 D-42 遗漏的 reputation 相位
     ——geo/abuse 已有 deadline，rep 的循环分批此前只受 per-call 超时约束，
     缓存大面积失效时会把后处理拖过 120min job 硬杀。
+
+    返回 ``{ip: signal}``：``signal is None`` 表示**成功响应但无信号**
+    （如 greynoise 对干净 IP 返回 404/clean、ip2location 非代理），与
+    **抛异常的失败**语义不同——只有失败才重试，无信号不重试（R238：此前
+    二者混同，导致干净 IP 每轮被重查且无法负缓存）。
     """
     items = list(dict.fromkeys(ips))
     if cap > 0:
@@ -1227,13 +1232,16 @@ async def batch_sync(
                 return
             try:
                 res = await asyncio.to_thread(fn, ip)
+                ok = True
             except Exception as exc:
                 logging.debug("batch_sync: %s failed: %s", ip, err_name(exc))
                 res = None
+                ok = False
             if deadline is not None and time.monotonic() >= deadline:
                 failed.append(ip)
                 return
-            if res is not None:
+            if ok:
+                # None=成功响应但无信号：记录（供负缓存）但不重试
                 out[ip] = res
                 await asyncio.sleep(delay)
             else:
@@ -2119,25 +2127,34 @@ async def lookup_all_risk(
         delay: float = REP_DELAY,
     ) -> None:
         """Fill from fresh cache; stale entries are re-queried but kept as a
-        fallback (used if the refresh fails) instead of being dropped."""
+        fallback (used if the refresh fails) instead of being dropped.
+
+        R238 负缓存：成功响应但无信号（``signal is None``，如 greynoise 对
+        干净 IP）存 ``data: {}`` 哨兵，TTL 内不再重查；空字典在读取与兜底
+        时都被视为「已知无信号」，不进入 ``risk_data``（不改变共识投票面）。
+        """
         need = []
         fallback = {}
         for ip in uniq:
             sig = cached_signal(cache, ip, name, now, cache_ttl)
             if sig is not None:
-                put(name, ip, sig)
+                if sig:
+                    put(name, ip, sig)
                 continue
             src_entry = cache.get(ip, {}).get(name)
             if isinstance(src_entry, dict) and \
-               isinstance(src_entry.get("data"), dict):
+               isinstance(src_entry.get("data"), dict) and src_entry["data"]:
                 fallback[ip] = src_entry["data"]
             need.append(ip)
         res = await batch_sync(
             need, fn, cap=cap, workers=workers, delay=delay, deadline=deadline
         )
         for ip, sig in res.items():
-            put(name, ip, sig)
             entry = cache.setdefault(ip, {})
+            if sig is None:
+                entry[name] = {"ts": now, "data": {}}
+                continue
+            put(name, ip, sig)
             entry[name] = {"ts": now, "data": sig}
         for ip, sig in fallback.items():
             if ip not in res:
