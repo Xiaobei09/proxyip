@@ -912,6 +912,35 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIn("dns.google", calls[0])
 
+    def test_doh_sticky_thread_safe(self):
+        """R262：并发读 stale/写 sticky 不得 IndexError，长度恒 ≤1。
+
+        list 无锁时「读到 stale 后 pop()」与他线程 pop 交错会抛
+        IndexError，使一次 DoH 查询白白失败并触发重试。多线程压测
+        helper 验证加锁后无异常且始终收敛为单条。
+        """
+        import threading as _th
+        qr._DOH_STICKY.clear()
+        qr._DOH_STICKY.append((qr.DNSBL_DOH_ENDPOINTS[0], 0.0))
+        errs = []
+
+        def worker():
+            try:
+                for _ in range(300):
+                    qr._doh_sticky_order()
+                    qr._doh_sticky_record(qr.DNSBL_DOH_ENDPOINTS[-1])
+            except Exception as exc:  # noqa: BLE001
+                errs.append(exc)
+
+        ts = [_th.Thread(target=worker) for _ in range(8)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        self.assertEqual(errs, [])
+        self.assertLessEqual(len(qr._DOH_STICKY), 1)
+        qr._DOH_STICKY.clear()
+
     def test_abuseipdb_public_source_registered(self):
         """R251：abuseipdb_public 公共黑名单默认启用、有权重/静态分。"""
         self.assertIn("abuseipdb_public", qc.DEFAULT_REP_SOURCES)

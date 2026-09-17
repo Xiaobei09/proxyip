@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -99,6 +100,31 @@ DNSBL_DOH_ENDPOINTS = (
 # 失败自动回落其余端点（避免每次查询都先空等一个慢/死端点超时）。
 _DOH_STICKY: list = []
 _DOH_STICKY_TTL = 600
+# dnsbl 以多 worker 并发查询，sticky 列表的读/过期/写入必须加锁：否则
+# 「读到 stale 后 pop」与他线程的 pop/append 交错可致 IndexError（浪费
+# 一次查询并触发重试），或让长度短暂无界。
+_DOH_STICKY_LOCK = threading.Lock()
+
+
+def _doh_sticky_order() -> tuple:
+    """优先端点的有序回退序列（sticky 命中则置顶）。线程安全。"""
+    with _DOH_STICKY_LOCK:
+        if not _DOH_STICKY:
+            return DNSBL_DOH_ENDPOINTS
+        ep, until = _DOH_STICKY[-1]
+        if time.time() < until:
+            return (ep,) + tuple(
+                e for e in DNSBL_DOH_ENDPOINTS if e != ep)
+        _DOH_STICKY.pop()
+        return DNSBL_DOH_ENDPOINTS
+
+
+def _doh_sticky_record(base: str) -> None:
+    """记录最近成功端点（仅保留一条）。线程安全。"""
+    with _DOH_STICKY_LOCK:
+        _DOH_STICKY.append((base, time.time() + _DOH_STICKY_TTL))
+        if len(_DOH_STICKY) > 1:
+            del _DOH_STICKY[:-1]
 # AbuseIPDB 公共黑名单（近 30 天、置信度高的滥用举报 IP/CIDR，社区镜像，
 # GitHub 原始 + jsDelivr 镜像可回退）。独立于本仓库 key 版滥用相位。
 ABUSEIPDB_PUBLIC_URL = (
@@ -1087,13 +1113,7 @@ def _doh_query(name: str, qtype: str = "A") -> list:
     同批 IP 序列优先复用，避免每个查询都先空等一个慢/死端点拉满
     ``DNSBL_TIMEOUT``；命中端点后续失效时会自动回落其余端点并重选。
     """
-    order = DNSBL_DOH_ENDPOINTS
-    if _DOH_STICKY:
-        ep, until = _DOH_STICKY[-1]
-        if time.time() < until:
-            order = (ep,) + tuple(e for e in DNSBL_DOH_ENDPOINTS if e != ep)
-        else:
-            _DOH_STICKY.pop()
+    order = _doh_sticky_order()
     last = None
     for base in order:
         url = f"{base}?name={urllib.parse.quote(name)}&type={qtype}"
@@ -1116,9 +1136,7 @@ def _doh_query(name: str, qtype: str = "A") -> list:
         answers = [str(a.get("data"))
                    for a in (data.get("Answer") or [])
                    if isinstance(a, dict) and a.get("data")]
-        _DOH_STICKY.append((base, time.time() + _DOH_STICKY_TTL))
-        if len(_DOH_STICKY) > 1:
-            _DOH_STICKY.pop(0)
+        _doh_sticky_record(base)
         return answers
     raise last if last else RuntimeError("doh: no endpoints")
 
