@@ -48,6 +48,7 @@ import logging
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -519,7 +520,32 @@ def _within_budget(start: float, budget: int) -> bool:
     return budget <= 0 or time.monotonic() - start < budget
 
 
+def ensure_worker_executor(workers: int) -> int:
+    """放大事件循环默认 executor，使配置的并发真正生效。
+
+    ``asyncio.to_thread`` 默认走 loop 的 default executor，其线程数为
+    ``min(32, cpu+4)``——GitHub runner（2-4 核）上仅 ~8 线程，远低于探针
+    ``--workers``（60）与信誉各源 semaphore 之和。于是所有阻塞型 HTTP
+    查询被这个小池串行化：占绝大多数的快速请求还好，但少量失效代理要等
+    满 ``check_external_api`` 的 30s 超时，串行尾巴会把相位拖到预算上限
+    （实证：18243 探针中最后 ~600 个吃掉 62min）。这里按 I/O 密集场景放大
+    默认池（线程多 > 核数无妨），让 semaphore 成为真实并发上限。
+
+    返回最终线程数。
+    """
+    want = max(64, workers * 2)
+    loop = asyncio.get_running_loop()
+    current = getattr(loop, "_default_executor", None)
+    if current is not None and getattr(current, "_max_workers", 0) >= want:
+        return current._max_workers
+    loop.set_default_executor(
+        ThreadPoolExecutor(max_workers=want, thread_name_prefix="qworker")
+    )
+    return want
+
+
 async def run(args: argparse.Namespace) -> int:
+    print(f"Worker executor: {ensure_worker_executor(args.workers)} threads")
     if not args.source.exists():
         print(f"Error: {args.source} not found", file=sys.stderr)
         return 1

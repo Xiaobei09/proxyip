@@ -1347,6 +1347,16 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(score, 37)
         self.assertEqual(sorted(flagged), ["abuse", "proxy"])
 
+    def test_ensure_worker_executor_sizes_default_pool(self):
+        async def scenario():
+            first = qc.ensure_worker_executor(60)
+            second = qc.ensure_worker_executor(4)
+            return first, second
+
+        first, second = asyncio.run(scenario())
+        self.assertGreaterEqual(first, 64)
+        self.assertEqual(first, second)
+
     def test_ffraud_lookup_parsing(self):
         payload = (
             b'{"fraud_score":0,"risk":"none","proxy":false,"vpn":false,'
