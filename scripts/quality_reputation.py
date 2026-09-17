@@ -105,6 +105,8 @@ ABUSEIPDB_PUBLIC_URL = (
     "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/"
     "abuseipdb-s100-30d.ipv4"
 )
+# ~8.2MB 是静态源中体量最大的：放宽容限避免慢网统一 15s 超时 fail-open。
+ABUSEIPDB_PUBLIC_TIMEOUT = 45
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
 FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
@@ -900,7 +902,8 @@ async def fetch_abuseipdb_public() -> IpSet:
     不同上游（AbuseIPDB 社区举报），提供「criminal-activity + deliberate
     滥用」高精度信号。
     """
-    return IpSet(await fetch_text_list(ABUSEIPDB_PUBLIC_URL))
+    return IpSet(await fetch_text_list(
+        ABUSEIPDB_PUBLIC_URL, timeout=ABUSEIPDB_PUBLIC_TIMEOUT))
 
 
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
@@ -1240,13 +1243,17 @@ def iplocation_lookup_sync(ip: str) -> dict | None:
     return out
 
 
-async def fetch_text_list(url: str) -> set[str]:
-    """Fetch a static list; any failure returns an empty set (fail-open)."""
+async def fetch_text_list(url: str, timeout: float = STATIC_LIST_TIMEOUT) -> set[str]:
+    """Fetch a static list; any failure returns an empty set (fail-open).
+
+    ``timeout`` 为整包抓取上限；超大列表（如 abuseipdb_public ≈8MB）可
+    单独放宽，避免慢网在统一 15s 内被截断吞成空（fail-open 成 0 覆盖）。
+    """
     out: set[str] = set()
     try:
         text = await asyncio.to_thread(
             lambda: fetch_with_mirror(
-                url, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA},
+                url, timeout, headers={"User-Agent": UA},
                 max_bytes=STATIC_LIST_MAX,
             ).decode("utf-8", errors="replace")
         )

@@ -926,6 +926,23 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["abuseipdb_public"])
         self.assertIsNone(qc.source_score("abuseipdb_public", {}))
 
+    def test_abuseipdb_public_fetch_uses_large_timeout(self):
+        """R259：8.2MB 列表用独立放宽超时，慢网不致统一 15s fail-open。"""
+        calls = []
+
+        def fake(url, timeout, headers=None, max_bytes=None):
+            calls.append((url, timeout))
+            return b"1.2.3.4\n5.6.7.8\n"
+
+        with unittest.mock.patch.object(qr, "fetch_with_mirror",
+                                        side_effect=fake):
+            got = asyncio.run(qr.fetch_abuseipdb_public())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1], qr.ABUSEIPDB_PUBLIC_TIMEOUT)
+        self.assertGreater(qr.ABUSEIPDB_PUBLIC_TIMEOUT,
+                           qr.STATIC_LIST_TIMEOUT)
+        self.assertEqual(len(got), 2)
+
     def test_docs_enumerate_all_sources(self):
         """R256：docs/logic.md 与 docs/scripts.md 必须命名每个信誉源。
 
