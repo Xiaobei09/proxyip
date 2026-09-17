@@ -83,6 +83,24 @@ STOPFORUMSPAM_CAP = 3000
 MALTIVERSE_URL = "https://api.maltiverse.com/ip/{ip}"
 MALTIVERSE_TIMEOUT = 12
 MALTIVERSE_CAP = 2500
+# Spamhaus ZEN（SBL/XBL/CSS/PBL 合成实时 DNSBL）经 DNS-over-HTTPS 免 key 查询。
+# 多端点按序回退：alidns（公共 DoH，v4 HTTP/HTTPS 双就绪，实测可达）、
+# cloudflare-dns、dns.google（公共限量 ~1500/min）——单端点失败不视为
+# 「干净」，全部失败才报错重试。首选用可达性经过实证的端点，避免死端点
+# 空等超时拖慢相位（R244 教训）。
+DNSBL_ZEN_CAP = 12000
+DNSBL_TIMEOUT = 4
+DNSBL_DOH_ENDPOINTS = (
+    "https://dns.alidns.com/resolve",
+    "https://cloudflare-dns.com/dns-query",
+    "https://dns.google/resolve",
+)
+# AbuseIPDB 公共黑名单（近 30 天、置信度高的滥用举报 IP/CIDR，社区镜像，
+# GitHub 原始 + jsDelivr 镜像可回退）。独立于本仓库 key 版滥用相位。
+ABUSEIPDB_PUBLIC_URL = (
+    "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/"
+    "abuseipdb-s100-30d.ipv4"
+)
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
 FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
@@ -230,6 +248,7 @@ STATIC_LIST_SCORES = {
     "socks_proxy": 60,     # is_proxy（活跃 SOCKS 代理，独立代理族证据）
     "vpn_ips": 55,          # is_vpn（X4BNet VPN 出口 CIDR，覆盖面大）
     "dshield": 50,          # is_abuse（DShield 社区封禁攻击 /24 子网）
+    "abuseipdb_public": 55,  # is_abuse（AbuseIPDB 近 30 天高置信滥用举报）
 }
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
@@ -259,6 +278,7 @@ REPUTATION_WEIGHTS = {
     "stopforumspam": 4,
     "maltiverse": 6,
     "iplocation": 3,
+    "dnsbl": 8,
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
@@ -279,6 +299,7 @@ REPUTATION_WEIGHTS = {
     "socks_proxy": 3,
     "vpn_ips": 3,
     "dshield": 3,
+    "abuseipdb_public": 5,
 }
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
@@ -296,7 +317,8 @@ DEFAULT_REP_SOURCES = (
     "firehol_level1", "binarydefense",
     "c2_tracker", "botscout", "greensnow",
     "sslproxies", "socks_proxy",
-    "vpn_ips", "dshield",
+    "vpn_ips", "dshield", "abuseipdb_public",
+    "dnsbl",
 )
 SOURCE_PACING = {
     "netcoffee": (10, 0.15),
@@ -317,6 +339,7 @@ SOURCE_PACING = {
     "stopforumspam": (4, 0.3),
     "maltiverse": (4, 0.3),
     "greynoise": (6, 0.3),
+    "dnsbl": (6, 0.2),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -865,6 +888,17 @@ async def fetch_dshield() -> IpSet:
     return IpSet(await fetch_text_list(FIREHOL_DSHIELD_URL))
 
 
+async def fetch_abuseipdb_public() -> IpSet:
+    """AbuseIPDB 公共黑名单（置信度 ≥ 报告数阈值，近 30 天）。
+
+    单行一个 IP/CIDR（``#`` 注释由 ``fetch_text_list`` 剔除）；独立于
+    本仓库 key 版滥用相位，且与现有静态源（firehol 系/abuse.ch 系）
+    不同上游（AbuseIPDB 社区举报），提供「criminal-activity + deliberate
+    滥用」高精度信号。
+    """
+    return IpSet(await fetch_text_list(ABUSEIPDB_PUBLIC_URL))
+
+
 PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
 PROXYCHECK_TIMEOUT = 8
 
@@ -1032,6 +1066,63 @@ def maltiverse_lookup_sync(ip: str) -> dict | None:
     if _maltiverse_recent_blacklist(data.get("blacklist")):
         out["recent_blacklist"] = True
     return out or None
+
+
+def _doh_query(name: str, qtype: str = "A") -> list:
+    """DNS-over-HTTPS 查询：按序尝试 ``DNSBL_DOH_ENDPOINTS``，返回 A 记录数组。
+
+    端点返回合法 JSON（含 ``Status``）即视为权威应答（NXDOMAIN+无 Answer =
+    未列出 = 干净信号）；单端点连接/解析失败不当作「干净」，转下一镜像；
+    全部端点失败才抛出最后一个异常（由 ``batch_sync`` 判为失败并重试，
+    不会污染负缓存）。
+    """
+    last = None
+    for base in DNSBL_DOH_ENDPOINTS:
+        url = f"{base}?name={urllib.parse.quote(name)}&type={qtype}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": UA, "Accept": "application/dns-json"},
+        )
+        try:
+            with deadline_open(req, DNSBL_TIMEOUT) as resp:
+                data = json.loads(resp.read(64 * 1024 + 1))
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            continue
+        if not isinstance(data, dict):
+            last = RuntimeError(f"doh {base}: non-dict response")
+            continue
+        if "Status" not in data:
+            last = RuntimeError(f"doh {base}: missing Status")
+            continue
+        return [str(a.get("data"))
+                for a in (data.get("Answer") or [])
+                if isinstance(a, dict) and a.get("data")]
+    raise last if last else RuntimeError("doh: no endpoints")
+
+
+def dnsbl_lookup_sync(ip: str) -> dict | None:
+    """Spamhaus ZEN 实时 DNSBL（经 DoH，免 key）。
+
+    反查 ``<rev-ip>.zen.spamhaus.org`` A 记录；返回码 ``127.0.0.x``：
+    SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ ``listed`` 信号；
+    PBL 6/7（邮件策略网段，与代理信誉无关）与 CSS 8/9（snowshoe 弱信号）
+    忽略。未列出/不可解析 → ``None``（进入负缓存，不再重查）。
+    """
+    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
+        return None
+    qname = f"{'.'.join(reversed(ip.split('.')))}.zen.spamhaus.org"
+    answers = _doh_query(qname, "A")
+    for ans in answers:
+        if not ans.startswith("127.0.0."):
+            continue
+        try:
+            code = int(ans.rsplit(".", 1)[1])
+        except ValueError:
+            continue
+        if code in (2, 3, 4, 5):
+            return {"is_listed": True, "dnsbl_code": code}
+    return None
 
 
 def freeipapi_lookup_sync(ip: str) -> dict | None:
@@ -1230,6 +1321,7 @@ async def fetch_static_lists(sources: list) -> dict:
         "socks_proxy": IpSet(),
         "vpn_ips": IpSet(),
         "dshield": IpSet(),
+        "abuseipdb_public": IpSet(),
     }
     mapping = []
     if "abuse_list" in sources:
@@ -1276,6 +1368,8 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("vpn_ips", fetch_x4bnet_vpn()))
     if "dshield" in sources:
         mapping.append(("dshield", fetch_dshield()))
+    if "abuseipdb_public" in sources:
+        mapping.append(("abuseipdb_public", fetch_abuseipdb_public()))
     if "dc_asn" in sources:
         mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
     if "vpn_asn" in sources:
@@ -1540,6 +1634,10 @@ def source_score(name: str, signal) -> int | None:
     if name == "iplocation":
         penalty = 30 if signal.get("is_proxy") else 0
         return max(0, min(100, 100 - penalty))
+    if name == "dnsbl":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
     if name == "greynoise":
         if signal.get("is_abuse"):
             penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
@@ -1578,6 +1676,7 @@ def source_score(name: str, signal) -> int | None:
             "socks_proxy": "is_proxy",
             "vpn_ips": "is_vpn",
             "dshield": "is_abuse",
+            "abuseipdb_public": "is_abuse",
         }.get(name)
         return STATIC_LIST_SCORES[name] if signal.get(flag) else None
     return None
@@ -1825,6 +1924,10 @@ def _flag_opinions(name: str, signal) -> dict:
         return opinions
     if name == "iplocation":
         return {"proxy": True} if signal.get("is_proxy") else {}
+    if name == "dnsbl":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "abuseipdb_public":
+        return {"abuse": True} if signal.get("is_abuse") else {}
     if name == "hackmyip":
         return {
             f: v for f, v in {
@@ -2434,6 +2537,10 @@ async def lookup_all_risk(
     if "greynoise" in sources:
         w, d = pacing.get("greynoise", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("greynoise", greynoise_lookup_sync, workers=w, delay=d))
+    if "dnsbl" in sources:
+        w, d = pacing.get("dnsbl", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "dnsbl", dnsbl_lookup_sync, cap=DNSBL_ZEN_CAP, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:
@@ -2483,6 +2590,8 @@ async def lookup_all_risk(
             put("sslproxies", ip, {"is_proxy": True})
         if ip in static["socks_proxy"]:
             put("socks_proxy", ip, {"is_proxy": True})
+        if ip in static["abuseipdb_public"]:
+            put("abuseipdb_public", ip, {"is_abuse": True})
         asn = (asn_map or {}).get(ip)
         if not asn:
             continue

@@ -787,6 +787,96 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["dshield"])
         self.assertIsNone(qc.source_score("vpn_ips", {}))
 
+    def test_dnsbl_source_registered(self):
+        """R251：dnsbl（Spamhaus ZEN via DoH）默认启用、权重 8、有 pacing、
+        命中 → listed 维度，score 70。"""
+        self.assertIn("dnsbl", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("dnsbl", qc.REPUTATION_WEIGHTS)
+        self.assertEqual(qc.REPUTATION_WEIGHTS["dnsbl"], 8)
+        self.assertIn("dnsbl", qr.SOURCE_PACING)
+        self.assertEqual(
+            qr._flag_opinions("dnsbl", {"is_listed": True}), {"listed": True})
+        self.assertEqual(qr._flag_opinions("dnsbl", {}), {})
+        self.assertEqual(qr.source_score("dnsbl", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("dnsbl", {}))
+
+    def test_dnsbl_lookup_parse(self):
+        """SBL(2/3)/XBL(4/5)→listed；PBL(6/7)/CSS(8/9)/无应答→None。"""
+        cases = [
+            (["127.0.0.2"], {"is_listed": True, "dnsbl_code": 2}),
+            (["127.0.0.3"], {"is_listed": True, "dnsbl_code": 3}),
+            (["127.0.0.4"], {"is_listed": True, "dnsbl_code": 4}),
+            (["127.0.0.5"], {"is_listed": True, "dnsbl_code": 5}),
+            (["127.0.0.2", "127.0.0.4"], {"is_listed": True, "dnsbl_code": 2}),
+            (["127.0.0.6"], None),  # PBL 忽略（邮件策略网段）
+            (["127.0.0.7"], None),
+            (["127.0.0.8"], None),  # CSS snowshoe 弱信号忽略
+            (["127.0.0.9"], None),
+            ([], None),             # NXDOMAIN/无应答 = 未列出
+        ]
+        for answers, expect in cases:
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertEqual(qr.dnsbl_lookup_sync("8.8.8.8"), expect)
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.2"]) as m:
+            qr.dnsbl_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.zen.spamhaus.org")
+
+    def test_doh_query_endpoint_fallback(self):
+        """端点失败转镜像；全部失败抛错（不把故障当「干净」）。"""
+        responses = [
+            "not json",
+            None,  # json null -> missing Status
+            {"Status": 0, "Answer": [{"data": "1.2.3.4"}]},
+        ]
+        index = [0]
+
+        def fake_deadline_open(req, timeout, max_bytes=None):
+            cur = responses[min(index[0], len(responses) - 1)]
+            index[0] += 1
+
+            class FakeResp:
+                def read(self, *a):
+                    if cur is None:
+                        return b"null"
+                    if isinstance(cur, str):
+                        raise OSError("bad payload")
+                    return json.dumps(cur).encode()
+                def __enter__(self):
+                    return self
+                def __exit__(self, *a):
+                    pass
+            return FakeResp()
+
+        with unittest.mock.patch.object(qr, "deadline_open",
+                                        side_effect=fake_deadline_open):
+            self.assertEqual(
+                qr._doh_query("1.2.3.4.zen.spamhaus.org"),
+                ["1.2.3.4"])
+
+        # 全部端点失败 → 抛异常（而非返回 []）
+        with unittest.mock.patch.object(
+                qr, "deadline_open",
+                side_effect=OSError("all endpoints dead")):
+            with self.assertRaises(OSError):
+                qr._doh_query("1.2.3.4.zen.spamhaus.org")
+
+    def test_abuseipdb_public_source_registered(self):
+        """R251：abuseipdb_public 公共黑名单默认启用、有权重/静态分。"""
+        self.assertIn("abuseipdb_public", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("abuseipdb_public", qc.REPUTATION_WEIGHTS)
+        self.assertIn("abuseipdb_public", qc.STATIC_LIST_SCORES)
+        self.assertGreater(qc.REPUTATION_WEIGHTS["abuseipdb_public"], 0)
+        self.assertEqual(
+            qr._flag_opinions("abuseipdb_public", {"is_abuse": True}),
+            {"abuse": True})
+        self.assertEqual(
+            qc.source_score("abuseipdb_public", {"is_abuse": True}),
+            qc.STATIC_LIST_SCORES["abuseipdb_public"])
+        self.assertIsNone(qc.source_score("abuseipdb_public", {}))
+
     def test_new_rep_abuse_sources_vote_abuse(self):
         """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
         for name in ("c2_tracker", "botscout", "greensnow"):

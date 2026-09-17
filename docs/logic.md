@@ -134,6 +134,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | freeipapi | 6 | `isProxy` 标志 -30（附 ASN/org，全免费免 key） |
 | scamalytics | 8 | 免费风险页 `Fraud Score`（0-100）直扣；`is_blacklisted_external` 投 listed 票 |
 | iplocation | 3 | `is_proxy` 标志 -30（附 isp，全免费免 key） |
+| dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.zen.spamhaus.org` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存 |
 
 #### 静态列表源（每 run 重拉）
 
@@ -146,6 +147,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | resproxy_asn | 2 | 75（住宅代理骨干 ASN） |
 | cins | 5 | 50（CINS 活跃滥用/拒绝服务 IP） |
 | et_compromised | 4 | 45（EmergingThreats 被入侵主机回连） |
+| abuseipdb_public | 5 | 55（AbuseIPDB 近 30 天高置信滥用举报，社区镜像静态名单） |
 
 未命中 → 该项不计入合分（不误判满分）。
 
