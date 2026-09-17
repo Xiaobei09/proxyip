@@ -32,6 +32,7 @@ from common import (
     merge_note_tokens,
     normalize_note,
     parse_line,
+    parse_ltd_line,
     read_json,
     collect_txt_files,
     annotate_files,
@@ -209,10 +210,30 @@ def _key_of(text: str) -> set[str]:
     return {line.split("#", 1)[0] for line in text.splitlines() if line}
 
 
+def _key_of_non_all(text: str) -> set[str]:
+    """``all.txt`` 中入口国**已归属**（非 ``#ALL`` 哨兵）行的 ``ip:port`` 键集。
+
+    ``data-spec`` 规定 ``#ALL``（入口未知）只出现在 ``all.txt``/``all_ltd.txt``、
+    不进入 ``countries/``（``validate_proxies`` 按此跳过）；分国家键集 1:1 校验
+    必须剔除它，否则会把合法哨兵误报为 ``missing`` 漂移（R218 ``normalize_country``
+    产出 ``#ALL`` 后于 CI 暴露 ``countries sum 18410 != all.txt 18411``）。
+    """
+    keys: set[str] = set()
+    for line in text.splitlines():
+        if not line:
+            continue
+        parsed = parse_ltd_line(line)
+        if parsed and parsed[3] == "ALL":
+            continue
+        keys.add(line.split("#", 1)[0])
+    return keys
+
+
 def verify_country_split(valid_dir: Path) -> dict:
-    """R208 漂移防护：``countries/*/all.txt`` 行键集必须与 ``all.txt`` 大师清单
-    **恰好 1:1**（reconcile_views 只向下裁剪、不补缺行；若上游工作流在注解步之后
-    又改了 ``all.txt`` 行集，分目录会带出超集/缺集，跨工作流数据流断裂就在此处）。
+    """R208 漂移防护：``countries/*/all.txt`` 行键集必须与 ``all.txt`` 大师清单中
+    **入口国可归属的行**（已剔除 ``#ALL`` 哨兵）**恰好 1:1**（reconcile_views 只向下
+    裁剪、不补缺行；若上游工作流在注解步之后又改了 ``all.txt`` 行集，分目录会带出
+    超集/缺集，跨工作流数据流断裂就在此处）。
 
     返回 ``{"master", "countries", "missing", "excess", "dup_endpoints"}``；
     ``missing`` = 大师有而分目录缺（新键待 validate 重切分），``excess`` =
@@ -224,7 +245,7 @@ def verify_country_split(valid_dir: Path) -> dict:
     if not all_txt.exists():
         return {"master": 0, "countries": 0, "missing": [], "excess": [],
                 "dup_endpoints": 0}
-    master = _key_of(all_txt.read_text(encoding="utf-8"))
+    master = _key_of_non_all(all_txt.read_text(encoding="utf-8"))
     cdir = valid_dir / "countries"
     seen: set[str] = set()
     endpoint_cc: dict[str, set[str]] = defaultdict(set)

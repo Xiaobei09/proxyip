@@ -7,6 +7,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import reorg_country as rc
+from common import parse_ltd_line
+
+
+def _is_all_entry(line: str) -> bool:
+    """行入口国是否为 ``#ALL`` 哨兵（入口未知）。"""
+    parsed = parse_ltd_line(line)
+    return bool(parsed and parsed[3] == "ALL")
 
 
 class TestMarker(unittest.TestCase):
@@ -198,8 +205,9 @@ class TestMergeOrdered(unittest.TestCase):
 
 
 class TestReorgCountryConsistency(unittest.TestCase):
-    """回归守护：countries/*/all.txt 行数总和 = valid/all.txt 总行数（R177）。
-    本地无数据文件则跳过。"""
+    """回归守护：countries/*/all.txt 行数总和 = valid/all.txt 中入口国可归属的
+    行数（总行数扣除 ``#ALL`` 哨兵，R177/R231）。``#ALL``（入口未知）依 data-spec
+    只出现在 all.txt/all_ltd.txt、不进入 countries/。本地无数据文件则跳过。"""
 
     def _valid(self):
         return Path(__file__).resolve().parent.parent / "data" / "valid"
@@ -208,7 +216,10 @@ class TestReorgCountryConsistency(unittest.TestCase):
         all_path = self._valid() / "all.txt"
         if not all_path.exists():
             self.skipTest("no data/valid/all.txt")
-        all_lines = len(all_path.read_text(encoding="utf-8").splitlines())
+        master = [
+            ln for ln in all_path.read_text(encoding="utf-8").splitlines()
+            if ln and not _is_all_entry(ln)
+        ]
         cdir = self._valid() / "countries"
         if not cdir.exists():
             self.skipTest("no data/valid/countries")
@@ -219,7 +230,10 @@ class TestReorgCountryConsistency(unittest.TestCase):
             f = d / "all.txt"
             if f.exists():
                 total += len(f.read_text(encoding="utf-8").splitlines())
-        self.assertEqual(total, all_lines, f"countries sum {total} != all.txt {all_lines}")
+        self.assertEqual(
+            total, len(master),
+            f"countries sum {total} != all.txt (non-#ALL) {len(master)}",
+        )
 
     def test_no_orphan_dirs(self):
         cdir = self._valid() / "countries"

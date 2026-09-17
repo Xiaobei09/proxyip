@@ -111,6 +111,18 @@ class TestReconcileViews(unittest.TestCase):
         self.assertEqual(r["excess"], [])
         self.assertEqual(r["dup_endpoints"], 0)
 
+    def test_verify_country_split_all_sentinel_excluded(self):
+        # ``#ALL``（入口未知）依 data-spec 只在 all.txt/all_ltd.txt、不进
+        # countries/：大师键集须剔除 ALL，否则合法哨兵被误报 missing。
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US", "2.2.2.2:443#ALL→US"],
+            countries={"all.txt": ["1.1.1.1:443#US"]},
+        )
+        r = verify_country_split(valid)
+        self.assertEqual((r["master"], r["countries"]), (1, 1))
+        self.assertEqual(r["missing"], [])
+        self.assertEqual(r["excess"], [])
+
     def test_verify_country_split_excess_detected(self):
         d, valid = self._tree(
             all_lines=["1.1.1.1:443#US"],
