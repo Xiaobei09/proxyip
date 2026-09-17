@@ -988,6 +988,34 @@ class TestReputation(unittest.TestCase):
                 name, scripts,
                 f"docs/scripts.md 缺少信誉源 {name}")
 
+    def test_all_weight_sources_have_dispatch(self):
+        """R263：每个 REPUTATION_WEIGHTS 源必须有 ``if "<name>" in sources``
+        派发分支，且每个静态分源都在权重表内。
+
+        防「新增源只登记权重、忘接派发」→ 该源静默空转（永不查询/投票），
+        分数被悄悄拉低却无任何报错。以源码文本做静态不变量校验。"""
+        root = Path(__file__).resolve().parents[1]
+        src = (root / "scripts" / "quality_reputation.py").read_text(
+            encoding="utf-8")
+        import re
+        weights_match = re.search(
+            r"REPUTATION_WEIGHTS\s*=\s*\{(.*?)\n\}", src, re.S)
+        self.assertIsNotNone(weights_match)
+        weight_keys = re.findall(
+            r'"([a-z0-9_]+)"\s*:', weights_match.group(1))
+        dispatched = set(re.findall(r'if "([a-z0-9_]+)" in sources', src))
+        self.assertEqual(
+            set(weight_keys) - dispatched, set(),
+            "REPUTATION_WEIGHTS 中的源缺派发分支")
+        static_match = re.search(
+            r"STATIC_LIST_SCORES\s*=\s*\{(.*?)\n\}", src, re.S)
+        self.assertIsNotNone(static_match)
+        static_keys = set(re.findall(
+            r'"([a-z0-9_]+)"\s*:', static_match.group(1)))
+        self.assertEqual(
+            static_keys - set(weight_keys), set(),
+            "STATIC_LIST_SCORES 含不在权重表内的源")
+
     def test_parse_reputation_sources_unknown_warned(self):
         """R260：未知源名返回 unknown 供告警，合法源过滤保留；
         全错（无合法源）回退默认全集——typo 不再静默无提示。"""
