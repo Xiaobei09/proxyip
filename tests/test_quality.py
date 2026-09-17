@@ -818,6 +818,11 @@ class TestReputation(unittest.TestCase):
             with unittest.mock.patch.object(
                     qr, "_doh_query", return_value=answers):
                 self.assertEqual(qr.dnsbl_lookup_sync("8.8.8.8"), expect)
+        # 非 IPv4 直接短路：不触发 DoH 查询
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.dnsbl_lookup_sync("2001:db8::1"))
+            self.assertIsNone(qr.dnsbl_lookup_sync("not-an-ip"))
+            m.assert_not_called()
         with unittest.mock.patch.object(qr, "_doh_query",
                                         return_value=["127.0.0.2"]) as m:
             qr.dnsbl_lookup_sync("1.2.3.4")
