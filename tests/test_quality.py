@@ -882,6 +882,53 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["abuseipdb_public"])
         self.assertIsNone(qc.source_score("abuseipdb_public", {}))
 
+    def test_static_list_size_report(self):
+        """R253：静态源尺寸上报——非空打印逐源大小，全空打印 all empty，
+        便于 R245 式死源审计（空列表静默 = 不可发现）。"""
+        seed_keys = (
+            "abuse_list", "dc_asn", "vpn_asn", "resproxy_asn", "tor_exit",
+            "spamhaus", "cins", "et_compromised", "feodo", "blocklist_de",
+            "blocklist_de_ssh", "blocklist_de_apache", "danmeuk_tor",
+            "tor_bulk", "urlhaus", "threatfox", "firehol_level1",
+            "binarydefense", "c2_tracker", "botscout", "greensnow",
+            "sslproxies", "socks_proxy", "vpn_ips", "dshield",
+            "abuseipdb_public",
+        )
+
+        def fake_static(sources):
+            d = {}
+            for k in seed_keys:
+                d[k] = qr.IpSet() if k != "dc_asn" else set()
+                if k in ("vpn_asn", "resproxy_asn"):
+                    d[k] = set()
+            d["cins"] = qr.IpSet(["1.1.1.1", "2.2.2.2"])
+            return d
+
+        args = argparse.Namespace(
+            reputation_sources=["cins", "abuse_list"],
+            no_rep_cache=True, rep_cache_ttl=0, getipintel_email="",
+        )
+        with unittest.mock.patch.object(qr, "fetch_static_lists",
+                                        side_effect=fake_static), \
+             unittest.mock.patch.object(qr, "fetch_ipsum_list",
+                                        return_value=set()), \
+             contextlib.redirect_stdout(io.StringIO()) as buf:
+            asyncio.run(qr.lookup_all_risk(["1.1.1.1"], args))
+        self.assertIn("Reputation static lists: cins=2", buf.getvalue())
+
+        def fake_empty(sources):
+            d = fake_static(sources)
+            d["cins"] = qr.IpSet()
+            return d
+
+        with unittest.mock.patch.object(qr, "fetch_static_lists",
+                                        side_effect=fake_empty), \
+             unittest.mock.patch.object(qr, "fetch_ipsum_list",
+                                        return_value=set()), \
+             contextlib.redirect_stdout(io.StringIO()) as buf2:
+            asyncio.run(qr.lookup_all_risk(["1.1.1.1"], args))
+        self.assertIn("all empty", buf2.getvalue())
+
     def test_new_rep_abuse_sources_vote_abuse(self):
         """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
         for name in ("c2_tracker", "botscout", "greensnow"):

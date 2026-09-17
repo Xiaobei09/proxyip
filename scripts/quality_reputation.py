@@ -2549,6 +2549,14 @@ async def lookup_all_risk(
             if ip in ipsum_set:
                 put("ipsum", ip, {"is_listed": True})
     static = await fetch_static_lists(sources)
+    sizes = {k: len(v) for k, v in static.items() if v and k in sources}
+    if sizes:
+        print(
+            "Reputation static lists: "
+            + ", ".join(f"{k}={n}" for k, n in sorted(sizes.items()))
+        )
+    elif any(s in static for s in sources):
+        print("Reputation static lists: all empty")
     for ip in uniq:
         if ip in static["abuse_list"]:
             put("abuse_list", ip, {"is_abuse": True})
