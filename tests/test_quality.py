@@ -693,6 +693,7 @@ class TestReputation(unittest.TestCase):
         self.assertNotIn("ipwhois", qc.DEFAULT_REP_SOURCES)
         self.assertIn("ipwhois", qc.REPUTATION_WEIGHTS)
         self.assertIn("stopforumspam", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("maltiverse", qc.DEFAULT_REP_SOURCES)
         self.assertIn("tor_exit", qc.DEFAULT_REP_SOURCES)
 
     def test_hackmyip_source_vote(self):
@@ -1278,6 +1279,70 @@ class TestReputation(unittest.TestCase):
             self.assertIsNone(qc.stopforumspam_lookup_sync("1.2.3.4"))
         finally:
             qc.urllib.request.urlopen = orig
+
+    def _maltiverse_with(self, payload):
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("api.maltiverse.com/ip/1.2.3.4", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            return qc.maltiverse_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+
+    def test_maltiverse_lookup_parsing(self):
+        # 取 current 字段；忽略历史脏数据 is_known_attacker
+        out = self._maltiverse_with(
+            b'{"classification":"malicious","is_open_proxy":true,'
+            b'"is_known_attacker":true,"is_tor_node":false,'
+            b'"blacklist":[{"last_seen":"2026-09-01 00:00:00",'
+            b'"labels":["malicious-activity"],"source":"X"}]}'
+        )
+        self.assertEqual(out["classification"], "malicious")
+        self.assertTrue(out["is_open_proxy"])
+        self.assertTrue(out["recent_blacklist"])
+        self.assertNotIn("is_known_attacker", out)
+        self.assertNotIn("is_tor_node", out)
+        self.assertEqual(
+            qr._flag_opinions("maltiverse", out),
+            {"proxy": True, "abuse": True})
+
+    def test_maltiverse_clean_and_stale_blacklist(self):
+        # neutral 无结构布尔 + 陈旧黑名单 → None（负缓存）
+        self.assertIsNone(self._maltiverse_with(
+            b'{"classification":"neutral","is_open_proxy":false,'
+            b'"is_known_attacker":true,'
+            b'"blacklist":[{"last_seen":"2012-01-01 00:00:00",'
+            b'"labels":["malicious-activity"]}]}'
+        ))
+        # suspicious（无布尔）仍返回分类
+        out = self._maltiverse_with(b'{"classification":"suspicious"}')
+        self.assertEqual(out, {"classification": "suspicious"})
+        self.assertEqual(qr._flag_opinions("maltiverse", out), {"abuse": True})
+
+    def test_maltiverse_source_score_and_vote(self):
+        self.assertEqual(
+            qc.source_score("maltiverse", {"classification": "malicious"}), 40)
+        self.assertEqual(
+            qc.source_score("maltiverse", {"classification": "suspicious"}), 65)
+        self.assertIsNone(qc.source_score("maltiverse", {}))
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"maltiverse": {"classification": "malicious", "is_open_proxy": True}},
+            self.W)
+        self.assertEqual(score, 37)
+        self.assertEqual(sorted(flagged), ["abuse", "proxy"])
 
     def test_ffraud_lookup_parsing(self):
         payload = (

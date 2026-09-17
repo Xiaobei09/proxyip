@@ -80,6 +80,9 @@ FREEIPAPI_CAP = 3000
 STOPFORUMSPAM_URL = "https://api.stopforumspam.org/api?ip={ip}&json"
 STOPFORUMSPAM_TIMEOUT = 10
 STOPFORUMSPAM_CAP = 3000
+MALTIVERSE_URL = "https://api.maltiverse.com/ip/{ip}"
+MALTIVERSE_TIMEOUT = 12
+MALTIVERSE_CAP = 2500
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
 FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
@@ -254,6 +257,7 @@ REPUTATION_WEIGHTS = {
     "hackmyip": 6,
     "scamalytics": 8,
     "stopforumspam": 4,
+    "maltiverse": 6,
     "iplocation": 3,
     "cins": 5,
     "et_compromised": 4,
@@ -284,7 +288,7 @@ DEFAULT_REP_SOURCES = (
     "proxycheck", "ip2location",
     "tor_exit", "spamhaus",
     "freeipapi", "scamalytics", "iplocation",
-    "hackmyip", "stopforumspam",
+    "hackmyip", "stopforumspam", "maltiverse",
     "cins", "et_compromised", "feodo",
     "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
     "danmeuk_tor", "tor_bulk",
@@ -311,6 +315,7 @@ SOURCE_PACING = {
     "scamalytics": (4, 0.5),
     "iplocation": (8, 0.12),
     "stopforumspam": (4, 0.3),
+    "maltiverse": (4, 0.3),
     "greynoise": (6, 0.3),
 }
 def parse_abuser_score(value) -> float | None:
@@ -972,6 +977,63 @@ def stopforumspam_lookup_sync(ip: str) -> dict | None:
     return out
 
 
+MALTIVERSE_RECENT_DAYS = 30
+
+
+def _maltiverse_recent_blacklist(
+    blacklist, days: int = MALTIVERSE_RECENT_DAYS
+) -> bool:
+    """``blacklist`` 名单中是否存在最近 ``days`` 天内的恶意/匿名化条目。"""
+    if not isinstance(blacklist, list):
+        return False
+    cutoff = time.strftime(
+        "%Y-%m-%d %H:%M:%S", time.gmtime(time.time() - days * 86400)
+    )
+    keep = ("malicious-activity", "attacker", "compromised",
+            "anomalous-activity", "anonymization", "tor", "proxy")
+    for e in blacklist:
+        if not isinstance(e, dict):
+            continue
+        ls = e.get("last_seen")
+        if not (isinstance(ls, str) and ls[:19] >= cutoff):
+            continue
+        labels = e.get("labels") or []
+        if not labels or any(str(x) in keep for x in labels):
+            return True
+    return False
+
+
+def maltiverse_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``api.maltiverse.com/ip/{ip}`` 聚合威胁情报。
+
+    仅取**当前有效**字段：``classification``（malicious/suspicious）、结构
+    布尔（open_proxy/tor_node/vpn_node/cnc/distributing_malware/iot_threat/
+    known_scanner/mining_pool）与最近 ``MALTIVERSE_RECENT_DAYS`` 天内的黑名单
+    条目。刻意忽略 ``is_known_attacker``（历史脏数据，8.8.8.8 亦为 True）与
+    ``is_hosting``（共识已充分，避免叠噪）。全空 → ``None``（进入负缓存）。
+    """
+    req = urllib.request.Request(
+        MALTIVERSE_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with deadline_open(req, MALTIVERSE_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    out: dict = {}
+    cls = data.get("classification")
+    if isinstance(cls, str) and cls.lower() in ("malicious", "suspicious"):
+        out["classification"] = cls.lower()
+    for k in ("is_open_proxy", "is_tor_node", "is_vpn_node", "is_cnc",
+              "is_distributing_malware", "is_iot_threat", "is_known_scanner",
+              "is_mining_pool"):
+        if data.get(k):
+            out[k] = True
+    if _maltiverse_recent_blacklist(data.get("blacklist")):
+        out["recent_blacklist"] = True
+    return out or None
+
+
 def freeipapi_lookup_sync(ip: str) -> dict | None:
     """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
     req = urllib.request.Request(
@@ -1459,6 +1521,22 @@ def source_score(name: str, signal) -> int | None:
         if not signal.get("is_abuse"):
             return None
         return 50
+    if name == "maltiverse":
+        cls = signal.get("classification")
+        if cls == "malicious":
+            penalty = 60
+        elif cls == "suspicious":
+            penalty = 35
+        elif (signal.get("is_cnc") or signal.get("is_distributing_malware")
+              or signal.get("is_iot_threat") or signal.get("is_known_scanner")
+              or signal.get("recent_blacklist")):
+            penalty = 40
+        elif (signal.get("is_tor_node") or signal.get("is_open_proxy")
+              or signal.get("is_vpn_node")):
+            penalty = 25
+        else:
+            return None
+        return max(0, min(100, 100 - penalty))
     if name == "iplocation":
         penalty = 30 if signal.get("is_proxy") else 0
         return max(0, min(100, 100 - penalty))
@@ -1729,6 +1807,21 @@ def _flag_opinions(name: str, signal) -> dict:
             opinions["abuse"] = True
         if signal.get("torexit"):
             opinions["tor"] = True
+        return opinions
+    if name == "maltiverse":
+        opinions = {}
+        if signal.get("is_tor_node"):
+            opinions["tor"] = True
+        if signal.get("is_vpn_node"):
+            opinions["vpn"] = True
+        if signal.get("is_open_proxy"):
+            opinions["proxy"] = True
+        if signal.get("classification") in ("malicious", "suspicious") or any(
+            signal.get(k) for k in (
+                "is_cnc", "is_distributing_malware", "is_iot_threat",
+                "is_known_scanner", "is_mining_pool", "recent_blacklist")
+        ):
+            opinions["abuse"] = True
         return opinions
     if name == "iplocation":
         return {"proxy": True} if signal.get("is_proxy") else {}
@@ -2318,6 +2411,11 @@ async def lookup_all_risk(
         api_tasks.append(cached_batch(
             "stopforumspam", stopforumspam_lookup_sync,
             cap=STOPFORUMSPAM_CAP, workers=w, delay=d))
+    if "maltiverse" in sources:
+        w, d = pacing.get("maltiverse", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "maltiverse", maltiverse_lookup_sync,
+            cap=MALTIVERSE_CAP, workers=w, delay=d))
     if "scamalytics" in sources:
         w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
