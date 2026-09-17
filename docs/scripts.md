@@ -385,6 +385,17 @@ After:  1.2.3.4:443#🇺🇸US→US-30ms-10.82MB/s-DC-fast-V6-CN-77-U92
 
 **处理范围**：`data/valid/all.txt`、`all_ltd.txt`、`countries/*/all.txt`、`countries/*/ltd.txt`、`sets/*/all.txt`、`sets/*/ltd.txt`、`ports/*.txt`
 
+**分目录漂移防护**（`verify_country_split`）：以 `all.txt` 大师清单（剔除 `#ALL` 哨兵）为准，比对 `countries/*/all.txt` 的行键集，返回 `{master, countries, missing, excess, dup_endpoints, phantom}`：
+
+| 字段 | 含义 | 处置 |
+|---|---|---|
+| `missing` | 大师有、分目录缺（新键待 validate 重切分） | 非空即漂移，阻断 |
+| `excess` | 分目录有、大师无（死代残留漏裁） | 非空即漂移，阻断 |
+| `dup_endpoints` | 同一 `ip:port` 出现在 ≥2 国目录（入口国标注矛盾，如 `#SG`/`#CO`） | 告警不阻断 |
+| `phantom` | 同键在分目录行数**多于**大师（`reconcile_views` 仅按 `ip:port` 裁剪，同键幻影行剪不掉） | 告警不阻断 |
+
+键集比对（`missing`/`excess`）等价于「无代理丢失/无越界残留」；行数等式非不变量——同端点可带不同入口国标注合法共存，三链并发 commit 亦会瞬时错位。
+
 ```bash
 python3 scripts/annotate_classify.py
 python3 scripts/annotate_classify.py --data-dir /path/to/data
