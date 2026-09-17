@@ -3408,6 +3408,23 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertEqual(score, 70)
         self.assertNotIn("listed", flagged)
 
+    def test_vote_reputation_consensus_dnsbl_listed(self):
+        """R265：dnsbl(ZEN SBL/XBL) 命中 listed → 共识扣 30（100→70，
+        即 R252 所述 89→59 的同一口径），且与 cins/firehol_level1 等
+        同维度源并存时仅计一次、不重复扣分。"""
+        score, _r, flagged, _n = qr.vote_reputation(
+            {"dnsbl": {"is_listed": True, "dnsbl_code": 2}},
+            qr.REPUTATION_WEIGHTS)
+        self.assertEqual(score, 70)
+        self.assertIn("listed", flagged)
+        score2, _r2, flagged2, _n2 = qr.vote_reputation(
+            {"dnsbl": {"is_listed": True},
+             "cins": {"is_listed": True},
+             "firehol_level1": {"is_listed": True}},
+            qr.REPUTATION_WEIGHTS)
+        self.assertEqual(score2, 70)
+        self.assertEqual(flagged2.count("listed"), 1)
+
     def test_defaults_include_new_sources(self):
         for name in ("freeipapi", "scamalytics", "iplocation", "cins",
                      "et_compromised"):
