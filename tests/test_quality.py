@@ -1369,6 +1369,25 @@ class TestReputation(unittest.TestCase):
         )
         self.assertNotIn("ip-api", signals)
 
+    def test_collect_signals_skips_empty_sentinel(self):
+        # R238 负缓存哨兵 {} 不得进入 signals（防御未来路径泄漏）
+        signals = qc.collect_signals(
+            "1.1.1.1", {},
+            {"1.1.1.1": {"netcoffee": {}, "ncgy": {"is_proxy": True}}},
+            qc.REPUTATION_WEIGHTS,
+        )
+        self.assertNotIn("netcoffee", signals)
+        self.assertIn("ncgy", signals)
+
+    def test_vote_reputation_ignores_empty_sentinel(self):
+        # 空哨兵不得虚增 responding（否则 source 计数/标签失真）
+        signals = {"netcoffee": {}, "ncgy": {"is_proxy": True}}
+        score, responding, _flagged, _numeric = qr.vote_reputation(
+            signals, qc.REPUTATION_WEIGHTS
+        )
+        self.assertEqual(responding, ["ncgy"])
+        self.assertIsNotNone(score)
+
     def test_all_rep_sources_have_weights(self):
         """All default reputation sources must have positive weights."""
         for name in qc.DEFAULT_REP_SOURCES:

@@ -1874,9 +1874,11 @@ def vote_reputation(
     sources (punish with the strongest evidence), capped once per family even
     when multiple independent sources agree on it.
     """
+    # 空字典是 R238 负缓存哨兵（成功但无信号）：既非 None 也无数值，
+    # 必须排除出 responding，否则会被误记为「响应的源」而虚增 source 数。
     responding = sorted(
         (n for n, s in signals.items()
-         if isinstance(s, dict) and weights.get(n, 0) > 0)
+         if isinstance(s, dict) and s and weights.get(n, 0) > 0)
     )
     if not responding:
         return None, [], [], []
@@ -1966,7 +1968,8 @@ def collect_signals(
         if source == "ip-api":
             continue
         signal = risk_data.get(ip, {}).get(source)
-        if signal is not None:
+        # 跳过 None 与空字典（R238 负缓存哨兵），空信号不得进入共识。
+        if signal:
             signals[source] = signal
     if include_ipapi and geo_item.get("countryCode"):
         signals["ip-api"] = geo_item
