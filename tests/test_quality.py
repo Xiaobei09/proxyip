@@ -2049,6 +2049,34 @@ class TestStaticLists(unittest.TestCase):
         self.assertEqual(len(out["abuse_list"]), 0)
         self.assertEqual(out["dc_asn"], set())
 
+    def test_static_list_error_logged_desensitized(self):
+        """R264：静态源任务抛异常时按 err_name 记类别，不得透传含
+        URL/token 的原始异常串（common.err_name 脱敏约定）。"""
+        import logging
+
+        async def boom():
+            raise OSError(
+                "https://example.com/list?token=SECRETTOKEN failed")
+
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        logger = logging.getLogger()
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            with unittest.mock.patch.object(
+                    qr, "fetch_cins_badguys", boom):
+                out = asyncio.run(qr.fetch_static_lists(["cins"]))
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        self.assertEqual(len(out["cins"]), 0)
+        logged = stream.getvalue()
+        self.assertIn("cins", logged)
+        self.assertIn("OSError", logged)
+        self.assertNotIn("SECRETTOKEN", logged)
+
 
 class TestReputationFiles(unittest.TestCase):
     def setUp(self):

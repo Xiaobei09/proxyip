@@ -1425,7 +1425,8 @@ async def fetch_static_lists(sources: list) -> dict:
     )
     for (name, _task), res in zip(mapping, results):
         if isinstance(res, Exception):
-            logging.warning("static list source %s failed: %s", name, res)
+            logging.warning("static list source %s failed: %s",
+                            name, err_name(res))
             continue
         out[name] = res
     return out
