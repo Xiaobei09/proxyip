@@ -1279,6 +1279,17 @@ async def fetch_text_list(url: str, timeout: float = STATIC_LIST_TIMEOUT) -> set
         logging.debug("fetch_text_list %s: %s", url, err_name(exc))
         logging.warning("fetch_text_list failed open for %s: %s", url, err_name(exc))
         return out
+    stripped = text.lstrip()
+    if text and (stripped[:1] in ("<", "{", "[") or
+                 "<html" in text[:512].lower()):
+        # 网关/边缘把错误页以 200 原样吐出（HTML/JSON/重定向页），逐行解析
+        # 会静默滤成空表——显式告警，避免「想拉 15 万条实得 0」被吞掉。
+        logging.warning(
+            "fetch_text_list non-list content for %s (%.0f bytes, "
+            "first char %r): treating as empty",
+            url, len(text), stripped[:1],
+        )
+        return out
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith(("#", ";")):

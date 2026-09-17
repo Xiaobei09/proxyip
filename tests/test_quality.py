@@ -2049,6 +2049,35 @@ class TestStaticLists(unittest.TestCase):
         self.assertEqual(len(out["abuse_list"]), 0)
         self.assertEqual(out["dc_asn"], set())
 
+    def test_fetch_text_list_gate_non_list_content(self):
+        """R266：网关把错误页以 200 原样吐出（HTML）时不得静默解析成空表
+        假「干净」，应显式告警（fail-open 语义保留，但可观测）。"""
+        import logging as _l
+        stream = io.StringIO()
+        handler = _l.StreamHandler(stream)
+        logger = _l.getLogger()
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(_l.WARNING)
+        try:
+            with unittest.mock.patch.object(
+                    qr, "fetch_with_mirror",
+                    return_value=b"<html><body>blocked</body></html>"):
+                got = asyncio.run(qr.fetch_text_list("https://x/list"))
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        self.assertEqual(got, set())
+        self.assertIn("non-list content", stream.getvalue())
+
+    def test_fetch_text_list_clean_lines(self):
+        """R266 回归：正常 IP 列表不受内容门槛影响，注释行照旧跳过。"""
+        with unittest.mock.patch.object(
+                qr, "fetch_with_mirror",
+                return_value=b"# header\n1.2.3.4\n5.6.7.8\n"):
+            got = asyncio.run(qr.fetch_text_list("https://x/list"))
+        self.assertEqual(got, {"1.2.3.4", "5.6.7.8"})
+
     def test_static_list_error_logged_desensitized(self):
         """R264：静态源任务抛异常时按 err_name 记类别，不得透传含
         URL/token 的原始异常串（common.err_name 脱敏约定）。"""
