@@ -158,7 +158,9 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
   挤出缓存上限（`REP_CACHE_MAX`）
 - **负缓存**：源成功响应但无信号（`None`，如 greynoise 对干净 IP 返回
   404/clean、ip2location 非代理）以 `data: {}` 哨兵写入缓存，TTL 内不再
-  重查；空哨兵不进入 `risk_data`、不参与共识投票，也不误当「可回退信号」
+  重查；空哨兵不进入 `risk_data`、不参与共识投票，也不误当「可回退信号」。
+  负缓存用更短的 TTL 上限 `NEG_CACHE_TTL`（默认 1 天 `<` `--rep-cache-ttl`），
+  限制「干净→恶意」的检测时延
 - **无信号 ≠ 失败**：只有抛异常的查询才重试；`None` 结果不重试
 - 静态列表不缓存，每轮重拉
 

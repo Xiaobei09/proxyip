@@ -25,6 +25,9 @@ from bisect import bisect_right
 from common import *  # noqa: F401,F403  (paths, UA, write_json, keyed_json, ...)
 
 REP_CACHE_MAX = 40000   # 信誉缓存 IP 上限（防无限膨胀，超出按最近使用裁剪）
+# 负缓存（成功但无信号）TTL 上限：短于正向 TTL，兼顾省调用与「干净→恶意」
+# 检测时延（最坏情况下延迟这么久才重新观测到新增风险）。
+NEG_CACHE_TTL = 86400
 REP_RISK_HIGH = 30
 REP_RISK_MEDIUM = 75
 
@@ -2091,9 +2094,14 @@ def cached_signal(
     src_entry = entry.get(source)
     if not isinstance(src_entry, dict):
         return None
-    if (src_entry.get("ts") or 0) + ttl < now:
+    data = src_entry.get("data")
+    if not isinstance(data, dict):
         return None
-    return src_entry.get("data") if isinstance(src_entry.get("data"), dict) else None
+    # 负缓存哨兵空字典用更短 TTL，限制「干净→恶意」的检测时延。
+    effective_ttl = ttl if data else min(ttl, NEG_CACHE_TTL)
+    if (src_entry.get("ts") or 0) + effective_ttl < now:
+        return None
+    return data
 
 
 async def lookup_all_risk(

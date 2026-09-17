@@ -1839,6 +1839,25 @@ class TestReputationCache(unittest.TestCase):
         cache = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))["proxies"]
         self.assertEqual(cache["1.1.1.1"]["netcoffee"]["data"], {})
 
+    def test_negative_cache_shorter_ttl_than_positive(self):
+        # 负缓存 TTL 上限 NEG_CACHE_TTL(<正 TTL)：2 天前的负条目应重查，
+        # 同龄正条目仍在 TTL 内复用——限制「干净→恶意」检测时延。
+        now = time.time()
+        qc.save_rep_cache({
+            "1.1.1.1": {"netcoffee": {"ts": now - 2 * 86400, "data": {}}},
+            "8.8.8.8": {"netcoffee": {"ts": now - 2 * 86400, "data": {"risk": "low"}}},
+        })
+        calls = []
+        orig = qr.netcoffee_lookup_sync
+        qr.netcoffee_lookup_sync = lambda ip: (calls.append(ip), {"risk": "high"})[1]
+        try:
+            asyncio.run(qc.lookup_all_risk(
+                ["1.1.1.1", "8.8.8.8"], self._args()
+            ))
+        finally:
+            qr.netcoffee_lookup_sync = orig
+        self.assertEqual(calls, ["1.1.1.1"])  # 仅负条目重查
+
     def test_negative_signal_not_retried(self):
         # 无信号不是失败：不应触发 batch_sync 重试（旧行为会重查 2 次）。
         calls = []
