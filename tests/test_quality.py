@@ -2109,6 +2109,49 @@ class TestReputationCache(unittest.TestCase):
         )
 
 
+class TestAbuseFallback(unittest.TestCase):
+    """预算跳过/截断滥用相位时，用最近 abuse.json 兜底（滥用分具最高优先级）。"""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self._orig = qr.ABUSE_FILE
+        qr.ABUSE_FILE = self.tmp / "abuse.json"
+
+    def tearDown(self):
+        qr.ABUSE_FILE = self._orig
+
+    def _write(self, entries, age=0.0):
+        qr.write_json(qr.ABUSE_FILE, qr.keyed_json(entries))
+        if age:
+            import os
+            t = time.time() - age
+            os.utime(qr.ABUSE_FILE, (t, t))
+
+    def test_missing_and_corrupt_return_empty(self):
+        self.assertEqual(qr.load_abuse_file(), {})
+        qr.ABUSE_FILE.write_text("{not json", encoding="utf-8")
+        self.assertEqual(qr.load_abuse_file(), {})
+
+    def test_roundtrip_and_stale_ttl(self):
+        self._write({"1.1.1.1:443#US": {"service": "abuseipdb", "score": 40}})
+        loaded = qr.load_abuse_file()
+        self.assertEqual(loaded["1.1.1.1:443#US"]["score"], 40)
+        # 超龄 → 不兜底
+        self._write({"1.1.1.1:443#US": {"score": 40}}, age=2 * 86400)
+        self.assertEqual(qr.load_abuse_file(), {})
+
+    def test_merge_only_fills_valid_missing_keys(self):
+        fresh = {"a": {"score": 1}}
+        cached = {"a": {"score": 9}, "b": {"score": 2}, "c": {"score": 3}}
+        merged = qr.merge_abuse_fallback(fresh, cached, {"a", "b"})
+        self.assertEqual(merged["a"]["score"], 1)   # 不覆盖新结果
+        self.assertEqual(merged["b"]["score"], 2)   # 补齐缺失
+        self.assertNotIn("c", merged)               # 非本轮键不注入
+        self.assertNotIn("c", fresh)
+
+
 class TestAnnotateClassify(unittest.TestCase):
     """Tests for annotate_classify.py suffix filling and classification."""
 

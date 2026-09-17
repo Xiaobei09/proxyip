@@ -282,7 +282,7 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 
 ### `data/quality/abuse.json`
 
-提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。
+提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。若 `--time-budget` 导致滥用相位被跳过或截断，本轮以最近一次 `abuse.json`（年龄 ≤ 1 天，`ABUSE_STALE_TTL`）补齐缺失键作为兜底——滥用分在信誉合成中优先级最高，缺失会静默降级为纯共识分。仅当启用滥用服务（非 `none` 且有 key）时才会标记该相位为「跳过」，`abuse_service=none` 不产生假降级。
 
 ### `data/quality/entry_audit.json`
 

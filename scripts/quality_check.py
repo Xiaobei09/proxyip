@@ -598,14 +598,32 @@ async def run(args: argparse.Namespace) -> int:
             f"{', '.join(args.reputation_sources)}"
         )
     abuse_map: dict = {}
-    if _within_budget(start, budget):
+    abuse_enabled = args.abuse_service != "none" and bool(args.abuse_key)
+    if abuse_enabled and _within_budget(start, budget):
         abuse_map = await run_abuse(results, {
             k: {"exit_ip": res["exit_ip"]} for k, res in results.items()
         }, args, deadline=phase_deadline)
-    else:
+        cached_abuse = load_abuse_file()
+        if cached_abuse:
+            before = len(abuse_map)
+            abuse_map = merge_abuse_fallback(abuse_map, cached_abuse, set(results))
+            used = len(abuse_map) - before
+            if used:
+                print(
+                    f"Abuse: filled {used} proxy(es) from cached abuse.json "
+                    "(phase partial/unavailable)"
+                )
+    elif abuse_enabled:
+        # 仅当滥用相位确实启用时才记为跳过，避免 abuse_service=none 时
+        # 产生假「降级」告警污染 quality_meta.skipped。
         skipped.append("abuse scores")
         print("Warning: time budget exhausted; skipping abuse scores",
               file=sys.stderr)
+        abuse_map = merge_abuse_fallback({}, load_abuse_file(), set(results))
+        if abuse_map:
+            print(
+                f"Warning: using {len(abuse_map)} cached abuse score(s) "
+                "as fallback", file=sys.stderr)
     ipinfo = build_ipinfo_map(
         results, geo, abuse_map, risk_data, args.reputation_weights
     )

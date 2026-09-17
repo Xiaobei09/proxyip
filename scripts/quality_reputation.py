@@ -2083,6 +2083,39 @@ def save_rep_cache(cache: dict) -> None:
     write_json(REP_CACHE_FILE, keyed_json(cache))
 
 
+ABUSE_STALE_TTL = 86400  # abuse.json 回退最大年龄（秒）；<=0 表示不限制
+
+
+def load_abuse_file(now: float | None = None, ttl: int = ABUSE_STALE_TTL) -> dict:
+    """Persisted abuse scores ``{key: entry}`` as a fallback.
+
+    预算耗尽跳过/截断滥用相位时，用最近一次 ``abuse.json`` 兜底（滥用分在
+    ``compute_reputation`` 中具最高优先级，缺失会静默降级为共识分）。
+    文件缺失/损坏/超龄（> ``ttl``）→ ``{}``。
+    """
+    try:
+        if now is None:
+            now = time.time()
+        if ttl and ttl > 0 and now - ABUSE_FILE.stat().st_mtime > ttl:
+            return {}
+        data = json.loads(ABUSE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    proxies = data.get("proxies") if isinstance(data, dict) else None
+    if not isinstance(proxies, dict):
+        return {}
+    return {k: v for k, v in proxies.items() if isinstance(v, dict)}
+
+
+def merge_abuse_fallback(fresh: dict, cached: dict, valid_keys) -> dict:
+    """Fill ``valid_keys`` missing in ``fresh`` from ``cached`` abuse scores."""
+    merged = dict(fresh)
+    for key, entry in cached.items():
+        if key in valid_keys and key not in merged:
+            merged[key] = entry
+    return merged
+
+
 def cached_signal(
     cache: dict, ip: str, source: str, now: float, ttl: int
 ) -> dict | None:

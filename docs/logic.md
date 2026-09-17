@@ -97,7 +97,7 @@ deep-speed 深测（多流大样本）结果聚合出每节点最优目标的
 
 扣分表与默认源/权重见 `docs/scripts.md`「scripts/quality_check.py」段的「跨源共识合成」说明与「默认源与权重」表（tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅 mobile 与其余风险维度均不成立时有 +5 加分）。
 
-**滥用分优先级**：若 AbuseIPDB/IPQS 滥用分可用，直接取 `100 - abuse_score`，不走多源合成。
+**滥用分优先级**：若 AbuseIPDB/IPQS 滥用分可用，直接取 `100 - abuse_score`，不走多源合成。滥用相位受墙钟预算门控；被跳过/截断时以最近 `abuse.json`（≤1 天）补齐缺失键兜底，避免静默降级为纯共识分；仅当滥用服务启用时该相位才算「可跳过」。
 
 **密钥防护约束**：滥用/信誉 key 只经环境变量注入（`ABUSEIPDB_KEY`/`IPQS_KEY`，
 不进 CLI 参数与配置文件）；key 不得进入任何日志、`TimeoutError`/异常文本或
