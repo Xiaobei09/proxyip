@@ -95,6 +95,10 @@ DNSBL_DOH_ENDPOINTS = (
     "https://cloudflare-dns.com/dns-query",
     "https://dns.google/resolve",
 )
+# 进程内 sticky：记住最近成功命中的 DoH 端点，同进程后续查询优先用它，
+# 失败自动回落其余端点（避免每次查询都先空等一个慢/死端点超时）。
+_DOH_STICKY: list = []
+_DOH_STICKY_TTL = 600
 # AbuseIPDB 公共黑名单（近 30 天、置信度高的滥用举报 IP/CIDR，社区镜像，
 # GitHub 原始 + jsDelivr 镜像可回退）。独立于本仓库 key 版滥用相位。
 ABUSEIPDB_PUBLIC_URL = (
@@ -1069,15 +1073,26 @@ def maltiverse_lookup_sync(ip: str) -> dict | None:
 
 
 def _doh_query(name: str, qtype: str = "A") -> list:
-    """DNS-over-HTTPS 查询：按序尝试 ``DNSBL_DOH_ENDPOINTS``，返回 A 记录数组。
+    """DNS-over-HTTPS 查询：返回 A 记录数组。
 
-    端点返回合法 JSON（含 ``Status``）即视为权威应答（NXDOMAIN+无 Answer =
-    未列出 = 干净信号）；单端点连接/解析失败不当作「干净」，转下一镜像；
-    全部端点失败才抛出最后一个异常（由 ``batch_sync`` 判为失败并重试，
-    不会污染负缓存）。
+    按序尝试 ``DNSBL_DOH_ENDPOINTS``，单端点失败继续下一镜像；端点返回
+    合法 JSON（含 ``Status``）即视为权威应答（NXDOMAIN+无 Answer =
+    未列出 = 干净信号）；全部失败才抛出最后一个异常（由 ``batch_sync``
+    判为失败并重试，不会污染负缓存）。
+
+    Sticky 亲缘：进程内记住最近成功端点（TTL ``_DOH_STICKY_TTL``），
+    同批 IP 序列优先复用，避免每个查询都先空等一个慢/死端点拉满
+    ``DNSBL_TIMEOUT``；命中端点后续失效时会自动回落其余端点并重选。
     """
+    order = DNSBL_DOH_ENDPOINTS
+    if _DOH_STICKY:
+        ep, until = _DOH_STICKY[-1]
+        if time.time() < until:
+            order = (ep,) + tuple(e for e in DNSBL_DOH_ENDPOINTS if e != ep)
+        else:
+            _DOH_STICKY.pop()
     last = None
-    for base in DNSBL_DOH_ENDPOINTS:
+    for base in order:
         url = f"{base}?name={urllib.parse.quote(name)}&type={qtype}"
         req = urllib.request.Request(
             url,
@@ -1095,9 +1110,13 @@ def _doh_query(name: str, qtype: str = "A") -> list:
         if "Status" not in data:
             last = RuntimeError(f"doh {base}: missing Status")
             continue
-        return [str(a.get("data"))
-                for a in (data.get("Answer") or [])
-                if isinstance(a, dict) and a.get("data")]
+        answers = [str(a.get("data"))
+                   for a in (data.get("Answer") or [])
+                   if isinstance(a, dict) and a.get("data")]
+        _DOH_STICKY.append((base, time.time() + _DOH_STICKY_TTL))
+        if len(_DOH_STICKY) > 1:
+            _DOH_STICKY.pop(0)
+        return answers
     raise last if last else RuntimeError("doh: no endpoints")
 
 

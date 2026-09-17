@@ -134,7 +134,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | freeipapi | 6 | `isProxy` 标志 -30（附 ASN/org，全免费免 key） |
 | scamalytics | 8 | 免费风险页 `Fraud Score`（0-100）直扣；`is_blacklisted_external` 投 listed 票 |
 | iplocation | 3 | `is_proxy` 标志 -30（附 isp，全免费免 key） |
-| dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.zen.spamhaus.org` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存 |
+| dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.zen.spamhaus.org` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存；三镜像 `dns.alidns.com`→`cloudflare-dns.com`→`dns.google/resolve` 失败回退且进程内 sticky 复用最近成功端点（TTL 600s），全部失败按失败重试、不误判干净 |
 
 #### 静态列表源（每 run 重拉）
 

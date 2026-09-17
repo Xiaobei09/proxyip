@@ -855,6 +855,7 @@ class TestReputation(unittest.TestCase):
                     pass
             return FakeResp()
 
+        qr._DOH_STICKY.clear()
         with unittest.mock.patch.object(qr, "deadline_open",
                                         side_effect=fake_deadline_open):
             self.assertEqual(
@@ -862,11 +863,54 @@ class TestReputation(unittest.TestCase):
                 ["1.2.3.4"])
 
         # 全部端点失败 → 抛异常（而非返回 []）
+        qr._DOH_STICKY.clear()
         with unittest.mock.patch.object(
                 qr, "deadline_open",
                 side_effect=OSError("all endpoints dead")):
             with self.assertRaises(OSError):
                 qr._doh_query("1.2.3.4.zen.spamhaus.org")
+
+    def test_doh_query_sticky_leader(self):
+        """成功端点被 sticky 复用：同一进程后续查询不再先空等慢/死端点。"""
+        qr._DOH_STICKY.clear()
+
+        def fake_deadline_open(req, timeout, max_bytes=None):
+            if "dns.google" not in req.full_url:
+                raise OSError("only dns.google reachable")
+
+            class FakeResp:
+                def read(self, *a):
+                    return json.dumps(
+                        {"Status": 0, "Answer": [{"data": "1.2.3.4"}]}
+                    ).encode()
+                def __enter__(self):
+                    return self
+                def __exit__(self, *a):
+                    pass
+            return FakeResp()
+
+        calls = []
+
+        def traced(req, timeout=30, max_bytes=None):
+            calls.append(req.full_url)
+            return fake_deadline_open(req, timeout, max_bytes)
+
+        with unittest.mock.patch.object(qr, "deadline_open",
+                                        side_effect=traced):
+            self.assertEqual(qr._doh_query("4.3.2.1.zen.spamhaus.org"),
+                             ["1.2.3.4"])
+        # 第一次：alidns/cloudflare 失败 → 失败回落至 dns.google 成功。
+        self.assertEqual(len(calls), len(qr.DNSBL_DOH_ENDPOINTS))
+        self.assertEqual(qr._DOH_STICKY[-1][0], qr.DNSBL_DOH_ENDPOINTS[-1])
+
+        calls.clear()
+        with unittest.mock.patch.object(qr, "deadline_open",
+                                        side_effect=traced):
+            # sticky 命中 dns.google → 仅一次调用即返回，不再空等 alidns。
+            self.assertEqual(qr._doh_query("5.5.5.5.zen.spamhaus.org"),
+                             ["1.2.3.4"])
+        self.assertEqual(len(calls), 1)
+        self.assertIn("dns.google", calls[0])
 
     def test_abuseipdb_public_source_registered(self):
         """R251：abuseipdb_public 公共黑名单默认启用、有权重/静态分。"""
