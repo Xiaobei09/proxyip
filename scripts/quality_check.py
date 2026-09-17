@@ -727,6 +727,37 @@ def parse_reputation_sources(
     return valid, unknown
 
 
+def parse_reputation_weights(
+    override: str,
+    base: dict | None = None,
+) -> tuple[dict, list[str]]:
+    """Apply ``--reputation-weights-override`` on a copy of the base weights.
+
+    Returns ``(weights, unknown)``。只认 ``base``（默认 ``REPUTATION_WEIGHTS``）
+    内已知名；未知/无 ``:`` 分隔的片段放入 ``unknown`` 供告警，杜绝
+    typo 静默「新增 dict 键」却让目标源权重不生效（同 R260 的 source 语义）。
+    数值非法（非 int）时保留原权重并告警。
+    """
+    base = dict(base) if base is not None else dict(REPUTATION_WEIGHTS)
+    unknown: list[str] = []
+    for tok in (override or "").split(","):
+        if not tok.strip():
+            continue
+        name, sep, weight = tok.partition(":")
+        if not sep:
+            unknown.append(tok.strip())
+            continue
+        name = name.strip()
+        if name not in base:
+            unknown.append(tok.strip())
+            continue
+        try:
+            base[name] = int(weight)
+        except ValueError:
+            logging.warning("Invalid weight value for %s: %s", name, weight)
+    return base, unknown
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -805,15 +836,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             args.abuse_service = "none"
     args.getipintel_email = os.environ.get("GETIPINTEL_EMAIL", "")
-    args.reputation_weights = dict(REPUTATION_WEIGHTS)
-    override = args.reputation_weights_override or ""
-    for tok in override.split(","):
-        if ":" in tok:
-            name, weight = tok.split(":", 1)
-            try:
-                args.reputation_weights[name.strip()] = int(weight)
-            except ValueError:
-                logging.warning("Invalid weight value for %s: %s", name, weight)
+    args.reputation_weights, weight_unknown = parse_reputation_weights(
+        args.reputation_weights_override,
+    )
+    for name in weight_unknown:
+        logging.warning(
+            "Unknown reputation weight target %r dropped; "
+            "check --reputation-weights (expect <source>:<int>)",
+            name,
+        )
     args.reputation_sources = args.reputation_sources or ""
     parsed, unknown = parse_reputation_sources(
         args.reputation_sources, args.reputation_provider,

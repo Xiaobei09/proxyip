@@ -976,6 +976,23 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.parse_reputation_sources("", "ip-api")[0],
                          ["ip-api"])
 
+    def test_parse_reputation_weights_unknown_warned(self):
+        """R261：权重覆盖对未知源名/无冒号片段告警并丢弃，
+        不再静默新增 dict 键让 typo 权重悄悄不生效。"""
+        base = dict(qr.REPUTATION_WEIGHTS)
+        w, unknown = qc.parse_reputation_weights(
+            "dnsbl:12, netoffee:40, ,foo:9, bare", base=dict(base))
+        self.assertEqual(w["dnsbl"], 12)
+        self.assertNotIn("netoffee", w)
+        self.assertNotIn("foo", w)
+        self.assertEqual(unknown, ["netoffee:40", "foo:9", "bare"])
+        w2, unk2 = qc.parse_reputation_weights("netcoffee:abc")
+        self.assertEqual(unk2, [])
+        self.assertEqual(w2["netcoffee"], base["netcoffee"])
+        w3, unk3 = qc.parse_reputation_weights("")
+        self.assertEqual(w3, base)
+        self.assertEqual(unk3, [])
+
     def test_static_list_size_report(self):
         """R253：静态源尺寸上报——非空打印逐源大小，全空打印 all empty，
         便于 R245 式死源审计（空列表静默 = 不可发现）。

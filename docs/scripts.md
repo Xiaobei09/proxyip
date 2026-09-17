@@ -103,7 +103,7 @@
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
 | `--reputation-sources` | multi 时启用的源（逗号分隔，见下）；**未知/拼错的源名打印警告并丢弃，杜绝 typo 静默变全量默认** | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,tor_exit,spamhaus,freeipapi,scamalytics,iplocation,hackmyip,stopforumspam,maltiverse,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk,greynoise,urlhaus,threatfox,firehol_level1,binarydefense,c2_tracker,botscout,greensnow,sslproxies,socks_proxy,vpn_ips,dshield,dnsbl,abuseipdb_public |
-| `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
+| `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20`；**未知源名/格式错误打印警告并丢弃** | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 6 |
