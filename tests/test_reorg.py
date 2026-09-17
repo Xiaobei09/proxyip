@@ -10,12 +10,6 @@ import reorg_country as rc
 from common import parse_ltd_line
 
 
-def _is_all_entry(line: str) -> bool:
-    """行入口国是否为 ``#ALL`` 哨兵（入口未知）。"""
-    parsed = parse_ltd_line(line)
-    return bool(parsed and parsed[3] == "ALL")
-
-
 class TestMarker(unittest.TestCase):
     def test_inserts_marker(self):
         self.assertEqual(
@@ -205,34 +199,54 @@ class TestMergeOrdered(unittest.TestCase):
 
 
 class TestReorgCountryConsistency(unittest.TestCase):
-    """回归守护：countries/*/all.txt 行数总和 = valid/all.txt 中入口国可归属的
-    行数（总行数扣除 ``#ALL`` 哨兵，R177/R231）。``#ALL``（入口未知）依 data-spec
-    只出现在 all.txt/all_ltd.txt、不进入 countries/。本地无数据文件则跳过。"""
+    """回归守护：``countries/*/all.txt`` 的端点集必须与 ``valid/all.txt`` 的端点集
+    一致（剔除 ``#ALL`` 哨兵；键 = ``ip:port``，R177/R231）。
+
+    按**端点键集**而非原始行数断言：同一端点可因不同入口国标注出现在多个国家目录
+    （``dup_endpoints``，data-spec 允许的告警、非漂移），若按行数比较，这类合法重复
+    以及并发提交（update/quality/exit 三条链交叉 commit）带来的瞬时行数偏移会误报。
+    端点集一致才等价于「无代理在分目录中丢失 / 无越界残留」。
+
+    ``#ALL``（入口未知）依 data-spec 只出现在 ``all.txt``/``all_ltd.txt``、不进入
+    ``countries/``。本地无数据文件则跳过。"""
 
     def _valid(self):
         return Path(__file__).resolve().parent.parent / "data" / "valid"
+
+    @staticmethod
+    def _keys(lines):
+        keys = set()
+        for ln in lines:
+            if not ln:
+                continue
+            parsed = parse_ltd_line(ln)
+            if parsed and parsed[3] == "ALL":
+                continue
+            keys.add(ln.split("#", 1)[0])
+        return keys
 
     def test_sum_equals_all_txt(self):
         all_path = self._valid() / "all.txt"
         if not all_path.exists():
             self.skipTest("no data/valid/all.txt")
-        master = [
-            ln for ln in all_path.read_text(encoding="utf-8").splitlines()
-            if ln and not _is_all_entry(ln)
-        ]
+        master = self._keys(all_path.read_text(encoding="utf-8").splitlines())
         cdir = self._valid() / "countries"
         if not cdir.exists():
             self.skipTest("no data/valid/countries")
-        total = 0
+        seen = set()
         for d in sorted(cdir.iterdir()):
-            if not d.is_dir():
-                continue
             f = d / "all.txt"
-            if f.exists():
-                total += len(f.read_text(encoding="utf-8").splitlines())
+            if d.is_dir() and f.exists():
+                seen |= self._keys(f.read_text(encoding="utf-8").splitlines())
+        missing = sorted(master - seen)
+        excess = sorted(seen - master)
         self.assertEqual(
-            total, len(master),
-            f"countries sum {total} != all.txt (non-#ALL) {len(master)}",
+            missing, [],
+            f"endpoints in all.txt missing from countries: {missing[:5]}",
+        )
+        self.assertEqual(
+            excess, [],
+            f"endpoints in countries not in all.txt: {excess[:5]}",
         )
 
     def test_no_orphan_dirs(self):
