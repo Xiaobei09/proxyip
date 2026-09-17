@@ -2979,5 +2979,27 @@ class TestNeedsProbe(unittest.TestCase):
         self.assertTrue(cc.needs_probe(entries, "1.1.1.1:80#US"))
 
 
+class TestBuildCnBest(unittest.TestCase):
+    def test_skips_none_and_non_dict_entries(self):
+        # 回归 R236：cn_best_isp 返回 None（无 per-ISP 读数）不得导致
+        # `for isp, ms in [None]` 解包 TypeError 崩溃整轮 china_check。
+        entries = {
+            "1.1.1.1:443#US": {"isp_ms": {"移动": 57.0}},   # 有效
+            "2.2.2.2:443#US": {"isp_ms": {"电信": 2.0}},    # 全 ≤2ms → None
+            "3.3.3.3:443#US": {"isp_ms": {}},               # 空 → None
+            "4.4.4.4:443#US": {},                            # 无 isp_ms → None
+            "5.5.5.5:443#US": "not-a-dict",                  # 非 dict → None
+        }
+        out = cc.build_cn_best(entries)
+        self.assertEqual(out, {"1.1.1.1:443#US": "移动=57ms"})
+
+    def test_empty_entries(self):
+        self.assertEqual(cc.build_cn_best({}), {})
+
+    def test_rounds_best_ms(self):
+        out = cc.build_cn_best({"k": {"isp_ms": {"电信": 42.6}}})
+        self.assertEqual(out["k"], "电信=43ms")
+
+
 if __name__ == "__main__":
     unittest.main()

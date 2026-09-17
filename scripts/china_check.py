@@ -3358,6 +3358,25 @@ def compute_fallback_merge(
     return fallback_keys
 
 
+def build_cn_best(entries: dict) -> dict:
+    """CN 清单"最佳运营商"后缀映射（``-移动=57ms``）。
+
+    仅当 ``cn_best_isp`` 给出真实 per-ISP 读数时才生成；其返回 ``None``
+    （无读数/全为 ICMP 噪声）的条目直接跳过，绝不伪造运营商后缀。
+    """
+    out: dict = {}
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            continue
+        best = cn_best_isp(entry)
+        if best is None:
+            continue
+        isp, ms = best
+        if isp is not None and ms is not None:
+            out[key] = f"{isp}={round(ms)}ms"
+    return out
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="china_check.py",
@@ -3558,13 +3577,7 @@ def main(argv=None) -> int:
     }
     # CN 清单"最佳运营商"后缀：仅当 itdog 等 per-ISP 读数真实存在时，
     # 标记表现最好的运营商名字与其大陆 RTT（如 `-移动=57ms`）；无读数不伪造。
-    cn_best = {
-        key: f"{isp}={round(ms)}ms"
-        for key, entry in entries.items()
-        if isinstance(entry, dict)
-        for isp, ms in [cn_best_isp(entry)]  # noqa: C419
-        if isp is not None and ms is not None
-    }
+    cn_best = build_cn_best(entries)
     # 兜底键未复测，无当轮读数：从其上一轮 entry 补大陆延迟（历史同源读数，
     # 比海外 TLS 更贴近大陆视角；实在无读数则保持"不伪饰、删除速度"）。
     if fallback_keys:
