@@ -1333,6 +1333,25 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(
             qc.source_score("ipapi_is", {"company_abuser_score": 0.5}), 80)
 
+    def test_source_score_abuser_score_string_forms(self):
+        # R237：缓存/上游可能给 "0.5 (High)" 这类字符串，此前 `or 0` 与阈值
+        # 做 str>=float 比较会抛 TypeError；改用 parse_abuser_score 归一。
+        self.assertEqual(
+            qc.source_score("netcoffee", {"abuser_score": "0.5 (High)"}), 80)
+        self.assertEqual(
+            qc.source_score("netcoffee", {"abuser_score": "0.0039 (Low)"}), 100)
+        self.assertEqual(
+            qc.source_score(
+                "ipapi_is", {"company_abuser_score": "0.5 (High)"}), 80)
+        self.assertEqual(
+            qc.source_score("netcoffee", {"abuser_score": "n/a"}), 100)
+
+    def test_numeric_risk_penalty_ignores_bool(self):
+        # bool 是 int 子类：投毒 true 不应被当成 1 分风险罚分
+        self.assertIsNone(qr._numeric_risk_penalty("scamalytics", {"score": True}))
+        self.assertEqual(
+            qr._numeric_risk_penalty("scamalytics", {"score": 7}), 7)
+
     def test_collect_signals_clean_geo_includes_ipapi(self):
         signals = qc.collect_signals(
             "9.9.9.9",

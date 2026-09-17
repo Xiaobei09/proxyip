@@ -1267,7 +1267,8 @@ def source_score(name: str, signal) -> int | None:
         if signal.get("company_type") in ("hosting", "datacenter") or \
            signal.get("asn_kind") in ("hosting", "datacenter"):
             penalty += 15
-        if (signal.get("abuser_score") or 0) >= ABUSER_SCORE_THRESHOLD:
+        abuser = parse_abuser_score(signal.get("abuser_score"))
+        if abuser is not None and abuser >= ABUSER_SCORE_THRESHOLD:
             penalty += 20
         return max(0, min(100, 100 - penalty))
     if name == "ncgy":
@@ -1309,10 +1310,10 @@ def source_score(name: str, signal) -> int | None:
         if signal.get("company_type") in ("hosting", "datacenter") or \
            signal.get("asn_type") in ("hosting", "datacenter"):
             penalty += 15
-        abuser = signal.get("company_abuser_score")
+        abuser = parse_abuser_score(signal.get("company_abuser_score"))
         if abuser is None:
-            abuser = signal.get("asn_abuser_score")
-        if (abuser or 0) >= ABUSER_SCORE_THRESHOLD:
+            abuser = parse_abuser_score(signal.get("asn_abuser_score"))
+        if abuser is not None and abuser >= ABUSER_SCORE_THRESHOLD:
             penalty += 20
         return max(0, min(100, 100 - penalty))
     if name == "ipquery":
@@ -1786,6 +1787,10 @@ def _numeric_risk_penalty(name: str, signal: dict) -> int | None:
         return min(max(0, -rep) * 5, 80) + max(0, min(pulses * 2, 20))
     for key in ("risk_score", "fraud_score", "score", "risk", "threat_score"):
         value = signal.get(key)
+        # bool 是 int 子类：缓存投毒塞入 ``true`` 不得被当作 1 分风险罚分，
+        # 与 _as_int 的 bool 防御一致。
+        if isinstance(value, bool):
+            continue
         if isinstance(value, (int, float)):
             return round(max(0, min(100, value)))
     return None

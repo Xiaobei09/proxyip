@@ -120,7 +120,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 |---|---|---|
 | netcoffee | 20 | 直接取 `trust_score`（0-100）；无 score 时按标志罚分：abuser -40 / tor -35 / proxy -30 / vpn -25 / datacenter -15，机房 ASN/公司类型再 -15，abuser_score≥0.1 再 -20 |
 | ncgy | 10 | MaxMind 标志罚分：tor -45 / proxy -30 / vpn -25 / anonymous -10 |
-| ip-api | 15 | 本地批量地理：proxy -25 / hosting -10 / mobile +10；有 `countryCode` 即计入 |
+| ip-api | 15 | 本地批量地理：proxy -25 / hosting -10 / mobile +5（与共识 `_mobile_clean_bonus` 一致）；有 `countryCode` 即计入 |
 | ipquery | 12 | `risk_score` 直用或标志罚分（取较大者）：tor -45 / vpn -30 / proxy -25 / datacenter -15 |
 | ffraud | 12 | `fraud_score` 直用或标志罚分（取较大者）：tor -45 / vpn -30 / proxy -25 / hosting -15 / abuser -20 / recent_abuse -15 |
 | blackbox | 10 | 按分类给分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10 / bogon 5 / unknown 50；suspicious -20 |
