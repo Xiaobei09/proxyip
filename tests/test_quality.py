@@ -926,6 +926,22 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["abuseipdb_public"])
         self.assertIsNone(qc.source_score("abuseipdb_public", {}))
 
+    def test_docs_enumerate_all_sources(self):
+        """R256：docs/logic.md 与 docs/scripts.md 必须命名每个信誉源。
+
+        防新增源（权重/静态）时漏同步文档；loop-state 认为「可发现性」是
+        文档契约的一部分。源名以字面出现即通过（含 per-IP 表与静态表）。"""
+        root = Path(__file__).resolve().parents[1]
+        logic = (root / "docs" / "logic.md").read_text(encoding="utf-8")
+        scripts = (root / "docs" / "scripts.md").read_text(encoding="utf-8")
+        for name in qr.REPUTATION_WEIGHTS:
+            self.assertIn(
+                name, logic,
+                f"docs/logic.md 缺少信誉源 {name}")
+            self.assertIn(
+                name, scripts,
+                f"docs/scripts.md 缺少信誉源 {name}")
+
     def test_static_list_size_report(self):
         """R253：静态源尺寸上报——非空打印逐源大小，全空打印 all empty，
         便于 R245 式死源审计（空列表静默 = 不可发现）。

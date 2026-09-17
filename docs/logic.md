@@ -135,19 +135,43 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | scamalytics | 8 | 免费风险页 `Fraud Score`（0-100）直扣；`is_blacklisted_external` 投 listed 票 |
 | iplocation | 3 | `is_proxy` 标志 -30（附 isp，全免费免 key） |
 | dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.zen.spamhaus.org` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存；三镜像 `dns.alidns.com`→`cloudflare-dns.com`→`dns.google/resolve` 失败回退且进程内 sticky 复用最近成功端点（TTL 600s），全部失败按失败重试、不误判干净 |
+| ipwhois | 6 | `security` 块标志罚分：tor -45 / vpn -30 / proxy -25 / hosting -15 / anonymous -10；`connection.type` 命中机房类另投 hosting；无罚分且无 ASN 则 None |
+| maltiverse | 6 | `classification`（malicious/suspicious）或结构布尔（open_proxy / tor_node / vpn_node / cnc / malware 分发 / iot / scanner / mining）+ 近 MALTIVERSE_RECENT_DAYS 天黑名单；刻意忽略 `is_known_attacker` 与 `is_hosting`（防叠噪）；全空 → None |
+| stopforumspam | 4 | `is_abuse` → abuse -35、Tor exit → tor -40（HTTP 垃圾评论/僵尸出口） |
+| hackmyip | 6 | `data.privacy` 块：hosting / proxy / mobile（附 ASN）；全空 payload → None |
+| greynoise | 8 | `is_abuse` -60（恶意扫描）/ `is_riot` bot -35 / `is_noise` -15；免费 40 req/min 限流 |
 
 #### 静态列表源（每 run 重拉）
 
-| 源 | 权重 | 命中时分数 |
-|---|---|---|
-| ipsum | 8 | 55（命中 3+ 黑名单） |
-| abuse_list | 5 | 60（历史滥用） |
-| dc_asn | 5 | 85（机房/数据中心 ASN） |
-| vpn_asn | 3 | 70（VPN 服务商 ASN） |
-| resproxy_asn | 2 | 75（住宅代理骨干 ASN） |
-| cins | 5 | 50（CINS 活跃滥用/拒绝服务 IP） |
-| et_compromised | 4 | 45（EmergingThreats 被入侵主机回连） |
-| abuseipdb_public | 5 | 55（AbuseIPDB 近 30 天高置信滥用举报，社区镜像静态名单） |
+| 源 | 权重 | 命中分数 | 信号旗 | 说明 |
+|---|---|---|---|---|
+| ipsum | 8 | 55 | `is_listed` | 命中 3+ 黑名单 |
+| abuse_list | 5 | 60 | `is_abuse` | 历史滥用 |
+| abuseipdb_public | 5 | 55 | `is_abuse` | AbuseIPDB 近 30 天高置信滥用举报（社区镜像） |
+| cins | 5 | 50 | `is_listed` | CINS 活跃滥用/拒绝服务 IP |
+| danmeuk_tor | 5 | 40 | `is_tor` | Dan.me.uk Tor 出口 |
+| dc_asn | 5 | 85 | `is_hosting` | 机房/数据中心 ASN |
+| firehol_level1 | 5 | 60 | `is_listed` | FireHOL 最严封禁集 |
+| threatfox | 5 | 55 | `is_abuse` | ThreatFox IOC |
+| tor_exit | 5 | 45 | `is_tor` | Tor 出口节点 |
+| urlhaus | 5 | 55 | `is_abuse` | URLhaus 恶意软件分发 |
+| binarydefense | 4 | 55 | `is_abuse` | Binary Defense 蜜罐 |
+| blocklist_de | 4 | 50 | `is_abuse` | Blocklist.de 全量滥用 |
+| c2_tracker | 4 | 55 | `is_abuse` | C2 Tracker 命令控制 |
+| et_compromised | 4 | 45 | `is_abuse` | EmergingThreats 被入侵主机回连 |
+| feodo | 4 | 40 | `is_abuse` | Feodo Tracker 银行木马 C2 |
+| greensnow | 4 | 50 | `is_abuse` | GreenSnow 蜜罐 |
+| spamhaus | 4 | 55 | `is_listed` | Spamhaus DROP/EDROP 高风险网段 |
+| tor_bulk | 4 | 35 | `is_tor` | Tor 批量出口 |
+| blocklist_de_apache | 3 | 45 | `is_abuse` | Blocklist.de Apache 攻击 |
+| blocklist_de_ssh | 3 | 45 | `is_abuse` | Blocklist.de SSH 暴力破解 |
+| botscout | 3 | 45 | `is_abuse` | BotScout 机器人 |
+| dshield | 3 | 50 | `is_abuse` | DShield 攻击源 |
+| socks_proxy | 3 | 60 | `is_proxy` | SOCKS 代理 |
+| sslproxies | 3 | 60 | `is_proxy` | SSL 代理 |
+| vpn_asn | 3 | 70 | `is_vpn` | VPN 服务商 ASN |
+| vpn_ips | 3 | 55 | `is_vpn` | X4BNet VPN 出口 CIDR |
+| resproxy_asn | 2 | 75 | `is_proxy` | 住宅代理骨干 ASN |
 
 未命中 → 该项不计入合分（不误判满分）。
 
