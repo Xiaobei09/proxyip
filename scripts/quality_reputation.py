@@ -2512,13 +2512,15 @@ async def lookup_all_risk(
             if ip not in res:
                 put(name, ip, sig)
         if need:
+            attempted = len(need)
             truncated = 0
             if cap > 0 and len(need) > cap:
+                attempted = cap
                 truncated = len(need) - cap
             text = (
                 f"Reputation source {name}: {time.monotonic() - t0:.1f}s "
-                f"({len(need)} queried, {len(res)} resolved, "
-                f"{len(fallback)} fallback)"
+                f"({len(need)} need, {attempted} queried, "
+                f"{len(res)} resolved, {len(fallback)} fallback)"
             )
             if truncated:
                 text += f", cap-truncated {truncated}"

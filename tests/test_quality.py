@@ -1128,7 +1128,7 @@ class TestReputation(unittest.TestCase):
             risk = asyncio.run(qr.lookup_all_risk(ips, args))
         out = buf.getvalue()
         self.assertIn("Reputation source dnsbl:", out)
-        self.assertIn("6 queried", out)
+        self.assertIn("6 need, 2 queried", out)
         self.assertIn("cap-truncated 4", out)
         self.assertEqual(len(risk), 2)
 
@@ -1168,7 +1168,8 @@ class TestReputation(unittest.TestCase):
                 qr.lookup_all_risk(["10.0.0.1", "10.0.0.2"], args))
         # 只查了从未有信号的 10.0.0.2；10.0.0.1 未在线补查。
         self.assertEqual(calls, ["10.0.0.2"])
-        self.assertIn("2 queried, 1 resolved", buf.getvalue())
+        self.assertIn("2 need, 1 queried, 1 resolved",
+                      buf.getvalue())
         self.assertIn("cap-truncated 1", buf.getvalue())
         # 旧信号以 fallback 注入，10.0.0.1 仍出信号而不丢覆盖。
         self.assertIn("dnsbl", risk.get("10.0.0.1", {}))
