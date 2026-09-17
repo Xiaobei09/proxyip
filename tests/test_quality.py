@@ -928,7 +928,11 @@ class TestReputation(unittest.TestCase):
 
     def test_static_list_size_report(self):
         """R253：静态源尺寸上报——非空打印逐源大小，全空打印 all empty，
-        便于 R245 式死源审计（空列表静默 = 不可发现）。"""
+        便于 R245 式死源审计（空列表静默 = 不可发现）。
+
+        R255 补充：**已启用但为空/拉取失败（fail-open）的静态源以
+        ``<name>=0`` 显式列出**，可与「未启用」区分；未启用的源即使被
+        fetch 返回也绝不入报。"""
         seed_keys = (
             "abuse_list", "dc_asn", "vpn_asn", "resproxy_asn", "tor_exit",
             "spamhaus", "cins", "et_compromised", "feodo", "blocklist_de",
@@ -946,6 +950,7 @@ class TestReputation(unittest.TestCase):
                 if k in ("vpn_asn", "resproxy_asn"):
                     d[k] = set()
             d["cins"] = qr.IpSet(["1.1.1.1", "2.2.2.2"])
+            d["dshield"] = qr.IpSet(["3.3.3.3"])  # 未启用源也要被忽略
             return d
 
         args = argparse.Namespace(
@@ -958,11 +963,17 @@ class TestReputation(unittest.TestCase):
                                         return_value=set()), \
              contextlib.redirect_stdout(io.StringIO()) as buf:
             asyncio.run(qr.lookup_all_risk(["1.1.1.1"], args))
-        self.assertIn("Reputation static lists: cins=2", buf.getvalue())
+        out = buf.getvalue()
+        # 非空 + 空全列出（abuse_list=0 表明已启用但本次零命中/拉取失败），
+        # 未启用的 dshield 即使非空也不入报。
+        self.assertIn("Reputation static lists: abuse_list=0, cins=2", out)
+        self.assertNotIn("dshield", out)
+        self.assertNotIn("all empty", out)
 
         def fake_empty(sources):
             d = fake_static(sources)
             d["cins"] = qr.IpSet()
+            d["dshield"] = qr.IpSet()
             return d
 
         with unittest.mock.patch.object(qr, "fetch_static_lists",

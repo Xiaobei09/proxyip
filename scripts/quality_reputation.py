@@ -2568,13 +2568,18 @@ async def lookup_all_risk(
             if ip in ipsum_set:
                 put("ipsum", ip, {"is_listed": True})
     static = await fetch_static_lists(sources)
-    sizes = {k: len(v) for k, v in static.items() if v and k in sources}
-    if sizes:
+    rep_static = {
+        k: len(v) for k, v in static.items()
+        if k in sources
+    }
+    if rep_static and any(rep_static.values()):
         print(
             "Reputation static lists: "
-            + ", ".join(f"{k}={n}" for k, n in sorted(sizes.items()))
+            + ", ".join(f"{k}={n}" for k, n in sorted(rep_static.items()))
         )
-    elif any(s in static for s in sources):
+    elif rep_static:
+        # 已启用静态源全为零尺寸：可能为合法空列表，也可能是拉取失败
+        # fail-open（镜像不可达被吞成空）——两者均打印 all empty。
         print("Reputation static lists: all empty")
     for ip in uniq:
         if ip in static["abuse_list"]:
