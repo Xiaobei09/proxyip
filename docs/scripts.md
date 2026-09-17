@@ -24,7 +24,7 @@
 
 **维护宗旨：只保留「非 Cloudflare AS13335 + Cloudflare 边缘端口」连接池。** 因此不收录 Cloudflare 官方边缘 IP（如 `byJoey/cfnew-ipdb`——其 IP 全属 AS13335，而 Workers 出站 `connect()` 禁止直连 CF IP 网段，无法用于自建链路）。最终产物经端口白名单 `443/8443/2053/2083/2087/2096` 过滤，其余端口桶一律丢弃——可用于 Worker 内部 `connect()` 直连。
 
-主源 `all.json` 采用 **3 次线性退避重试**（1.5s/3s）后才回退 zip 镜像（镜像同样 3 次尝试）；附加 `.json`/`.zip` 源分别 3/2 次重试。`ip-api` 国籍批量按批重试 2 次，终失败仅跳过该批继续后续批次，网络抖动不再中断整次国籍填充。所有下载统一带**整体 wall-clock 截止**：`fetch_with_deadline`（daemon 线程 + `join(timeout)`）用于「返回 bytes」路径，`deadline_open`（上下文管理器、`resp.read()` 返回已读完整 body）用于 `with urlopen(...) as resp:` 形态的逐 IP 信仰抓取——覆盖 download 主源/`ip-api`、quality 探活与全部信誉 API（netcoffee/ncgy/greynoise/ipdata/getipintel/ipapi_is/ipquery/ffraud/whatismyip/blackbox/otx/proxycheck/ip2location/ipwhois/freeipapi/hackmyip/iplocation/scamalytics）、external 校验、audit 国籍批量、健康 webhook。单次 `urlopen` 的 socket 超时只约束单次读写，遇到只回 200 头、响应体永不结束的上游仍会挂死管线——现在一律在 `timeout` 内按错误处理并走重试/兜底，任何上游都无法无限拖住流程（china_check 的 SSE 长连接轮询除外——其分块读取由内部 deadline 循环控制，不套用）。
+主源 `all.json` 采用 **3 次线性退避重试**（1.5s/3s）后才回退 zip 镜像（镜像同样 3 次尝试）；附加 `.json`/`.zip` 源分别 3/2 次重试。`ip-api` 国籍批量按批重试 2 次，终失败仅跳过该批继续后续批次，网络抖动不再中断整次国籍填充。所有下载统一带**整体 wall-clock 截止**：`fetch_with_deadline`（daemon 线程 + `join(timeout)`）用于「返回 bytes」路径，`deadline_open`（上下文管理器、`resp.read()` 返回已读完整 body）用于 `with urlopen(...) as resp:` 形态的逐 IP 信仰抓取——覆盖 download 主源/`ip-api`、quality 探活与全部信誉 API（netcoffee/ncgy/greynoise/ipdata/getipintel/ipapi_is/ipquery/ffraud/whatismyip/blackbox/otx/proxycheck/ip2location/ipwhois/freeipapi/hackmyip/iplocation/scamalytics/stopforumspam）、external 校验、audit 国籍批量、健康 webhook。单次 `urlopen` 的 socket 超时只约束单次读写，遇到只回 200 头、响应体永不结束的上游仍会挂死管线——现在一律在 `timeout` 内按错误处理并走重试/兜底，任何上游都无法无限拖住流程（china_check 的 SSE 长连接轮询除外——其分块读取由内部 deadline 循环控制，不套用）。
 
 ### `scripts/validate_proxies.py`
 
@@ -102,7 +102,7 @@
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,ipwhois,tor_exit,spamhaus,freeipapi,scamalytics,iplocation,hackmyip,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk,greynoise,urlhaus,threatfox,firehol_level1,binarydefense,c2_tracker,botscout,greensnow,sslproxies,socks_proxy,vpn_ips,dshield |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,tor_exit,spamhaus,freeipapi,scamalytics,iplocation,hackmyip,stopforumspam,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk,greynoise,urlhaus,threatfox,firehol_level1,binarydefense,c2_tracker,botscout,greensnow,sslproxies,socks_proxy,vpn_ips,dshield |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
@@ -133,13 +133,14 @@
 | `resproxy_asn` | 2 | iplogs `residential-proxy-backbones.csv` 住宅代理骨干 ASN 表，命中 -25（fail-open） |
 | `proxycheck` | 12 | `proxycheck.io/v3/{ip}`，免 key（100/天）；proxy/vpn/tor/hosting/scraper 标志罚分 + risk score |
 | `ip2location` | 5 | `api.ip2location.io/?ip={ip}`，免 key（1000/天）；`is_proxy` 标志 -30 |
-| `ipwhois` | 6 | `ipwho.is/{ip}`，免 key；`security.proxy/vpn/tor/hosting` 标志各 -25，`security.anonymous` -8；`connection.type` 不额外加分（唯一住宅/移动加分由共识 `_mobile_clean_bonus` +5 提供，见上） |
+| `ipwhois` | 6 | `ipwhois.app/json/{ip}`，免 key；**已退出默认源**（opt-in）——免费层不再返回 `connection`/`security` 字段，纯信号为 0 却每轮仍产生 HTTP 调用；解析器保留，若上游恢复字段可用 `--reputation-sources` 重新启用。`security.proxy/vpn/tor/hosting` 各 -25、`security.anonymous` -8 |
 | `tor_exit` | 5 | check.torproject.org 出口节点实时列表（免费），命中即投 `tor` 票 |
 | `spamhaus` | 4 | Spamhaus DROP + EDROP 端用户高风险网段静态表（免费，`<cidr> ; 描述`），命中即投 `listed` 票 |
 | `freeipapi` | 6 | `freeipapi.com/api/json/{ip}`，免 key；`isProxy` 标志 -30，附 ASN/org |
 | `hackmyip` | 6 | `hackmyip.com/api/lookup?ip={ip}`，免 key；`data.privacy` 的 hosting/proxy/mobile 标志参与投票，附 ASN |
 | `scamalytics` | 8 | `scamalytics.com/ip/{ip}` 免费风险页；`Fraud Score` 0-100 直扣，`is_blacklisted_external` 投 `listed` 票 |
 | `iplocation` | 3 | `api.iplocation.net/?ip={ip}`，免 key；`is_proxy` -30，附 isp |
+| `stopforumspam` | 4 | `api.stopforumspam.org/api?ip={ip}&json`，免 key；`appears=1`（被举报的 HTTP 垃圾/滥用来源）投 `abuse` 票并 -50，`torexit=1` 额外投 `tor` 票；无记录返回空（负缓存） |
 | `cins` | 5 | CINS Army `ci-badguys.txt` 静态活跃滥用/拒绝服务 IP（免费），命中投 `listed` 票 |
 | `et_compromised` | 4 | EmergingThreats `compromised-ips.txt` 被入侵主机（免费），命中投 `abuse` 票 |
 | `feodo` | 4 | abuse.ch Feodo Tracker `ipblocklist.txt` 僵尸网络 C2 IP（免费），命中投 `abuse` 票 |
@@ -161,7 +162,7 @@
 | `vpn_ips` | 3 | X4BNet lists_vpn VPN 出口 IP/CIDR（静态），命中投 `vpn` 票 |
 | `dshield` | 3 | FireHOL dshield_1d（DShield 攻击 /24 子网），命中投 `abuse` 票 |
 
-可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 2000 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（netcoffee/ncgy：10 worker、0.15s；blackbox/proxycheck：8 worker、0.2s；ipapi_is：8 worker、0.2s；otx：6 worker、0.3s；ipquery/ffraud/whatismyip/ip2location/ipwhois：6 worker、0.2s；freeipapi：8 worker、0.15s（上限 3000/轮）；hackmyip：6 worker、0.2s；iplocation：8 worker、0.12s（上限 3000/轮）；scamalytics：4 worker、0.5s（上限 1500/轮），新源按轮次上限 + 7 天缓存逐回填覆盖，避免首轮撑爆作业预算）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；**成功但无信号的源以 `data:{}` 负缓存**（如 greynoise 干净 IP），TTL 内不重查且不进入共识投票（负缓存 TTL 上限 `NEG_CACHE_TTL` 默认 1 天，短于正 TTL）；无信号不重试（仅异常重试）；**过期条目不删除**——过期后每轮尝试刷新，若刷新失败回退使用最近缓存信号（保持数据最新而非过期即丢），直至被新条目挤出上限；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。缓存表按每个 IP 最近一次信号时间封顶 `REP_CACHE_MAX`（4 万条），超限自动裁剪最旧条目防无限膨胀。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 作为出口参与检测与 `ip-api` 地理（入口即出口，`ip-api` 计入规则与其源相同）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），`ipinfo.json` 每个键含 `rep_flags`/`rep_sources`/`risk_sources`（存在 abuse 分时经 `derive_risk` 直接分解、不逐源列出），`reputation.json` 含 `flags`/`numeric`（有 deep_speed 带宽加成时另有 `deep_bonus`）。分数也追加进 `#` 备注末尾。rep 交叉矩阵（`all_{g}_rep.txt`、`all_{g}_rep_ltd.txt`、子目录 `rep.txt` 等）同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）变体；子目录分组 rep 保持单维度以控制文件数量。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
+可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 2000 次/运行，得分 `100 - prob×100`）。静态列表每 run 拉取一次，失败即跳过；按 IP 的免 key 源各自限速（netcoffee/ncgy：10 worker、0.15s；blackbox/proxycheck：8 worker、0.2s；ipapi_is：8 worker、0.2s；otx：6 worker、0.3s；ipquery/ffraud/whatismyip/ip2location/ipwhois：6 worker、0.2s；freeipapi：8 worker、0.15s（上限 3000/轮）；hackmyip：6 worker、0.2s；iplocation：8 worker、0.12s（上限 3000/轮）；scamalytics：4 worker、0.5s（上限 1500/轮）；stopforumspam：4 worker、0.3s（上限 3000/轮），新源按轮次上限 + 7 天缓存逐回填覆盖，避免首轮撑爆作业预算）避免限流掉单。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；**成功但无信号的源以 `data:{}` 负缓存**（如 greynoise 干净 IP），TTL 内不重查且不进入共识投票（负缓存 TTL 上限 `NEG_CACHE_TTL` 默认 1 天，短于正 TTL）；无信号不重试（仅异常重试）；**过期条目不删除**——过期后每轮尝试刷新，若刷新失败回退使用最近缓存信号（保持数据最新而非过期即丢），直至被新条目挤出上限；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。缓存表按每个 IP 最近一次信号时间封顶 `REP_CACHE_MAX`（4 万条），超限自动裁剪最旧条目防无限膨胀。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 作为出口参与检测与 `ip-api` 地理（入口即出口，`ip-api` 计入规则与其源相同）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），`ipinfo.json` 每个键含 `rep_flags`/`rep_sources`/`risk_sources`（存在 abuse 分时经 `derive_risk` 直接分解、不逐源列出），`reputation.json` 含 `flags`/`numeric`（有 deep_speed 带宽加成时另有 `deep_bonus`）。分数也追加进 `#` 备注末尾。rep 交叉矩阵（`all_{g}_rep.txt`、`all_{g}_rep_ltd.txt`、子目录 `rep.txt` 等）同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）变体；子目录分组 rep 保持单维度以控制文件数量。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
 ### `scripts/quality_probe.py`
 

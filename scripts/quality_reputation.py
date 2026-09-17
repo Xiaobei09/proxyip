@@ -77,6 +77,9 @@ IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
 IPLOCATION_TIMEOUT = 10
 IPLOCATION_CAP = 3000
 FREEIPAPI_CAP = 3000
+STOPFORUMSPAM_URL = "https://api.stopforumspam.org/api?ip={ip}&json"
+STOPFORUMSPAM_TIMEOUT = 10
+STOPFORUMSPAM_CAP = 3000
 CINS_BADGUYS_URL = "https://cinsscore.com/list/ci-badguys.txt"
 ET_COMPROMISED_URL = "https://rules.emergingthreats.net/blockrules/compromised-ips.txt"
 FEODO_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
@@ -250,6 +253,7 @@ REPUTATION_WEIGHTS = {
     "freeipapi": 6,
     "hackmyip": 6,
     "scamalytics": 8,
+    "stopforumspam": 4,
     "iplocation": 3,
     "cins": 5,
     "et_compromised": 4,
@@ -277,10 +281,10 @@ DEFAULT_REP_SOURCES = (
     "blackbox", "otx", "ipsum",
     "ipapi_is", "ipdata", "whatismyip", "dc_asn",
     "abuse_list", "vpn_asn", "resproxy_asn",
-    "proxycheck", "ip2location", "ipwhois",
+    "proxycheck", "ip2location",
     "tor_exit", "spamhaus",
     "freeipapi", "scamalytics", "iplocation",
-    "hackmyip",
+    "hackmyip", "stopforumspam",
     "cins", "et_compromised", "feodo",
     "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
     "danmeuk_tor", "tor_bulk",
@@ -306,6 +310,7 @@ SOURCE_PACING = {
     "hackmyip": (6, 0.2),
     "scamalytics": (4, 0.5),
     "iplocation": (8, 0.12),
+    "stopforumspam": (4, 0.3),
     "greynoise": (6, 0.3),
 }
 def parse_abuser_score(value) -> float | None:
@@ -907,7 +912,7 @@ def ip2location_lookup_sync(ip: str) -> dict | None:
 def ipwhois_lookup_sync(ip: str) -> dict | None:
     """Free keyless ``ipwhois.app`` security flags + connection type."""
     req = urllib.request.Request(
-        IPWHOIS_URL.format(ip),
+        IPWHOIS_URL.format(ip=ip),
         headers={"User-Agent": UA, "Accept": "application/json"},
     )
     with deadline_open(req, IPWHOIS_TIMEOUT) as resp:
@@ -929,6 +934,41 @@ def ipwhois_lookup_sync(ip: str) -> dict | None:
         out["asn"] = asn
     if not any(out["security"].values()) and not conn.get("type") and not asn:
         return None
+    return out
+
+
+def stopforumspam_lookup_sync(ip: str) -> dict | None:
+    """Keyless ``stopforumspam.com`` HTTP-spammer + Tor-exit flags.
+
+    JSON: ``{"success":1,"ip":{"appears","confidence","frequency","torexit",
+    "asn","country"}}``。``appears`` 为 0/1（是否被举报为垃圾来源）。
+    无记录且非 Tor 出口 → ``None``（进入负缓存，不再重查）。
+    """
+    req = urllib.request.Request(
+        STOPFORUMSPAM_URL.format(ip=ip),
+        headers={"User-Agent": UA, "Accept": "application/json"},
+    )
+    with deadline_open(req, STOPFORUMSPAM_TIMEOUT) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    item = data.get("ip")
+    if not isinstance(item, dict):
+        return None
+    appears = bool(item.get("appears"))
+    torexit = bool(item.get("torexit"))
+    if not appears and not torexit:
+        return None
+    out: dict = {"is_abuse": appears, "torexit": torexit}
+    conf = item.get("confidence")
+    if isinstance(conf, (int, float)):
+        out["confidence"] = float(conf)
+    freq = item.get("frequency")
+    if isinstance(freq, (int, float)):
+        out["frequency"] = int(freq)
+    asn = norm_asn(item.get("asn"))
+    if asn:
+        out["asn"] = asn
     return out
 
 
@@ -1415,6 +1455,10 @@ def source_score(name: str, signal) -> int | None:
         if not isinstance(signal.get("score"), (int, float)):
             return None
         return max(0, min(100, 100 - round(signal["score"])))
+    if name == "stopforumspam":
+        if not signal.get("is_abuse"):
+            return None
+        return 50
     if name == "iplocation":
         penalty = 30 if signal.get("is_proxy") else 0
         return max(0, min(100, 100 - penalty))
@@ -1679,6 +1723,13 @@ def _flag_opinions(name: str, signal) -> dict:
         ) else {}
     if name == "scamalytics":
         return {"listed": True} if signal.get("is_blacklisted") else {}
+    if name == "stopforumspam":
+        opinions = {}
+        if signal.get("is_abuse"):
+            opinions["abuse"] = True
+        if signal.get("torexit"):
+            opinions["tor"] = True
+        return opinions
     if name == "iplocation":
         return {"proxy": True} if signal.get("is_proxy") else {}
     if name == "hackmyip":
@@ -2262,6 +2313,11 @@ async def lookup_all_risk(
         w, d = pacing.get("hackmyip", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "hackmyip", hackmyip_lookup_sync, workers=w, delay=d))
+    if "stopforumspam" in sources:
+        w, d = pacing.get("stopforumspam", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "stopforumspam", stopforumspam_lookup_sync,
+            cap=STOPFORUMSPAM_CAP, workers=w, delay=d))
     if "scamalytics" in sources:
         w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(

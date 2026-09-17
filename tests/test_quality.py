@@ -666,6 +666,16 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(score, 72)
         self.assertEqual(flagged, ["proxy"])
 
+    def test_stopforumspam_source_score_and_vote(self):
+        self.assertEqual(
+            qc.source_score("stopforumspam", {"is_abuse": True}), 50)
+        self.assertIsNone(qc.source_score("stopforumspam", {}))
+        # abuse 35 + tor 40 → 100-75 = 25
+        score, _r, flagged, _n = qc.vote_reputation(
+            {"stopforumspam": {"is_abuse": True, "torexit": True}}, self.W)
+        self.assertEqual(score, 25)
+        self.assertEqual(sorted(flagged), ["abuse", "tor"])
+
     def test_static_list_sources_vote_and_score(self):
         score, _r, flagged, _n = qc.vote_reputation(
             {"tor_exit": {"is_tor": True}}, self.W)
@@ -679,7 +689,10 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.source_score("spamhaus", {"is_listed": True}), 55)
         self.assertIn("tor_exit", qc.REPUTATION_WEIGHTS)
         self.assertIn("spamhaus", qc.REPUTATION_WEIGHTS)
-        self.assertIn("ipwhois", qc.DEFAULT_REP_SOURCES)
+        # ipwhois 免费层不再返回 connection/security，已退出默认源（保留权重供 opt-in）
+        self.assertNotIn("ipwhois", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("ipwhois", qc.REPUTATION_WEIGHTS)
+        self.assertIn("stopforumspam", qc.DEFAULT_REP_SOURCES)
         self.assertIn("tor_exit", qc.DEFAULT_REP_SOURCES)
 
     def test_hackmyip_source_vote(self):
@@ -1167,6 +1180,104 @@ class TestReputation(unittest.TestCase):
         self.assertTrue(out["is_datacenter"])
         self.assertEqual(out["risk_score"], 35)
         self.assertEqual(out["asn"], "AS15169")
+
+    def test_ipwhois_lookup_parsing(self):
+        # R242 回归：IPWHOIS_URL 用命名占位符 {ip}，URL 构造须 .format(ip=ip)，
+        # 否则每次调用 KeyError，源 100% 失效（实测 rep_sources 中从不出现）。
+        payload = (
+            b'{"success":true,"connection":{"asn":36352,"type":"Hosting"},'
+            b'"security":{"anonymous":false,"proxy":false,"vpn":false,'
+            b'"tor":false,"hosting":true}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("ipwhois.app/json/1.2.3.4", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.ipwhois_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertEqual(out["connection_type"], "Hosting")
+        self.assertTrue(out["security"]["hosting"])
+        self.assertEqual(out["asn"], "AS36352")
+        flags = qr._flag_opinions("ipwhois", out)
+        self.assertTrue(flags["hosting"])
+        self.assertFalse(flags["proxy"])
+
+    def test_stopforumspam_lookup_parsing(self):
+        payload = (
+            b'{"success":1,"ip":{"value":"1.2.3.4","appears":1,'
+            b'"frequency":92,"confidence":95.34,"torexit":1,"asn":60729,'
+            b'"country":"de"}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            self.assertIn("stopforumspam.org/api?ip=1.2.3.4", req.full_url)
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            out = qc.stopforumspam_lookup_sync("1.2.3.4")
+        finally:
+            qc.urllib.request.urlopen = orig
+        self.assertTrue(out["is_abuse"])
+        self.assertTrue(out["torexit"])
+        self.assertEqual(out["confidence"], 95.34)
+        self.assertEqual(out["frequency"], 92)
+        self.assertEqual(out["asn"], "AS60729")
+        self.assertEqual(
+            qr._flag_opinions("stopforumspam", out),
+            {"abuse": True, "tor": True})
+
+    def test_stopforumspam_clean_returns_none(self):
+        payload = (
+            b'{"success":1,"ip":{"value":"1.2.3.4","appears":0,'
+            b'"frequency":0,"torexit":0,"asn":15169,"country":"us"}}'
+        )
+
+        def fake_urlopen(req, timeout=0):
+            class FakeResp:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self):
+                    return payload
+
+            return FakeResp()
+
+        orig = qc.urllib.request.urlopen
+        qc.urllib.request.urlopen = fake_urlopen
+        try:
+            self.assertIsNone(qc.stopforumspam_lookup_sync("1.2.3.4"))
+        finally:
+            qc.urllib.request.urlopen = orig
 
     def test_ffraud_lookup_parsing(self):
         payload = (
