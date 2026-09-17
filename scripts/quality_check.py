@@ -697,6 +697,36 @@ async def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_reputation_sources(
+    value: str,
+    provider: str = "default",
+    allowed: dict | None = None,
+    default: list | None = None,
+) -> tuple[list[str], list[str]]:
+    """Resolve ``--reputation-sources``/``--reputation-provider``.
+
+    Returns ``(sources, unknown)``。``provider`` 为 ``none``/``netcoffee``/
+    ``ip-api`` 时直接给出对应源（``unknown`` 恒空）；否则把 ``value`` 按
+    逗号拆分，仅保留 ``allowed``（默认 ``REPUTATION_WEIGHTS``）内的知名，
+    未知/无效项放入 ``unknown`` 由调用方告警——避免 typo 被静默丢弃后
+    整组回退成全量默认源的误配置。合法源为空时回退 ``default``。
+    """
+    allowed = allowed if allowed is not None else REPUTATION_WEIGHTS
+    default = default if default is not None else list(DEFAULT_REP_SOURCES)
+    if provider == "none":
+        return [], []
+    if provider == "netcoffee":
+        return ["netcoffee", "ip-api"], []
+    if provider == "ip-api":
+        return ["ip-api"], []
+    raw = [s.strip() for s in (value or "").split(",") if s.strip()]
+    unknown = [s for s in raw if s not in allowed]
+    valid = [s for s in raw if s in allowed]
+    if not valid:
+        return list(default), unknown
+    return valid, unknown
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -785,21 +815,22 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 logging.warning("Invalid weight value for %s: %s", name, weight)
     args.reputation_sources = args.reputation_sources or ""
-    if args.reputation_provider == "none":
-        args.reputation_sources = []
-    elif args.reputation_provider == "netcoffee":
-        args.reputation_sources = ["netcoffee", "ip-api"]
-    elif args.reputation_provider == "ip-api":
-        args.reputation_sources = ["ip-api"]
-    else:
-        args.reputation_sources = [
-            s.strip() for s in args.reputation_sources.split(",") if s.strip()
-        ]
-        args.reputation_sources = [
-            s for s in args.reputation_sources if s in REPUTATION_WEIGHTS
-        ]
-        if not args.reputation_sources:
-            args.reputation_sources = list(DEFAULT_REP_SOURCES)
+    parsed, unknown = parse_reputation_sources(
+        args.reputation_sources, args.reputation_provider,
+    )
+    args.reputation_sources = parsed
+    for name in unknown:
+        logging.warning(
+            "Unknown reputation source %r dropped; check --reputation-sources",
+            name,
+        )
+    if args.reputation_provider not in ("none", "netcoffee", "ip-api") and \
+       unknown and args.reputation_sources == list(DEFAULT_REP_SOURCES):
+        logging.warning(
+            "No valid reputation source survived; fell back to all defaults "
+            "(%d sources) instead of only %d requested",
+            len(list(DEFAULT_REP_SOURCES)), len(unknown),
+        )
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:

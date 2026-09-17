@@ -959,6 +959,23 @@ class TestReputation(unittest.TestCase):
                 name, scripts,
                 f"docs/scripts.md 缺少信誉源 {name}")
 
+    def test_parse_reputation_sources_unknown_warned(self):
+        """R260：未知源名返回 unknown 供告警，合法源过滤保留；
+        全错（无合法源）回退默认全集——typo 不再静默无提示。"""
+        srcs, unknown = qc.parse_reputation_sources("dnsbl,dnslb, cins")
+        self.assertEqual(srcs, ["dnsbl", "cins"])
+        self.assertEqual(unknown, ["dnslb"])
+        srcs, unknown = qc.parse_reputation_sources("dnslb,typo")
+        self.assertEqual(srcs, list(qc.DEFAULT_REP_SOURCES))
+        self.assertEqual(unknown, ["dnslb", "typo"])
+        self.assertEqual(qc.parse_reputation_sources("")[0],
+                         list(qc.DEFAULT_REP_SOURCES))
+        self.assertEqual(qc.parse_reputation_sources("", "none")[0], [])
+        self.assertEqual(qc.parse_reputation_sources("", "netcoffee")[0],
+                         ["netcoffee", "ip-api"])
+        self.assertEqual(qc.parse_reputation_sources("", "ip-api")[0],
+                         ["ip-api"])
+
     def test_static_list_size_report(self):
         """R253：静态源尺寸上报——非空打印逐源大小，全空打印 all empty，
         便于 R245 式死源审计（空列表静默 = 不可发现）。
