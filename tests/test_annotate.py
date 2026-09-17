@@ -123,6 +123,27 @@ class TestReconcileViews(unittest.TestCase):
         self.assertEqual(r["missing"], [])
         self.assertEqual(r["excess"], [])
 
+    def test_verify_country_split_phantom_duplicate_detected(self):
+        # 同键在分目录行数 > 大师（入口国标注不同的重复行）：reconcile_views
+        # 按键裁剪剪不掉 → phantom 计 1，键集 1:1 不受影响。
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US"],
+            countries={"all.txt": ["1.1.1.1:443#US", "1.1.1.1:443#DE→US"]},
+        )
+        r = verify_country_split(valid)
+        self.assertEqual(r["phantom"], 1)
+        self.assertEqual(r["missing"], [])
+        self.assertEqual(r["excess"], [])
+
+    def test_verify_country_split_matched_duplicates_not_phantom(self):
+        # 大师本就含两行同键（两次观测）→ 分目录同样两行属正常，phantom=0。
+        d, valid = self._tree(
+            all_lines=["1.1.1.1:443#US", "1.1.1.1:443#DE→US"],
+            countries={"all.txt": ["1.1.1.1:443#US", "1.1.1.1:443#DE→US"]},
+        )
+        r = verify_country_split(valid)
+        self.assertEqual(r["phantom"], 0)
+
     def test_verify_country_split_excess_detected(self):
         d, valid = self._tree(
             all_lines=["1.1.1.1:443#US"],

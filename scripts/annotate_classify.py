@@ -17,7 +17,7 @@ where ``<type>`` is ``DC``/``RES``/``MOB``/``PROXY`` and ``<tier>`` is
 
 import argparse
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -235,19 +235,28 @@ def verify_country_split(valid_dir: Path) -> dict:
     裁剪、不补缺行；若上游工作流在注解步之后又改了 ``all.txt`` 行集，分目录会带出
     超集/缺集，跨工作流数据流断裂就在此处）。
 
-    返回 ``{"master", "countries", "missing", "excess", "dup_endpoints"}``；
+    返回 ``{"master", "countries", "missing", "excess", "dup_endpoints", "phantom"}``；
     ``missing`` = 大师有而分目录缺（新键待 validate 重切分），``excess`` =
     分目录有而大师无（死代残留漏裁）。两者任非空即跨工作流漂移。
     ``dup_endpoints`` = 同一 ``ip:port`` 出现在 ≥2 个国家目录（入口国标注矛盾，
     如同端点被标注 ``#SG`` 与 ``#CO``）：属数据质量告警，不影响键集 1:1。
+    ``phantom`` = 同键在分目录的行数**多于**大师（``master`` 行数 >0 时的重复行）：
+    ``reconcile_views`` 只按 ``ip:port`` 键裁剪，同键幻影重复行永远剪不掉，
+    是行级永久漂移源（``excess`` 覆盖不到，因该键本身在大师中存在）。
     """
     all_txt = valid_dir / "all.txt"
     if not all_txt.exists():
         return {"master": 0, "countries": 0, "missing": [], "excess": [],
-                "dup_endpoints": 0}
-    master = _key_of_non_all(all_txt.read_text(encoding="utf-8"))
+                "dup_endpoints": 0, "phantom": 0}
+    all_text = all_txt.read_text(encoding="utf-8")
+    master = _key_of_non_all(all_text)
+    master_counts: Counter[str] = Counter()
+    for line in all_text.splitlines():
+        if line and line.split("#", 1)[0] in master:
+            master_counts[line.split("#", 1)[0]] += 1
     cdir = valid_dir / "countries"
     seen: set[str] = set()
+    country_counts: Counter[str] = Counter()
     endpoint_cc: dict[str, set[str]] = defaultdict(set)
     if cdir.is_dir():
         for d in sorted(cdir.glob("*")):
@@ -257,9 +266,15 @@ def verify_country_split(valid_dir: Path) -> dict:
                 cc = d.name
                 for line in text.splitlines():
                     if line:
-                        endpoint_cc[line.split("#", 1)[0]].add(cc)
+                        key = line.split("#", 1)[0]
+                        country_counts[key] += 1
+                        endpoint_cc[key].add(cc)
     dup_endpoints = sum(
         1 for eps in endpoint_cc.values() if len(eps) > 1
+    )
+    phantom = sorted(
+        key for key, n in country_counts.items()
+        if n > master_counts.get(key, 0) > 0
     )
     return {
         "master": len(master),
@@ -267,6 +282,7 @@ def verify_country_split(valid_dir: Path) -> dict:
         "missing": sorted(master - seen)[:5],
         "excess": sorted(seen - master)[:5],
         "dup_endpoints": dup_endpoints,
+        "phantom": len(phantom),
     }
 
 
@@ -388,6 +404,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"WARN: {split['dup_endpoints']} ip:port 出现在多个国家目录"
             "（入口国标注矛盾，如 #SG 与 #CO），不阻断但请留意",
+            file=sys.stderr,
+        )
+    if split["phantom"]:
+        print(
+            f"WARN: {split['phantom']} 个 ip:port 在分目录行数多于 all.txt"
+            "（同键幻影重复行，reconcile_views 按键裁剪剪不掉），不阻断但请留意",
             file=sys.stderr,
         )
     return 0
