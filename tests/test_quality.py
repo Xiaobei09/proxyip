@@ -694,6 +694,9 @@ class TestReputation(unittest.TestCase):
         self.assertIn("ipwhois", qc.REPUTATION_WEIGHTS)
         self.assertIn("stopforumspam", qc.DEFAULT_REP_SOURCES)
         self.assertIn("maltiverse", qc.DEFAULT_REP_SOURCES)
+        # ipapi_is 与 ipwhois 同样：解析器保留但退出默认源（opt-in）
+        self.assertNotIn("ipapi_is", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("ipapi_is", qc.REPUTATION_WEIGHTS)
         self.assertIn("tor_exit", qc.DEFAULT_REP_SOURCES)
 
     def test_hackmyip_source_vote(self):

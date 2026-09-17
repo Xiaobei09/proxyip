@@ -102,7 +102,7 @@
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
-| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipapi_is,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,tor_exit,spamhaus,freeipapi,scamalytics,iplocation,hackmyip,stopforumspam,maltiverse,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk,greynoise,urlhaus,threatfox,firehol_level1,binarydefense,c2_tracker,botscout,greensnow,sslproxies,socks_proxy,vpn_ips,dshield |
+| `--reputation-sources` | multi 时启用的源（逗号分隔，见下） | netcoffee,ncgy,ip-api,ipquery,ffraud,blackbox,otx,ipsum,ipdata,whatismyip,dc_asn,abuse_list,vpn_asn,resproxy_asn,proxycheck,ip2location,tor_exit,spamhaus,freeipapi,scamalytics,iplocation,hackmyip,stopforumspam,maltiverse,cins,et_compromised,feodo,blocklist_de,blocklist_de_ssh,blocklist_de_apache,danmeuk_tor,tor_bulk,greynoise,urlhaus,threatfox,firehol_level1,binarydefense,c2_tracker,botscout,greensnow,sslproxies,socks_proxy,vpn_ips,dshield |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20` | 见下 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
@@ -124,7 +124,7 @@
 | `blackbox` | 10 | `blackbox.ipinfo.app/api/v3beta/{ip}`，免 key；分类评分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10 / bogon 5 / unknown 50；suspicious -20 |
 | `otx` | 8 | `otx.alienvault.com/api/v1/indicators/IPv4/{ip}/general`，免 key；`100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
 | `ipsum` | 8 | GitHub 静态 IP 列表（stamparm/ipsum levels/3+），命中 3+ 黑名单 → 55 分 |
-| `ipapi_is` | 8 | `api.ipapi.is`，tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
+| `ipapi_is` | 8 | `api.ipapi.is`，**已退出默认源**（opt-in）——CI 生成的 `reputation_cache.json` 自加入以来 5 个版本中该源条目恒为 0（其余按 IP 源均有 ~1.8 万条），即 GitHub runner 从未成功拿到响应；疑似上游对云/机房出口限流或 TCP 丢弃，而每次失败要空等到 `IPAPI_IS_TIMEOUT=8s`，会显著吞噬信誉相位预算（疑为 92min 运行中 ~56min 空档的主因之一）。解析器与权重保留，出口可达时可用 `--reputation-sources` 重新启用。tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
 | `ipdata` | 8 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
 | `whatismyip` | 3 | `whatismyip.ai/api/lookup/{ip}`，免 key；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
 | `dc_asn` | 5 | iplogs `datacenter-asns.csv` 静态机房 ASN 表，出口 `asn` 命中即 -15（fail-open） |

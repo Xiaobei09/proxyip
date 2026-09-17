@@ -283,7 +283,7 @@ REPUTATION_WEIGHTS = {
 DEFAULT_REP_SOURCES = (
     "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
     "blackbox", "otx", "ipsum",
-    "ipapi_is", "ipdata", "whatismyip", "dc_asn",
+    "ipdata", "whatismyip", "dc_asn",
     "abuse_list", "vpn_asn", "resproxy_asn",
     "proxycheck", "ip2location",
     "tor_exit", "spamhaus",
