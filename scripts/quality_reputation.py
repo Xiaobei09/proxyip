@@ -2321,6 +2321,7 @@ async def lookup_all_risk(
         干净 IP）存 ``data: {}`` 哨兵，TTL 内不再重查；空字典在读取与兜底
         时都被视为「已知无信号」，不进入 ``risk_data``（不改变共识投票面）。
         """
+        t0 = time.monotonic()
         need = []
         fallback = {}
         for ip in uniq:
@@ -2347,6 +2348,12 @@ async def lookup_all_risk(
         for ip, sig in fallback.items():
             if ip not in res:
                 put(name, ip, sig)
+        if need:
+            print(
+                f"Reputation source {name}: {time.monotonic() - t0:.1f}s "
+                f"({len(need)} queried, {len(res)} resolved, "
+                f"{len(fallback)} fallback)"
+            )
 
     pacing = SOURCE_PACING
     api_tasks = []
