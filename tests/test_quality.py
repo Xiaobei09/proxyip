@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import io
 import json
+import re
 import sys
 import time
 import tempfile
@@ -1248,7 +1249,6 @@ class TestReputation(unittest.TestCase):
         防退默认（R270 whatismyip / R271 vpn_ips）只改代码漏改文档——
         R256 枚举测试只查源名出现，拦不住默认集漂移。用集合比对，
         opt-in 源（spamrats/sorbs/uceprotect/psbl 等）两边都不含。"""
-        import re
         root = Path(__file__).resolve().parents[1]
         scripts = (root / "docs" / "scripts.md").read_text(encoding="utf-8")
         m = re.search(
@@ -1266,7 +1266,6 @@ class TestReputation(unittest.TestCase):
 
         防标题重编号后引用悬空。扫描 README＋docs 全文（现仅两处：
         §4.0 出口 IP 解析、§7.2 三数据源），逐条解析。"""
-        import re
         root = Path(__file__).resolve().parents[1]
         files = [root / "README.md"] + sorted((root / "docs").glob("*.md"))
         refs = set()
@@ -1293,7 +1292,6 @@ class TestReputation(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         src = (root / "scripts" / "quality_reputation.py").read_text(
             encoding="utf-8")
-        import re
         weights_match = re.search(
             r"REPUTATION_WEIGHTS\s*=\s*\{(.*?)\n\}", src, re.S)
         self.assertIsNotNone(weights_match)
@@ -3214,7 +3212,6 @@ class TestAnnotateClassify(unittest.TestCase):
         self.assertEqual(again, result)
 
     def test_no_uptime_token_without_data(self):
-        import re
 
         from annotate_classify import fill_and_classify
         result = fill_and_classify(
