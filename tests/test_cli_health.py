@@ -2,8 +2,17 @@
 import ast
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import annotate_classify
+import build_good
+import build_premium
+import export_json
+import generate_stats
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = sorted(ROOT.glob("scripts/*.py"))
@@ -69,6 +78,22 @@ class TestCliHealth(unittest.TestCase):
         out = proc.stdout
         self.assertNotIn("whatismyip", out)
         self.assertNotRegex(out, r"— ?\d+ 源")
+
+    def test_missing_data_dir_degrades_gracefully(self):
+        """R286：缺输入目录时各链脚本须优雅降级（空映射/skip 文案、
+        返回 0、无 traceback），不得把空数据当硬失败掀翻 CI。"""
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(
+                annotate_classify.main(["--data-dir", d]), 0)
+            self.assertEqual(
+                build_good.main(["--data-dir", d]), 0)
+            self.assertEqual(
+                build_premium.main(["--data-dir", d]), 0)
+            self.assertEqual(
+                export_json.main(["--data-dir", d]), 0)
+            self.assertEqual(
+                generate_stats.main(
+                    ["--data-dir", d, "--out", f"{d}/out"]), 0)
 
 
 if __name__ == "__main__":
