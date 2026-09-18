@@ -259,6 +259,29 @@ class TestReorgCountryConsistency(unittest.TestCase):
         )
         self.assertEqual(orphan_dirs, [], f"orphan country dirs (no all.txt): {orphan_dirs}")
 
+    def test_sets_ports_no_excess_vs_master(self):
+        """R294：sets/ports 分裂不得有 master 之外的越界残留。
+
+        R289 死锁复盘的姊妹不变量：countries/ 有 missing＋excess 双检，
+        sets/ports 只有“子集性”是设计内（精选集合），但 excess（越界）
+        永为漂移。本地无数据文件则跳过。"""
+        all_path = self._valid() / "all.txt"
+        if not all_path.exists():
+            self.skipTest("no data/valid/all.txt")
+        master = self._keys(all_path.read_text(encoding="utf-8").splitlines())
+        for sub, glob in (("sets", "*/all.txt"), ("ports", "*.txt")):
+            d = self._valid() / sub
+            if not d.exists():
+                continue
+            seen = set()
+            for f in sorted(d.glob(glob)):
+                seen |= self._keys(f.read_text(encoding="utf-8").splitlines())
+            excess = sorted(seen - master)
+            self.assertEqual(
+                excess, [],
+                f"endpoints in {sub} not in all.txt: {excess[:5]}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
