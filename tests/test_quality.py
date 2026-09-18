@@ -970,9 +970,9 @@ class TestReputation(unittest.TestCase):
     def test_dnsbl_family_consensus_listed(self):
         """R271：dnsbl/spamcop/dronebl/spamrats/sorbs 五家命中 listed 时
         共识均投 listed 票（任一漏接即回归失败）。R272 起含 uceprotect
-        共六家。"""
+        共六家，R273 起含 psbl 共七家。"""
         for name in ("dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
-                     "uceprotect"):
+                     "uceprotect", "psbl"):
             self.assertEqual(
                 qr._flag_opinions(name, {"is_listed": True}),
                 {"listed": True}, name)
@@ -1012,6 +1012,56 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(
             qr.source_score("uceprotect", {"is_listed": True}), 70)
         self.assertIsNone(qr.source_score("uceprotect", {}))
+
+    def test_psbl_lookup_sync_codes(self):
+        """R273：PSBL 新增 opt-in 源——命中码仅 2 → listed；其余/空 →
+        None；listed 信号进入共识投票与计分。test-point 2.0.0.127 经
+        DoH 实测回包 127.0.0.2（分区存活实证）。"""
+        with unittest.mock.patch.object(
+                qr, "_doh_query", return_value=["127.0.0.2"]):
+            self.assertEqual(
+                qr.psbl_lookup_sync("8.8.8.8"),
+                {"is_listed": True, "dnsbl_code": 2})
+        for answers in (["127.0.0.1"], ["127.0.0.3"], []):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertIsNone(qr.psbl_lookup_sync("8.8.8.8"))
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.psbl_lookup_sync("2001:db8::1"))
+            self.assertIsNone(qr.psbl_lookup_sync("not-an-ip"))
+            m.assert_not_called()
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.2"]) as m:
+            qr.psbl_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.psbl.surriel.com")
+        self.assertNotIn("psbl", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("psbl", qr.REPUTATION_WEIGHTS)
+        self.assertEqual(qr.REPUTATION_WEIGHTS["psbl"], 5)
+        self.assertIn("psbl", qr.SOURCE_PACING)
+        self.assertEqual(
+            qr._flag_opinions("psbl", {"is_listed": True}),
+            {"listed": True})
+        self.assertEqual(qr._flag_opinions("psbl", {}), {})
+        self.assertEqual(qr.source_score("psbl", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("psbl", {}))
+
+    def test_dnsbl_lookup_shared_skeleton(self):
+        """R273：七源 lookup 共用骨架——多应答取首个命中码、非 127 网段
+        跳过、非法码容错；spamcop 旧精确匹配语义等价（单码 2）。"""
+        with unittest.mock.patch.object(
+                qr, "_doh_query",
+                return_value=["8.8.8.8", "127.0.0.9", "not-an-ip",
+                              "127.0.0.2"]):
+            self.assertEqual(
+                qr.spamcop_lookup_sync("1.2.3.4"),
+                {"is_listed": True, "dnsbl_code": 2})
+        with unittest.mock.patch.object(
+                qr, "_doh_query",
+                return_value=["127.0.0.3", "127.0.0.2"]):
+            self.assertEqual(
+                qr.dnsbl_lookup_sync("1.2.3.4"),
+                {"is_listed": True, "dnsbl_code": 3})
 
     def test_default_sources_drop_maltiverse_add_spamcop(self):
         """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""

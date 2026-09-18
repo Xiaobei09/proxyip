@@ -119,6 +119,11 @@ SORBS_LISTED_CODES = frozenset((2, 7))
 # 保持 opt-in 待验证，不断言其死亡）。
 UCEPROTECT_CAP = 9000
 UCEPROTECT_LISTED_CODES = frozenset((2,))
+# PSBL（psbl.surriel.com）被动垃圾邮件黑名单（第六独立权威，GSRsoft 运营
+# 的社区陷阱网络，与上五家互补）。命中码仅 127.0.0.2 → `listed`。
+# R273 经 DoH 以 test-point 2.0.0.127 实测回包 127.0.0.2，确认分区存活。
+PSBL_CAP = 9000
+PSBL_LISTED_CODES = frozenset((2,))
 DNSBL_DOH_ENDPOINTS = (
     "https://dns.alidns.com/resolve",
     "https://cloudflare-dns.com/dns-query",
@@ -344,6 +349,7 @@ REPUTATION_WEIGHTS = {
     "spamrats": 5,
     "sorbs": 5,
     "uceprotect": 5,
+    "psbl": 5,
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
@@ -411,6 +417,7 @@ SOURCE_PACING = {
     "spamrats": (6, 0.15),
     "sorbs": (6, 0.2),
     "uceprotect": (6, 0.15),
+    "psbl": (6, 0.15),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -1180,17 +1187,19 @@ def _doh_query(name: str, qtype: str = "A") -> list:
     raise last if last else RuntimeError("doh: no endpoints")
 
 
-def dnsbl_lookup_sync(ip: str) -> dict | None:
-    """Spamhaus ZEN 实时 DNSBL（经 DoH，免 key）。
+def _dnsbl_listed_lookup_sync(ip: str, zone: str, codes) -> dict | None:
+    """通用 DNSBL 反查骨架（经 DoH，免 key，供各源薄包装复用）。
 
-    反查 ``<rev-ip>.zen.spamhaus.org`` A 记录；返回码 ``127.0.0.x``：
-    SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ ``listed`` 信号；
-    PBL 6/7（邮件策略网段，与代理信誉无关）与 CSS 8/9（snowshoe 弱信号）
-    忽略。未列出/不可解析 → ``None``（进入负缓存，不再重查）。
+    反查 ``<rev-ip>.<zone>`` A 记录；首个落入 ``codes`` 的 ``127.0.0.x``
+    返回 ``{"is_listed": True, "dnsbl_code": code}``；其余返回/无应答 →
+    ``None``（负缓存）。非 IPv4 直接短路，不触发查询。
+    各源公开函数保留自有 docstring（命中码语义）与函数名，下游与测试
+    钉住的 qname/码表行为保持不变（R273 去重：此前六源复制同一循环体，
+    曾致 R271 接线/docstring 双 bug）。
     """
     if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
         return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.zen.spamhaus.org"
+    qname = f"{'.'.join(reversed(ip.split('.')))}.{zone}"
     answers = _doh_query(qname, "A")
     for ans in answers:
         if not ans.startswith("127.0.0."):
@@ -1199,9 +1208,24 @@ def dnsbl_lookup_sync(ip: str) -> dict | None:
             code = int(ans.rsplit(".", 1)[1])
         except ValueError:
             continue
-        if code in (2, 3, 4, 5):
+        if code in codes:
             return {"is_listed": True, "dnsbl_code": code}
     return None
+
+
+DNSBL_LISTED_CODES = frozenset((2, 3, 4, 5))
+
+
+def dnsbl_lookup_sync(ip: str) -> dict | None:
+    """Spamhaus ZEN 实时 DNSBL（经 DoH，免 key）。
+
+    反查 ``<rev-ip>.zen.spamhaus.org`` A 记录；返回码 ``127.0.0.x``：
+    SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ ``listed`` 信号；
+    PBL 6/7（邮件策略网段，与代理信誉无关）与 CSS 8/9（snowshoe 弱信号）
+    忽略。未列出/不可解析 → ``None``（进入负缓存，不再重查）。
+    """
+    return _dnsbl_listed_lookup_sync(ip, "zen.spamhaus.org",
+                                     DNSBL_LISTED_CODES)
 
 
 def spamcop_lookup_sync(ip: str) -> dict | None:
@@ -1211,13 +1235,8 @@ def spamcop_lookup_sync(ip: str) -> dict | None:
     （社区入榜）→ ``listed`` 信号。任何其他返回视为未列出。
     未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
     """
-    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
-        return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.bl.spamcop.net"
-    answers = _doh_query(qname, "A")
-    if SPAMCOP_LISTED_CODE in answers:
-        return {"is_listed": True, "dnsbl_code": 2}
-    return None
+    return _dnsbl_listed_lookup_sync(ip, "bl.spamcop.net",
+                                     frozenset((2,)))
 
 
 def dronebl_lookup_sync(ip: str) -> dict | None:
@@ -1227,20 +1246,8 @@ def dronebl_lookup_sync(ip: str) -> dict | None:
     （abuse/爆破/垃圾/重犯/模糊等各类被控行为）→ ``listed`` 信号。
     未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
     """
-    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
-        return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl.dronebl.org"
-    answers = _doh_query(qname, "A")
-    for ans in answers:
-        if not ans.startswith("127.0.0."):
-            continue
-        try:
-            code = int(ans.rsplit(".", 1)[1])
-        except ValueError:
-            continue
-        if code in DRONEBL_LISTED_CODES:
-            return {"is_listed": True, "dnsbl_code": code}
-    return None
+    return _dnsbl_listed_lookup_sync(ip, "dnsbl.dronebl.org",
+                                     DRONEBL_LISTED_CODES)
 
 
 def spamrats_lookup_sync(ip: str) -> dict | None:
@@ -1251,20 +1258,9 @@ def spamrats_lookup_sync(ip: str) -> dict | None:
     信号；``127.0.0.4``（DYN 动态住宅线）刻意忽略（与 spamhaus PBL 同口径）。
     未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
     """
-    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
-        return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl.spamrats.com"
-    answers = _doh_query(qname, "A")
-    for ans in answers:
-        if not ans.startswith("127.0.0."):
-            continue
-        try:
-            code = int(ans.rsplit(".", 1)[1])
-        except ValueError:
-            continue
-        if code in SPAMRATS_LISTED_CODES:
-            return {"is_listed": True, "dnsbl_code": code}
-    return None
+    return _dnsbl_listed_lookup_sync(ip, "dnsbl.spamrats.com",
+                                     SPAMRATS_LISTED_CODES)
+
 
 def sorbs_lookup_sync(ip: str) -> dict | None:
     """SORBS（dnsbl.sorbs.net）社区 open-proxy 实时 DNSBL（经 DoH，免 key）。
@@ -1274,20 +1270,8 @@ def sorbs_lookup_sync(ip: str) -> dict | None:
     动态住宅段 ``127.0.0.4/8/9`` 刻意忽略（与 spamhaus PBL 同口径）。
     未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
     """
-    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
-        return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl.sorbs.net"
-    answers = _doh_query(qname, "A")
-    for ans in answers:
-        if not ans.startswith("127.0.0."):
-            continue
-        try:
-            code = int(ans.rsplit(".", 1)[1])
-        except ValueError:
-            continue
-        if code in SORBS_LISTED_CODES:
-            return {"is_listed": True, "dnsbl_code": code}
-    return None
+    return _dnsbl_listed_lookup_sync(ip, "dnsbl.sorbs.net",
+                                     SORBS_LISTED_CODES)
 
 
 def uceprotect_lookup_sync(ip: str) -> dict | None:
@@ -1298,20 +1282,19 @@ def uceprotect_lookup_sync(ip: str) -> dict | None:
     （L1 列入的发送 IP）→ ``listed`` 信号。L2/L3 升级名单刻意不用。
     未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
     """
-    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
-        return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl-1.uceprotect.net"
-    answers = _doh_query(qname, "A")
-    for ans in answers:
-        if not ans.startswith("127.0.0."):
-            continue
-        try:
-            code = int(ans.rsplit(".", 1)[1])
-        except ValueError:
-            continue
-        if code in UCEPROTECT_LISTED_CODES:
-            return {"is_listed": True, "dnsbl_code": code}
-    return None
+    return _dnsbl_listed_lookup_sync(ip, "dnsbl-1.uceprotect.net",
+                                     UCEPROTECT_LISTED_CODES)
+
+
+def psbl_lookup_sync(ip: str) -> dict | None:
+    """PSBL（psbl.surriel.com）被动垃圾邮件黑名单（经 DoH，免 key）。
+
+    反查 ``<rev-ip>.psbl.surriel.com`` A 记录；命中码仅 ``127.0.0.2``
+    （曾发送垃圾邮件的发送 IP）→ ``listed`` 信号。
+    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
+    """
+    return _dnsbl_listed_lookup_sync(ip, "psbl.surriel.com",
+                                     PSBL_LISTED_CODES)
 
 
 def freeipapi_lookup_sync(ip: str) -> dict | None:
@@ -1863,6 +1846,10 @@ def source_score(name: str, signal) -> int | None:
         if not signal.get("is_listed"):
             return None
         return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
+    if name == "psbl":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
     if name == "greynoise":
         if signal.get("is_abuse"):
             penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
@@ -2160,6 +2147,8 @@ def _flag_opinions(name: str, signal) -> dict:
     if name == "sorbs":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "uceprotect":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "psbl":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "abuseipdb_public":
         return {"abuse": True} if signal.get("is_abuse") else {}
@@ -2808,6 +2797,11 @@ async def lookup_all_risk(
         w, d = pacing.get("uceprotect", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "uceprotect", uceprotect_lookup_sync, cap=UCEPROTECT_CAP,
+            workers=w, delay=d))
+    if "psbl" in sources:
+        w, d = pacing.get("psbl", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "psbl", psbl_lookup_sync, cap=PSBL_CAP,
             workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
