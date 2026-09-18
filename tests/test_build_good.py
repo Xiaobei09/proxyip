@@ -554,11 +554,13 @@ class TestWriteGoodFiles(unittest.TestCase):
 class TestCommittedCnViewInvariant(unittest.TestCase):
     """数据合规护栏：仓库内所有 CN 视图文件不混入海外实测 ``-XMB/s``。
 
-    覆盖三块 CN 视图表面（统一只允许 ``≈XMB/s`` 估算或无速度 token）：
+    覆盖四块 CN 视图表面（统一只允许 ``≈XMB/s`` 估算或无速度 token）：
 
     - ``good/premium`` 家族（build_good/build_premium 及其全部变体）；
     - ``data/valid/tiers/`` 镜像（good 家族同源 CN 视图副本）；
     - ``all_cn*.txt``（china_check 的大陆清单）。
+    - ``countries/*/cn*.txt`` 与 ``sets/*/cn*.txt``（R299 补入：此前
+      仅前三块有锁，子目录 CN 视图同类泄漏将无声入库；实证零泄漏）。
 
     曾出现陈旧清单把海外实测 ``-XMB/s`` 直接提交进 per-country/set 的
     good/premium 文件（大陆用户误读为大陆速度）。此测试在 CI 里直接扫描
@@ -584,6 +586,11 @@ class TestCommittedCnViewInvariant(unittest.TestCase):
                 out.append(path)
                 continue
             if path.name.startswith("all_cn"):
+                out.append(path)
+                continue
+            # 子目录 CN 视图（countries/*/cn*.txt、sets/*/cn*.txt）同属
+            # CN 视图语义（≈XMB/s 或无速度），R299 纳入护栏。
+            if path.name.startswith("cn"):
                 out.append(path)
                 continue
             if "tiers" in path.parts:
