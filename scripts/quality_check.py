@@ -7,11 +7,10 @@ under ``data/quality/``:
 - ``ipinfo.json``      exit IP / geo / IP type / reputation score + source
                       (per checked proxy)
 - ``abuse.json``       optional abuse-score results (key-gated)
-- ``reputation.json``  0-100 reputation scores (multi-source weighted merge:
-                      netcoffee / ncgy / ip-api / ipquery / ffraud / blackbox
-                      / otx / ipsum / ipapi_is / ipdata / whatismyip
-                      / proxycheck / ip2location / dc_asn / abuse_list
-                      / vpn_asn / resproxy_asn, plus opt-in getipintel),
+- ``reputation.json``  0-100 reputation scores (multi-source weighted merge
+                      over ``DEFAULT_REP_SOURCES``, plus opt-in sources via
+                      ``--reputation-sources``; see ``quality_reputation.py``
+                      ``REPUTATION_WEIGHTS`` and docs/scripts.md『默认源与权重』表),
                       keyed by ``ip:port#CC``
 - ``all_rep.txt``      ``all.txt`` lines re-sorted by reputation desc
 - ``countries/<cc>/rep.txt``, ``sets/<name>/rep.txt``
@@ -779,7 +778,7 @@ def main(argv: list[str] | None = None) -> int:
         "--reputation-sources",
         default=None,
         help="Comma list of sources for --reputation-provider multi "
-        "(default: all DEFAULT_REP_SOURCES — 44 源，见 quality_reputation.py "
+        "(default: all DEFAULT_REP_SOURCES，见 quality_reputation.py "
         "常量与 docs/scripts.md『默认源与权重』表；如 netcoffee,ncgy,ip-api)",
     )
     parser.add_argument(

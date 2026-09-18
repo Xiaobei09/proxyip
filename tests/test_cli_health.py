@@ -54,6 +54,22 @@ class TestCliHealth(unittest.TestCase):
                 f"{script.name} prints at import time: {visitor.found}",
             )
 
+    def test_quality_help_has_no_stale_source_enum(self):
+        """R278：CLI 帮助不得硬编码信誉源清单（R270 whatismyip 退默认后
+        quality_check docstring 枚举过期无人发现；R277 默认集已修，此处
+        锁帮助文本）。帮助应指向常量/文档表，而非点名。"""
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "quality_check.py"),
+             "--help"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        self.assertEqual(proc.returncode, 0)
+        out = proc.stdout
+        self.assertNotIn("whatismyip", out)
+        self.assertNotRegex(out, r"— ?\d+ 源")
+
 
 if __name__ == "__main__":
     unittest.main()
