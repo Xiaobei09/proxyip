@@ -969,13 +969,49 @@ class TestReputation(unittest.TestCase):
 
     def test_dnsbl_family_consensus_listed(self):
         """R271：dnsbl/spamcop/dronebl/spamrats/sorbs 五家命中 listed 时
-        共识均投 listed 票（任一漏接即回归失败）。"""
-        for name in ("dnsbl", "spamcop", "dronebl", "spamrats", "sorbs"):
+        共识均投 listed 票（任一漏接即回归失败）。R272 起含 uceprotect
+        共六家。"""
+        for name in ("dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
+                     "uceprotect"):
             self.assertEqual(
                 qr._flag_opinions(name, {"is_listed": True}),
                 {"listed": True}, name)
             self.assertEqual(
                 qr.source_score(name, {"is_listed": True}), 70, name)
+
+    def test_uceprotect_lookup_sync_codes(self):
+        """R272：UCEPROTECT L1 新增 opt-in 源——命中码仅 2 → listed；
+        其余/空 → None；listed 信号进入共识投票与计分。test-point
+        2.0.0.127 经 DoH 实测回包 127.0.0.2（分区存活实证）。"""
+        with unittest.mock.patch.object(
+                qr, "_doh_query", return_value=["127.0.0.2"]):
+            self.assertEqual(
+                qr.uceprotect_lookup_sync("8.8.8.8"),
+                {"is_listed": True, "dnsbl_code": 2})
+        for answers in (["127.0.0.1"], ["127.0.0.3"], ["127.0.0.4"], []):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertIsNone(qr.uceprotect_lookup_sync("8.8.8.8"))
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.uceprotect_lookup_sync("2001:db8::1"))
+            self.assertIsNone(qr.uceprotect_lookup_sync("not-an-ip"))
+            m.assert_not_called()
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.2"]) as m:
+            qr.uceprotect_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.dnsbl-1.uceprotect.net")
+        self.assertNotIn("uceprotect", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("uceprotect", qr.REPUTATION_WEIGHTS)
+        self.assertEqual(qr.REPUTATION_WEIGHTS["uceprotect"], 5)
+        self.assertIn("uceprotect", qr.SOURCE_PACING)
+        self.assertEqual(
+            qr._flag_opinions("uceprotect", {"is_listed": True}),
+            {"listed": True})
+        self.assertEqual(qr._flag_opinions("uceprotect", {}), {})
+        self.assertEqual(
+            qr.source_score("uceprotect", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("uceprotect", {}))
 
     def test_default_sources_drop_maltiverse_add_spamcop(self):
         """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""

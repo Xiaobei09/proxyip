@@ -111,6 +111,14 @@ SPAMRATS_CAP = 9000
 SORBS_CAP = 9000
 SPAMRATS_LISTED_CODES = frozenset((2, 3))
 SORBS_LISTED_CODES = frozenset((2, 7))
+# UCEPROTECT Level 1（dnsbl-1.uceprotect.net）社区发送者黑名单（第五独立
+# 权威，UCEPROTECT-Network 运营，与上四家互补）。仅用 L1（具体发送 IP）：
+# L2/L3 为升级名单（整段/AS 列入，争议大，不宜作代理罪证，刻意不用）。
+# 命中码仅 127.0.0.2 → `listed`；R272 经 DoH 以 test-point 2.0.0.127 实测
+# 回包 127.0.0.2，确认分区存活（同期 sorbs/spamrats test-point 无响应，
+# 保持 opt-in 待验证，不断言其死亡）。
+UCEPROTECT_CAP = 9000
+UCEPROTECT_LISTED_CODES = frozenset((2,))
 DNSBL_DOH_ENDPOINTS = (
     "https://dns.alidns.com/resolve",
     "https://cloudflare-dns.com/dns-query",
@@ -335,6 +343,7 @@ REPUTATION_WEIGHTS = {
     "dronebl": 5,
     "spamrats": 5,
     "sorbs": 5,
+    "uceprotect": 5,
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
@@ -401,6 +410,7 @@ SOURCE_PACING = {
     "dronebl": (6, 0.15),
     "spamrats": (6, 0.15),
     "sorbs": (6, 0.2),
+    "uceprotect": (6, 0.15),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -1280,6 +1290,30 @@ def sorbs_lookup_sync(ip: str) -> dict | None:
     return None
 
 
+def uceprotect_lookup_sync(ip: str) -> dict | None:
+    """UCEPROTECT Level 1（dnsbl-1.uceprotect.net）社区发送者黑名单
+    （经 DoH，免 key）。
+
+    反查 ``<rev-ip>.dnsbl-1.uceprotect.net`` A 记录；命中码仅 ``127.0.0.2``
+    （L1 列入的发送 IP）→ ``listed`` 信号。L2/L3 升级名单刻意不用。
+    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
+    """
+    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
+        return None
+    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl-1.uceprotect.net"
+    answers = _doh_query(qname, "A")
+    for ans in answers:
+        if not ans.startswith("127.0.0."):
+            continue
+        try:
+            code = int(ans.rsplit(".", 1)[1])
+        except ValueError:
+            continue
+        if code in UCEPROTECT_LISTED_CODES:
+            return {"is_listed": True, "dnsbl_code": code}
+    return None
+
+
 def freeipapi_lookup_sync(ip: str) -> dict | None:
     """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
     req = urllib.request.Request(
@@ -1825,6 +1859,10 @@ def source_score(name: str, signal) -> int | None:
         if not signal.get("is_listed"):
             return None
         return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
+    if name == "uceprotect":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
     if name == "greynoise":
         if signal.get("is_abuse"):
             penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
@@ -2120,6 +2158,8 @@ def _flag_opinions(name: str, signal) -> dict:
     if name == "spamrats":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "sorbs":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "uceprotect":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "abuseipdb_public":
         return {"abuse": True} if signal.get("is_abuse") else {}
@@ -2764,6 +2804,11 @@ async def lookup_all_risk(
         w, d = pacing.get("sorbs", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "sorbs", sorbs_lookup_sync, cap=SORBS_CAP, workers=w, delay=d))
+    if "uceprotect" in sources:
+        w, d = pacing.get("uceprotect", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "uceprotect", uceprotect_lookup_sync, cap=UCEPROTECT_CAP,
+            workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:
