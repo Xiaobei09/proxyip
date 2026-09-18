@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from common import DATA_DIR
+from common import normalize_note, parse_ltd_line
 
 VALID_DIR = DATA_DIR / "valid"
 
@@ -40,3 +41,34 @@ class TestNoEmptyResidueFiles(unittest.TestCase):
             return str(path.relative_to(VALID_DIR))
         except ValueError:
             return str(path)
+
+
+class TestFormatContract(unittest.TestCase):
+    """R280：数据格式契约合成锁（契约 A/B）。
+
+    实证：`data/valid/all.txt` 17974 行经 `parse_ltd_line` 全过、
+    备注词表全落在归一桶内（DC/RES/MOB/PROXY、fast/mid/slow、V4/V6/DS、
+    CN/CNH、U<NN>、→出口，历史 GPT/D+/YT 容忍）、延迟升序零违反。
+    此处用合成行锁定解析与归一语义（不依赖 18k 活数据，避免 CI 脆弱）。
+    """
+
+    def test_contract_line_forms_parse(self):
+        cases = [
+            "1.2.3.4:443#US",
+            "1.2.3.4:443#🇺🇸US-8ms-5.86MB/s",
+            "1.2.3.4:443#🇺🇸US-8.5ms",
+            "1.2.3.4:443#🇺🇸US→LAX-8ms-5.86MB/s-GPT-PROXY-fast-V4-CN-97-U100",
+            "1.2.3.4:443#🇺🇸US-8ms-CN-U100",
+            "1.2.3.4:443#🇺🇸US-8ms-RES-mid-DS-CNH-U60",
+        ]
+        for line in cases:
+            with self.subTest(line=line):
+                parsed = parse_ltd_line(line)
+                self.assertIsNotNone(parsed)
+                self.assertEqual(parsed[3], "US")
+
+    def test_normalize_keeps_contract_buckets(self):
+        line = "1.2.3.4:443#US-8ms-5.86MB/s-GPT-PROXY-fast-V4-CN-97-U100"
+        out = normalize_note(line)
+        for tok in ("GPT", "PROXY-fast", "V4", "CN", "U100"):
+            self.assertIn(tok, out)
