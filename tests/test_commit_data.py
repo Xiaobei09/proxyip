@@ -282,6 +282,26 @@ class TestWorkflowSchedules(unittest.TestCase):
                     f"{wf} 缺定时心跳 {cron}")
 
 
+class TestNoPycTracked(unittest.TestCase):
+    """R310：字节码不得入库（`__pycache__/`/`*.pyc` 仅本地产物）。
+
+    .gitignore 已覆盖；此锁防 `git add -f` 误操作或 ignore 被改坏。
+    无 git 环境则跳过。"""
+
+    def test_no_pycache_tracked(self):
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        bad = [l for l in proc.stdout.splitlines()
+               if l.endswith(".pyc") or "__pycache__" in l]
+        self.assertEqual(bad, [], f"字节码已入库：{bad[:5]}")
+
+
 class TestWorkflowConcurrency(unittest.TestCase):
     """R308：并发策略锁——主更新优先抢占，下游保护在跑结果。
 
