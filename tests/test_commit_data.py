@@ -234,6 +234,27 @@ class TestWorkflowTestGate(unittest.TestCase):
                     names.index(gate), names.index(heavy),
                     f"{wf}: {gate} 必须排在 {heavy} 之前")
 
+    def test_quality_chain_script_order(self):
+        """R312：quality 链脚本序（uptime→reorg→annotate）与 README
+        流程段一致；china 链 annotate 紧随检测步。防步骤重排致
+        标注基于过期分裂（先注解后重组即错）。"""
+        import re
+        q = (ROOT / ".github" / "workflows" / "quality-check.yml"
+             ).read_text(encoding="utf-8")
+        qnames = re.findall(r"-\s*name:\s*(.+)", q)
+        self.assertLess(
+            qnames.index("Rolling uptime"),
+            qnames.index("Reorganize by exit country"))
+        self.assertLess(
+            qnames.index("Reorganize by exit country"),
+            qnames.index("Annotate and classify"))
+        c = (ROOT / ".github" / "workflows" / "china-check.yml"
+             ).read_text(encoding="utf-8")
+        cnames = re.findall(r"-\s*name:\s*(.+)", c)
+        self.assertLess(
+            cnames.index("China reachability check"),
+            cnames.index("Annotate and classify"))
+
 
 class TestWorkflowPermissions(unittest.TestCase):
     """R296：工作流权限最小集——全部只需 `contents: write`（提交数据）。
