@@ -1261,6 +1261,29 @@ class TestReputation(unittest.TestCase):
             self.assertNotIn(name, qr.DEFAULT_REP_SOURCES, name)
             self.assertIn(name, qr.REPUTATION_WEIGHTS, name)
 
+    def test_doc_section_refs_resolve(self):
+        """R295：文档章节引用（如 `logic.md §4.0`）必须指向真实标题。
+
+        防标题重编号后引用悬空。扫描 README＋docs 全文（现仅两处：
+        §4.0 出口 IP 解析、§7.2 三数据源），逐条解析。"""
+        import re
+        root = Path(__file__).resolve().parents[1]
+        files = [root / "README.md"] + sorted((root / "docs").glob("*.md"))
+        refs = set()
+        for f in files:
+            refs |= set(re.findall(
+                r"([a-z][a-z0-9-]*\.md) §(\d+(?:\.\d+)*)",
+                f.read_text(encoding="utf-8")))
+        self.assertTrue(refs, "未扫到任何章节引用，扫描器可能失效")
+        header_re = re.compile(r"^#{1,4}\s+(\d+(?:\.\d+)*)\b", re.M)
+        for doc, sec in sorted(refs):
+            text = (root / "docs" / doc
+                    if (root / "docs" / doc).exists()
+                    else root / doc).read_text(encoding="utf-8")
+            headers = set(header_re.findall(text))
+            self.assertIn(
+                sec, headers, f"{doc} §{sec} 无对应标题")
+
     def test_all_weight_sources_have_dispatch(self):
         """R263：每个 REPUTATION_WEIGHTS 源必须有 ``if "<name>" in sources``
         派发分支，且每个静态分源都在权重表内。
