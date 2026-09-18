@@ -136,8 +136,9 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | iplocation | 3（opt-in） | `is_proxy` 标志 -30（附 isp，全免费免 key）。**R269 起退出默认源**：权重最低（3）且 proxy 维度被 hackmyip(6)/freeipapi(6)/scamalytics(8) 全超集覆盖，属重复低置信信号；`--reputation-sources` 显式启用仍可用 |
 | dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.zen.spamhaus.org` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存；三镜像 `dns.alidns.com`→`cloudflare-dns.com`→`dns.google/resolve` 失败回退且进程内 sticky 复用最近成功端点（TTL 600s），全部失败按失败重试、不误判干净 |
 | spamcop | 5 | SpamCop `bl.spamcop.net` 社区实时 DNSBL（独立权威、与 Spamhaus 互补），复用 dnsbl 的 DoH/sticky/并发与负缓存：`<rev-ip>.bl.spamcop.net` A 记录命中 `127.0.0.2` → `listed` 扣 30；其余返回视为未列出；上限 SPAMCOP_CAP=9000/轮 |
+| sorbs | 5 | SORBS `dnsbl.sorbs.net` 社区 open-proxy 实时 DNSBL：SOCKS/HTTP 代理码 `127.0.0.2`/`127.0.0.7` → `listed` 扣 30；动态住宅段 `127.0.0.4/8/9` 忽略（与 spamhaus PBL 同口径）；复用 dnsbl 的 DoH/sticky/并发与负缓存；opt-in 不入默认；上限 SORBS_CAP=9000/轮。**R271 新增** |
 | dronebl | 5 | DroneBL `dnsbl.dronebl.org` 社区僵尸/失陷主机实时 DNSBL（独立权威，命中多为被控主机/开代理人），复用 dnsbl 通路：`<rev-ip>.dnsbl.dronebl.org` A 记录命中码 `127.0.0.2~13`（abuse/爆破/垃圾/重犯/模糊等）→ `listed` 扣 30；上限 DRONEBL_CAP=9000/轮 |
-| spamrats | 5 | SpamRats `dnsbl.spamrats.com` 社区双通路实时 DNSBL（第四独立权威，与 Spamhaus/SpamCop/DroneBL 四家同构为免 key 社区派对）。复用 dnsbl 通路：`<rev-ip>.dnsbl.spamrats.com` A 记录命中码 `127.0.0.2`（AUTO 自动化自录）与 `127.0.0.3`（AUTH 社区人工确认）→ `listed` 扣 30；**`127.0.0.4`（DYN 动态住宅线）刻意忽略**——与 spamhaus PBL/iplocation 同口径：动态住宅段是正常合法用户基线，不按代理罪证处理；上限 SPAMRATS_CAP=9000/轮。**R270 新增，opt-in**（默认不进 DEFAULT，`--reputation-sources` 显式启用） |
+| spamrats | 5 | SpamRats `dnsbl.spamrats.com` 社区双通路实时 DNSBL（第四独立权威，与 Spamhaus/SpamCop/DroneBL 四家同构为免 key 社区派对）。复用 dnsbl 通路：`<rev-ip>.dnsbl.spamrats.com` A 记录命中码 `127.0.0.2`（AUTO 自动化自录）与 `127.0.0.3`（AUTH 社区人工确认）→ `listed` 扣 30；**`127.0.0.4`（DYN 动态住宅线）刻意忽略**——与 spamhaus PBL/iplocation 同口径：动态住宅段是正常合法用户基线，不按代理罪证处理；上限 SPAMRATS_CAP=9000/轮。**R270 新增，opt-in**（默认不进 DEFAULT，`--reputation-sources` 显式启用）。**R271 补接**：`_flag_opinions`/`source_score` 缺分支导致命中零扣分，现已与 spamcop/dronebl 同口径 |
 | ipwhois | 6 | `security` 块标志罚分：tor -45 / vpn -30 / proxy -25 / hosting -15 / anonymous -10；`connection.type` 命中机房类另投 hosting；无罚分且无 ASN 则 None |
 | maltiverse | 6（opt-in） | `classification`（malicious/suspicious）或结构布尔（open_proxy / tor_node / vpn_node / cnc / malware 分发 / iot / scanner / mining）+ 近 MALTIVERSE_RECENT_DAYS 天黑名单；刻意忽略 `is_known_attacker` 与 `is_hosting`（防叠噪）；全空 → None。**R268 起退出默认源**：实域 18127 出口的 `rep_sources` 中参与共识仅 3 次（每轮 cap 2500 查询），判识增量近零而调用成本不低，故降级为 opt-in（`--reputation-sources` 显式启用） |
 | stopforumspam | 4 | `is_abuse` → abuse -35、Tor exit → tor -40（HTTP 垃圾评论/僵尸出口） |
@@ -173,7 +174,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | socks_proxy | 3 | 60 | `is_proxy` | SOCKS 代理 |
 | sslproxies | 3 | 60 | `is_proxy` | SSL 代理 |
 | vpn_asn | 3 | 70 | `is_vpn` | VPN 服务商 ASN |
-| vpn_ips | 3 | 55 | `is_vpn` | X4BNet VPN 出口 CIDR |
+| vpn_ips | 3（opt-in） | 55 | `is_vpn` | X4BNet VPN 出口 CIDR。**R271 起退出默认源**：静态 VPN 出口表与 `vpn_asn` 机房 ASN 判据高度重叠，属重复低增益信号；`--reputation-sources` 显式启用仍可用 |
 | resproxy_asn | 2 | 75 | `is_proxy` | 住宅代理骨干 ASN |
 
 未命中 → 该项不计入合分（不误判满分）。

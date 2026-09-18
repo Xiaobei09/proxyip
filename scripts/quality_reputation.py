@@ -108,7 +108,9 @@ DRONEBL_LISTED_CODES = frozenset(range(2, 14))
 # 与 spamhaus PBL/自留 spamcop 同口径：动态住宅段是啥正合法用户基线，
 # 不当代理罪证（R270 决策，防叠噪）。
 SPAMRATS_CAP = 9000
+SORBS_CAP = 9000
 SPAMRATS_LISTED_CODES = frozenset((2, 3))
+SORBS_LISTED_CODES = frozenset((2, 7))
 DNSBL_DOH_ENDPOINTS = (
     "https://dns.alidns.com/resolve",
     "https://cloudflare-dns.com/dns-query",
@@ -332,6 +334,7 @@ REPUTATION_WEIGHTS = {
     "spamcop": 5,
     "dronebl": 5,
     "spamrats": 5,
+    "sorbs": 5,
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
@@ -371,7 +374,7 @@ DEFAULT_REP_SOURCES = (
     "firehol_level1", "binarydefense",
     "c2_tracker", "botscout", "greensnow",
     "sslproxies", "socks_proxy",
-    "vpn_ips", "dshield", "abuseipdb_public",
+    "dshield", "abuseipdb_public",
     "dnsbl",
 )
 SOURCE_PACING = {
@@ -397,6 +400,7 @@ SOURCE_PACING = {
     "spamcop": (6, 0.15),
     "dronebl": (6, 0.15),
     "spamrats": (6, 0.15),
+    "sorbs": (6, 0.2),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -1230,10 +1234,11 @@ def dronebl_lookup_sync(ip: str) -> dict | None:
 
 
 def spamrats_lookup_sync(ip: str) -> dict | None:
-    """DroneBL（dnsbl.spamrats.com）僵尸/失陷主机实时 DNSBL（经 DoH，免 key）。
+    """SpamRats（dnsbl.spamrats.com）社区双通路实时 DNSBL（经 DoH，免 key）。
 
-    反查 ``<rev-ip>.dnsbl.spamrats.com`` A 记录；命中码 ``127.0.0.2~13``
-    （abuse/爆破/垃圾/重犯/模糊等各类被控行为）→ ``listed`` 信号。
+    反查 ``<rev-ip>.dnsbl.spamrats.com`` A 记录；命中码仅 ``127.0.0.2``
+    （AUTO 自动化自录）与 ``127.0.0.3``（AUTH 社区人工确认）→ ``listed``
+    信号；``127.0.0.4``（DYN 动态住宅线）刻意忽略（与 spamhaus PBL 同口径）。
     未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
     """
     if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
@@ -1250,6 +1255,30 @@ def spamrats_lookup_sync(ip: str) -> dict | None:
         if code in SPAMRATS_LISTED_CODES:
             return {"is_listed": True, "dnsbl_code": code}
     return None
+
+def sorbs_lookup_sync(ip: str) -> dict | None:
+    """SORBS（dnsbl.sorbs.net）社区 open-proxy 实时 DNSBL（经 DoH，免 key）。
+
+    反查 ``<rev-ip>.dnsbl.sorbs.net`` A 记录；命中码仅 ``127.0.0.2``
+   （SOCKS 代理）与 ``127.0.0.7``（HTTP 代理）→ ``listed`` 信号；
+    动态住宅段 ``127.0.0.4/8/9`` 刻意忽略（与 spamhaus PBL 同口径）。
+    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
+    """
+    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
+        return None
+    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl.sorbs.net"
+    answers = _doh_query(qname, "A")
+    for ans in answers:
+        if not ans.startswith("127.0.0."):
+            continue
+        try:
+            code = int(ans.rsplit(".", 1)[1])
+        except ValueError:
+            continue
+        if code in SORBS_LISTED_CODES:
+            return {"is_listed": True, "dnsbl_code": code}
+    return None
+
 
 def freeipapi_lookup_sync(ip: str) -> dict | None:
     """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
@@ -1788,6 +1817,14 @@ def source_score(name: str, signal) -> int | None:
         if not signal.get("is_listed"):
             return None
         return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
+    if name == "spamrats":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
+    if name == "sorbs":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
     if name == "greynoise":
         if signal.get("is_abuse"):
             penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
@@ -2079,6 +2116,10 @@ def _flag_opinions(name: str, signal) -> dict:
     if name == "spamcop":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "dronebl":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "spamrats":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "sorbs":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "abuseipdb_public":
         return {"abuse": True} if signal.get("is_abuse") else {}
@@ -2719,6 +2760,10 @@ async def lookup_all_risk(
         w, d = pacing.get("spamrats", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "spamrats", spamrats_lookup_sync, cap=SPAMRATS_CAP, workers=w, delay=d))
+    if "sorbs" in sources:
+        w, d = pacing.get("sorbs", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "sorbs", sorbs_lookup_sync, cap=SORBS_CAP, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:

@@ -772,12 +772,15 @@ class TestReputation(unittest.TestCase):
 
     def test_r214_rep_static_sources_registered(self):
         """R214：vpn_ips（X4BNet VPN 出口 CIDR）+ dshield（DShield /24
-        攻击子网）默认启用、有权重、能打分。"""
-        for name in ("vpn_ips", "dshield"):
+        攻击子网）        断言 vpn_ips 退默认（保留 opt-in 权重/派发），dshield 仍默认启用。"""
+        for name in ("dshield",):
             self.assertIn(name, qc.DEFAULT_REP_SOURCES)
+        for name in ("vpn_ips", "dshield"):
             self.assertIn(name, qc.REPUTATION_WEIGHTS)
             self.assertIn(name, qc.STATIC_LIST_SCORES)
             self.assertGreater(qc.REPUTATION_WEIGHTS[name], 0)
+        self.assertNotIn("vpn_ips", qc.DEFAULT_REP_SOURCES)
+        self.assertGreater(qc.REPUTATION_WEIGHTS["vpn_ips"], 0)
         self.assertEqual(
             qr._flag_opinions("vpn_ips", {"is_vpn": True}), {"vpn": True})
         self.assertEqual(
@@ -894,6 +897,85 @@ class TestReputation(unittest.TestCase):
         self.assertNotIn("iplocation", qr.DEFAULT_REP_SOURCES)
         self.assertIn("dronebl", qr.REPUTATION_WEIGHTS)
         self.assertIn("iplocation", qr.REPUTATION_WEIGHTS)
+
+    def test_spamrats_lookup_sync_codes(self):
+        """R270/R271：SpamRats 命中码 2/3 → listed；DYN 4/其余/空 → None；
+        且 listed 信号必须进入共识投票与计分（R271 补接分支的回归锁）。"""
+        for code in (2, 3):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query",
+                    return_value=[f"127.0.0.{code}"]):
+                self.assertEqual(
+                    qr.spamrats_lookup_sync("8.8.8.8"),
+                    {"is_listed": True, "dnsbl_code": code})
+        for answers in (["127.0.0.1"], ["127.0.0.4"], []):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertIsNone(qr.spamrats_lookup_sync("8.8.8.8"))
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.spamrats_lookup_sync("2001:db8::1"))
+            m.assert_not_called()
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.2"]) as m:
+            qr.spamrats_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.dnsbl.spamrats.com")
+        # opt-in：有权重/pacing/派发但不进默认。
+        self.assertNotIn("spamrats", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("spamrats", qr.REPUTATION_WEIGHTS)
+        self.assertIn("spamrats", qr.SOURCE_PACING)
+        # 计分接线：与 spamcop/dronebl 同维同分。
+        self.assertEqual(
+            qr._flag_opinions("spamrats", {"is_listed": True}),
+            {"listed": True})
+        self.assertEqual(qr._flag_opinions("spamrats", {}), {})
+        self.assertEqual(qr.source_score("spamrats", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("spamrats", {}))
+
+    def test_sorbs_lookup_sync_codes(self):
+        """R271：SORBS 新增 opt-in 源——命中码 2/7 → listed；动态住宅段
+        4/8/9/其余/空 → None；listed 信号进入共识投票与计分。"""
+        for code in (2, 7):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query",
+                    return_value=[f"127.0.0.{code}"]):
+                self.assertEqual(
+                    qr.sorbs_lookup_sync("8.8.8.8"),
+                    {"is_listed": True, "dnsbl_code": code})
+        for answers in (["127.0.0.1"], ["127.0.0.4"], ["127.0.0.8"],
+                        ["127.0.0.9"], []):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertIsNone(qr.sorbs_lookup_sync("8.8.8.8"))
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.sorbs_lookup_sync("2001:db8::1"))
+            self.assertIsNone(qr.sorbs_lookup_sync("not-an-ip"))
+            m.assert_not_called()
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.2"]) as m:
+            qr.sorbs_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.dnsbl.sorbs.net")
+        self.assertNotIn("sorbs", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("sorbs", qr.REPUTATION_WEIGHTS)
+        self.assertEqual(qr.REPUTATION_WEIGHTS["sorbs"], 5)
+        self.assertIn("sorbs", qr.SOURCE_PACING)
+        self.assertEqual(
+            qr._flag_opinions("sorbs", {"is_listed": True}),
+            {"listed": True})
+        self.assertEqual(qr._flag_opinions("sorbs", {}), {})
+        self.assertEqual(qr.source_score("sorbs", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("sorbs", {}))
+
+    def test_dnsbl_family_consensus_listed(self):
+        """R271：dnsbl/spamcop/dronebl/spamrats/sorbs 五家命中 listed 时
+        共识均投 listed 票（任一漏接即回归失败）。"""
+        for name in ("dnsbl", "spamcop", "dronebl", "spamrats", "sorbs"):
+            self.assertEqual(
+                qr._flag_opinions(name, {"is_listed": True}),
+                {"listed": True}, name)
+            self.assertEqual(
+                qr.source_score(name, {"is_listed": True}), 70, name)
 
     def test_default_sources_drop_maltiverse_add_spamcop(self):
         """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""
