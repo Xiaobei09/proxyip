@@ -200,6 +200,8 @@ async def main_async(args: argparse.Namespace) -> int:
         for key, ip, port in entries
     }
     results: dict[str, dict] = {}
+    # tasks 与 entries 按同一构造顺序并行迭代（dict 保持插入序）：
+    # 不得改任一序列后仍用 zip 配对，错位即张冠李戴。
     for task, (key, _ip, _port) in zip(tasks.keys(), entries):
         try:
             res = await task
