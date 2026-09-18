@@ -72,3 +72,47 @@ class TestFormatContract(unittest.TestCase):
         out = normalize_note(line)
         for tok in ("GPT", "PROXY-fast", "V4", "CN", "U100"):
             self.assertIn(tok, out)
+
+
+class TestNoSecretsInTree(unittest.TestCase):
+    """R288：入库文件不得含真密钥（私钥/webhook token/GitHub PAT/Slack token）。
+
+    实证：全树仅 tests/test_health.py 命中，均为 `SECRET_TOKEN_ABC` 类
+    脱敏固件。扫描对象为 git 跟踪的文本文件；tests/ 固件目录整体豁免。
+    """
+
+    PATTERNS = (
+        "BEGIN (?:RSA )?PRIVATE KEY",
+        "discord\\.com/api/webhooks/\\d+/[A-Za-z0-9_-]{10,}",
+        "ghp_[A-Za-z0-9]{20,}",
+        "xoxb-[A-Za-z0-9-]{10,}",
+    )
+    EXEMPT_PREFIXES = ("tests/",)
+
+    def test_no_live_secrets(self):
+        import re
+        import subprocess
+        proc = subprocess.run(
+            ["git", "ls-files"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=Path(__file__).resolve().parent.parent,
+        )
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        root = Path(__file__).resolve().parent.parent
+        offenders = []
+        for rel in proc.stdout.splitlines():
+            if not rel or rel.startswith(self.EXEMPT_PREFIXES):
+                continue
+            p = root / rel
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError, UnicodeDecodeError):
+                continue
+            for pat in self.PATTERNS:
+                if re.search(pat, text):
+                    offenders.append(f"{rel} ~ /{pat}/")
+                    break
+        self.assertEqual(offenders, [], "疑似真密钥入库：\n" + "\n".join(offenders))
