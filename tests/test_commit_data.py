@@ -209,5 +209,31 @@ class TestLoopCommitFormat(unittest.TestCase):
             f"type {m.group(1)} 不在 DEVELOPMENT.md 允许集 {sorted(allowed)}")
 
 
+class TestWorkflowTestGate(unittest.TestCase):
+    """R290：数据链工作流必须先过单测门禁，再进重型网络阶段。
+
+    R289 死锁复盘：红单测若排在数小时验证之后才暴露，将空烧 CI 配额
+    且延迟失败信号；现三链均把 Run tests 置于首个耗时步之前，此序
+    不得打乱（改 workflow 时常见失误：为“先干活”把测试后移）。"""
+
+    GATES = {
+        "update-proxies.yml": ("Run tests", "Download and extract"),
+        "quality-check.yml": ("Run tests", "Deep quality check"),
+        "china-check.yml": ("Run tests", "China reachability check"),
+    }
+
+    def test_run_tests_precedes_heavy_steps(self):
+        for wf, (gate, heavy) in self.GATES.items():
+            with self.subTest(workflow=wf):
+                text = (ROOT / ".github" / "workflows" / wf).read_text(
+                    encoding="utf-8")
+                names = re.findall(r"-\s*name:\s*(.+)", text)
+                self.assertIn(gate, names)
+                self.assertIn(heavy, names)
+                self.assertLess(
+                    names.index(gate), names.index(heavy),
+                    f"{wf}: {gate} 必须排在 {heavy} 之前")
+
+
 if __name__ == "__main__":
     unittest.main()
