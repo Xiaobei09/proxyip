@@ -28,6 +28,15 @@ class TestLineToObj(unittest.TestCase):
         self.assertEqual(o["uptime7"], 82)
         self.assertFalse(o["cn"])
 
+    def test_obj_has_contract_keys(self):
+        """R283：下游契约 E——all.json 条目键名向后兼容（只增不改不删）。
+        生产键缺失即回归失败。"""
+        o = ej.line_to_obj(
+            "1.2.3.4:443#🇺🇸US→LAX-108ms-4.20MB/s-V6-DC-77-U82")
+        for k in ("ip", "port", "cc", "latency_ms", "speed_mbps",
+                  "family", "rep", "key"):
+            self.assertIn(k, o)
+
     def test_exit_without_uptime(self):
         line = "4.4.4.4:443#🇯🇵JP→TYO-55ms-DC-CN-30"
         o = ej.line_to_obj(line)
