@@ -180,12 +180,17 @@ class TestLoopCommitFormat(unittest.TestCase):
     DEVELOPMENT.md 修正案：type 取 fix/feat/perf/docs/ci/chore/refactor/
     test 其一（禁复合 type；历史 R273 `refactor+feat` 与 R281 `docs+test`
     已记偏离，不追溯改写，只锁当下与未来）。机器人数据提交无标记，
-    自动跳过。"""
+    自动跳过。R287：允许集从 DEVELOPMENT.md 实时解析（测试—文档互锁，
+    防两处二次漂移）。"""
 
-    ALLOWED = ("fix", "feat", "perf", "docs", "ci", "chore",
-               "refactor", "test")
+    def _allowed_types(self) -> set[str]:
+        doc = (ROOT / "DEVELOPMENT.md").read_text(encoding="utf-8")
+        found = set(re.findall(r"^- `([a-z]+)(?:\([^)]*\))?:", doc, re.M))
+        self.assertTrue(found, "DEVELOPMENT.md type 表解析为空")
+        return found
 
     def test_head_loop_commit_single_type(self):
+        allowed = self._allowed_types()
         proc = subprocess.run(
             ["git", "-C", str(ROOT), "log", "-1", "--format=%s"],
             capture_output=True,
@@ -197,11 +202,11 @@ class TestLoopCommitFormat(unittest.TestCase):
         subject = proc.stdout.strip()
         if not re.search(r"\[R\d+\]", subject):
             self.skipTest("HEAD 非轮次提交")
-        self.assertRegex(
-            subject,
-            r"^(fix|feat|perf|docs|ci|chore|refactor|test)"
-            r"(\([^)]+\))?: .+ \[R\d+\]$",
-            f"轮次提交格式偏离: {subject}")
+        m = re.match(r"^([a-z]+)(\([^)]+\))?: .+ \[R\d+\]$", subject)
+        self.assertIsNotNone(m, f"轮次提交格式偏离: {subject}")
+        self.assertIn(
+            m.group(1), allowed,
+            f"type {m.group(1)} 不在 DEVELOPMENT.md 允许集 {sorted(allowed)}")
 
 
 if __name__ == "__main__":
