@@ -570,3 +570,10 @@ itdog.cn 批量大陆可达性探测（WebSocket 收结果）：自 `china_check
 细节（errno 等）需保留时用 `type(exc).__name__ + (errno/strerror 白名单)`
 显式拼接，不得整串透传。`china_check.py`/`china_itdog.py` 另有本地别名
 `_err` 转调 `err_name`。
+
+## 退出码约定（R281 补记）
+
+- `0`：正常完成（含部分失败的降级完成：失败隔离后其余产出照常落盘）。
+- `1`：输入缺失或硬失败（如 quality_check 源文件不存在；health_alert 仅 `--strict` 且有告警时返回 1 供 CI 门控）。
+- `2`：`china_check.py` 输入样本为空（`--source` 无可用行；`--dry-run` 仍先过此检查，无网络动作即退出）。
+- `--help`：CLI 脚本退出 0（`common.py` 纯库模块除外，退出 2 并提示）。

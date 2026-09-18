@@ -3014,5 +3014,20 @@ class TestBuildCnBest(unittest.TestCase):
         self.assertEqual(out["k"], "电信=43ms")
 
 
+class TestMainExitCodes(unittest.TestCase):
+    """R281：退出码契约——空输入样本 → 2（用法/数据问题），无网络动作；
+    与 quality_check 缺源返回 1、health_alert 非 strict 下恒 0 的分工一致。"""
+
+    def test_empty_source_exits_2_without_network(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "empty.txt"
+            src.write_text("", encoding="utf-8")
+            with mock.patch.object(
+                    cc, "request_follow",
+                    side_effect=AssertionError("no network in test")):
+                rc = cc.main(["--source", str(src)])
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
