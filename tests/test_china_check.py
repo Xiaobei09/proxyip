@@ -191,6 +191,19 @@ class TestParseTcpping(unittest.TestCase):
         self.assertEqual(cc.parse_tcpping({})["status"], "error")
         self.assertEqual(cc.parse_tcpping("x")["status"], "error")
 
+    def test_transport_failure_redacts_token_url(self):
+        """R275：tcpping token 进 URL query，传输异常不得把 token/URL
+        带入持久化 error 字段（_err 仅取类型名；防 china.json/CI 日志泄漏）。"""
+        token = "SECRET-TOKEN-XYZ"
+        boom = urllib.error.URLError(
+            f"https://tcpping.cn/ping_api?url=1.2.3.4&port=443&token={token}")
+        with mock.patch.object(cc, "request_follow", side_effect=boom):
+            out = cc.tcpping_check("1.2.3.4", "443", token, 5)
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(out["error"], "URLError")
+        self.assertNotIn(token, out["error"])
+        self.assertNotIn("tcpping.cn", out["error"])
+
 
 class TestMergeVerdict(unittest.TestCase):
     def test_any_ok_reachable(self):
