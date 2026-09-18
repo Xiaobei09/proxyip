@@ -127,7 +127,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | otx | 8 | `100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
 | ipapi_is | 8 | 标志罚分：tor -45 / vpn -30 / proxy -25 / datacenter -15 / abuser -20，机房 ASN/公司类型 -15，abuser_score≥0.1 -20 |
 | ipdata | 8 | 标志罚分 + `threat_score`：tor -45 / proxy -30 / vpn -25 / anonymous -10 |
-| whatismyip | 3 | `security.score` 直用或标志罚分（取较大者）：vpn -30 / proxy -25 / tor -45 / hosting -15 / blacklisted -30 |
+| whatismyip | 3（opt-in） | `security.score` 直用或标志罚分（取较大者）：vpn -30 / proxy -25 / tor -45 / hosting -15 / blacklisted -30。**R270 起退出默认源**（一增一减轮换，保留权重/派发作 opt-in；`--reputation-sources` 显式启用仍可用） |
 | getipintel | 5 | `100 - probability×100`（opt-in，需邮箱） |
 | proxycheck | 12 | `risk` score 直用或标志罚分（取较大者）：proxy -45 / vpn -45 / tor -45 / hosting -30 / scraper -20 |
 | ip2location | 5 | `is_proxy` 标志 -30 |

@@ -1241,6 +1241,26 @@ class TestReputation(unittest.TestCase):
                 name, scripts,
                 f"docs/scripts.md 缺少信誉源 {name}")
 
+    def test_default_sources_match_docs(self):
+        """R277：`--reputation-sources` 文档默认值必须与代码
+        `DEFAULT_REP_SOURCES` 集合全等。
+
+        防退默认（R270 whatismyip / R271 vpn_ips）只改代码漏改文档——
+        R256 枚举测试只查源名出现，拦不住默认集漂移。用集合比对，
+        opt-in 源（spamrats/sorbs/uceprotect/psbl 等）两边都不含。"""
+        import re
+        root = Path(__file__).resolve().parents[1]
+        scripts = (root / "docs" / "scripts.md").read_text(encoding="utf-8")
+        m = re.search(
+            r"\| `--reputation-sources` \|[^\n]*\| ([^|]+) \|", scripts)
+        self.assertIsNotNone(m, "docs 默认源清单行解析失败")
+        doc_default = set(m.group(1).strip().split(","))
+        self.assertEqual(doc_default, set(qr.DEFAULT_REP_SOURCES))
+        for name in ("whatismyip", "vpn_ips", "spamrats", "sorbs",
+                     "uceprotect", "psbl"):
+            self.assertNotIn(name, qr.DEFAULT_REP_SOURCES, name)
+            self.assertIn(name, qr.REPUTATION_WEIGHTS, name)
+
     def test_all_weight_sources_have_dispatch(self):
         """R263：每个 REPUTATION_WEIGHTS 源必须有 ``if "<name>" in sources``
         派发分支，且每个静态分源都在权重表内。
