@@ -96,6 +96,11 @@ DNSBL_TIMEOUT = 4
 # 独立计数（避免命中共用 DNSBL_ZEN_CAP 的源头配额语义）。
 SPAMCOP_CAP = 9000
 SPAMCOP_LISTED_CODE = "127.0.0.2"
+# DroneBL（dnsbl.dronebl.org）社区僵尸/失陷主机黑名单：命中多为被控
+# 主机/开代理人，与 Spamhaus/SpamCop 权威互补。复用同一 DoH 通路，
+# 独立配额。命中码 127.0.0.2~13（abuse/爆破/垃圾/重犯/模糊…) 均视为入榜。
+DRONEBL_CAP = 9000
+DRONEBL_LISTED_CODES = frozenset(range(2, 14))
 DNSBL_DOH_ENDPOINTS = (
     "https://dns.alidns.com/resolve",
     "https://cloudflare-dns.com/dns-query",
@@ -317,6 +322,7 @@ REPUTATION_WEIGHTS = {
     "iplocation": 3,
     "dnsbl": 8,
     "spamcop": 5,
+    "dronebl": 5,
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
@@ -346,9 +352,9 @@ DEFAULT_REP_SOURCES = (
     "abuse_list", "vpn_asn", "resproxy_asn",
     "proxycheck", "ip2location",
     "tor_exit", "spamhaus",
-    "freeipapi", "scamalytics", "iplocation",
+    "freeipapi", "scamalytics",
     "hackmyip", "stopforumspam",
-    "spamcop",
+    "spamcop", "dronebl",
     "cins", "et_compromised", "feodo",
     "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
     "danmeuk_tor", "tor_bulk",
@@ -380,6 +386,7 @@ SOURCE_PACING = {
     "greynoise": (6, 0.3),
     "dnsbl": (6, 0.2),
     "spamcop": (6, 0.15),
+    "dronebl": (6, 0.15),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -1189,6 +1196,29 @@ def spamcop_lookup_sync(ip: str) -> dict | None:
     return None
 
 
+def dronebl_lookup_sync(ip: str) -> dict | None:
+    """DroneBL（dnsbl.dronebl.org）僵尸/失陷主机实时 DNSBL（经 DoH，免 key）。
+
+    反查 ``<rev-ip>.dnsbl.dronebl.org`` A 记录；命中码 ``127.0.0.2~13``
+    （abuse/爆破/垃圾/重犯/模糊等各类被控行为）→ ``listed`` 信号。
+    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
+    """
+    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
+        return None
+    qname = f"{'.'.join(reversed(ip.split('.')))}.dnsbl.dronebl.org"
+    answers = _doh_query(qname, "A")
+    for ans in answers:
+        if not ans.startswith("127.0.0."):
+            continue
+        try:
+            code = int(ans.rsplit(".", 1)[1])
+        except ValueError:
+            continue
+        if code in DRONEBL_LISTED_CODES:
+            return {"is_listed": True, "dnsbl_code": code}
+    return None
+
+
 def freeipapi_lookup_sync(ip: str) -> dict | None:
     """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
     req = urllib.request.Request(
@@ -1722,6 +1752,10 @@ def source_score(name: str, signal) -> int | None:
         if not signal.get("is_listed"):
             return None
         return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
+    if name == "dronebl":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
     if name == "greynoise":
         if signal.get("is_abuse"):
             penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
@@ -2011,6 +2045,8 @@ def _flag_opinions(name: str, signal) -> dict:
     if name == "dnsbl":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "spamcop":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "dronebl":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "abuseipdb_public":
         return {"abuse": True} if signal.get("is_abuse") else {}
@@ -2643,6 +2679,10 @@ async def lookup_all_risk(
         w, d = pacing.get("spamcop", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "spamcop", spamcop_lookup_sync, cap=SPAMCOP_CAP, workers=w, delay=d))
+    if "dronebl" in sources:
+        w, d = pacing.get("dronebl", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "dronebl", dronebl_lookup_sync, cap=DRONEBL_CAP, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:

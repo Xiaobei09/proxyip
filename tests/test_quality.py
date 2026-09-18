@@ -858,6 +858,43 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qr.source_score("spamcop", {"is_listed": True}), 70)
         self.assertIsNone(qr.source_score("spamcop", {}))
 
+    def test_dronebl_lookup_sync_codes(self):
+        """R269：DroneBL 命中码 2~13 → listed；其余/空 → None。"""
+        for code in (2, 3, 5, 7, 13):
+            with unittest.mock.patch.object(
+                    qr, "_doh_query",
+                    return_value=[f"127.0.0.{code}"]):
+                self.assertEqual(
+                    qr.dronebl_lookup_sync("8.8.8.8"),
+                    {"is_listed": True, "dnsbl_code": code})
+        for answers, expect in [
+            (["127.0.0.1"], None),  # 非入榜码
+            ([], None),              # 未列出
+        ]:
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertEqual(qr.dronebl_lookup_sync("8.8.8.8"), expect)
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.dronebl_lookup_sync("2001:db8::1"))
+            m.assert_not_called()
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.3"]) as m:
+            qr.dronebl_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.dnsbl.dronebl.org")
+        self.assertEqual(
+            qr._flag_opinions("dronebl", {"is_listed": True}),
+            {"listed": True})
+        self.assertEqual(qr.source_score("dronebl", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("dronebl", {}))
+
+    def test_default_sources_add_dronebl_drop_iplocation(self):
+        """R269：每轮一增一减——默认源含 dronebl、不含 iplocation。"""
+        self.assertIn("dronebl", qr.DEFAULT_REP_SOURCES)
+        self.assertNotIn("iplocation", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("dronebl", qr.REPUTATION_WEIGHTS)
+        self.assertIn("iplocation", qr.REPUTATION_WEIGHTS)
+
     def test_default_sources_drop_maltiverse_add_spamcop(self):
         """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""
         self.assertIn("spamcop", qr.DEFAULT_REP_SOURCES)
@@ -3492,10 +3529,13 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertEqual(flagged2.count("listed"), 1)
 
     def test_defaults_include_new_sources(self):
-        for name in ("freeipapi", "scamalytics", "iplocation", "cins",
+        for name in ("freeipapi", "scamalytics", "dronebl", "cins",
                      "et_compromised"):
             self.assertIn(name, qr.DEFAULT_REP_SOURCES)
             self.assertIn(name, qr.REPUTATION_WEIGHTS)
+        # R269：iplocation 退出默认源（最低权重、proxy 维度被超集覆盖）
+        self.assertNotIn("iplocation", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("iplocation", qr.REPUTATION_WEIGHTS)
 
     def test_bounded_coverage_caps(self):
         self.assertTrue(0 < qr.SCAMALYTICS_CAP <= 5000)

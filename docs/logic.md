@@ -133,9 +133,10 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | ip2location | 5 | `is_proxy` 标志 -30 |
 | freeipapi | 6 | `isProxy` 标志 -30（附 ASN/org，全免费免 key） |
 | scamalytics | 8 | 免费风险页 `Fraud Score`（0-100）直扣；`is_blacklisted_external` 投 listed 票 |
-| iplocation | 3 | `is_proxy` 标志 -30（附 isp，全免费免 key） |
+| iplocation | 3（opt-in） | `is_proxy` 标志 -30（附 isp，全免费免 key）。**R269 起退出默认源**：权重最低（3）且 proxy 维度被 hackmyip(6)/freeipapi(6)/scamalytics(8) 全超集覆盖，属重复低置信信号；`--reputation-sources` 显式启用仍可用 |
 | dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.zen.spamhaus.org` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存；三镜像 `dns.alidns.com`→`cloudflare-dns.com`→`dns.google/resolve` 失败回退且进程内 sticky 复用最近成功端点（TTL 600s），全部失败按失败重试、不误判干净 |
 | spamcop | 5 | SpamCop `bl.spamcop.net` 社区实时 DNSBL（独立权威、与 Spamhaus 互补），复用 dnsbl 的 DoH/sticky/并发与负缓存：`<rev-ip>.bl.spamcop.net` A 记录命中 `127.0.0.2` → `listed` 扣 30；其余返回视为未列出；上限 SPAMCOP_CAP=9000/轮 |
+| dronebl | 5 | DroneBL `dnsbl.dronebl.org` 社区僵尸/失陷主机实时 DNSBL（独立权威，命中多为被控主机/开代理人），复用 dnsbl 通路：`<rev-ip>.dnsbl.dronebl.org` A 记录命中码 `127.0.0.2~13`（abuse/爆破/垃圾/重犯/模糊等）→ `listed` 扣 30；上限 DRONEBL_CAP=9000/轮 |
 | ipwhois | 6 | `security` 块标志罚分：tor -45 / vpn -30 / proxy -25 / hosting -15 / anonymous -10；`connection.type` 命中机房类另投 hosting；无罚分且无 ASN 则 None |
 | maltiverse | 6（opt-in） | `classification`（malicious/suspicious）或结构布尔（open_proxy / tor_node / vpn_node / cnc / malware 分发 / iot / scanner / mining）+ 近 MALTIVERSE_RECENT_DAYS 天黑名单；刻意忽略 `is_known_attacker` 与 `is_hosting`（防叠噪）；全空 → None。**R268 起退出默认源**：实域 18127 出口的 `rep_sources` 中参与共识仅 3 次（每轮 cap 2500 查询），判识增量近零而调用成本不低，故降级为 opt-in（`--reputation-sources` 显式启用） |
 | stopforumspam | 4 | `is_abuse` → abuse -35、Tor exit → tor -40（HTTP 垃圾评论/僵尸出口） |
