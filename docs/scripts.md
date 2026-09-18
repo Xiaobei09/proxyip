@@ -165,8 +165,8 @@
 | `dnsbl` | 8 | Spamhaus ZEN 实时 DNSBL（免 key，DNS-over-HTTPS）——SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ `listed` 票；PBL 6/7（邮件策略）与 CSS 8/9（snowshoe 弱信号）忽略 |
 | `spamcop` | 5 | SpamCop `bl.spamcop.net` 社区实时 DNSBL（免 key，DNS-over-HTTPS）——`<rev-ip>.bl.spamcop.net` A 记录命中 `127.0.0.2` → `listed` 票；复用 dnsbl 的 DoH 端点回退/sticky/并发与负缓存，上限 9000/轮 |
 | `dronebl` | 5（默认） | DroneBL `dnsbl.dronebl.org` 社区僵尸/失陷主机实时 DNSBL（免 key，DNS-over-HTTPS）——命中码 2~13 → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R269 新增） |
-| `spamrats` | 5（opt-in） | SpamRats `dnsbl.spamrats.com` 社区双通路实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（AUTO）/`127.0.0.3`（AUTH）→ `listed` 票，DYN `127.0.0.4` 忽略；复用 dnsbl 通路，上限 9000/轮（R270 新增；R271 补接 `_flag_opinions`/`source_score` 计分接线） |
-| `sorbs` | 5（opt-in） | SORBS `dnsbl.sorbs.net` 社区 open-proxy 实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（SOCKS）/`127.0.0.7`（HTTP）→ `listed` 票，动态住宅段忽略；复用 dnsbl 通路，上限 9000/轮（R271 新增；R272 实测 test-point 无响应，保持 opt-in 待验证） |
+| `spamrats` | 5（opt-in） | SpamRats `dnsbl.spamrats.com` 社区双通路实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（AUTO）/`127.0.0.3`（AUTH）→ `listed` 票，DYN `127.0.0.4` 忽略；复用 dnsbl 通路，上限 9000/轮（R270 新增；R271 补接 `_flag_opinions`/`source_score` 计分接线；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
+| `sorbs` | 5（opt-in） | SORBS `dnsbl.sorbs.net` 社区 open-proxy 实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（SOCKS）/`127.0.0.7`（HTTP）→ `listed` 票，动态住宅段忽略；复用 dnsbl 通路，上限 9000/轮（R271 新增；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
 | `uceprotect` | 5（opt-in） | UCEPROTECT Level 1 `dnsbl-1.uceprotect.net` 社区发送者黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票，仅用 L1（L2/L3 升级名单刻意不用）；复用 dnsbl 通路，上限 9000/轮（R272 新增；test-point `2.0.0.127` 经 DoH 实测回包 `127.0.0.2`，分区存活实证） |
 | `psbl` | 5（opt-in） | PSBL `psbl.surriel.com` 被动垃圾邮件黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R273 新增；test-point `2.0.0.127` 经 DoH 实测回包 `127.0.0.2`）。R273 起七源 lookup 共用 `_dnsbl_listed_lookup_sync` 骨架，各源仅保留 qname/码表/ docstring 差异 |
 | `abuseipdb_public` | 5 | AbuseIPDB 公共黑名单（近 30 天置信举报，社区镜像，静态），命中投 `abuse` 票 |
