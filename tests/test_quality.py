@@ -4130,5 +4130,17 @@ class TestRepParsers(unittest.TestCase):
         self.assertIsNone(qr.norm_asn(""))
 
 
+class TestRunExitCodes(unittest.TestCase):
+    """R303：缺源返回 1（与 china 空样本返 2、health 非 strict 恒 0 的
+    分工一致，见 docs/scripts.md 退出码约定）。无网络动作。"""
+
+    def test_missing_source_returns_1(self):
+        import argparse
+        import asyncio
+        args = argparse.Namespace(
+            source=Path("/nonexistent-all.txt"), workers=2)
+        self.assertEqual(asyncio.run(qc.run(args)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
