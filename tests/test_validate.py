@@ -313,8 +313,9 @@ class TestWriteValidOutputs(unittest.TestCase):
 
     def test_sets_cover_previously_missing_countries(self):
         """R291：SK/CO/MO/KG/OM/BH 曾被集合定义遗漏（sets/ 缺 23 端点，
-        与 R289 countries/ 漂移同类）。定义修复后，合成条目必须落入
-        对应集合分裂（europe/asia/south_america/middle_east）。"""
+        与 R289 countries/ 漂移同类）；R293 追加工 Africa 缺口 NA（新入池）。
+        定义修复后，合成条目必须落入对应集合分裂
+       （europe/asia/south_america/middle_east/africa）。"""
         alive = {
             "1.0.0.1:443#SK": ("1.0.0.1", "443", "SK", "tls", 100.0, 0.5, None),
             "1.0.0.2:443#CO": ("1.0.0.2", "443", "CO", "tls", 100.0, 0.5, None),
@@ -322,6 +323,7 @@ class TestWriteValidOutputs(unittest.TestCase):
             "1.0.0.4:443#KG": ("1.0.0.4", "443", "KG", "tls", 100.0, 0.5, None),
             "1.0.0.5:443#OM": ("1.0.0.5", "443", "OM", "tls", 100.0, 0.5, None),
             "1.0.0.6:443#BH": ("1.0.0.6", "443", "BH", "tls", 100.0, 0.5, None),
+            "1.0.0.7:443#NA": ("1.0.0.7", "443", "NA", "tls", 100.0, 0.5, None),
         }
         vp.write_valid_outputs(alive, per_country_limit=1)
         sets = vp.VALID_DIR / "sets"
@@ -330,6 +332,7 @@ class TestWriteValidOutputs(unittest.TestCase):
             "south_america": "1.0.0.2:443",
             "asia": "1.0.0.3:443",
             "middle_east": "1.0.0.5:443",
+            "africa": "1.0.0.7:443",
         }
         for name, key in expect.items():
             lines = (sets / name / "all.txt").read_text(
@@ -357,6 +360,19 @@ class TestWriteValidOutputs(unittest.TestCase):
             self.assertEqual(
                 sorted(m.group(1).split()), sorted(countries), name)
             self.assertEqual(int(m.group(2)), len(countries), name)
+
+    def test_set_definitions_hygiene(self):
+        """R293：集合定义卫生——无重复/畸形码；地理集合字母序，
+        精选集合（hot/cn_common/hk_us_jp_sg_tw_kr）为刻意优先级序，
+        豁免排序但仍禁重复。"""
+        geo = set(vp.COUNTRY_SETS) - {"hot"}
+        for name, countries in {**vp.COUNTRY_SETS, **vp.SMALL_SETS}.items():
+            with self.subTest(set=name):
+                self.assertEqual(len(countries), len(set(countries)))
+                for cc in countries:
+                    self.assertRegex(cc, r"^[A-Z]{2}$")
+                if name in geo:
+                    self.assertEqual(countries, sorted(countries))
 
     def test_sets_empty_not_written_and_residue_removed(self):
         # 空命名集合（所含国家全部缺席）不得产出 0 字节/单换行残留：

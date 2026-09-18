@@ -90,7 +90,7 @@ COUNTRY_SETS: dict[str, list[str]] = {
     "north_america": ["CA", "MX", "US", "VG"],
     "south_america": ["AR", "BR", "CL", "CO", "EC"],
     "oceania": ["AU", "NZ"],
-    "africa": ["EG", "NG", "ZA"],
+    "africa": ["EG", "NA", "NG", "ZA"],
     "middle_east": ["AE", "BH", "IL", "OM", "SA", "TR"],
     "hot": ["AU", "CA", "DE", "FR", "GB", "HK", "JP", "KR", "NL", "SG", "TW", "US", "RU"],
 }

@@ -49,7 +49,7 @@
 | `north_america` | CA MX US VG（4） | 北美 |
 | `south_america` | AR BR CL CO EC（5） | 南美 |
 | `oceania` | AU NZ（2） | 大洋洲 |
-| `africa` | EG NG ZA（3） | 非洲 |
+| `africa` | EG NA NG ZA（4） | 非洲 |
 | `middle_east` | AE BH IL OM SA TR（6） | 中东 |
 | `hot` | AU CA DE FR GB HK JP KR NL SG TW US RU（13） | 热门线路 |
 | `cn_common` | HK TW SG JP KR US DE GB FR NL RU CA AU（13） | 中国大陆常用 |
