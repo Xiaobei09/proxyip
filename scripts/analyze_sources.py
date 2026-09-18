@@ -14,6 +14,7 @@ import json
 import statistics
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -191,9 +192,7 @@ def analyze(
         }
 
     return {
-        "ts": __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total_proxies": len(ip_sources),
         "total_alive": len(valid_keys),
         "sources": sources,
