@@ -6,6 +6,7 @@ countries/sets/ports 越界视图与 rep/verified 残留的清理永远进不了
 死代视图会一直留在发布树。同时删除不得被 align_foreign 用 checkout -f
 救回，他人中途更新（外来漂移）仍须对齐 origin 而不是回滚。
 """
+import re
 import subprocess
 import tempfile
 import unittest
@@ -171,6 +172,36 @@ class TestCommitData(unittest.TestCase):
             self._head_has("data/raw/gone.txt"),
             "data/raw 归档不在删除/新增追踪范围，HEAD 必须保留旧稿",
         )
+
+
+class TestLoopCommitFormat(unittest.TestCase):
+    """R285：带 `[Rnnn]` 轮次标记的 HEAD 提交须为单一允许 type。
+
+    DEVELOPMENT.md 修正案：type 取 fix/feat/perf/docs/ci/chore/refactor/
+    test 其一（禁复合 type；历史 R273 `refactor+feat` 与 R281 `docs+test`
+    已记偏离，不追溯改写，只锁当下与未来）。机器人数据提交无标记，
+    自动跳过。"""
+
+    ALLOWED = ("fix", "feat", "perf", "docs", "ci", "chore",
+               "refactor", "test")
+
+    def test_head_loop_commit_single_type(self):
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "-1", "--format=%s"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        subject = proc.stdout.strip()
+        if not re.search(r"\[R\d+\]", subject):
+            self.skipTest("HEAD 非轮次提交")
+        self.assertRegex(
+            subject,
+            r"^(fix|feat|perf|docs|ci|chore|refactor|test)"
+            r"(\([^)]+\))?: .+ \[R\d+\]$",
+            f"轮次提交格式偏离: {subject}")
 
 
 if __name__ == "__main__":

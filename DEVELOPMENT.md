@@ -5,9 +5,9 @@
 **修改完代码后必须提交并推送，不允许仅本地修改不推送。**
 
 ```bash
-git add -A
-git commit -m "<type>: <description>"
-git push
+git add <本轮改动文件>   # 禁止 git add -A/.：防止误带 data/raw/、data/diff/、scratch 与 secrets
+git commit -m "<type>(<scope>): <subject> [R<轮次>]"
+git push origin main   # 推送前先 git pull --rebase origin main；禁止 force push
 ```
 
 ### 提交信息格式
@@ -19,6 +19,11 @@ git push
 - `docs:` 文档变更
 - `refactor:` 重构
 - `test:` 测试
+- `perf:` 性能优化
+- `ci:` CI 配置变更
+
+迭代循环提交须带轮次标记 `[R<轮次>]`（如 `[R285]`），type 取且仅取上表其一
+（禁止 `docs+test` 类复合 type；历史 R273/R281 两例已记为偏离，不追溯改写）。
 
 ### 提交检查清单
 
