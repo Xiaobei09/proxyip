@@ -693,7 +693,10 @@ class TestReputation(unittest.TestCase):
         self.assertNotIn("ipwhois", qc.DEFAULT_REP_SOURCES)
         self.assertIn("ipwhois", qc.REPUTATION_WEIGHTS)
         self.assertIn("stopforumspam", qc.DEFAULT_REP_SOURCES)
-        self.assertIn("maltiverse", qc.DEFAULT_REP_SOURCES)
+        # R268：maltiverse 退出默认源（实域参与共识近零），权重保留供 opt-in
+        self.assertNotIn("maltiverse", qc.DEFAULT_REP_SOURCES)
+        self.assertIn("maltiverse", qc.REPUTATION_WEIGHTS)
+        self.assertIn("spamcop", qc.DEFAULT_REP_SOURCES)
         # ipapi_is 与 ipwhois 同样：解析器保留但退出默认源（opt-in）
         self.assertNotIn("ipapi_is", qc.DEFAULT_REP_SOURCES)
         self.assertIn("ipapi_is", qc.REPUTATION_WEIGHTS)
@@ -828,6 +831,39 @@ class TestReputation(unittest.TestCase):
             qr.dnsbl_lookup_sync("1.2.3.4")
             self.assertEqual(
                 m.call_args[0][0], "4.3.2.1.zen.spamhaus.org")
+
+    def test_spamcop_lookup_sync_codes(self):
+        """R268：SpamCop 命中码 127.0.0.2 → listed；其余/空 → None。"""
+        for answers, expect in [
+            (["127.0.0.2"], {"is_listed": True, "dnsbl_code": 2}),
+            (["127.0.0.1"], None),   # 反解失败码忽略
+            (["127.0.0.4"], None),   # 非 SpamCop 码
+            ([], None),              # 未列出
+        ]:
+            with unittest.mock.patch.object(
+                    qr, "_doh_query", return_value=answers):
+                self.assertEqual(qr.spamcop_lookup_sync("8.8.8.8"), expect)
+        with unittest.mock.patch.object(qr, "_doh_query") as m:
+            self.assertIsNone(qr.spamcop_lookup_sync("2001:db8::1"))
+            m.assert_not_called()
+        with unittest.mock.patch.object(qr, "_doh_query",
+                                        return_value=["127.0.0.2"]) as m:
+            qr.spamcop_lookup_sync("1.2.3.4")
+            self.assertEqual(
+                m.call_args[0][0], "4.3.2.1.bl.spamcop.net")
+        # 与 dnsbl 同维：listed 信号与罚分口径一致。
+        self.assertEqual(
+            qr._flag_opinions("spamcop", {"is_listed": True}),
+            {"listed": True})
+        self.assertEqual(qr.source_score("spamcop", {"is_listed": True}), 70)
+        self.assertIsNone(qr.source_score("spamcop", {}))
+
+    def test_default_sources_drop_maltiverse_add_spamcop(self):
+        """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""
+        self.assertIn("spamcop", qr.DEFAULT_REP_SOURCES)
+        self.assertNotIn("maltiverse", qr.DEFAULT_REP_SOURCES)
+        self.assertIn("spamcop", qr.REPUTATION_WEIGHTS)
+        self.assertIn("maltiverse", qr.REPUTATION_WEIGHTS)
 
     def test_doh_query_endpoint_fallback(self):
         """端点失败转镜像；全部失败抛错（不把故障当「干净」）。"""

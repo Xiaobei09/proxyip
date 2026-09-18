@@ -91,6 +91,11 @@ MALTIVERSE_CAP = 2500
 # 空等超时拖慢相位（R244 教训）。
 DNSBL_ZEN_CAP = 12000
 DNSBL_TIMEOUT = 4
+# SpamCop（bl.spamcop.net）社区独立黑名单：与 Spamhaus 权威互补，
+# 命中码仅 127.0.0.2。复用 dnsbl 的 DoH/sticky/并发与负缓存机制，
+# 独立计数（避免命中共用 DNSBL_ZEN_CAP 的源头配额语义）。
+SPAMCOP_CAP = 9000
+SPAMCOP_LISTED_CODE = "127.0.0.2"
 DNSBL_DOH_ENDPOINTS = (
     "https://dns.alidns.com/resolve",
     "https://cloudflare-dns.com/dns-query",
@@ -311,6 +316,7 @@ REPUTATION_WEIGHTS = {
     "maltiverse": 6,
     "iplocation": 3,
     "dnsbl": 8,
+    "spamcop": 5,
     "cins": 5,
     "et_compromised": 4,
     "feodo": 4,
@@ -341,7 +347,8 @@ DEFAULT_REP_SOURCES = (
     "proxycheck", "ip2location",
     "tor_exit", "spamhaus",
     "freeipapi", "scamalytics", "iplocation",
-    "hackmyip", "stopforumspam", "maltiverse",
+    "hackmyip", "stopforumspam",
+    "spamcop",
     "cins", "et_compromised", "feodo",
     "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
     "danmeuk_tor", "tor_bulk",
@@ -372,6 +379,7 @@ SOURCE_PACING = {
     "maltiverse": (4, 0.3),
     "greynoise": (6, 0.3),
     "dnsbl": (6, 0.2),
+    "spamcop": (6, 0.15),
 }
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
@@ -1165,6 +1173,22 @@ def dnsbl_lookup_sync(ip: str) -> dict | None:
     return None
 
 
+def spamcop_lookup_sync(ip: str) -> dict | None:
+    """SpamCop（bl.spamcop.net）社区黑名单实时 DNSBL（经 DoH，免 key）。
+
+    反查 ``<rev-ip>.bl.spamcop.net`` A 记录；命中码仅 ``127.0.0.2``
+    （社区入榜）→ ``listed`` 信号。任何其他返回视为未列出。
+    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
+    """
+    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
+        return None
+    qname = f"{'.'.join(reversed(ip.split('.')))}.bl.spamcop.net"
+    answers = _doh_query(qname, "A")
+    if SPAMCOP_LISTED_CODE in answers:
+        return {"is_listed": True, "dnsbl_code": 2}
+    return None
+
+
 def freeipapi_lookup_sync(ip: str) -> dict | None:
     """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
     req = urllib.request.Request(
@@ -1694,6 +1718,10 @@ def source_score(name: str, signal) -> int | None:
         if not signal.get("is_listed"):
             return None
         return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
+    if name == "spamcop":
+        if not signal.get("is_listed"):
+            return None
+        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
     if name == "greynoise":
         if signal.get("is_abuse"):
             penalty = GREYNOISE_FLAG_PENALTIES.get("is_abuse", 60)
@@ -1981,6 +2009,8 @@ def _flag_opinions(name: str, signal) -> dict:
     if name == "iplocation":
         return {"proxy": True} if signal.get("is_proxy") else {}
     if name == "dnsbl":
+        return {"listed": True} if signal.get("is_listed") else {}
+    if name == "spamcop":
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "abuseipdb_public":
         return {"abuse": True} if signal.get("is_abuse") else {}
@@ -2609,6 +2639,10 @@ async def lookup_all_risk(
         w, d = pacing.get("dnsbl", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "dnsbl", dnsbl_lookup_sync, cap=DNSBL_ZEN_CAP, workers=w, delay=d))
+    if "spamcop" in sources:
+        w, d = pacing.get("spamcop", (REP_WORKERS, REP_DELAY))
+        api_tasks.append(cached_batch(
+            "spamcop", spamcop_lookup_sync, cap=SPAMCOP_CAP, workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
     if "ipsum" in sources:
