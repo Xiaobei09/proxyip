@@ -259,6 +259,18 @@ class TestReorgCountryConsistency(unittest.TestCase):
         )
         self.assertEqual(orphan_dirs, [], f"orphan country dirs (no all.txt): {orphan_dirs}")
 
+    def test_no_orphan_set_dirs(self):
+        """R301：sets/ 分裂目录同样不得孤儿化（R300 CO 孤儿致两链门禁
+        连带失败；sets/ 同理设防；ports/ 为扁平文件无目录形态）。"""
+        sdir = self._valid() / "sets"
+        if not sdir.exists():
+            self.skipTest("no data/valid/sets")
+        orphan_dirs = sorted(
+            d.name for d in sdir.iterdir()
+            if d.is_dir() and not (d / "all.txt").exists()
+        )
+        self.assertEqual(orphan_dirs, [], f"orphan set dirs (no all.txt): {orphan_dirs}")
+
     def test_sets_ports_no_excess_vs_master(self):
         """R294：sets/ports 分裂不得有 master 之外的越界残留。
 
