@@ -258,5 +258,29 @@ class TestWorkflowPermissions(unittest.TestCase):
                     f"{wf.name} 权限超出最小集")
 
 
+class TestWorkflowSchedules(unittest.TestCase):
+    """R307：定时心跳 cron 不得误删（改 cron 须明确任务授权）。
+
+    本轮观测 china 19:11/20:11/21:11 三 tick 调度侧跳过（工作流全
+    active，streak 6h 容差覆盖中）；若连 cron 定义本身丢失则心跳
+    永久停摆且无任何失败信号，锁四条 schedule。"""
+
+    SCHEDULES = {
+        "update-proxies.yml": "0 */2 * * *",
+        "china-check.yml": "11 * * * *",
+        "stats.yml": "40 */2 * * *",
+        "deep-speed.yml": "7 3 * * 6",
+    }
+
+    def test_schedule_triggers_present(self):
+        for wf, cron in self.SCHEDULES.items():
+            with self.subTest(workflow=wf):
+                text = (ROOT / ".github" / "workflows" / wf).read_text(
+                    encoding="utf-8")
+                self.assertIn(
+                    f'- cron: "{cron}"', text,
+                    f"{wf} 缺定时心跳 {cron}")
+
+
 if __name__ == "__main__":
     unittest.main()
