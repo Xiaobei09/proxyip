@@ -1215,6 +1215,12 @@ def _dnsbl_listed_lookup_sync(ip: str, zone: str, codes) -> dict | None:
 
 
 DNSBL_LISTED_CODES = frozenset((2, 3, 4, 5))
+# 以 `is_listed` 投 listed 共识票的 DoH DNSBL 家族（R279 表驱动去重：
+# 此前 source_score/_flag_opinions 各复制七份三行分支；新增成员改此一处）。
+_DNSBL_LISTED_SOURCES = (
+    "dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
+    "uceprotect", "psbl",
+)
 
 
 def dnsbl_lookup_sync(ip: str) -> dict | None:
@@ -1823,31 +1829,7 @@ def source_score(name: str, signal) -> int | None:
     if name == "iplocation":
         penalty = 30 if signal.get("is_proxy") else 0
         return max(0, min(100, 100 - penalty))
-    if name == "dnsbl":
-        if not signal.get("is_listed"):
-            return None
-        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
-    if name == "spamcop":
-        if not signal.get("is_listed"):
-            return None
-        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
-    if name == "dronebl":
-        if not signal.get("is_listed"):
-            return None
-        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
-    if name == "spamrats":
-        if not signal.get("is_listed"):
-            return None
-        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
-    if name == "sorbs":
-        if not signal.get("is_listed"):
-            return None
-        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
-    if name == "uceprotect":
-        if not signal.get("is_listed"):
-            return None
-        return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
-    if name == "psbl":
+    if name in _DNSBL_LISTED_SOURCES:
         if not signal.get("is_listed"):
             return None
         return max(0, min(100, 100 - FLAG_PENALTIES.get("listed", 30)))
@@ -2137,19 +2119,7 @@ def _flag_opinions(name: str, signal) -> dict:
         return opinions
     if name == "iplocation":
         return {"proxy": True} if signal.get("is_proxy") else {}
-    if name == "dnsbl":
-        return {"listed": True} if signal.get("is_listed") else {}
-    if name == "spamcop":
-        return {"listed": True} if signal.get("is_listed") else {}
-    if name == "dronebl":
-        return {"listed": True} if signal.get("is_listed") else {}
-    if name == "spamrats":
-        return {"listed": True} if signal.get("is_listed") else {}
-    if name == "sorbs":
-        return {"listed": True} if signal.get("is_listed") else {}
-    if name == "uceprotect":
-        return {"listed": True} if signal.get("is_listed") else {}
-    if name == "psbl":
+    if name in _DNSBL_LISTED_SOURCES:
         return {"listed": True} if signal.get("is_listed") else {}
     if name == "abuseipdb_public":
         return {"abuse": True} if signal.get("is_abuse") else {}
