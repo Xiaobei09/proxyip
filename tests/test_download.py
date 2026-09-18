@@ -1470,3 +1470,18 @@ class TestDataPortsInWhitelist(unittest.TestCase):
                 continue
         self.assertTrue(ports, "all.txt has no parseable entries")
         self.assertEqual(sorted(ports - whitelist), [])
+
+
+class TestExtraSourcesCountMatchesReadme(unittest.TestCase):
+    """R309：README 宣称的补充源个数须与 `EXTRA_SOURCES` 一致。
+
+    加源只改代码漏改计数即漂移（17→18 实证）；用正则读 README，
+    增减源时两处必须同动。"""
+
+    def test_readme_count_equals_extra_sources(self):
+        import re
+        readme = (Path(__file__).resolve().parent.parent / "README.md"
+                  ).read_text(encoding="utf-8")
+        m = re.search(r"另并 (\d+) 个第三方 CF 反代", readme)
+        self.assertIsNotNone(m, "README 补充源计数句式丢失")
+        self.assertEqual(int(m.group(1)), len(dp.EXTRA_SOURCES))
