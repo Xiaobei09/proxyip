@@ -282,5 +282,32 @@ class TestWorkflowSchedules(unittest.TestCase):
                     f"{wf} 缺定时心跳 {cron}")
 
 
+class TestWorkflowConcurrency(unittest.TestCase):
+    """R308：并发策略锁——主更新优先抢占，下游保护在跑结果。
+
+    与 DEVELOPMENT.md「CI 并发策略」一致：update-proxies 为唯一
+    `cancel-in-progress: true`，其余七个均为 false（防改 workflow
+    时误开抢占致长任务被连环取消，或误关主更新致旧数据阻塞）。"""
+
+    def test_cancel_policy(self):
+        wf_dir = ROOT / ".github" / "workflows"
+        files = sorted(wf_dir.glob("*.yml"))
+        self.assertTrue(files, "workflows 目录为空，扫描器失效")
+        for wf in files:
+            with self.subTest(workflow=wf.name):
+                text = wf.read_text(encoding="utf-8")
+                m = re.search(
+                    r"^concurrency:\s*\n"
+                    r"\s*group:\s*(\S+)\s*\n"
+                    r"\s*cancel-in-progress:\s*(true|false)\s*\n",
+                    text, re.M)
+                self.assertIsNotNone(
+                    m, f"{wf.name} 缺 concurrency 块")
+                want = (wf.name == "update-proxies.yml")
+                self.assertEqual(
+                    m.group(2) == "true", want,
+                    f"{wf.name} cancel-in-progress 应为 {want}")
+
+
 if __name__ == "__main__":
     unittest.main()
