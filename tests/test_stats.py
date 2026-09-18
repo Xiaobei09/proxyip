@@ -386,7 +386,13 @@ class TestMain(unittest.TestCase):
             self.assertEqual(stats["cn_served"], 0)
             badge = json.loads((out / "badge.json").read_text())
             self.assertEqual(badge["label"], "status")
-            self.assertIn(badge["color"], ("brightgreen", "red"))
+            self.assertEqual(badge["schemaVersion"], 1)
+            # R298：message 与 color 必须一致（fresh↔绿，stale/告警名↔红；
+            # 本轮生产验证徽章红绿语义属实，锁对应关系防渲染漂移）。
+            if badge["message"] == "fresh":
+                self.assertEqual(badge["color"], "brightgreen")
+            else:
+                self.assertEqual(badge["color"], "red")
             for f in (
                 "chart_combo.svg", "chart_country.svg", "chart_port.svg",
                 "chart_churn.svg", "chart_latency_speed.svg",
