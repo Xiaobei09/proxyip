@@ -311,6 +311,36 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertFalse((vp.VALID_DIR / "sets" / "hot.txt").exists())
         self.assertFalse((vp.VALID_DIR / "sets" / "hot_ltd.txt").exists())
 
+    def test_sets_cover_previously_missing_countries(self):
+        """R291：SK/CO/MO/KG/OM/BH 曾被集合定义遗漏（sets/ 缺 23 端点，
+        与 R289 countries/ 漂移同类）。定义修复后，合成条目必须落入
+        对应集合分裂（europe/asia/south_america/middle_east）。"""
+        alive = {
+            "1.0.0.1:443#SK": ("1.0.0.1", "443", "SK", "tls", 100.0, 0.5, None),
+            "1.0.0.2:443#CO": ("1.0.0.2", "443", "CO", "tls", 100.0, 0.5, None),
+            "1.0.0.3:443#MO": ("1.0.0.3", "443", "MO", "tls", 100.0, 0.5, None),
+            "1.0.0.4:443#KG": ("1.0.0.4", "443", "KG", "tls", 100.0, 0.5, None),
+            "1.0.0.5:443#OM": ("1.0.0.5", "443", "OM", "tls", 100.0, 0.5, None),
+            "1.0.0.6:443#BH": ("1.0.0.6", "443", "BH", "tls", 100.0, 0.5, None),
+        }
+        vp.write_valid_outputs(alive, per_country_limit=1)
+        sets = vp.VALID_DIR / "sets"
+        expect = {
+            "europe": "1.0.0.1:443",
+            "south_america": "1.0.0.2:443",
+            "asia": "1.0.0.3:443",
+            "middle_east": "1.0.0.5:443",
+        }
+        for name, key in expect.items():
+            lines = (sets / name / "all.txt").read_text(
+                encoding="utf-8").splitlines()
+            self.assertIn(key, [ln.split("#", 1)[0] for ln in lines], name)
+        asia_lines = (sets / "asia" / "all.txt").read_text(
+            encoding="utf-8").splitlines()
+        asia_keys = [ln.split("#", 1)[0] for ln in asia_lines]
+        self.assertIn("1.0.0.4:443", asia_keys)
+        self.assertIn("1.0.0.6:443", asia_keys)
+
     def test_sets_empty_not_written_and_residue_removed(self):
         # 空命名集合（所含国家全部缺席）不得产出 0 字节/单换行残留：
         # 旧实现写 \"\\n\"，且此类文件在 data/valid（守卫覆盖）但未及写入端。

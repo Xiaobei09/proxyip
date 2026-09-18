@@ -44,13 +44,13 @@
 
 | 集合 | 覆盖国家/地区 | 用途 |
 |---|---|---|
-| `europe` | AL AT BE BG BY CH CY CZ DE DK EE ES FI FR GB GR HR HU IE IS IT LT LV MD MK NL NO PL PT RO RS RU SE SI UA（35） | 欧洲全域 |
-| `asia` | AE AM AZ CN GE HK ID IL IN JP KH KR KZ MY PH SA SG TH TR TW UZ VN（22） | 亚洲全域 |
+| `europe` | AL AT BE BG BY CH CY CZ DE DK EE ES FI FR GB GR HR HU IE IS IT LT LV MD MK NL NO PL PT RO RS RU SE SI SK UA（36） | 欧洲全域 |
+| `asia` | AE AM AZ BH CN GE HK ID IL IN JP KG KH KR KZ MO MY OM PH SA SG TH TR TW UZ VN（26） | 亚洲全域 |
 | `north_america` | CA MX US VG（4） | 北美 |
-| `south_america` | AR BR CL EC（4） | 南美 |
+| `south_america` | AR BR CL CO EC（5） | 南美 |
 | `oceania` | AU NZ（2） | 大洋洲 |
 | `africa` | EG NG ZA（3） | 非洲 |
-| `middle_east` | AE IL SA TR（4） | 中东 |
+| `middle_east` | AE BH IL OM SA TR（6） | 中东 |
 | `hot` | AU CA DE FR GB HK JP KR NL SG TW US RU（13） | 热门线路 |
 | `cn_common` | HK TW SG JP KR US DE GB FR NL RU CA AU（13） | 中国大陆常用 |
 | `hk_us_jp_sg_tw_kr` | HK US JP SG TW KR（6） | 港美日新台韩 |
