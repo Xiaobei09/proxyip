@@ -341,6 +341,23 @@ class TestWriteValidOutputs(unittest.TestCase):
         self.assertIn("1.0.0.4:443", asia_keys)
         self.assertIn("1.0.0.6:443", asia_keys)
 
+    def test_set_definitions_match_docs(self):
+        """R292：集合定义与 docs/data-spec.md 集合表逐字对等（国家＋计数）。
+
+        R291 修定义时同步了文档；此锁防任一侧单边改动（如只改代码
+        忘改计数，或文档先行）。全 10 集合比对。"""
+        import re
+        from pathlib import Path
+        doc = (Path(__file__).resolve().parent.parent / "docs"
+               / "data-spec.md").read_text(encoding="utf-8")
+        for name, countries in {**vp.COUNTRY_SETS, **vp.SMALL_SETS}.items():
+            m = re.search(
+                r"`" + name + r"` \| ([A-Z ]+)（(\d+)）", doc)
+            self.assertIsNotNone(m, f"data-spec.md 缺集合 {name}")
+            self.assertEqual(
+                sorted(m.group(1).split()), sorted(countries), name)
+            self.assertEqual(int(m.group(2)), len(countries), name)
+
     def test_sets_empty_not_written_and_residue_removed(self):
         # 空命名集合（所含国家全部缺席）不得产出 0 字节/单换行残留：
         # 旧实现写 \"\\n\"，且此类文件在 data/valid（守卫覆盖）但未及写入端。
