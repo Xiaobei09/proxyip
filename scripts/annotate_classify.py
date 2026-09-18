@@ -83,29 +83,30 @@ def _build_china_sets(data: dict) -> tuple[set[str], set[str]]:
 
 
 def _build_family_map(data: dict) -> dict[str, str]:
-    """``exit_family.json`` → ``{key: family}``."""
+    """``exit_family.json`` → ``{key: family}``（垃圾条目跳过）。"""
     return {
         k: v.get("family", "")
         for k, v in data.get("proxies", {}).items()
-        if v.get("family")
+        if isinstance(v, dict) and v.get("family")
     }
 
 
 def _build_ip_type_map(data: dict) -> dict[str, str]:
-    """``ipinfo.json`` → ``{key: ip_type}``."""
+    """``ipinfo.json`` → ``{key: ip_type}``（垃圾条目跳过）。"""
     return {
         k: v.get("ip_type", "")
         for k, v in data.get("proxies", {}).items()
-        if v.get("ip_type")
+        if isinstance(v, dict) and v.get("ip_type")
     }
 
 
 def _build_rep_map(data: dict) -> dict[str, int]:
-    """``reputation.json`` → ``{key: score}``."""
+    """``reputation.json`` → ``{key: score}``（无分/垃圾条目跳过，
+    与 build_good.build_rep_map 同口径，防脏缓存击垮注解链）。"""
     return {
         k: v.get("score", 0)
         for k, v in data.get("proxies", {}).items()
-        if v.get("score") is not None
+        if isinstance(v, dict) and v.get("score") is not None
     }
 
 

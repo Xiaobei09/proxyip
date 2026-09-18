@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from annotate_classify import reconcile_views, verify_country_split
+from annotate_classify import _build_rep_map, _build_family_map
+from annotate_classify import _build_ip_type_map
 
 
 class TestReconcileViews(unittest.TestCase):
@@ -216,6 +218,42 @@ class TestReconcileViews(unittest.TestCase):
             (valid2 / "ports" / "443.txt").read_text(encoding="utf-8"),
             "1.1.1.1:443#US\n",
         )
+
+
+class TestRepMapContract(unittest.TestCase):
+    """R276：生产—消费键契约——`reputation.json → {key: score}` 映射
+    只收有分条目，无分/垃圾条目静默跳过（quality_check 生产键
+    score/risk/source/sources/flags/numeric，下游仅取 score）。"""
+
+    def test_build_rep_map_skips_scoreless(self):
+        data = {"proxies": {
+            "1.2.3.4:443#US": {"score": 88, "risk": "low",
+                               "sources": ["dnsbl"], "flags": ["listed"],
+                               "numeric": [70]},
+            "5.6.7.8:443#JP": {"risk": "medium"},
+            "6.6.6.6:443#DE": "garbage",
+        }}
+        self.assertEqual(_build_rep_map(data), {"1.2.3.4:443#US": 88})
+
+    def test_build_rep_map_empty(self):
+        self.assertEqual(_build_rep_map({}), {})
+        self.assertEqual(_build_rep_map({"proxies": {}}), {})
+
+    def test_build_maps_skip_garbage(self):
+        """R276：同类加固——family/ip_type 映射遇垃圾条目同样跳过
+        （曾与 rep_map 同病：未守卫 isinstance 即 .get 而崩溃）。"""
+        fam = {"proxies": {
+            "1.2.3.4:443#US": {"family": "datacenter"},
+            "5.6.7.8:443#JP": "garbage",
+            "6.6.6.6:443#DE": {"family": ""},
+        }}
+        self.assertEqual(_build_family_map(fam), {"1.2.3.4:443#US": "datacenter"})
+        ipt = {"proxies": {
+            "1.2.3.4:443#US": {"ip_type": "hosting"},
+            "5.6.7.8:443#JP": 42,
+            "6.6.6.6:443#DE": {},
+        }}
+        self.assertEqual(_build_ip_type_map(ipt), {"1.2.3.4:443#US": "hosting"})
 
 
 if __name__ == "__main__":
