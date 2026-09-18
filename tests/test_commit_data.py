@@ -235,5 +235,28 @@ class TestWorkflowTestGate(unittest.TestCase):
                     f"{wf}: {gate} 必须排在 {heavy} 之前")
 
 
+class TestWorkflowPermissions(unittest.TestCase):
+    """R296：工作流权限最小集——全部只需 `contents: write`（提交数据）。
+
+    防改 workflow 时顺手放宽权限（如 packages/actions 写）。八个文件
+    逐一解析顶层 permissions 块，全等断言。"""
+
+    def test_permissions_minimal(self):
+        wf_dir = ROOT / ".github" / "workflows"
+        files = sorted(wf_dir.glob("*.yml"))
+        self.assertTrue(files, "workflows 目录为空，扫描器失效")
+        for wf in files:
+            with self.subTest(workflow=wf.name):
+                text = wf.read_text(encoding="utf-8")
+                m = re.search(
+                    r"^permissions:\s*\n((?:  \w+: \w+\n)+)",
+                    text, re.M)
+                self.assertIsNotNone(
+                    m, f"{wf.name} 缺顶层 permissions 块")
+                self.assertEqual(
+                    m.group(1), "  contents: write\n",
+                    f"{wf.name} 权限超出最小集")
+
+
 if __name__ == "__main__":
     unittest.main()
