@@ -95,7 +95,8 @@ DNSBL_TIMEOUT = 4
 # 命中码仅 127.0.0.2。复用 dnsbl 的 DoH/sticky/并发与负缓存机制，
 # 独立计数（避免命中共用 DNSBL_ZEN_CAP 的源头配额语义）。
 SPAMCOP_CAP = 9000
-SPAMCOP_LISTED_CODE = "127.0.0.2"
+# 注：旧单码常量 SPAMCOP_LISTED_CODE 已在 R273 骨架去重中移除，语义由
+# spamcop 薄包装的 frozenset((2,)) 等价承载（多应答用例已锁定）。
 # DroneBL（dnsbl.dronebl.org）社区僵尸/失陷主机黑名单：命中多为被控
 # 主机/开代理人，与 Spamhaus/SpamCop 权威互补。复用同一 DoH 通路，
 # 独立配额。命中码 127.0.0.2~13（abuse/爆破/垃圾/重犯/模糊…) 均视为入榜。
@@ -415,7 +416,7 @@ SOURCE_PACING = {
     "spamcop": (6, 0.15),
     "dronebl": (6, 0.15),
     "spamrats": (6, 0.15),
-    "sorbs": (6, 0.2),
+    "sorbs": (6, 0.15),
     "uceprotect": (6, 0.15),
     "psbl": (6, 0.15),
 }

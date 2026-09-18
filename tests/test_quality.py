@@ -1063,6 +1063,18 @@ class TestReputation(unittest.TestCase):
                 qr.dnsbl_lookup_sync("1.2.3.4"),
                 {"is_listed": True, "dnsbl_code": 3})
 
+    def test_dnsbl_skeleton_constants_cleanup(self):
+        """R274：骨架常量锁——dnsbl 码表常量化；sorbs pacing 与其余
+        DNSBL 归一 (6, 0.15)；旧 SPAMCOP_LISTED_CODE 单码常量已移除
+        （语义由薄包装 frozenset((2,)) 承载）。"""
+        self.assertEqual(qr.DNSBL_LISTED_CODES, frozenset((2, 3, 4, 5)))
+        for name in ("spamcop", "dronebl", "spamrats", "sorbs",
+                     "uceprotect", "psbl"):
+            self.assertEqual(qr.SOURCE_PACING[name], (6, 0.15), name)
+        # dnsbl 例外：主源上限 12000/轮，pacing (6, 0.2) 保持不变。
+        self.assertEqual(qr.SOURCE_PACING["dnsbl"], (6, 0.2))
+        self.assertFalse(hasattr(qr, "SPAMCOP_LISTED_CODE"))
+
     def test_default_sources_drop_maltiverse_add_spamcop(self):
         """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""
         self.assertIn("spamcop", qr.DEFAULT_REP_SOURCES)
