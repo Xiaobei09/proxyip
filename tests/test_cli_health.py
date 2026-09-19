@@ -79,6 +79,21 @@ class TestCliHealth(unittest.TestCase):
         self.assertNotIn("whatismyip", out)
         self.assertNotRegex(out, r"— ?\d+ 源")
 
+    def test_china_help_has_no_stale_source_enum(self):
+        """CN-09：china_check 帮助曾硬编码过期源枚举（itdog/check-host/
+        xxapi/jkapi/ping.pe，缺十余新源），与 quality_check 同病（R278）。
+        帮助应指向参数表/文档/CI，不再点名。"""
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "china_check.py"),
+             "--help"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        self.assertEqual(proc.returncode, 0)
+        out = proc.stdout
+        self.assertNotIn("jkapi.com + ping.pe", out)
+
     def test_missing_data_dir_degrades_gracefully(self):
         """R286：缺输入目录时各链脚本须优雅降级（空映射/skip 文案、
         返回 0、无 traceback），不得把空数据当硬失败掀翻 CI。"""

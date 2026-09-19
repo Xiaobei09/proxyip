@@ -3453,7 +3453,8 @@ def build_cn_best(entries: dict) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="china_check.py",
-        description="大陆连通性检测（itdog 批量 + check-host.cc + xxapi.cn + jkapi.com + ping.pe [+ tcpping.cn]）",
+        description="大陆连通性检测（多源分层判定：源清单与默认见各 --*-limit 参数 "
+        "与 docs/scripts.md，CI 启用集见 .github/workflows/china-check.yml）",
     )
     parser.add_argument("--source", type=Path, default=REP_RANK_FILE,
                         help=f"输入清单（默认 {REP_RANK_FILE.name}，缺失回退 all_ltd.txt）")
