@@ -2433,6 +2433,27 @@ class TestMergeIspMs(unittest.TestCase):
         self.assertNotIn("isp_ms", entries["a:443#US"])
 
 
+class TestMergeIspSpeed(unittest.TestCase):
+    """CN-41：isp_ms 派生 isp_speed（只增字段，同公式估算上限）。"""
+
+    def test_derives_per_isp_speed(self):
+        entries = {"a:443#US": {"isp_ms": {"中国电信": 120.0, "中国移动": 60.0}}}
+        cc.merge_isp_speed(entries)
+        self.assertEqual(
+            entries["a:443#US"]["isp_speed"],
+            {"中国电信": 4.0, "中国移动": 8.0})
+
+    def test_no_isp_ms_no_field(self):
+        entries = {"a:443#US": {"ms": 10}}
+        cc.merge_isp_speed(entries)
+        self.assertNotIn("isp_speed", entries["a:443#US"])
+
+    def test_all_noise_no_field(self):
+        entries = {"a:443#US": {"isp_ms": {"中国移动": 1.5}}}
+        cc.merge_isp_speed(entries)
+        self.assertNotIn("isp_speed", entries["a:443#US"])
+
+
 class TestNewMultiSources(unittest.TestCase):
     """新增四源适配器单测（全部 mock HTTP/WS，不触网）。"""
 

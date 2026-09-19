@@ -425,6 +425,12 @@ CN-40 逆向复核（活体探针实证）：`tcptest.cn type=traceroute`（202 
 `tcptest_trace` 源（同站路由追踪；`success` 即达判，`ms` 恒空布尔见证；
 `level=icmp`，不产 `isp_ms`；跑在 http 相之后；CI 200 键/6 并发）。
 `pingcz.cn`（OAuth 登录门）/`iptrace.net`（API 需 Key），不接入。
+CN-41 分运营商速度维（活体探针实证）：`tcptest.cn type=http` 结果行虽带
+`speed_mbps`（100/100 有值），但目标为 48 字节 400 错误页，中位仅
+0.01Mbps——实为 RTT 倒数，无带宽意义，不接入（宁缺勿假）。改由
+`isp_ms` 套用与 CN 清单 `≈XMB/s` 完全相同的单流参考上限公式逐运营商
+派生 `isp_speed`（`common.cn_isp_speed` 单一事实源，≤2ms 噪声同门剔除），
+只增 `china.json` 字段，展示消费留待逻辑优化轮。
 CN-31 逆向复核（活体探针实证）：`ping.aa1.cn/batch_ping`（WS 即关，
 消息形不明，且节点表仅 4 个独立出口 IP——同站价值已由单目标流覆盖，
 不接入；待验证法：浏览器抓包确切首帧）/`v2.xxapi.cn/api/netCheck`
@@ -584,7 +590,9 @@ annotate 系，待验证），机制已根治。
     大陆探测源（xxapi 北京 / jkapi 宁波 / checkhost 呼市）的 ok 最小 RTT，
     再回退全部 ok 源 ≥2ms 最小可信值及行内值，杜绝 L3 复核源 1ms 噪声
     冒充真实延迟。速度 token 同步改写为大陆视角估算 `≈XMB/s`——以最新
-    **最快运营商 RTT** 推算单流上限，与海外实测取小；
+    **最快运营商 RTT** 推算单流上限，与海外实测取小；`china.json` 另存
+    分运营商估算速度 `isp_speed`（CN-41：`isp_ms` 同公式逐运营商派生，
+    只增字段，供逻辑优化轮消费）；
   * 其他清单（`all.txt`、国家全量等）：ms 为海外 runner 的 TLS 握手延迟。
 - CN 系清单**保持完整**：`all_cn*` 与 CN good-tier 收录当期全可达集
   （正常水平 ≥1 万），不按大陆延迟门槛精简；下落即有运行时自检

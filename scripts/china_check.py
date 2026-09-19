@@ -130,6 +130,7 @@ from common import (
     clear_note_buckets,
     cn_fastest_ms,
     cn_best_isp,
+    cn_isp_speed,
     cn_l2_ms,
     cn_mainland_ok,
     CN_LATENCY_CAP_MS,
@@ -3697,6 +3698,22 @@ def merge_isp_ms(entries: dict) -> None:
             }
 
 
+def merge_isp_speed(entries: dict) -> None:
+    """就地由已合并的 ``entry["isp_ms"]`` 派生 ``entry["isp_speed"]``
+    （``{运营商: 估算MB/s}``，公式见 ``common.cn_isp_speed``，与 CN 清单
+    ``≈XMB/s`` 同口径）。
+
+    只增字段：无 ``isp_ms`` 的条目不写该字段；展示层消费（后缀/排序）留待
+    CN/信誉逻辑优化轮，前端契约零改动。
+    """
+    for e in entries.values():
+        if not isinstance(e, dict):
+            continue
+        sp = cn_isp_speed(e.get("isp_ms"))
+        if sp:
+            e["isp_speed"] = sp
+
+
 def merge_verdict(sources: dict) -> dict:
     """跨源合成大陆可达性判定。
 
@@ -5165,6 +5182,9 @@ def main(argv=None) -> int:
     print(f"isp_ms coverage: {n_isp}/{len(entries)} entries "
           f"(0 意味着 itdog 取节点被风控且 tcptest/ce98/biuding 无出数 "
           f"— 见 CN-17 审计)", file=sys.stderr)
+    # 分运营商估算速度（CN-41）：由 isp_ms 同公式派生，只增 isp_speed 字段，
+    # 展示消费留待逻辑优化轮。
+    merge_isp_speed(entries)
     write_json(
         CHINA_FILE,
         {

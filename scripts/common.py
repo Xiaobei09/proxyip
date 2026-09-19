@@ -904,6 +904,26 @@ def cn_best_isp(entry) -> tuple[str, float] | None:
     return best
 
 
+def cn_isp_speed(isp_ms) -> dict:
+    """分运营商估算速度 ``{运营商: MB/s}``：对 ``isp_ms`` 各运营商 RTT 套用
+    与 :func:`_rewrite_cn_speed` 完全相同的单流参考上限公式
+    ``max(CN_SPEED_FLOOR, CN_SPEED_BASE_CAP * (CN_SPEED_REF_MS / ms))``。
+
+    语义同为**估算上限**（非实测吞吐——免费大陆拨测不提供吞吐量，唯一
+    例外 tcptest ``speed_mbps`` 实为 48 字节错误页 fetch 速率≈RTT 倒数，
+    无带宽意义，CN-41 已实证排除）；≤2.0ms 读数按 ICMP 噪声剔除（与
+    :func:`cn_fastest_ms` 同门）。无有效读数返回 {}，调用方不写字段。
+    """
+    out: dict = {}
+    if not isinstance(isp_ms, dict):
+        return out
+    for isp, v in isp_ms.items():
+        if not isinstance(v, (int, float)) or v <= 2.0:
+            continue
+        out[isp] = round(max(CN_SPEED_FLOOR, CN_SPEED_BASE_CAP * (CN_SPEED_REF_MS / v)), 1)
+    return {k: out[k] for k in sorted(out)}
+
+
 def cn_mainland_ok(ms, cap: float | None = None) -> bool:
     """大陆视角 RTT 是否落在大陆簇（≤ cap）。无数值/非正按非大陆。"""
     if cap is None:

@@ -17,6 +17,7 @@ from common import (
     cn_l2_ms,
     cn_mainland_ok,
     cn_best_isp,
+    cn_isp_speed,
     clear_note_buckets,
     line_to_key,
     merge_note_tokens,
@@ -377,6 +378,31 @@ class TestCnBestIsp(unittest.TestCase):
     def test_unmapped_isp_name_preserved(self):
         e = {"isp_ms": {"其他运营商": 42.0}}
         self.assertEqual(cn_best_isp(e), ("其他运营商", 42.0))
+
+
+class TestCnIspSpeed(unittest.TestCase):
+    """CN-41：分运营商估算速度，与 _rewrite_cn_speed 同公式。"""
+
+    def test_formula_matches_rewrite_cap(self):
+        # 60ms→8.0，120ms→4.0，30ms→16.0（上限语义，无海外实测可比时不截顶）
+        self.assertEqual(
+            cn_isp_speed({"中国移动": 60.0, "中国电信": 120.0, "中国联通": 30.0}),
+            {"中国电信": 4.0, "中国移动": 8.0, "中国联通": 16.0},
+        )
+
+    def test_floor_applies(self):
+        self.assertEqual(cn_isp_speed({"中国电信": 2000.0}), {"中国电信": 0.4})
+
+    def test_icmp_noise_rejected(self):
+        self.assertEqual(
+            cn_isp_speed({"中国移动": 1.0, "中国电信": 2.5}),
+            {"中国电信": 8.0 * 60.0 / 2.5},
+        )
+
+    def test_bad_input_returns_empty(self):
+        self.assertEqual(cn_isp_speed(None), {})
+        self.assertEqual(cn_isp_speed({}), {})
+        self.assertEqual(cn_isp_speed({"中国移动": 1.0}), {})
 
 
 class TestMergeNoteTokens(unittest.TestCase):
