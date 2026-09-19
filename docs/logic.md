@@ -276,6 +276,14 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 多节点源须「报告 ≥ `MULTI_MIN_NODES`（5）个节点 + 各自成功率达标」才可独立判 reachable（`strong_valid`），防限流残缺样本假阳性退化为单点。
 
 已评估并放弃的补充源：`api.hostmonit.com/check_port`（已 404）。
+2026-09 穷尽复核（CN-19/21/22）：`boce.com`（API 404＋新页挂 AliyunCaptcha）、
+`tools.ipip.net/api/v1/ping`（POST 405 下线）、`17ce.com/api.php`（404，
+工具路由迁移无迹可循）、`ping0.cc`（Turnstile＋`/api/probe` 404 双重出局，
+交互验证属合规禁区）、`wansui.cn`（TLS 主机名错乱无 SAN）、
+`ping.aizhan.com`（AliyunCaptcha，API 签名未知）、站长测速（captcha＋JS
+内聚无 API 面）、`check-host.net`（59 节点零 CN）、dnschecker（403）、
+pingtool（404 且无 CN）、oioweb/uomg（TLS 坏）。免 key 大陆池已穷尽；
+新源唯一现实路径为用户提供 key（`TCPPING_CN_TOKEN` 等）或批准定向逆向预算。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）

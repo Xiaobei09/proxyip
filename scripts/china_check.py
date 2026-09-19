@@ -36,6 +36,11 @@
   `biuping.com`（HTTP SSE，约 39 个 ISP×节点测量单元 TCPing，零 key）；可选
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
+- 2026-09 穷尽复核（CN-19/21/22）：boce（API 404＋AliyunCaptcha）、ipip
+  （POST 405）、17ce（路由迁移）、ping0（Turnstile＋端点 404）、wansui
+  （TLS 无 SAN）、aizhan（AliyunCaptcha）、站长测速（captcha＋JS 内聚）、
+  check-host.net（零 CN）、dnschecker（403）、pingtool（404 无 CN）、
+  oioweb/uomg（TLS 坏）。免 key 大陆池穷尽；新源需用户 key 或定向预算。
 
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/antping/
