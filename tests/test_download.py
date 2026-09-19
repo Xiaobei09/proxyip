@@ -1012,6 +1012,8 @@ class TestProxyMirrorSources(unittest.TestCase):
              "wwuyi_proxyip_cc"),
             ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt",
              "wwuyi_all"),
+            ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/Manual_input_IP.txt",
+             "wwuyi_manual"),
             ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt",
              "wanwu_us"),
             ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt",

@@ -133,6 +133,8 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt"),
     ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt"),
     ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt"),
+    # IP-02：同站手工精选裸 IP（多国别 VPS；ASN 抽查 20/20 非 AS13335）
+    ("ip", "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/Manual_input_IP.txt"),
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt"),
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt"),
     # IP-01：同站香港榜（裸 IP→443；ASN 抽查 12/12 非 AS13335，见轮次记录）
@@ -157,6 +159,7 @@ SOURCE_LABELS: dict[str, str] = {
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt": "wwuyi_proxyip",
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip_with_country.txt": "wwuyi_proxyip_cc",
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/all_ips.txt": "wwuyi_all",
+    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/Manual_input_IP.txt": "wwuyi_manual",
     "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/US.txt": "wanwu_us",
     "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt": "wanwu_jp",
     "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/HK.txt": "wanwu_hk",
