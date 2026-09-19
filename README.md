@@ -34,7 +34,7 @@
 - **出口 IP 质量检测**（独立 CI）：对全量存活池做出口 IP 地理与类型（机房/住宅/移动）、双栈判定与可选滥用分，结果按既有格式以 `-` 段追加备注到 `data/valid/*.txt`；**滚动可用率跟踪**（`uptime.py`：按轮记录存活日期，7d/30d 存活率写入 `data/quality/uptime.json` 并追加 `-U<NN>` 备注）；
   **结构化导出** `data/valid/all.json` 与**出口多样性视图** `data/valid/all_diverse.txt`（每实测出口/入口网段仅留综合分最高一条）；**池健康看门狗**（`health_alert.py`：池量暴跌/大陆可达崩塌/上游源覆盖骤降/数据过期 → webhook 告警）
   （流媒体解锁检查已移除；历史行上的 NF/D+/YT 等标记仍被解析器容忍但不再产生新观测）
-- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性 + itdog 应用层确认），保守判定（多节点源单独或 ≥2 单节点源交叉确认才标 reachable，详见 `docs/logic.md`）+ 证据分级（`level`：http/tcp）+ 跨轮稳定计数（`streak`），itdog.cn 批量（24 节点跨省采样 + batch_tcping 大节点池降级补测）+ check-host.cc / xxapi.cn 单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细、`data/valid/all_cn.txt` 全量清单及 `all_cn_http.txt`/`all_cn_stable.txt` 可靠性子集，并在 `data/valid/*.txt` 追加 `-CN` 备注
+- **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用（GFW 视角 TCP 可达性 + itdog 应用层确认），保守判定（多节点源单独或 ≥2 单节点源交叉确认才标 reachable，详见 `docs/logic.md`）+ 证据分级（`level`：http/tcp/icmp）+ 跨轮稳定计数（`streak`），itdog.cn 批量（24 节点跨省采样 + batch_tcping 大节点池降级补测）+ check-host.cc / xxapi.cn / jkapi 双协议（TCP+ICMP）单节点实测 + ping.pe 多运营商复核，产出 `data/quality/china.json` 全量明细、`data/valid/all_cn.txt` 全量清单及 `all_cn_http.txt`/`all_cn_stable.txt` 可靠性子集，并在 `data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注（探测无结论 `unknown` 时清旧家族 token，不冒称）；同时对照上游 `data/quality/upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`data/quality/exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
 - **统计与趋势**：生成 `data/output/stats.json`（供徽章消费）与零依赖 SVG 图表组：趋势、存活率、国家/端口分布、延迟/速度分布、更新增量、双轴复合图、集合规模、大陆可达性、出口家族与信誉分分布
@@ -147,7 +147,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 `.github/workflows/china-check.yml`（大陆连通性独立 CI）：
 
 - **触发**：每小时定时（`cron: 11 * * * *`）+ `workflow_dispatch` 手动触发（原 workflow_run 依赖已移除，独立于质量链节奏）。GitHub 调度偶发连续跳 tick（实测）时以 `workflow_dispatch` 手动补跑为准，streak 6h 容差覆盖短缺口
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，全免费 CN 验证源分层判定：itdog 批量 http + batch_tcping 大节点池降级、check-host.cc 呼和浩特/xxapi.cn 北京单节点，多源复核集：tcptest.cn（800 键/20 并发）、ip.net.coffee（1200/40）、pingloc（600/12）、antping（500/8）、tcping.cn（400/8）、chinaz（200/8）、98ce.com（200 键/6 并发，34 大陆省运营商节点 TCPing）、biuping.com（200 键/8 并发，约 39 ISP×节点 TCPing 测量单元）、ping.pe（300））→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，全免费 CN 验证源分层判定：itdog 批量 http + batch_tcping 大节点池降级、check-host.cc 呼和浩特/xxapi.cn 北京/jkapi 宁波电信 TCP+ICMP 双协议单节点，多源复核集：tcptest.cn（800 键/20 并发）、ip.net.coffee（1200/40）、pingloc（600/12）、antping（500/8）、tcping.cn（400/8）、chinaz（200/8）、98ce.com（200 键/6 并发，34 大陆省运营商节点 TCPing）、biuping.com（200 键/8 并发，约 39 ISP×节点 TCPing 测量单元）、ping.pe（300））→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
 - **细节**：作业超时 360 分钟；`concurrency` 组防重入；`contents: write` 权限；check-host.cc key 与 tcpping.cn token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流提交经 `.github/scripts/commit_data.sh`——只提交本 job
   实际写入的文件（mtime 标记），push 冲突时其余文件对齐 origin，
@@ -189,7 +189,7 @@ scripts/uptime.py                        滚动节点可用率（node_seen.json 
 scripts/export_json.py                   结构化 all.json 导出
 scripts/health_alert.py                  池健康看门狗（webhook 告警）
 scripts/reorg_country.py                 按出口国家重组 country/set/port 文件
-scripts/china_check.py                   大陆连通性检测（itdog 批量 + check-host/xxapi/jkapi + ping.pe）
+scripts/china_check.py                   大陆连通性检测（itdog 批量 + check-host/xxapi/jkapi/jkping + ping.pe）
 scripts/china_itdog.py                   itdog.cn 批量探活模块（china_check 拆分）
 scripts/exit_family.py                   实际出口 IP 家族检测与分离（TLS trace 回显）
 scripts/generate_fingerprint.py          浏览器指纹生成

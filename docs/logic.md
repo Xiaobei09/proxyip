@@ -253,7 +253,11 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 - `check-host.cc`：呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 `--api-key` 可放宽
 - `xxapi.cn`：北京节点，免 key
-- `jkapi.com/zz_tcping`：浙江宁波电信 1 节点，免 key（纯文本报告）
+- `jkapi.com/zz_tcping`：浙江宁波电信 TCP 1 节点，免 key（纯文本报告）
+- `jkapi.com/zz_ping`（CN-25 新增）：同站同节点 ICMP 主机存活，免 key
+  （纯文本报告；`level=icmp`，不进 `cn_display_ms`/`isp_ms`，与 chinaz/coffee
+  同口径）。同站不同协议：TCP 握手与 ICMP 回显失效模式正交（端口封 vs
+  禁 Ping），独立性评级低增益-同站（新增协议层证据，非地理/ISP 覆盖）
 
 **batch_tcping 补测（降级通道）**：
 
@@ -278,25 +282,28 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 已评估并放弃的补充源：`api.hostmonit.com/check_port`（已 404）。
 2026-09 穷尽复核（CN-19/21/22）：`boce.com`（API 404＋新页挂 AliyunCaptcha）、
 `tools.ipip.net/api/v1/ping`（POST 405 下线）、`17ce.com/api.php`（404，
-工具路由迁移无迹可循）、`ping0.cc`（Turnstile＋`/api/probe` 404 双重出局，
-交互验证属合规禁区）、`wansui.cn`（TLS 主机名错乱无 SAN）、
+工具路由迁移无迹可循）、`ping0.cc`（Turnstile＋`/api/probe` 404 双重出局）、
+`wansui.cn`（TLS 主机名错乱无 SAN）、
 `ping.aizhan.com`（AliyunCaptcha，API 签名未知）、站长测速（captcha＋JS
 内聚无 API 面）、`check-host.net`（59 节点零 CN）、dnschecker（403）、
-pingtool（404 且无 CN）、oioweb/uomg（TLS 坏）。免 key 大陆池已穷尽；
-新源唯一现实路径为用户提供 key（`TCPPING_CN_TOKEN` 等）或批准定向逆向预算。
+pingtool（404 且无 CN）、oioweb/uomg（TLS 坏）。CN-25 在同站内再挖一层：
+`jkapi.com/zz_ping`（与 `zz_tcping` 同站同节点、不同协议层）证实同运营者
+仍可产出正交证据；用户已授权逆向与反爬对抗（2026-09-19，源越多越好），
+下一阶段按此新口径复活 captcha 墙后休眠源（boce 新路由/17ce 新端点/
+aizhan 签名/ping0），此前"新源唯一现实路径为用户 key"的结论作废。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
 
 ```
 输入：sources = {check_host: {status, ok, ms, level}, xxapi: {...}, jkapi: {...},
-       itdog: {...}, pingpe: {...}, tcptest: {...}, ...}
+       jkping: {...}, itdog: {...}, pingpe: {...}, tcptest: {...}, ...}
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
 1. 多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/
    antping/tcpingcn/chinaz/ce98/biuping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（check_host/xxapi/jkapi）≥2 个 ok → reachable
+2. 单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
