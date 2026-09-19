@@ -295,7 +295,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 - `tcptest.cn`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
 - `tcptest_ping`（CN-33）：同站 `type=ping`（裸 IP 目标，无端口概念），节点成功 = `success`＋`avg_ms>0`，`level=icmp`，不产 `isp_ms`；与 TCP 共用节点采样，跑在 TCP 相之后（只投仍未定论者），CI 400 键/20 并发
 - `ip.net.coffee`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
-- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点，JWT+WS，TCP `ip:port`）、`antping_ping`（CN-28：同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点，服务端渲染 token + WS）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`ping.aa1.cn`（CN-27：独立运营商免费 API 站，WS 纯 JSON 零鉴权，28 城三网 TCPing，`operator` 原生分电信/联通/移动，`domain` 携真实端口逐端口实测；CI 以 200 键/6 并发启用）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
+- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点，JWT+WS，TCP `ip:port`）、`antping_ping`（CN-28：同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点，服务端渲染 token + WS）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`biuping_ping`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`；CI 200 键/8 并发）、`ping.aa1.cn`（CN-27：独立运营商免费 API 站，WS 纯 JSON 零鉴权，28 城三网 TCPing，`operator` 原生分电信/联通/移动，`domain` 携真实端口逐端口实测；CI 以 200 键/6 并发启用）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
 - `tcpping.cn`：多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过
 
@@ -364,6 +364,12 @@ CN-30 逆向决战 tcping.cn（活体全链路打通）：ALTCHA 为标准规范
 同轮产出：`tcpingcn` 复活（CI 400 恢复，会话复用＋403 重试）＋新源
 `tcpingcn_ping`（同站 ICMP，`level=icmp`，地域|ISP 去重，不产 `isp_ms`；
 显示语义未定前宁缺勿假；CI 200 键/6 并发）。
+CN-34 逆向复核（活体探针实证）：`biuping.com type=ping`（SSE 同端点，
+39/39 出数，原生 ms；节点 `isp`/`country_group` 富模式）接入为
+`biuping_ping` 源（同站 ICMP，`level=icmp`，剥离 `isp_ms`；CI 200 键/
+8 并发）。`ce98.com`（/httptest 为 URL 型网站测速，非 ip:port TCP，
+不接入）/`ping.aa1.cn/batch_*`（WS 即关；节点表仅 4 独立 IP，
+不接入；待验证法：浏览器抓包）。
 CN-33 逆向复核（活体探针实证）：`tcptest.cn type=ping`（202 建任务，
 158 节点，`avg_ms`/`packets_received`  schema 与 tcping 同构）接入为
 `tcptest_ping` 源（同站 ICMP，裸 IP 目标；`level=icmp`、不产 `isp_ms`；
@@ -399,7 +405,7 @@ annotate 系，待验证），机制已根治。
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/coffee/pingloc/
-   antping/antping_ping/tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
+   antping/antping_ping/tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
 2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain

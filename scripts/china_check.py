@@ -45,7 +45,8 @@
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
   判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
-  `biuping.com`（HTTP SSE，约 39 个 ISP×节点测量单元 TCPing，零 key）；可选
+  `biuping.com`（HTTP SSE，约 39 个 ISP×节点测量单元 TCPing，零 key）；
+  `biuping_ping`（CN-34，同站 ICMP，`level=icmp`，不产 `isp_ms`）；可选
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
   `ping.aa1.cn`（CN-27：独立运营商免费API 站 TCPing，WS 纯 JSON 无鉴权，
   28 城三网节点原生 per-ISP，端口直连）。
@@ -60,8 +61,8 @@
   itdog batch_ping 已接入；boce/17ce/aizhan 经逆向确认仍阻塞；ping.sx 零 CN）。
 
 保守判定逻辑（merge_verdict）：
-  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/antping_ping/
-  tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
+  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/coffee/pingloc/antping/antping_ping/
+  tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
   单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
@@ -351,6 +352,13 @@ AA1PING_WS_IDLE = 40.0
 AA1PING_LINES = "1,2,3"
 AA1PING_MIN_RATIO = ITDOG_MIN_RATIO
 
+# biuping 同站 ICMP 复用（CN-34）：biuping_check 的 port="" 分支即 ping
+# 模式（type=ping，level=icmp），此前无调用方。单列 biuping_ping 源走
+# ICMP，与 TCP 同站同节点池（约 39 测量单元）、不同协议层（低增益-同站）。
+# ping 原生 ms 已实证（广东电信 7.578ms），但为与全部 ICMP 源一致仍剥离
+# isp_ms（防 1~8ms 进展示；chinaz/coffee/jkping 同口径）。
+BIUPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
+
 # boce.com —— 博采网拨测（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
 # GET https://www.boce.com/ 拿壳页 cookie（JSESSIONID）与《csrf token（meta "csrf-param" 对应的
 # 蕴含值通常出现在 <meta name="csrf-token"> 或函数参数）。
@@ -414,6 +422,7 @@ _SOURCE_MIN_RATIO = {
     "antping_ping": ANTPING_PING_MIN_RATIO,
     "tcpingcn_ping": TCPINGCN_PING_MIN_RATIO,
     "tcptest_ping": ITDOG_MIN_RATIO,
+    "biuping_ping": BIUPING_PING_MIN_RATIO,
 }
 
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
@@ -2799,6 +2808,20 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
     }
 
 
+def biuping_ping_check(ip: str, port: str, timeout: float) -> dict:
+    """biuping.com 单键多节点 ICMP ping（CN-34，同站同节点池、不同协议层）。
+
+    复用 ``biuping_check`` 的 port="" 分支（``type=ping``，``level="icmp"``，
+    该分支已实现但此前无调用方）。``port`` 仅为槽位接口一致保留。
+    剥离 ``isp_ms``（ping 原生 ms 已实证，但为与全部 ICMP 源一致不进展示；
+    chinaz/coffee/jkping 同口径）。不抛未捕获异常（内层已收敛）。
+    """
+    _ = port
+    out = biuping_check(ip, "", timeout)
+    out.pop("isp_ms", None)
+    return out
+
+
 def aa1ping_check(ip: str, port: str, timeout: float) -> dict:
     """ping.aa1.cn 单键多节点 TCPing（纯 WS JSON，零 key/零鉴权）。
 
@@ -3392,7 +3415,7 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "coffee",
-        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
 
@@ -3426,7 +3449,7 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "tcptest_ping", "coffee",
-        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
@@ -3911,6 +3934,7 @@ def _run_raw_slots(
     fn = {
         "ce98": lambda ip, port: ce98_check(ip, port, timeout),
         "biuping": lambda ip, port: biuping_check(ip, port, timeout),
+        "biuping_ping": lambda ip, port: biuping_ping_check(ip, port, timeout),
         "aa1ping": lambda ip, port: aa1ping_check(ip, port, timeout),
         "boce": lambda ip, port: boce_check(ip, port, timeout),
         "ipip": lambda ip, port: ipip_check(ip, port, timeout),
@@ -4345,6 +4369,21 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("biuping review: skipped (limit=0)", file=sys.stderr)
 
+    # biuping_ping（CN-34）：同站 ICMP，主独立判 reachable；默认 0=跳过。
+    biuping_ping_limit = getattr(args, "biuping_ping_limit", 0)
+    if biuping_ping_limit != 0:
+        cands = _pending_cands()
+        if biuping_ping_limit is None or biuping_ping_limit < 0:
+            biuping_ping_limit = len(cands)
+        _run_raw_slots(
+            cands[:biuping_ping_limit], entries, args.timeout, "biuping_ping",
+            getattr(args, "biuping_ping_concurrency", 8),
+        )
+        print(f"biuping_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("biuping_ping review: skipped (limit=0)", file=sys.stderr)
+
     # aa1ping（CN-27）：独立运营商 28 城三网 TCPing（纯 WS，零 key）。
     # 达标即可独立判 reachable；默认 0=跳过，-1=全部未定键。
     aa1ping_limit = getattr(args, "aa1ping_limit", 0)
@@ -4565,6 +4604,10 @@ def main(argv=None) -> int:
                         help="biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--biuping-concurrency", type=int, default=8,
                         help="biuping.com 并发复核数（默认 8）")
+    parser.add_argument("--biuping-ping-limit", type=int, default=0,
+                        help="biuping.com ICMP 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--biuping-ping-concurrency", type=int, default=8,
+                        help="biuping.com ICMP 并发复核数（默认 8）")
     parser.add_argument("--aa1ping-limit", type=int, default=0,
                         help="ping.aa1.cn WS 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--aa1ping-concurrency", type=int, default=6,

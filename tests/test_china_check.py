@@ -3384,6 +3384,71 @@ class TestAa1pingSource(unittest.TestCase):
         self.assertEqual(sent["lines"], cc.AA1PING_LINES)
 
 
+class TestBiupingPingSource(unittest.TestCase):
+    """CN-34：biuping_ping（同站 ICMP，复用 port="" 分支）。"""
+
+    def test_wrapper_ignores_port_strips_isp(self):
+        ret = {"status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
+               "ok_nodes": 39, "nodes": 39, "ratio": 1.0,
+               "isp_ms": {"中国电信": 7.5}}
+        with mock.patch.object(cc, "biuping_check",
+                               return_value=dict(ret)) as m:
+            out = cc.biuping_ping_check("1.2.3.4", "443", 10)
+        m.assert_called_once_with("1.2.3.4", "", 10)
+        self.assertEqual(out["level"], "icmp")
+        self.assertNotIn("isp_ms", out)
+        self.assertEqual(out["ms"], 7.5)
+
+    def test_strong_reachable(self):
+        sources = {"biuping_ping": {
+            "status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
+            "ok_nodes": 39, "nodes": 39, "ratio": 1.0}}
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["level"], "icmp")
+
+    def test_weak_ratio_uncertain(self):
+        sources = {"biuping_ping": {
+            "status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
+            "ok_nodes": 1, "nodes": 39, "ratio": 0.026}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_fail_plus_single_fail_unreachable(self):
+        sources = {
+            "biuping_ping": {"status": "fail", "ok": False, "ms": None,
+                             "ok_nodes": 0, "nodes": 39, "ratio": 0.0},
+            "jkapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+    def test_ratio_threshold_wired(self):
+        src = {"status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        self.assertEqual(
+            cc.merge_verdict({"biuping_ping": dict(src)})["verdict"],
+            "reachable")
+        old = cc._SOURCE_MIN_RATIO["biuping_ping"]
+        cc._SOURCE_MIN_RATIO["biuping_ping"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"biuping_ping": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["biuping_ping"] = old
+
+    def test_raw_slot_dispatch(self):
+        cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
+                  "1.2.3.4", "443", "US")]
+        entries: dict = {"1.2.3.4:443#US": {}}
+        with mock.patch.object(
+                cc, "biuping_ping_check",
+                return_value={"status": "ok", "ok": True}) as m:
+            cc._run_raw_slots(cands, entries, 5, "biuping_ping", 2)
+            m.assert_called_once_with("1.2.3.4", "443", 5)
+        self.assertEqual(
+            entries["1.2.3.4:443#US"]["biuping_ping"]["status"], "ok")
+
+
 class TestAntpingPingSource(unittest.TestCase):
     """CN-28：antping_ping（同站 ICMP，复用 code=3 分支）。"""
 
@@ -4979,6 +5044,7 @@ class TestCiEnabledSources(unittest.TestCase):
             encoding="utf-8")
         readme = (root / "README.md").read_text(encoding="utf-8")
         for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping"),
+                           ("biuping-ping", "biuping-ping"),
                            ("aa1ping", "aa1ping"),
                            ("antping-ping", "antping-ping"),
                            ("tcpingcn-ping", "tcpingcn-ping"),
@@ -5033,6 +5099,19 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(m.group(1), "TCPTEST_CONCURRENCY")
         self.assertEqual(cc.TCPTEST_CONCURRENCY, 8)
 
+    def test_biuping_ping_cli_default_stays_opt_in(self):
+        """CN-34：biuping-ping 本地默认 opt-in（0/8），只在 CI 显式启用。"""
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--biuping-ping-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "biuping-ping-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--biuping-ping-concurrency", type=int, default=(\d+)',
+                      src)
+        self.assertIsNotNone(m, "biuping-ping-concurrency 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 8)
+
     def test_all_enabled_l3_limits_present(self):
         """CN-12：CI 启用的全部 L3 复核源配额原地锁定（tcptest/coffee/
         pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding/aa1ping），防 CI 行
@@ -5046,7 +5125,8 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--ce98-limit 200", "--biuping-limit 200",
                      "--aa1ping-limit 200", "--antping-ping-limit 200",
                      "--tcpingcn-ping-limit 200",
-                     "--tcptest-ping-limit 400"):
+                     "--tcptest-ping-limit 400",
+                     "--biuping-ping-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
     def test_tcpingcn_limit_restored_after_altcha(self):
