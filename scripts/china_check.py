@@ -3640,6 +3640,14 @@ def main(argv=None) -> int:
     # per-key isp_ms（各运营商最小 RTT，来自 itdog 等 per-ISP 源）——
     # 必须在中国 check 写 china.json 之前合并进 entries，单一事实源。
     merge_isp_ms(entries)
+    n_isp = sum(
+        1 for e in entries.values()
+        if isinstance(e, dict) and isinstance(e.get("isp_ms"), dict)
+        and e["isp_ms"]
+    )
+    print(f"isp_ms coverage: {n_isp}/{len(entries)} entries "
+          f"(0 意味着 itdog 取节点被风控且 tcptest/ce98/biuding 无出数 "
+          f"— 见 CN-17 审计)", file=sys.stderr)
     write_json(
         CHINA_FILE,
         {
