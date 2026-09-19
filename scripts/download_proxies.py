@@ -141,6 +141,8 @@ EXTRA_SOURCES: list[tuple[str, str]] = [
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/HK.txt"),
     # IP-03：同站新加坡榜（裸 IP→443；ASN 抽查 20/20 非 AS13335，见轮次记录）
     ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/SG.txt"),
+    # IP-04：同站韩国榜（裸 IP→443；6 行含 1 重复→5 唯一，ASN 抽查 6/6 非 AS13335）
+    ("ip", "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/KR.txt"),
     # --- proxyip 源扩展（R214 首增 byJoey/LancelotRar 为 CF 官方 AS13335 段，
     #     与池政策「非 AS13335/排除官方 CF 段」冲突已于 R215 回退）---
     # svip-s/cloudflare_ip 实测为第三方反代 VPS（非 AS13335），格式 ip:port#CC [注解]
@@ -166,6 +168,7 @@ SOURCE_LABELS: dict[str, str] = {
     "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt": "wanwu_jp",
     "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/HK.txt": "wanwu_hk",
     "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/SG.txt": "wanwu_sg",
+    "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/KR.txt": "wanwu_kr",
 }
 
 
