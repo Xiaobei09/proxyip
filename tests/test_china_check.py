@@ -4353,6 +4353,142 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(entries["a:443#US"]["ms"], 110.0)
 
 
+class TestCe98PingSource(unittest.TestCase):
+    """CN-36：ce98_ping（同站 continuous-ping 通道，mock，不触网）。"""
+
+    class _FakeSIO:
+        def __init__(self, frames):
+            self._frames = list(frames)
+            self.sent = []
+            self.closed = False
+
+        def settimeout(self, t):
+            pass
+
+        def send(self, text):
+            self.sent.append(text)
+
+        def send_event(self, name, arg):
+            self.sent.append((name, arg))
+
+        def read(self):
+            if self._frames:
+                return self._frames.pop(0)
+            return "timeout", None
+
+        def close(self):
+            self.closed = True
+
+    _HTML = ('<html><script id="continuous-ping-nodes-data">'
+             '[{"name":"上海电信","location":"上海市"},'
+             '{"name":"北京联通","location":"北京市"}]'
+             '</script></html>').encode()
+
+    def _run(self, frames, html=None):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, html or self._HTML)), \
+              mock.patch.object(cc, "_SocketIOClient",
+                                return_value=self._FakeSIO(frames)):
+            return cc.ce98_ping_check("1.2.3.4", "443", 10)
+
+    def test_ping_all_ok_no_isp(self):
+        frames = [
+            ("event", ["continuous_ping_started", {"job_id": "j1"}]),
+            ("event", ["continuous_ping_node_update",
+                       {"node_name": "上海电信", "ok": True, "loss": 0,
+                        "latest": 3.4, "average": 3.4}]),
+            ("event", ["continuous_ping_node_update",
+                       {"node_name": "北京联通", "ok": True, "loss": 0,
+                        "latest": 9.0, "average": 9.0}]),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["nodes"], 2)
+        self.assertEqual(out["ms"], 3.4)
+        self.assertEqual(out["level"], "icmp")
+        # ICMP 不产 isp_ms（TCP 版同节点名会产出，此处须剥离）
+        self.assertNotIn("isp_ms", out)
+
+    def test_ping_all_fail(self):
+        frames = [
+            ("event", ["continuous_ping_node_update",
+                       {"node_name": "上海", "ok": False, "latest": 0}]),
+            ("event", ["continuous_ping_node_update",
+                       {"node_name": "广州", "ok": False, "latest": 0}]),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ratio"], 0.0)
+
+    def test_ping_no_nodes_data(self):
+        out = self._run([], html=b"<html>no nodes</html>")
+        self.assertEqual(out["status"], "error")
+
+    def test_ping_sends_no_port(self):
+        """ping 通道提交体无 port（与 TCP 相区分）。"""
+        fake = self._FakeSIO([
+            ("event", ["continuous_ping_started", {"job_id": "j1"}]),
+            ("event", ["continuous_ping_node_update",
+                       {"node_name": "上海电信", "ok": True, "loss": 0,
+                        "latest": 3.4, "average": 3.4}]),
+            ("event", ["continuous_ping_node_update",
+                       {"node_name": "北京联通", "ok": True, "loss": 0,
+                        "latest": 9.0, "average": 9.0}]),
+        ])
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, self._HTML)), \
+              mock.patch.object(cc, "_SocketIOClient", return_value=fake):
+            cc.ce98_ping_check("1.2.3.4", "8443", 10)
+        starts = [s for s in fake.sent
+                  if isinstance(s, tuple) and s[0] == "start_continuous_ping"]
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0][1]["target"], "1.2.3.4")
+        self.assertNotIn("port", starts[0][1])
+
+    def test_merge_strong_weak_fail(self):
+        strong = {"status": "ok", "ok": True, "ms": 3.4, "level": "icmp",
+                  "ok_nodes": 35, "nodes": 35, "ratio": 1.0}
+        self.assertEqual(cc.merge_verdict(
+            {"ce98_ping": strong})["verdict"], "reachable")
+        weak = dict(strong, ok_nodes=1, nodes=35, ratio=0.029)
+        self.assertEqual(cc.merge_verdict(
+            {"ce98_ping": weak})["verdict"], "uncertain")
+        fail = {"status": "fail", "ok": False, "ms": None,
+                "ok_nodes": 0, "nodes": 35, "ratio": 0.0}
+        self.assertEqual(cc.merge_verdict(
+            {"ce98_ping": fail,
+             "xxapi": {"status": "fail", "ok": False,
+                       "ms": None}})["verdict"], "unreachable")
+
+    def test_ratio_threshold_wired(self):
+        src = {"status": "ok", "ok": True, "ms": 5.0, "level": "icmp",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        self.assertEqual(
+            cc.merge_verdict({"ce98_ping": dict(src)})["verdict"],
+            "reachable")
+        old = cc._SOURCE_MIN_RATIO["ce98_ping"]
+        cc._SOURCE_MIN_RATIO["ce98_ping"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"ce98_ping": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["ce98_ping"] = old
+
+    def test_raw_slot_dispatch(self):
+        cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
+                  "1.2.3.4", "443", "US")]
+        entries: dict = {"1.2.3.4:443#US": {}}
+        with mock.patch.object(
+                cc, "ce98_ping_check",
+                return_value={"status": "ok", "ok": True}) as m:
+            cc._run_raw_slots(cands, entries, 5, "ce98_ping", 2)
+            m.assert_called_once_with("1.2.3.4", "443", 5)
+        self.assertEqual(
+            entries["1.2.3.4:443#US"]["ce98_ping"]["status"], "ok")
+
+
 class TestCe98Source(unittest.TestCase):
     """98ce.com socket.io-WS 适配器单测（mock _SocketIOClient，不触网）。"""
 
@@ -5188,7 +5324,8 @@ class TestCiEnabledSources(unittest.TestCase):
                            ("antping-ping", "antping-ping"),
                            ("tcpingcn-ping", "tcpingcn-ping"),
                            ("tcptest-ping", "tcptest-ping"),
-                           ("tcptest-http", "tcptest-http")):
+                           ("tcptest-http", "tcptest-http"),
+                           ("ce98-ping", "ce98-ping")):
             m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
                           wf, re.S)
             self.assertIsNotNone(m, f"CI 未启用 {name}")
@@ -5266,6 +5403,19 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIsNotNone(m, "biuping-ping-concurrency 参数定义丢失")
         self.assertEqual(int(m.group(1)), 8)
 
+    def test_ce98_ping_cli_default_stays_opt_in(self):
+        """CN-36：ce98-ping 本地默认 opt-in（0/6），只在 CI 显式启用。"""
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--ce98-ping-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "ce98-ping-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--ce98-ping-concurrency", type=int, default=(\d+)',
+                      src)
+        self.assertIsNotNone(m, "ce98-ping-concurrency 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 6)
+
     def test_all_enabled_l3_limits_present(self):
         """CN-12：CI 启用的全部 L3 复核源配额原地锁定（tcptest/coffee/
         pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding/aa1ping），防 CI 行
@@ -5281,7 +5431,8 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--tcpingcn-ping-limit 200",
                      "--tcptest-ping-limit 400",
                      "--biuping-ping-limit 200",
-                     "--tcptest-http-limit 200"):
+                     "--tcptest-http-limit 200",
+                     "--ce98-ping-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
     def test_tcpingcn_limit_restored_after_altcha(self):

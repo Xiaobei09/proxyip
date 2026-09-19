@@ -50,6 +50,8 @@
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
   `ping.aa1.cn`（CN-27：独立运营商免费API 站 TCPing，WS 纯 JSON 无鉴权，
   28 城三网节点原生 per-ISP，端口直连）。
+  `98ce.com continuous-ping`（CN-36：同站 ICMP，35 节点 socket.io，
+  结果帧与 TCP 同形，`level=icmp`，不产 `isp_ms`）。
   `tcptest.cn type=http`（CN-35：同站应用层，`status>0` 即确认，
   `level=http`，ms 取 connect_ms；与 TCP 同节点采样）。
   `tcping.cn`（~163 TCP 节点 + CN-30 同通道 `tcpingcn_ping` ICMP，
@@ -64,7 +66,7 @@
 
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/antping/antping_ping/
-  tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
+  tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
   单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
@@ -323,6 +325,10 @@ CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
 # → 发 '42["stop_continuous_tcping",{"job_id"}]'。socket.io 帧 = 数字前缀 + JSON。
 CE98_URL = "https://www.98ce.com/continuous-tcping"
 CE98_HOST = "www.98ce.com"
+# continuous-ping（CN-36）：同站 ICMP，事件族 start/stop_continuous_ping，
+# 节点表 continuous-ping-nodes-data（35 节点，原生 isp 字段），结果帧与
+# TCP 同形（ok/loss/latest/average）。活体 35/35 出数。
+CE98_PING_URL = "https://www.98ce.com/continuous-ping"
 CE98_WS_PATH = "/socket.io/?EIO=4&transport=websocket"
 CE98_WS_IDLE = 30.0
 CE98_REQ_TIMEOUT = 15
@@ -360,6 +366,11 @@ AA1PING_MIN_RATIO = ITDOG_MIN_RATIO
 # ping 原生 ms 已实证（广东电信 7.578ms），但为与全部 ICMP 源一致仍剥离
 # isp_ms（防 1~8ms 进展示；chinaz/coffee/jkping 同口径）。
 BIUPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
+
+# 98ce 同站 ICMP 复用（CN-36，见 ce98_ping_check）：35 节点（电信 11/
+# 移动 10/联通 8/多线 4/港澳台 1/海外 1，原生 isp 字段），结果帧与 TCP
+# 同形（ok/loss/latest/average）；level=icmp，不产 isp_ms。
+CE98_PING_MIN_RATIO = ITDOG_MIN_RATIO
 
 # boce.com —— 博采网拨测（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
 # GET https://www.boce.com/ 拿壳页 cookie（JSESSIONID）与《csrf token（meta "csrf-param" 对应的
@@ -426,6 +437,7 @@ _SOURCE_MIN_RATIO = {
     "tcptest_ping": ITDOG_MIN_RATIO,
     "tcptest_http": ITDOG_MIN_RATIO,
     "biuping_ping": BIUPING_PING_MIN_RATIO,
+    "ce98_ping": CE98_PING_MIN_RATIO,
 }
 
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
@@ -2587,16 +2599,30 @@ def _cn_isp_label(node_name: str) -> str | None:
     return None
 
 
-def ce98_check(ip: str, port: str, timeout: float) -> dict:
+def ce98_check(ip: str, port: str, timeout: float, mode: str = "tcping") -> dict:
     """98ce.com 单键多节点 TCP 探测（socket.io v4 over WebSocket，零 key）。
 
     34 个大陆各省运营商节点对 ``ip:port`` 做持续 TCPing；节点 ``ok===true`` 且
     ``loss<1`` 且 ``latest>0`` 判定可达。传输层 → ``level="tcp"``。``ms`` 取成功
     节点最小 average。整站失败（连接/协议异常）→ ``error``，可作不可达联动证据。
+    ``mode="ping"``（CN-36）：同站 continuous-ping 通道（35 节点，
+    ``level="icmp"``，不产 ``isp_ms``；结果帧与 TCP 同形），端口忽略。
     """
+    is_ping = mode == "ping"
+    page_url = CE98_PING_URL if is_ping else CE98_URL
+    nodes_id = ("continuous-ping-nodes-data" if is_ping
+                else "continuous-tcping-nodes-data")
+    ev_start = ("start_continuous_ping" if is_ping
+                else "start_continuous_tcping")
+    ev_started = ("continuous_ping_started" if is_ping
+                  else "continuous_tcping_started")
+    ev_update = ("continuous_ping_node_update" if is_ping
+                 else "continuous_tcping_node_update")
+    ev_stop = ("stop_continuous_ping" if is_ping
+               else "stop_continuous_tcping")
     try:
         status, _, resp = request_follow(
-            CE98_URL,
+            page_url,
             {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml",
              "Referer": "https://www.98ce.com/"},
             CE98_REQ_TIMEOUT,
@@ -2611,7 +2637,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     html = resp.decode("utf-8", "replace")
     m = re.search(
-        r'id="continuous-tcping-nodes-data"[^>]*>\s*(\[[\s\S]*?\])\s*</',
+        r'id="' + nodes_id + r'"[^>]*>\s*(\[[\s\S]*?\])\s*</',
         html,
     )
     if not m:
@@ -2648,8 +2674,8 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
             return {"status": "error", "ok": False, "ms": None,
                     "error": "ws connect fail", "level": None,
                     "ok_nodes": 0, "nodes": 0, "ratio": None}
-        client.send_event("start_continuous_tcping", {
-            "target": ip, "port": int(port),
+        client.send_event(ev_start, {
+            "target": ip, **({} if is_ping else {"port": int(port)}),
             "dns_settings": {"type": "isp"},
         })
     except Exception as e:
@@ -2676,9 +2702,9 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         if kind == "event" and isinstance(payload, list) and len(payload) >= 1:
             name = payload[0]
             arg = payload[1] if len(payload) > 1 else None
-            if name == "continuous_tcping_started" and isinstance(arg, dict):
+            if name == ev_started and isinstance(arg, dict):
                 job_id = arg.get("job_id")
-            elif name == "continuous_tcping_node_update" and isinstance(arg, dict):
+            elif name == ev_update and isinstance(arg, dict):
                 node = arg.get("node_name") or arg.get("ip_address")
                 if node not in seen:
                     seen.add(node)
@@ -2695,13 +2721,14 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
                     if ok:
                         ms_one = (avg if isinstance(avg, (int, float)) and avg > 0
                                   else latest)
-                        isp = _cn_isp_label(
-                            arg.get("node_name")
-                            if isinstance(arg.get("node_name"), str) else "")
-                        if (isp and isinstance(ms_one, (int, float))
-                                and ms_one > 0
-                                and ms_one < isp_best.get(isp, float("inf"))):
-                            isp_best[isp] = ms_one
+                        if not is_ping:
+                            isp = _cn_isp_label(
+                                arg.get("node_name")
+                                if isinstance(arg.get("node_name"), str) else "")
+                            if (isp and isinstance(ms_one, (int, float))
+                                    and ms_one > 0
+                                    and ms_one < isp_best.get(isp, float("inf"))):
+                                isp_best[isp] = ms_one
                     # 页节点已全部回执即提前结束（R327 性能：此前空等满
                     # 30s CE98_WS_IDLE，单键 ~34s；页表过期致数对不上时
                     # 条件恒假，回落原超时语义）。
@@ -2711,7 +2738,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
                 break
     try:
         if job_id:
-            client.send_event("stop_continuous_tcping", {"job_id": job_id})
+            client.send_event(ev_stop, {"job_id": job_id})
     except Exception:
         pass
     if client:
@@ -2721,7 +2748,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         out = {
             "status": "ok", "ok": True,
             "ms": round(min(ms_values), 1) if ms_values else None,
-            "error": "", "level": "tcp",
+            "error": "", "level": "icmp" if is_ping else "tcp",
             "ok_nodes": ok_nodes, "nodes": nodes,
             "ratio": round(ok_nodes / nodes, 3) if nodes else None,
         }
@@ -2733,6 +2760,19 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         "error": f"unreachable ({nodes} nodes)", "level": None,
         "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
     }
+
+
+def ce98_ping_check(ip: str, port: str, timeout: float) -> dict:
+    """98ce.com 单键多节点 ICMP ping（CN-36，同站同形、不同通道）。
+
+    复用 ``ce98_check`` 的 socket.io 通道（``mode="ping"``）：35 节点
+    （电信 11/移动 10/联通 8/多线 4/港澳台 1/海外 1，原生 isp 字段），
+    结果帧与 TCP 同形（``ok``/``loss``/``latest``/``average``）。
+    ``port`` 仅为槽位接口一致保留。``level="icmp"``，不产 ``isp_ms``
+    （ICMP 不进展示，chinaz 等同口径）。不抛未捕获异常（内层已收敛）。
+    """
+    _ = port
+    return ce98_check(ip, port, timeout, mode="ping")
 
 
 def biuping_check(ip: str, port: str, timeout: float) -> dict:
@@ -3465,7 +3505,7 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
-        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "biuping_ping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "ce98_ping", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
 
@@ -3499,7 +3539,7 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
-        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "biuping_ping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "ce98_ping", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
@@ -3983,6 +4023,7 @@ def _run_raw_slots(
     （ce98 socket.io-WS / biuping HTTP-SSE / aa1ping 纯 WS），只写 ``entries[key][source]``。"""
     fn = {
         "ce98": lambda ip, port: ce98_check(ip, port, timeout),
+        "ce98_ping": lambda ip, port: ce98_ping_check(ip, port, timeout),
         "biuping": lambda ip, port: biuping_check(ip, port, timeout),
         "biuping_ping": lambda ip, port: biuping_ping_check(ip, port, timeout),
         "aa1ping": lambda ip, port: aa1ping_check(ip, port, timeout),
@@ -4431,6 +4472,22 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("ce98 review: skipped (limit=0)", file=sys.stderr)
 
+    # ce98_ping（CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
+    # 默认 0=跳过，-1=全部未定键。
+    ce98_ping_limit = getattr(args, "ce98_ping_limit", 0)
+    if ce98_ping_limit != 0:
+        cands = _pending_cands()
+        if ce98_ping_limit is None or ce98_ping_limit < 0:
+            ce98_ping_limit = len(cands)
+        _run_raw_slots(
+            cands[:ce98_ping_limit], entries, args.timeout, "ce98_ping",
+            getattr(args, "ce98_ping_concurrency", 6),
+        )
+        print(f"ce98_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("ce98_ping review: skipped (limit=0)", file=sys.stderr)
+
     biuping_limit = getattr(args, "biuping_limit", 0)
     if biuping_limit != 0:
         cands = _pending_cands()
@@ -4680,6 +4737,10 @@ def main(argv=None) -> int:
                         help="98ce.com socket.io 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--ce98-concurrency", type=int, default=6,
                         help="98ce.com 并发复核数（默认 6）")
+    parser.add_argument("--ce98-ping-limit", type=int, default=0,
+                        help="98ce.com ICMP socket.io 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--ce98-ping-concurrency", type=int, default=6,
+                        help="98ce.com ICMP 并发复核数（默认 6）")
     parser.add_argument("--biuping-limit", type=int, default=0,
                         help="biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--biuping-concurrency", type=int, default=8,
