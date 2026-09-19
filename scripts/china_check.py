@@ -32,11 +32,12 @@
   为独立多节点源 ``itdog_ping``（``level`` 归一为 ``icmp`` 且不产
   ``isp_ms``，ICMP 不得进展示延迟，chinaz/coffee/jkping 同口径）。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+
-  `xxapi.cn`（北京节点，免 key）+ `jkapi.com/zz_tcping`（浙江宁波电信 TCP，
-  免 key）+ `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，
-  level=icmp，不进延迟显示/不产 isp_ms）——三只免额单节点源中任 2 ok
-  即双确认（single_ok≥2→reachable），check-host 的 250/h 配额不再是
-  可达判定的瓶颈。
+  `xxapi.cn`（北京节点 TCP，免 key）+ `xxapi.cn/api/ping`（CN-29：山东枣庄
+  BGP 节点 ICMP，免 key，`level=icmp`，echo 校验防垃圾回显）+
+  `jkapi.com/zz_tcping`（浙江宁波电信 TCP，免 key）+
+  `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，`level=icmp`，
+  不进延迟显示/不产 isp_ms）——四只免额单节点源中任 2 ok 即双确认
+  （single_ok≥2→reachable），check-host 的 250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
   判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
@@ -55,7 +56,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/antping_ping/
   tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
-  单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源（check_host/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -73,6 +74,7 @@ import argparse
 import base64
 import hashlib
 import http.cookiejar
+import ipaddress
 import json
 import logging
 import os
@@ -161,6 +163,22 @@ CH_HOUR_CAP = 250
 
 # xxapi.cn —— 北京服务器（免 key）
 XXAPI_URL = "https://v2.xxapi.cn/api/tcping"
+
+# v2.xxapi.cn（小小API）api/ping —— 与 tcping 同运营商、不同服务器
+# （山东枣庄BGP，tcping 为北京节点）的 ICMP ping，免 key（JSON）：
+#   ``?url=<ip>`` → ``{"code":200,"data":{"ip","server","time":"8.239ms"}}``；
+#   私网目标 → ``{"code":-4,"msg":"禁止访问该URL","data":""}``（后端拒绝，
+#   无信号，按 error fail-open，不定罪）；
+#   TEST-NET 类不可路由目标 → code 200 但 ``data.ip`` 与请求不一致
+#   （后端垃圾回显）→ echo 校验失败按 fail（该目标确不可达）。
+#   未知 code（如类比 tcping 的 -2 连接失败）一律按 error，
+#   生产若证实 -2 即死主机语义再映射为 fail（待验证）。
+# 2026-09-19 活体实证（CN-29）：223.5.5.5 → 8.239ms 枣庄；8.8.8.8 → 42ms；
+# 192.0.2.1/203.0.113.1 → echo 失配；10.255.255.1 → -4 拒绝。
+# 地理＋协议双差异（北京TCP/枣庄ICMP），中增益；server 为 BGP 机房
+# （运营商不明，不产 isp_ms）。回滚：摘 l2_xxapi 一行。
+XXPING_URL = "https://v2.xxapi.cn/api/ping"
+XXPING_TIMEOUT = 8.0  # 与 tcping 同口径：免额源不应拖慢整池 L2
 
 # jkapi.com（无铭 API）zz_tcping —— 浙江宁波电信 1 节点（免 key，纯文本报告）。
 # 单节点大陆实测，返回平均延迟 ms；目标不可达返回「所有测试均失败」。
@@ -258,6 +276,12 @@ ANTPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
 # sha256(f"{r}\n{salt}\n{request_hash}\n{nonce}") 前 d 位为 0 →
 # POST /api/probe/task（body 含 r/ts/p/nonce）拿 {k,r,u} → 连 wss:{u} 发
 # {"k":..,"r":..} → 收 hello/start/result/complete 逐节点结果（rtt_avg）。
+# 状态（CN-29 确认死亡）：/api/probe/task 现回 403
+# ``{"captcha":"altcha","error":"需要完成人机验证"}``（tcping/ping 双类型
+# 同墙）。ALTCHA 半破解：challenge 数学已复刻（SHA-256，maxNumber 50000，
+# ~0.1s；payload 须 base64，solve 200 ok:true），但会话绑定未过
+# （verify/task 仍 403；续攻方向见 docs/logic.md）。CI 配额已降为 0
+# （停烧，代码保留待复活；见 test_tcpingcn_stays_disabled_until_altcha）。
 TCPINGCN_URL = "https://www.tcping.cn"
 TCPINGCN_REQ_TIMEOUT = 15
 TCPINGCN_POW_DIFFICULTY = 15
@@ -786,6 +810,76 @@ def xxapi_check(ip: str, port: str, timeout: float) -> dict:
     except json.JSONDecodeError:
         return {"status": "error", "ok": False, "ms": None, "error": "bad json"}
     return parse_xxapi(payload)
+
+
+def parse_xxping(payload, ip: str) -> dict:
+    """``xxapi.cn api/ping`` → ``{"status", "ok", "ms", "error"}``。
+
+    - ``code==200`` + ``data.time`` 可解析 + echo 一致 → ok；
+    - echo 失配（IP 字面量输入但 ``data.ip`` 与请求不一致，后端垃圾回显，
+      实测 TEST-NET 恒触发）→ fail（该目标确不可达）；
+    - code 200 但无 time → inconclusive（-half 证据，不定罪）；
+    - code != 200（含 -4 禁止访问：后端拒绝测试）/坏载荷 → error
+      （fail-open，无信号）。
+    """
+    if not isinstance(payload, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad payload"}
+    if payload.get("code") != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"api code {payload.get('code')}"}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "empty data"}
+    m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*ms?\s*$",
+                 str(data.get("time") or ""))
+    if not m:
+        return {"status": "inconclusive", "ok": False, "ms": None,
+                "error": "no rtt"}
+    try:
+        ipaddress.ip_address(ip)
+        is_literal = True
+    except ValueError:
+        is_literal = False
+    if is_literal and data.get("ip") != ip:
+        return {"status": "fail", "ok": False, "ms": None,
+                "error": "echo mismatch"}
+    return {"status": "ok", "ok": True, "ms": float(m.group(1)), "error": ""}
+
+
+def xxping_check(ip: str, port: str, timeout: float) -> dict:
+    """xxapi 枣庄 BGP 单节点 ICMP 存活实测（免 key）。
+
+    ``port`` 仅为槽位接口一致保留（ping 无端口概念）。``level`` 恒标
+    ``"icmp"``（主机存活；显示层自动剔除），不产出 ``isp_ms``（BGP 机房
+    运营商不明）。无镜像（单 URL）。不抛未捕获异常。
+    """
+    _ = port
+    url = f"{XXPING_URL}?url={ip}"
+    try:
+        status, _, resp = request_follow(
+            url, {"User-Agent": UA, "Accept": "application/json"},
+            min(timeout, XXPING_TIMEOUT),
+        )
+    except urllib.error.HTTPError as e:
+        return {"status": "rate_limited" if e.code == 429 else "error",
+                "ok": False, "ms": None, "error": f"http {e.code}",
+                "level": None}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"http {status}", "level": None}
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad json", "level": None}
+    out = parse_xxping(payload, ip)
+    out["level"] = "icmp" if out.get("ok") else None
+    return out
 
 
 def pingpe_check(ip: str, port: str, timeout: float) -> dict:
@@ -2765,7 +2859,7 @@ def merge_verdict(sources: dict) -> dict:
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping", "xxping")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -2792,7 +2886,7 @@ def merge_verdict(sources: dict) -> dict:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
-    single_failed = [s for s in fail_sources if s in ("check_host", "xxapi", "jkapi", "jkping")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "xxapi", "jkapi", "jkping", "xxping")]
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
@@ -3320,15 +3414,16 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     _t0 = time.monotonic()
 
     def l2_xxapi(item):
-        """免额单节点源（xxapi 北京 + jkapi 宁波电信 TCP + jkping 宁波电信 ICMP）全池扫描，先建立候选集。
+        """免额单节点源（xxapi 北京 TCP + xxping 枣庄 ICMP + jkapi 宁波电信 TCP
+        + jkping 宁波电信 ICMP）全池扫描，先建立候选集。
 
-        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：三个源放进同池最多干到
+        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：四个源放进同池最多干到
         池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=56
-        实测三源均无 429），保键级数据一致性仍用逐键三源落盘。"""
+        实测各源均无 429），保键级数据一致性仍用逐键四源落盘。"""
         _, key, ip, port, _ = item
         out = {}
-        for name, fn in (("xxapi", xxapi_check), ("jkapi", jkapi_check),
-                         ("jkping", jkping_check)):
+        for name, fn in (("xxapi", xxapi_check), ("xxping", xxping_check),
+                         ("jkapi", jkapi_check), ("jkping", jkping_check)):
             try:
                 out[name] = fn(ip, port, args.timeout)
             except Exception as exc:
@@ -3354,15 +3449,16 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             logging.debug("l2 check_host failed for %s: %s", key, _err(exc))
             return key, {"check_host": {"status": "error", "ok": False, "ms": None, "error": _err(exc)}}
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
-    # - 免额三源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
+    # - 免额四源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
     # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         def _needs_ch(entry: dict) -> bool:
-            trio = [entry.get(n) or {} for n in ("xxapi", "jkapi", "jkping")]
-            if sum(1 for r in trio if r.get("status") == "ok") >= 2:
+            free = [entry.get(n) or {}
+                    for n in ("xxapi", "xxping", "jkapi", "jkping")]
+            if sum(1 for r in free if r.get("status") == "ok") >= 2:
                 return False
-            if any(r.get("status") == "fail" for r in trio):
+            if any(r.get("status") == "fail" for r in free):
                 return False
             return True
 

@@ -252,7 +252,10 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 **单节点实测（并发）**：
 
 - `check-host.cc`：呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 `--api-key` 可放宽
-- `xxapi.cn`：北京节点，免 key
+- `xxapi.cn`：北京节点 TCP，免 key
+- `xxapi.cn/api/ping`（CN-29）：山东枣庄 BGP 节点 ICMP，免 key（JSON；
+  `level=icmp`，echo 校验防垃圾回显，不产 `isp_ms`）。同运营商、不同城市
+  服务器＋不同协议（地理＋协议双差异，中增益）
 - `jkapi.com/zz_tcping`：浙江宁波电信 TCP 1 节点，免 key（纯文本报告；
   CN-26 起主站异常自动 failover 同站镜像 `api.jkapi.com`，429 不切换）
 - `jkapi.com/zz_ping`（CN-25 新增）：同站同节点 ICMP 主机存活，免 key
@@ -330,6 +333,20 @@ key 墙；`dm-tcping` 接口不存在。不接入）/`tool.lu`（首页零 ping/
 `antping_ping` 源（同站同节点、不同协议层，低增益-同站；`level=icmp`、
 不产 `isp_ms`；活体 223.5.5.5→178/179、192.0.2.1→186 全 fail；CI 200 键/
 8 并发启用）。
+CN-29 逆向复核（活体探针实证）：`tcping.cn` 确认死亡——`/api/probe/task`
+现回 403 `{"captcha":"altcha"}`（tcping/ping 双类型同墙）；ALTCHA 半破解
+（challenge 为标准 ALTCHA：SHA-256、maxNumber 50000、~0.1s 解出；
+payload 须 base64，solve 200 `ok:true`；但会话绑定未过，verify/task 仍
+403；续攻方向：task 体回显 payload / 对 widget 源码 payload 字段 /
+TLS 指纹差；验证方法：同脚本复测 solve→verify→task 全链）。CI 配额
+`--tcpingcn-limit 400→0` 停烧（代码保留待复活，锁测试
+`test_tcpingcn_stays_disabled_until_altcha`）。
+`api.qqsuu.cn`（`dm-ping` 需 ApiKey、`dm-tcping` 不存在。不接入）/
+`tool.lu`（无测量工具）/`api.oick.cn`（路径 404）/`ping-qyc`（WS-only）。
+同轮产出：`v2.xxapi.cn/api/ping`（`?url=` 参数经文档查得；山东枣庄 BGP
+ICMP，活体 223.5.5.5→8.239ms、8.8.8.8→42ms，TEST-NET 回显失配判 fail，
+私网 -4 拒绝按 error）接入为 `xxping` 源（地理＋协议双差异，中增益；
+L2 全池；`level=icmp`、不产 `isp_ms`）。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
@@ -342,7 +359,7 @@ key 墙；`dm-tcping` 接口不存在。不接入）/`tool.lu`（首页零 ping/
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/
    antping/antping_ping/tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable
+2. 单节点源（check_host/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
