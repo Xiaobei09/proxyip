@@ -268,6 +268,9 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
   （纯文本报告；`level=icmp`，不进 `cn_display_ms`/`isp_ms`，与 chinaz/coffee
   同口径；同镜像 failover）。同站不同协议：TCP 握手与 ICMP 回显失效模式正交（端口封 vs
   禁 Ping），独立性评级低增益-同站（新增协议层证据，非地理/ISP 覆盖）
+- `jkapi.com/zz_ssl`（CN-37 新增）：同站同节点 TLS 握手，免 key（JSON，
+  双镜像 failover；`level="tcp"` 保守，无 ms 只作布尔见证，不产 `isp_ms`）。
+  同站第三协议：TCP/ICMP/TLS 失效模式正交（端口封/禁 Ping/握手失败）
 
 **batch_tcping 补测（降级通道）**：
 
@@ -376,6 +379,10 @@ CN-36 逆向复核（活体探针实证）：`98ce.com/continuous-ping`（同站
 35 节点原生 isp：电信 11/移动 10/联通 8/多线 4/港澳台 1/海外 1；
 活体 35/35 出数）接入为 `ce98_ping` 源（参数化复用 socket.io 通道；
 `level=icmp`，不产 `isp_ms`；CI 200 键/6 并发）。
+CN-37 逆向复核（活体探针实证）：`jkapi.com/api/zz_ssl`（`?domain=&port=`，
+存活回完整证书链＋协议/套件/有效期，死亡回 `success:false`；镜像
+`api.jkapi.com` 同形存活）接入为 `jkssl` 源（同站第三协议 TCP/ICMP/TLS；
+`level="tcp"` 保守，无 ms；L2 全池；双镜像 failover）。
 CN-33 逆向复核（活体探针实证）：`tcptest.cn type=ping`（202 建任务，
 158 节点，`avg_ms`/`packets_received`  schema 与 tcping 同构）接入为
 `tcptest_ping` 源（同站 ICMP，裸 IP 目标；`level=icmp`、不产 `isp_ms`；
@@ -422,7 +429,7 @@ annotate 系，待验证），机制已根治。
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/
    antping/antping_ping/tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable
+2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping/jkssl）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、

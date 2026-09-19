@@ -634,6 +634,112 @@ class TestXxpingMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
 
+class TestParseJkssl(unittest.TestCase):
+    """CN-37：jkapi zz_ssl（宁波电信 TLS）JSON 解析。"""
+
+    def test_ok(self):
+        payload = {"success": True,
+                   "data": {"domain": "223.5.5.5",
+                            "current_protocol": "TLSv1.2"}}
+        result = cc.parse_jkssl(payload)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["ok"])
+        self.assertIsNone(result["ms"])  # 无 RTT，只作布尔见证
+
+    def test_fail(self):
+        payload = {"success": False,
+                   "message": "无法连接到 1.2.3.4:443 - Connection timed out"}
+        result = cc.parse_jkssl(payload)
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("timed out", result["error"])
+
+    def test_ok_without_data_inconclusive(self):
+        result = cc.parse_jkssl({"success": True})
+        self.assertEqual(result["status"], "inconclusive")
+
+    def test_bad(self):
+        self.assertEqual(cc.parse_jkssl({})["status"], "error")
+        self.assertEqual(cc.parse_jkssl(None)["status"], "error")
+        self.assertEqual(cc.parse_jkssl("x")["status"], "error")
+
+
+class TestJksslCheck(unittest.TestCase):
+    """CN-37：jkssl_check 双镜像＋level 语义（mock，不触网）。"""
+
+    _OK = (b'{"success":true,"data":{"domain":"223.5.5.5",'
+           b'"current_protocol":"TLSv1.2"}}')
+
+    def test_ok_level_tcp(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, self._OK)):
+            out = cc.jkssl_check("223.5.5.5", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["level"], "tcp")  # 保守：非 HTTP 内容
+        self.assertNotIn("isp_ms", out)
+
+    def test_query_carries_port(self):
+        """逐端口 TLS 实测：domain＋port 进查询串。"""
+        seen = []
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            seen.append(url)
+            return 200, {}, self._OK
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            cc.jkssl_check("1.2.3.4", "8443", 10)
+        self.assertIn("domain=1.2.3.4", seen[0])
+        self.assertIn("port=8443", seen[0])
+
+    def test_fail_no_level(self):
+        body = ('{"success":false,"message":"无法连接到 x - timeout"}'
+                ).encode()
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, body)):
+            out = cc.jkssl_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "fail")
+        self.assertIsNone(out["level"])
+
+    def test_rate_limited(self):
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=urllib.error.HTTPError(
+                                   "http://x", 429, "Too Many Requests",
+                                   {}, io.BytesIO(b""))):
+            out = cc.jkssl_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "rate_limited")
+
+    def test_bad_json(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, b"not json")):
+            out = cc.jkssl_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "error")
+
+
+class TestJksslMergeVerdict(unittest.TestCase):
+    """CN-37：jkssl 并入单节点交叉。"""
+
+    def test_double_ok_reachable(self):
+        sources = {
+            "jkssl": {"status": "ok", "ok": True, "ms": None,
+                      "level": "tcp"},
+            "xxapi": {"status": "ok", "ok": True, "ms": 43},
+        }
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["ms"], 43.0)
+
+    def test_alone_ok_uncertain(self):
+        sources = {"jkssl": {"status": "ok", "ok": True, "ms": None,
+                             "level": "tcp"}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_double_fail_unreachable(self):
+        sources = {
+            "jkssl": {"status": "fail", "ok": False, "ms": None},
+            "jkapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+
 class TestParseJkping(unittest.TestCase):
     """CN-25：jkapi zz_ping（宁波电信 ICMP）纯文本报告解析。"""
 
@@ -2895,6 +3001,9 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxping_check",
                                   return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "jkssl_check",
+                                  return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
 
@@ -2923,6 +3032,9 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxping_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "jkssl_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, _, _ = cc.run_measurements(items, self._args())
@@ -2953,6 +3065,9 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxping_check",
                                   return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "jkssl_check",
+                                  return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
 
@@ -2981,6 +3096,9 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                   return_value={"status": "ok", "ok": True,
                                                 "ms": 12.7, "level": "icmp"}), \
                 mock.patch.object(cc, "xxping_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "jkssl_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -3011,7 +3129,10 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxping_check",
                                   return_value={"status": "ok", "ok": True,
-                                                "ms": 42.1, "level": "icmp"}):
+                                                "ms": 42.1, "level": "icmp"}), \
+                mock.patch.object(cc, "jkssl_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
 
         self.assertEqual(mch.call_args_list, [])
@@ -3037,6 +3158,9 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxping_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "jkssl_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "checkhost_http_check",
@@ -3114,6 +3238,7 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
             mock.patch.object(cc, "jkapi_check", side_effect=self._boom),
             mock.patch.object(cc, "jkping_check", side_effect=self._boom),
             mock.patch.object(cc, "xxping_check", side_effect=self._boom),
+            mock.patch.object(cc, "jkssl_check", side_effect=self._boom),
             # check_host 也走槽位；抛异常同样须被隔离（l2_check_host 已有守卫）
             mock.patch.object(cc, "check_host_check", side_effect=self._boom),
             mock.patch.object(cc, "itdog_batch_run", return_value={}),
@@ -3127,7 +3252,8 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
                 p.stop()
         srcs = entries[item[1]]["sources"]
         for name in ("tcptest", "coffee", "pingloc", "antping", "tcpingcn",
-                     "chinaz", "pingpe", "check_host", "jkping", "xxping"):
+                     "chinaz", "pingpe", "check_host", "jkping", "xxping",
+                     "jkssl"):
             self.assertEqual(srcs[name]["status"], "error")
         # 全部错误 → 不误判（skipped/uncertain），且流程未中断
         self.assertIn(entries[item[1]]["verdict"], ("uncertain", "skipped"))
@@ -3179,6 +3305,9 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "xxping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "jkssl_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "check_host_check",
@@ -3244,6 +3373,9 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "xxping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "jkssl_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "check_host_check",
@@ -3907,6 +4039,9 @@ class TestItdogPingFallbackGuard(unittest.TestCase):
               mock.patch.object(cc, "xxping_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkssl_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
             entries, _, _ = cc.run_measurements(items, self._args())
 
@@ -3950,6 +4085,9 @@ class TestItdogPingFallbackGuard(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "xxping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkssl_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
@@ -4114,6 +4252,9 @@ class TestPingpeConcurrency(unittest.TestCase):
               mock.patch.object(cc, "xxping_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkssl_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
               mock.patch.object(cc, "checkhost_ping_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
@@ -4179,6 +4320,9 @@ class TestItdogTcpingFallbackGuard(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "xxping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkssl_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=failed_nodes) as mib:

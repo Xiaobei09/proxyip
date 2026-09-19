@@ -36,11 +36,13 @@
   BGP 节点 ICMP，免 key，`level=icmp`，echo 校验防垃圾回显）+
   `jkapi.com/zz_tcping`（浙江宁波电信 TCP，免 key）+
   `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，`level=icmp`，
-  不进延迟显示/不产 isp_ms）+ `check-host.cc/ping`（CN-31：同节点 ICMP，
+  不进延迟显示/不产 isp_ms）+ `jkapi.com/zz_ssl`（CN-37：同站同节点 TLS
+  握手，免 key，双镜像，`level="tcp"` 保守，无 ms，只作布尔见证）+
+  `check-host.cc/ping`（CN-31：同节点 ICMP，
   仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）+
   `check-host.cc/http`（CN-32：同节点 HTTPS 应用层确认，首个 http 级
   单节点源，仅 TCP-ok 且其余免额 0 ok 时追加猎取第二确认，共用配额）——
-  七只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
+  八只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
   的 250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
@@ -67,7 +69,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/antping/antping_ping/
   tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
-  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping/jkssl）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -217,6 +219,21 @@ JK_PING_URL = "https://jkapi.com/api/zz_ping"
 JK_PING_TIMEOUT = 8.0  # 与 zz_tcping 同口径：免额源不应拖慢整池 L2
 # 同站镜像（CN-26 活体实证：同报告格式、同节点；主站异常时 failover）。
 JK_PING_MIRROR_URL = "https://api.jkapi.com/api/zz_ping"
+
+# jkapi.com（无铭 API）zz_ssl —— 与 zz_tcping/zz_ping 同站同节点
+# （浙江宁波电信）的 TLS 握手探测，免 key（JSON，``?domain=<ip>&port=``）：
+#   存活 → ``{"success":true,"data":{certificate_chain,current_protocol,
+#   current_cipher,expiry_date,...}}``（完整 TLS 握手＋证书链）；
+#   死亡 → ``{"success":false,"message":"无法连接到 h:p - ..."}``。
+# 同站第三协议（TCP/ICMP/TLS）：TLS 握手成功强于裸 TCP 连通（真 TLS 栈
+# 应答），但非 HTTP 内容，按保守口径标 ``level="tcp"``；无 RTT 字段
+# （``time`` 为挂钟），``ms`` 恒空——只作布尔见证，不进延迟显示；
+# 不产 ``isp_ms``（单节点口径）。双镜像 failover（api.jkapi.com 同实证）。
+# 2026-09-19 活体实证（CN-37）：223.5.5.5:443 → 证书链；
+# 192.0.2.1:443 → success=false。回滚：摘 l2_xxapi 一行。
+JKSSL_URL = "https://jkapi.com/api/zz_ssl"
+JKSSL_MIRROR_URL = "https://api.jkapi.com/api/zz_ssl"
+JKSSL_TIMEOUT = 12.0  # TLS 握手＋证书转储慢于 TCP ping，单独放宽
 # 报告 footer 恒为「测试节点:浙江宁波电信」→ 中国电信（仅文档记录；
 # 本源 level=icmp，刻意不产出 isp_ms，防 ICMP RTT 污染 cn_fastest_ms，
 # 与 chinaz/coffee（ICMP 不出 isp_ms）同口径）。
@@ -661,6 +678,53 @@ def jkping_check(ip: str, port: str, timeout: float) -> dict:
     _, resp = out
     parsed = parse_jkping(resp.decode("utf-8", "replace"))
     parsed["level"] = "icmp" if parsed.get("ok") else None
+    return parsed
+
+
+def parse_jkssl(payload) -> dict:
+    """``jkapi.com zz_ssl`` JSON → ``{"status", "ok", "ms", "error"}``。
+
+    存活：``success==true`` 且 ``data`` 为字典（完整 TLS 握手＋证书链，
+    后端已验证）→ ok（无 RTT 字段，``ms`` 恒空，只作布尔见证）；
+    ``success==false`` → fail（``message`` 透出，如连接超时）；
+    其余 → error（fail-open）。
+    """
+    if not isinstance(payload, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad payload"}
+    if payload.get("success") is True:
+        if isinstance(payload.get("data"), dict):
+            return {"status": "ok", "ok": True, "ms": None, "error": ""}
+        return {"status": "inconclusive", "ok": False, "ms": None,
+                "error": "no cert data"}
+    if payload.get("success") is False:
+        return {"status": "fail", "ok": False, "ms": None,
+                "error": str(payload.get("message") or "unreachable")[:120]}
+    return {"status": "error", "ok": False, "ms": None,
+            "error": "bad payload"}
+
+
+def jkssl_check(ip: str, port: str, timeout: float) -> dict:
+    """jkapi 单节点 TLS 握手实测（浙江宁波电信，免 key，双镜像）。
+
+    ``port`` 原样透传（逐端口 TLS 实测）。``level`` 恒 ``"tcp"``
+    （保守：TLS 握手强于裸连通但非 HTTP 内容）；``ms`` 恒空；
+    不产 ``isp_ms``。不抛未捕获异常。
+    """
+    out = _jkapi_fetch(
+        [JKSSL_URL, JKSSL_MIRROR_URL], f"?domain={ip}&port={port}",
+        min(timeout, JKSSL_TIMEOUT),
+    )
+    if isinstance(out, dict):
+        return out
+    _, resp = out
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad json"}
+    parsed = parse_jkssl(payload)
+    parsed["level"] = "tcp" if parsed.get("ok") else None
     return parsed
 
 
@@ -3471,7 +3535,7 @@ def merge_verdict(sources: dict) -> dict:
       但**要求该源节点成功率达阈值**（itdog 系列按 ``ratio``≥0.5；
       ping.pe/tcpping 内部已是多数/60% 规则，视作满足）；比率过低的单源
       判定 → uncertain（单节点假阳性抑制）
-    - 单节点源（check_host/xxapi/jkapi）≥2 个失败 → unreachable
+    - 单节点源 ≥2 个失败 → unreachable（源集合见 single_failed 表）
     - 多节点源失败且所有单节点源也失败 → unreachable
     - 有确认源但也有失败源（冲突）→ 强证据多数裁定：强多节点确认或
       ≥2 单节点确认仍判 reachable（多数证据盖过单点证伪）；仅弱确认/
@@ -3507,7 +3571,7 @@ def merge_verdict(sources: dict) -> dict:
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "ce98_ping", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping", "jkssl")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -3534,7 +3598,7 @@ def merge_verdict(sources: dict) -> dict:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
-    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping", "jkssl")]
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
@@ -4071,15 +4135,16 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     def l2_xxapi(item):
         """免额单节点源（xxapi 北京 TCP + xxping 枣庄 ICMP + jkapi 宁波电信 TCP
-        + jkping 宁波电信 ICMP）全池扫描，先建立候选集。
+        + jkping 宁波电信 ICMP + jkssl 宁波电信 TLS）全池扫描，先建立候选集。
 
-        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：四个源放进同池最多干到
+        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：五个源放进同池最多干到
         池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=56
-        实测各源均无 429），保键级数据一致性仍用逐键四源落盘。"""
+        实测各源均无 429），保键级数据一致性仍用逐键五源落盘。"""
         _, key, ip, port, _ = item
         out = {}
         for name, fn in (("xxapi", xxapi_check), ("xxping", xxping_check),
-                         ("jkapi", jkapi_check), ("jkping", jkping_check)):
+                         ("jkapi", jkapi_check), ("jkping", jkping_check),
+                         ("jkssl", jkssl_check)):
             try:
                 out[name] = fn(ip, port, args.timeout)
             except Exception as exc:
@@ -4136,13 +4201,13 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                         "error": _err(exc), "level": None}
         return key, out
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
-    # - 免额四源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
+    # - 免额五源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
     # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         def _needs_ch(entry: dict) -> bool:
             free = [entry.get(n) or {}
-                    for n in ("xxapi", "xxping", "jkapi", "jkping")]
+                    for n in ("xxapi", "xxping", "jkapi", "jkping", "jkssl")]
             if sum(1 for r in free if r.get("status") == "ok") >= 2:
                 return False
             if any(r.get("status") == "fail" for r in free):
