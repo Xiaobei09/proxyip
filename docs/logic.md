@@ -285,7 +285,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 - `tcptest.cn`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
 - `ip.net.coffee`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
-- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
+- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`ping.aa1.cn`（CN-27：独立运营商免费 API 站，WS 纯 JSON 零鉴权，28 城三网 TCPing，`operator` 原生分电信/联通/移动，`domain` 携真实端口逐端口实测；CI 以 200 键/6 并发启用）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
 - `tcpping.cn`：多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过
 
@@ -312,6 +312,15 @@ China/节点提及，`public-us` 美区 playground，无 CN 覆盖，不接入�
 `api.xxapi.cn`/`xxapi.cn`（TLS 中断/404，无第二 vantage）。
 同轮产出：`itdog.cn/batch_ping`（提交/WS/记录与 batch 系全同构，无新增
 反爬动作）接入为 `itdog_ping` 源；`api.jkapi.com` 双镜像 failover。
+CN-27 逆向复核（活体探针实证）：`ping.aizhan.com`（提交协议裸露：`POST
+/api/node` 会话 CSRF＋`POST /api/node-data` 轮询，全程无 captcha 参数，
+但匿名仅返回 1 个赞助节点广东深圳[电信]且 12s 轮询无数据，`type=tcping`
+亦同单节点、无真实 TCP 能力，仍阻塞）；`ping.cn`（TLS 主机名错乱，
+oioweb 同类，不接入）；`api.boce.com`（404）；`itdog batch_https/dns`
+（软 404 回首页，不存在）；`ping.aa1.cn` 全套工具矩阵探明（见下）。
+同轮产出：`ping.aa1.cn/tcping`（`wss://ping-qyc.aa1.cn/tcping` 纯 JSON
+零鉴权，28 城三网，`domain` 携端口实测）接入为 `aa1ping` 源（独立运营商，
+10 项已过，CI 200 键/6 并发启用）。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
@@ -322,7 +331,7 @@ China/节点提及，`public-us` 美区 playground，无 CN 覆盖，不接入�
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/
-   antping/tcpingcn/chinaz/ce98/biuping/boce/ipip/17ce/ping0/wansui）任一
+   antping/tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
 2. 单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain

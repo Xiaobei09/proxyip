@@ -2683,6 +2683,171 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
         self.assertEqual(ping_res["status"], "error")  # 替身回 error，原样落地
 
 
+class TestAa1pingSource(unittest.TestCase):
+    """CN-27：ping.aa1.cn WS TCPing 适配器单测（mock _WebSocket，不触网）。"""
+
+    class _FakeWS:
+        def __init__(self, frames):
+            self._frames = list(frames)
+            self.sent = []
+            self.closed = False
+
+        def settimeout(self, t):
+            pass
+
+        def send_text(self, payload):
+            self.sent.append(payload)
+
+        def read(self):
+            if self._frames:
+                return self._frames.pop(0)
+            return "timeout", None
+
+        def close(self):
+            self.closed = True
+
+    def _cities(self, n=3):
+        return [{"city": f"城{i}", "operator": "电信"} for i in range(n)]
+
+    def _res(self, city, op, delay):
+        return {"province": "省", "city": city, "operator": op,
+                "tcping_delay": delay, "packet_test": 0,
+                "ip_address": "1.2.3.4:443", "geo_location": "中国"}
+
+    def _run(self, frames):
+        with mock.patch.object(cc, "_WebSocket",
+                               return_value=self._FakeWS(frames)):
+            return cc.aa1ping_check("1.2.3.4", "443", 10)
+
+    def test_all_ok_with_isp_ms(self):
+        frames = [
+            ("evt", {"status": "success",
+                     "city_list": self._cities(3), "jc_Count": 3}),
+            ("evt", {"status": "success", "results": [
+                self._res("城0", "电信", 5.0),
+                self._res("城1", "联通", 9.0),
+                self._res("城2", "移动", 12.0)]}),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 3)
+        self.assertEqual(out["nodes"], 3)
+        self.assertEqual(out["ms"], 5.0)
+        self.assertEqual(out["level"], "tcp")
+        self.assertEqual(out["ratio"], 1.0)
+        self.assertEqual(out["isp_ms"],
+                         {"中国电信": 5.0, "中国联通": 9.0, "中国移动": 12.0})
+
+    def test_unknown_operator_dropped_from_isp(self):
+        frames = [
+            ("evt", {"status": "success",
+                     "city_list": self._cities(2), "jc_Count": 2}),
+            ("evt", {"status": "success", "results": [
+                self._res("城0", "电信", 5.0),
+                self._res("城1", "多线", 4.0)]}),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["isp_ms"], {"中国电信": 5.0})
+
+    def test_all_fail(self):
+        frames = [
+            ("evt", {"status": "success",
+                     "city_list": self._cities(2), "jc_Count": 2}),
+            ("evt", {"status": "success", "results": [
+                dict(self._res("城0", "电信", 0.0), packet_test=1),
+                dict(self._res("城1", "联通", 0.0), packet_test=1)]}),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ok_nodes"], 0)
+        self.assertEqual(out["ratio"], 0.0)
+
+    def test_duplicate_city_deduped(self):
+        frames = [
+            ("evt", {"status": "success",
+                     "city_list": self._cities(1), "jc_Count": 1}),
+            ("evt", {"status": "success", "results": [
+                self._res("城0", "电信", 5.0)]}),
+            ("evt", {"status": "success", "results": [
+                self._res("城0", "电信", 6.0)]}),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["ok_nodes"], 1)
+        self.assertEqual(out["nodes"], 1)
+
+    def test_ws_connect_fail(self):
+        with mock.patch.object(cc, "_WebSocket",
+                               side_effect=RuntimeError("boom")):
+            out = cc.aa1ping_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "error")
+        self.assertFalse(out["ok"])
+
+    def test_sends_port_honoring_target(self):
+        """domain 必须携带真实端口（逐端口实测，活体已证回显 ip:port）。"""
+        fake = self._FakeWS([
+            ("evt", {"status": "success",
+                     "city_list": self._cities(1), "jc_Count": 1}),
+            ("evt", {"status": "success", "results": [
+                self._res("城0", "电信", 5.0)]}),
+        ])
+        with mock.patch.object(cc, "_WebSocket", return_value=fake):
+            cc.aa1ping_check("1.2.3.4", "8443", 10)
+        sent = json.loads(fake.sent[0])
+        self.assertEqual(sent["domain"], "1.2.3.4:8443")
+        self.assertEqual(sent["lines"], cc.AA1PING_LINES)
+
+
+class TestAa1pingMergeVerdict(unittest.TestCase):
+    """CN-27：aa1ping 并入多节点合成判定。"""
+
+    def _ok(self, delay=30.0, nodes=28, ratio=1.0, isp=None):
+        src = {"status": "ok", "ok": True, "ms": delay, "level": "tcp",
+               "ok_nodes": nodes, "nodes": nodes, "ratio": ratio}
+        if isp is not None:
+            src["isp_ms"] = isp
+        return src
+
+    def test_strong_reachable(self):
+        self.assertEqual(
+            cc.merge_verdict({"aa1ping": self._ok()})["verdict"], "reachable")
+
+    def test_weak_ratio_uncertain(self):
+        src = self._ok(nodes=28, ratio=0.04)
+        src["ok_nodes"] = 1
+        self.assertEqual(
+            cc.merge_verdict({"aa1ping": src})["verdict"], "uncertain")
+
+    def test_degenerate_sample_not_strong(self):
+        src = self._ok(nodes=1, ratio=1.0)
+        src["ok_nodes"] = 1
+        self.assertEqual(
+            cc.merge_verdict({"aa1ping": src})["verdict"], "uncertain")
+
+    def test_fail_plus_single_fail_unreachable(self):
+        sources = {
+            "aa1ping": {"status": "fail", "ok": False, "ms": None,
+                        "ok_nodes": 0, "nodes": 28, "ratio": 0.0},
+            "xxapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+    def test_per_source_ratio_threshold_wired(self):
+        """aa1ping 阈值须真正接线（_SOURCE_MIN_RATIO 缺项会静默回退默认）。"""
+        src = self._ok(nodes=10, ratio=0.7)
+        src["ok_nodes"] = 7
+        self.assertEqual(cc.merge_verdict({"aa1ping": dict(src)})["verdict"],
+                         "reachable")
+        old = cc._SOURCE_MIN_RATIO["aa1ping"]
+        cc._SOURCE_MIN_RATIO["aa1ping"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"aa1ping": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["aa1ping"] = old
+
+
 class TestItdogPingFallbackGuard(unittest.TestCase):
     """CN-26：batch_ping 只补 error/rate_limited 键；TCP 实测 fail 的键
     不用 ICMP 主机存活翻案（保守）；整站失败时不空转。"""
@@ -3677,7 +3842,8 @@ class TestCiEnabledSources(unittest.TestCase):
         wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
             encoding="utf-8")
         readme = (root / "README.md").read_text(encoding="utf-8")
-        for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping")):
+        for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping"),
+                           ("aa1ping", "aa1ping")):
             m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
                           wf, re.S)
             self.assertIsNotNone(m, f"CI 未启用 {name}")
@@ -3687,9 +3853,22 @@ class TestCiEnabledSources(unittest.TestCase):
                 re.compile(re.escape(f"{name}（{limit} 键/{conc} 并发")),
                 f"README 链与 CI 配额不一致：{name}")
 
+    def test_aa1ping_cli_default_stays_opt_in(self):
+        """CN-27：aa1ping 本地默认 opt-in（0/6），只在 CI 显式启用；
+        与 ce98/biuding 毕业路径一致。"""
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--aa1ping-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "aa1ping-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--aa1ping-concurrency", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "aa1ping-concurrency 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 6)
+
     def test_all_enabled_l3_limits_present(self):
         """CN-12：CI 启用的全部 L3 复核源配额原地锁定（tcptest/coffee/
-        pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding），防 CI 行
+        pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding/aa1ping），防 CI 行
         误删某源致覆盖无声缩水。"""
         wf = (Path(__file__).resolve().parent.parent / ".github"
               / "workflows" / "china-check.yml").read_text(encoding="utf-8")
@@ -3697,7 +3876,8 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--pingloc-limit 600", "--antping-limit 500",
                      "--tcpingcn-limit 400", "--chinaz-limit 200",
                      "--pingpe-limit 300",
-                     "--ce98-limit 200", "--biuping-limit 200"):
+                     "--ce98-limit 200", "--biuping-limit 200",
+                     "--aa1ping-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
     def test_ci_flags_all_defined(self):
@@ -3736,6 +3916,12 @@ class TestCiEnabledSources(unittest.TestCase):
         err = entries["1.2.3.4:443#US"]["biuping"]
         self.assertEqual(err["status"], "error")
         self.assertEqual(err["error"], "RuntimeError")
+        with mock.patch.object(
+                cc, "aa1ping_check",
+                return_value={"status": "ok", "ok": True}) as m:
+            cc._run_raw_slots(cands, entries, 5, "aa1ping", 2)
+            m.assert_called_once_with("1.2.3.4", "443", 5)
+        self.assertEqual(entries["1.2.3.4:443#US"]["aa1ping"]["status"], "ok")
 
 
 if __name__ == "__main__":

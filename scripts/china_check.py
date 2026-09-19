@@ -42,20 +42,24 @@
   判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
   `biuping.com`（HTTP SSE，约 39 个 ISP×节点测量单元 TCPing，零 key）；可选
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
+  `ping.aa1.cn`（CN-27：独立运营商免费API 站 TCPing，WS 纯 JSON 无鉴权，
+  28 城三网节点原生 per-ISP，端口直连）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
 - 2026-09 穷尽复核（CN-19/21/22）：boce（API 404＋AliyunCaptcha）、ipip
   （POST 405）、17ce（路由迁移）、ping0（Turnstile＋端点 404）、wansui
   （TLS 无 SAN）、aizhan（AliyunCaptcha）、站长测速（captcha＋JS 内聚）、
   check-host.net（零 CN）、dnschecker（403）、pingtool（404 无 CN）、
-  oioweb/uomg（TLS 坏）。免 key 大陆池穷尽；新源需用户 key 或定向预算。
+  oioweb/uomg（TLS 坏）。CN-25/26/27 复核见 docs/logic.md（jk 同站第二协议/
+  itdog batch_ping 已接入；boce/17ce/aizhan 经逆向确认仍阻塞；ping.sx 零 CN）。
 
 保守判定逻辑（merge_verdict）：
-  多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/antping/
-  tcpingcn/chinaz/ce98/biuping）任一 ok 且成功率达标 → reachable；
-  单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
-  check_host / xxapi / jkapi 单节点源 ≥2 个 fail → unreachable；
+  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/
+  tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
+  单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
-  证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"。
+  证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
+  仅 ICMP 主机存活 → "icmp"。
 
 跨轮稳定性：写 china.json 前读取上一轮结果，per-key 维护连续可达轮数
 ``streak``；采样置顶上轮 reachable（续保复检，防覆盖波动把稳定 CN 键
@@ -294,6 +298,21 @@ BIUPING_REQ_TIMEOUT = 15
 BIUPING_SSE_TIMEOUT = 20.0
 BIUPING_MIN_RATIO = ITDOG_MIN_RATIO
 
+# ping.aa1.cn —— 独立运营商（免费API 站）多节点 TCPing（纯 WS JSON，零 key/零鉴权）：
+# WSS wss://ping-qyc.aa1.cn/tcping → 发 {"action":"ping","domain":"<ip>:<port>",
+# "lines":"1,2,3","dns_type":"isp","dns_server":""} → 先收 {status,city_list}
+# （28 城）→ 逐节点 {status,results:[{province,city,operator,tcping_delay,
+# packet_test,ip_address,geo_location}]}。domain 携带端口且被回显/aizhan式
+# 逐端口实测（活体实证 223.5.5.5:443 出数；192.0.2.1:443 全 delay=0）。
+# operator 原生分电信/联通/移动（另有多线/海外行，city 聚合时保留，
+# isp_ms 只收三网）→ per-ISP 天然成立。lines 取 "1,2,3"（三网，与页默认一致）。
+# CN-27 活体实证 2026-09-19；回滚：摘 _run_raw_slots 派发与 CI flag。
+AA1PING_WS = "wss://ping-qyc.aa1.cn/tcping"
+AA1PING_REQ_TIMEOUT = 15
+AA1PING_WS_IDLE = 40.0
+AA1PING_LINES = "1,2,3"
+AA1PING_MIN_RATIO = ITDOG_MIN_RATIO
+
 # boce.com —— 博采网拨测（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
 # GET https://www.boce.com/ 拿壳页 cookie（JSESSIONID）与《csrf token（meta "csrf-param" 对应的
 # 蕴含值通常出现在 <meta name="csrf-token"> 或函数参数）。
@@ -353,6 +372,7 @@ _SOURCE_MIN_RATIO = {
     "17ce": SEVENTEEN_MIN_RATIO,
     "ping0": PING0_MIN_RATIO,
     "wansui": WANSUI_MIN_RATIO,
+    "aa1ping": AA1PING_MIN_RATIO,
 }
 
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
@@ -2129,6 +2149,91 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
     }
 
 
+def aa1ping_check(ip: str, port: str, timeout: float) -> dict:
+    """ping.aa1.cn 单键多节点 TCPing（纯 WS JSON，零 key/零鉴权）。
+
+    ``domain`` 携带真实端口逐端口实测（``ip:port`` 原样回显）；节点成功 =
+    ``tcping_delay > 0``（失败形为 ``delay=0.0 + packet_test=1``），``ms``
+    取成功节点最小 delay。``operator`` 原生电信/联通/移动 → 归一出
+    ``isp_ms``（多线/海外行不贡献运营商视角，_cn_isp_label 同口径）。
+    纯 TCP → ``level="tcp"``。city_list 给出期望节点数，收齐即早退，
+    否则 idle 超时收尾（ce98 同模式）。
+    """
+    target = f"{ip}:{port}" if port else ip
+    try:
+        ws = _WebSocket(AA1PING_WS, timeout=AA1PING_WS_IDLE)
+        ws.send_text(json.dumps({
+            "action": "ping", "domain": target, "lines": AA1PING_LINES,
+            "dns_type": "isp", "dns_server": "",
+        }))
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    seen: set = set()
+    expected = None
+    ok_nodes = 0
+    ms_values: list[float] = []
+    isp_best: dict[str, float] = {}
+    deadline = time.monotonic() + AA1PING_WS_IDLE
+    while time.monotonic() < deadline:
+        ws.settimeout(max(0.5, min(AA1PING_WS_IDLE, deadline - time.monotonic())))
+        try:
+            kind, payload = ws.read()
+        except Exception:
+            break
+        if kind in ("err", "close", "closed"):
+            break
+        if kind == "timeout":
+            break
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("status") != "success":
+            continue
+        cities = payload.get("city_list")
+        if isinstance(cities, list) and expected is None:
+            expected = len(cities)
+        results = payload.get("results")
+        if not isinstance(results, list):
+            continue
+        for res in results:
+            if not isinstance(res, dict):
+                continue
+            key = res.get("city") or res.get("province")
+            if key is None or key in seen:
+                continue
+            seen.add(key)
+            try:
+                delay = float(res.get("tcping_delay"))
+            except (TypeError, ValueError):
+                delay = 0.0
+            if delay > 0:
+                ok_nodes += 1
+                ms_values.append(delay)
+                isp = _cn_isp_label(res.get("operator") or "")
+                if isp and delay < isp_best.get(isp, float("inf")):
+                    isp_best[isp] = delay
+        if expected and len(seen) >= expected:
+            break
+    ws.close()
+    nodes = len(seen) or 1
+    if ok_nodes:
+        out = {
+            "status": "ok", "ok": True,
+            "ms": round(min(ms_values), 1), "error": "",
+            "level": "tcp", "ok_nodes": ok_nodes, "nodes": nodes,
+            "ratio": round(ok_nodes / nodes, 3) if nodes else None,
+        }
+        if isp_best:
+            out["isp_ms"] = {k: round(v, 1) for k, v in isp_best.items()}
+        return out
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
+    }
+
+
 def boce_check(ip: str, port: str, timeout: float) -> dict:
     """boce.com 博采拨测 多节点 TCPing（cookie-session + CSRF token 反爬）。
 
@@ -2637,7 +2742,7 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping",
+        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping")]
 
@@ -2671,7 +2776,7 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping",
+        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
@@ -3145,10 +3250,11 @@ def _run_raw_slots(
     candidates: list, entries: dict, timeout: float, source: str, concurrency: int
 ) -> None:
     """多节点复核通用 slot：按 ``source`` 派发到对应的多节点 check 函数
-    （ce98 socket.io-WS / biuping HTTP-SSE），只写 ``entries[key][source]``。"""
+    （ce98 socket.io-WS / biuping HTTP-SSE / aa1ping 纯 WS），只写 ``entries[key][source]``。"""
     fn = {
         "ce98": lambda ip, port: ce98_check(ip, port, timeout),
         "biuping": lambda ip, port: biuping_check(ip, port, timeout),
+        "aa1ping": lambda ip, port: aa1ping_check(ip, port, timeout),
         "boce": lambda ip, port: boce_check(ip, port, timeout),
         "ipip": lambda ip, port: ipip_check(ip, port, timeout),
         "17ce": lambda ip, port: seventeen_check(ip, port, timeout),
@@ -3491,6 +3597,22 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("biuping review: skipped (limit=0)", file=sys.stderr)
 
+    # aa1ping（CN-27）：独立运营商 28 城三网 TCPing（纯 WS，零 key）。
+    # 达标即可独立判 reachable；默认 0=跳过，-1=全部未定键。
+    aa1ping_limit = getattr(args, "aa1ping_limit", 0)
+    if aa1ping_limit != 0:
+        cands = _pending_cands()
+        if aa1ping_limit is None or aa1ping_limit < 0:
+            aa1ping_limit = len(cands)
+        _run_raw_slots(
+            cands[:aa1ping_limit], entries, args.timeout, "aa1ping",
+            getattr(args, "aa1ping_concurrency", 6),
+        )
+        print(f"aa1ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("aa1ping review: skipped (limit=0)", file=sys.stderr)
+
     # 新增五个多节点 TCP 复核源（全部大陆多节点、遵循各站反爬协议）：
     # boce（cookie-session+CSRF）、ipip（POST-JSON）、17ce（token 签章）、
     # ping0（header-token）、wansui（cookie-token+WS）。各自按 --<name>-limit
@@ -3683,6 +3805,10 @@ def main(argv=None) -> int:
                         help="biuping.com SSE 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--biuping-concurrency", type=int, default=8,
                         help="biuping.com 并发复核数（默认 8）")
+    parser.add_argument("--aa1ping-limit", type=int, default=0,
+                        help="ping.aa1.cn WS 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--aa1ping-concurrency", type=int, default=6,
+                        help="ping.aa1.cn 并发复核数（默认 6）")
     parser.add_argument("--boce-limit", type=int, default=0,
                         help="boce.com 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--boce-concurrency", type=int, default=6,
