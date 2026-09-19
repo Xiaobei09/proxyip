@@ -255,6 +255,9 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 - `check-host.cc/ping`（CN-31）：同节点 ICMP ping，仅 TCP 判 fail 时追加
   消歧（TCP-fail＋ping-ok→uncertain，主机存活；双 fail→置信定罪），共用
   250/h 配额，`level=icmp`，不产 `isp_ms`
+- `check-host.cc/http`（CN-32）：同节点 HTTPS 应用层确认，首个 http 级
+  单节点源（CF 边缘回 4xx 亦算完整往返）；仅 TCP-ok 且其余免额 0 ok 时
+  追加猎取第二确认（uncertain→reachable），共用配额，不产 `isp_ms`
 - `xxapi.cn`：北京节点 TCP，免 key
 - `xxapi.cn/api/ping`（CN-29）：山东枣庄 BGP 节点 ICMP，免 key（JSON；
   `level=icmp`，echo 校验防垃圾回显，不产 `isp_ms`）。同运营商、不同城市
@@ -366,6 +369,18 @@ CN-31 逆向复核（活体探针实证）：`ping.aa1.cn/batch_ping`（WS 即�
 （需 Key，不接入）。同轮产出：`api.check-host.cc/ping`（同节点 ICMP，
 `checks[0]={status,connectiontime}` 活体出数）接入为 `checkhost_ping`
 源（仅 TCP-fail 追加消歧，共用配额；`level=icmp`、不产 `isp_ms`）。
+CN-32 事故复盘（更新链连续失败）：`data/download/countries/` 下 75 个
+valid 式 `<CC>/all.txt` 目录（f5725f9f4 误入库）炸掉 `write_outputs`
+残留清理（`stale.unlink()` 遇目录抛 IsADirectoryError；worktree 实证
+复现＋修复验证 exit 0）。根因：`reconcile_views` 的回填按 valid 布局
+写分裂，`reconcile_download_tree` 误将其用于扁平 download 树。修复：
+75 目录删除＋回填加 `backfill` 开关（download 侧 False）＋残留清理
+遇目录跳过告警（fail-open）。创建向量未完全锁定（提交信息为
+annotate 系，待验证），机制已根治。
+同轮产出：`api.check-host.cc/http`（`checks[0]={status,http_status}`
+活体：404 亦完整往返）接入为 `checkhost_http` 源（同节点第三协议；
+仅 TCP-ok 且其余免额 0 ok 时猎取第二确认；`http_status>0`→`level=http`
+首个 http 单节点源，无应答但连通→`tcp`；不产 `isp_ms`）。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
@@ -378,7 +393,7 @@ CN-31 逆向复核（活体探针实证）：`ping.aa1.cn/batch_ping`（WS 即�
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/
    antping/antping_ping/tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（check_host/checkhost_ping/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable
+2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、

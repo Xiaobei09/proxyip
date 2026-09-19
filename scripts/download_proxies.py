@@ -608,6 +608,20 @@ def write_entries_list(path: Path, entries) -> None:
         path.unlink()
 
 
+def _remove_stale(stale: Path) -> None:
+    """残留清理：目录残留跳过并告警，不抛 IsADirectoryError 掀翻整轮。
+
+    实证（CN-32）：valid 式 ``<CC>/all.txt`` 目录曾误入 download 树并入库，
+    ``stale.unlink()`` 见目录即崩，更新链连续失败。未知残留宁可保留告警、
+    不可中断整轮下载（fail-open）；清理目录属破坏性操作，须人工复核。
+    """
+    if stale.is_dir():
+        print(f"WARNING: unexpected directory residue kept: {stale}",
+              file=sys.stderr)
+        return
+    stale.unlink()
+
+
 def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> tuple[dict, set]:
     print("[3/3] Writing output files ...")
     # 只维护 Cloudflare 边缘常用端口：其余端口桶（来自 zip 回退或 extra 源
@@ -638,7 +652,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
         expected = {f"{c}.txt" for c in by_port.get(port_dir.name, {})}
         for stale in port_dir.iterdir():
             if stale.name not in expected:
-                stale.unlink()
+                _remove_stale(stale)
         if not any(port_dir.iterdir()):
             port_dir.rmdir()
 
@@ -665,7 +679,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     expected_countries = {f"{c}.txt" for c in by_country}
     for stale in COUNTRIES_DIR.iterdir():
         if stale.name not in expected_countries:
-            stale.unlink()
+            _remove_stale(stale)
 
     PORTS_DIR.mkdir(parents=True, exist_ok=True)
     for port in sorted(by_port_all, key=int):
@@ -676,7 +690,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     expected_ports = {f"{p}.txt" for p in by_port_all}
     for stale in PORTS_DIR.iterdir():
         if stale.name not in expected_ports:
-            stale.unlink()
+            _remove_stale(stale)
 
     SETS_DIR.mkdir(parents=True, exist_ok=True)
     set_counts: dict[str, int] = {}
@@ -701,7 +715,7 @@ def write_outputs(by_port: dict, per_country_limit: int = PER_COUNTRY_LIMIT) -> 
     expected_sets = {f"{n}.txt" for n in all_sets} | {f"{n}_ltd.txt" for n in all_sets}
     for stale in SETS_DIR.iterdir():
         if stale.name not in expected_sets:
-            stale.unlink()
+            _remove_stale(stale)
 
     all_entries = sorted(
         {e for entries in by_country.values() for e in entries} | all_only,
@@ -734,10 +748,15 @@ def reconcile_download_tree(data_dir: Path = DOWNLOAD_DIR) -> int:
     崩溃式部分提交（下载步中途失败、commit 步仍照常提交的半个树）曾把
     非 CF 端口旧文件长期留在 ``download/ports/``；此函数让下一轮完整运行
     自动还原一致性。
+
+    注意（CN-32）：此处必须 ``backfill=False``——download 树是扁平
+    ``<CC>.txt`` 布局，valid 式回填会写出 ``<CC>/all.txt`` 目录并入库，
+    进而炸掉下轮 ``write_outputs`` 残留清理（``IsADirectoryError``，
+    2026-09-19 更新链连续失败实证）。download 树每轮全量重写，只修剪。
     """
     from annotate_classify import reconcile_views
 
-    removed = reconcile_views(data_dir)
+    removed = reconcile_views(data_dir, backfill=False)
     for sub in ("ports", "countries", "sets"):
         base = data_dir / sub
         if not base.is_dir():

@@ -227,6 +227,80 @@ class TestWriteOutputs(unittest.TestCase):
             self.assertFalse(f.exists())
 
 
+    def test_write_outputs_survives_stale_subdir(self):
+        """CN-32：残留清理遇目录残留不崩（2026-09-19 更新链实证：
+        valid 式 <CC>/all.txt 目录误入 download 树，stale.unlink 抛
+        IsADirectoryError 掀翻整轮）。目录保留＋告警，正常文件照常写。"""
+        import tempfile
+
+        base = Path(tempfile.mkdtemp(prefix="dp_"))
+        for k in self.orig:
+            if k in ("ALL_FILE", "ALL_LTD_FILE"):
+                setattr(dp, k, base / k.lower().replace("_file", ".txt"))
+            else:
+                setattr(dp, k, base / k.lower())
+        dp.ALL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        (dp.COUNTRIES_DIR).mkdir(parents=True, exist_ok=True)
+        (dp.COUNTRIES_DIR / "ZA").mkdir()  # bogus 目录残留
+        (dp.COUNTRIES_DIR / "ZA" / "all.txt").write_text("9.9.9.9:443#ZA\n")
+        stats, _ = dp.write_outputs({"443": {"US": ["1.1.1.1"]}},
+                                     per_country_limit=0)
+        self.assertTrue((dp.COUNTRIES_DIR / "ZA").is_dir())  # 保留不删
+        self.assertTrue((dp.COUNTRIES_DIR / "US.txt").exists())
+        self.assertEqual(stats["__total__"], 1)
+
+
+class TestDownloadTreeBackfillGuard(unittest.TestCase):
+    """CN-32：download 树禁用 valid 式回填（越界根因），残留目录跳过。
+
+    实证：reconcile_views(DOWNLOAD_DIR) 的回填曾写出 75 个 <CC>/all.txt
+    目录并入库，其后每轮 write_outputs 残留清理见目录即崩。
+    """
+
+    def _tree(self):
+        import tempfile
+
+        d = Path(tempfile.mkdtemp(prefix="dp_guard_"))
+        dl = d / "download"
+        (dl / "countries").mkdir(parents=True)
+        (dl / "all.txt").write_text("1.1.1.1:443#US\n", encoding="utf-8")
+        (dl / "countries" / "US.txt").write_text("1.1.1.1:443#US\n",
+                                                 encoding="utf-8")
+        return dl
+
+    def test_reconcile_download_tree_creates_no_dirs(self):
+        dl = self._tree()
+        removed = dp.reconcile_download_tree(dl)
+        self.assertEqual(removed, 0)
+        self.assertFalse((dl / "countries" / "US").exists())
+        self.assertTrue((dl / "countries" / "US.txt").exists())
+
+    def test_reconcile_views_backfill_flag(self):
+        from annotate_classify import reconcile_views
+
+        dl = self._tree()
+        reconcile_views(dl, backfill=False)
+        self.assertFalse((dl / "countries" / "US").exists())
+        # 默认 True 保持 valid 树行为（回填建目录——证明开关真实有效）
+        (dl / "all.txt").write_text(
+            "1.1.1.1:443#US\n2.2.2.2:443#US\n", encoding="utf-8")
+        reconcile_views(dl, backfill=True)
+        self.assertTrue((dl / "countries" / "US" / "all.txt").exists())
+
+    def test_remove_stale_skips_directories(self):
+        import tempfile
+
+        d = Path(tempfile.mkdtemp(prefix="dp_stale_"))
+        sub = d / "ZA"
+        sub.mkdir()
+        f = d / "old.txt"
+        f.write_text("x")
+        dp._remove_stale(sub)  # 不抛
+        self.assertTrue(sub.exists())  # 目录保留待人工复核
+        dp._remove_stale(f)
+        self.assertFalse(f.exists())
+
+
 class TestExtractJson(unittest.TestCase):
     def _json(self, entries: list[dict]) -> bytes:
         return json.dumps({"generated_at": "2026-08-15T00:00:00Z", "data": entries}).encode()

@@ -288,7 +288,7 @@ def verify_country_split(valid_dir: Path) -> dict:
     }
 
 
-def reconcile_views(valid_dir: Path) -> int:
+def reconcile_views(valid_dir: Path, backfill: bool = True) -> int:
     """把全部数据视图约束到 ``all.txt`` 权威活池之内。
 
     历史轮次会向 ports/countries/sets 的 ``all``/``ltd`` 视图泄漏已离开
@@ -304,6 +304,13 @@ def reconcile_views(valid_dir: Path) -> int:
     （注释漂移）不重复；``#ALL`` 与不可解析行跳过；sets/（精选子集，
     归属需定义表判定）与 ports/（未观测漂移，最小 blast radius）不在
     此列，下次 validate 自然重写。
+
+    ``backfill=False`` 时跳过国家分裂回填（CN-32）：download 树是扁平
+    ``<CC>.txt`` 布局，``download_proxies.reconcile_download_tree`` 若把
+    本函数用于 download 树，回填会写出 valid 式 ``<CC>/all.txt`` 目录、
+    进而炸掉下轮 ``write_outputs`` 残留清理（``stale.unlink()`` 遇目录抛
+    IsADirectoryError，2026-09-19 更新链连续失败实证）。download 树每轮
+    全量重写，只需修剪。
     """
     all_txt = valid_dir / "all.txt"
     if not all_txt.exists():
@@ -377,7 +384,8 @@ def reconcile_views(valid_dir: Path) -> int:
     for path in sorted(valid_dir.glob("all_*.txt")):
         if path.name != "all.txt":
             prune(path)
-    backfill_countries()
+    if backfill:
+        backfill_countries()
     return removed
 
 

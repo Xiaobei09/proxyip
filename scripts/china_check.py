@@ -37,9 +37,11 @@
   `jkapi.com/zz_tcping`（浙江宁波电信 TCP，免 key）+
   `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，`level=icmp`，
   不进延迟显示/不产 isp_ms）+ `check-host.cc/ping`（CN-31：同节点 ICMP，
-  仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）——五只免额
-  单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host 的
-  250/h 配额不再是可达判定的瓶颈。
+  仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）+
+  `check-host.cc/http`（CN-32：同节点 HTTPS 应用层确认，首个 http 级
+  单节点源，仅 TCP-ok 且其余免额 0 ok 时追加猎取第二确认，共用配额）——
+  七只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
+  的 250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
   判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
@@ -60,7 +62,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/antping_ping/
   tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
-  单节点源（check_host/checkhost_ping/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -160,6 +162,7 @@ POLL_INTERVAL = 3.0
 # （同品牌 check-host.net 前端 59 节点无一 CN，不可迁移，2026-09 实测）。
 CHECKHOST_URL = "https://api.check-host.cc/tcp"
 CHECKHOST_PING_URL = "https://api.check-host.cc/ping"
+CHECKHOST_HTTP_URL = "https://api.check-host.cc/http"
 CHECKHOST_REPORT_URL = "https://api.check-host.cc/report/{uuid}"
 CHECKHOST_NODE = "CN-HOH-Alibaba"
 CH_WINDOW_SEC = 10.0
@@ -892,6 +895,124 @@ def checkhost_ping_check(ip: str, limiter: RateLimiter, timeout: float, api_key:
         last = parse_check_host_ping_report(payload)
         if last["status"] in ("ok", "fail"):
             last["level"] = "icmp" if last["ok"] else None
+            return last
+    out = last or {"status": "timeout", "ok": False, "ms": None,
+                   "error": "poll timeout"}
+    out["level"] = None
+    return out
+
+
+def parse_check_host_http_report(payload) -> dict:
+    """``/http`` 报告 → ``{"status", "ok", "ms", "level", "error"}``（CN-32）。
+
+    成功形（活体实证）：``checks[0] == {"status": 1, "connectiontime": 39,
+    "http_status": 404, ...}``。``http_status>0``（含 4xx/5xx，完整数据
+    往返即应用层确认，itdog ``http_code>0`` 同口径）→ ok，``level="http"``；
+    ``status==1`` 但无 HTTP 应答且 ``connectiontime>0`` → ok，
+    ``level="tcp"``（连通但无应用层）；``status`` 非 1 → fail。
+    无 checks → pending（与 TCP/ping 版同语义）。
+    """
+    if not isinstance(payload, dict):
+        return {"status": "error", "ok": False, "ms": None, "error": "bad payload"}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {"status": "error", "ok": False, "ms": None, "error": "no data"}
+    checks = (data.get(CHECKHOST_NODE) or {}).get("checks") or []
+    if not checks:
+        return {"status": "pending", "ok": False, "ms": None, "error": ""}
+    c = checks[0]
+    if c.get("status") != 1:
+        return {
+            "status": "fail",
+            "ok": False,
+            "ms": None,
+            "error": str(c.get("errortext") or c.get("errortype") or "unreachable")[:120],
+        }
+    try:
+        code = int(c.get("http_status") or 0)
+    except (TypeError, ValueError):
+        code = 0
+    try:
+        ms = c.get("connectiontime")
+        ms = float(ms) if ms is not None else None
+    except (TypeError, ValueError):
+        ms = None
+    if code > 0:
+        return {"status": "ok", "ok": True, "ms": ms, "error": "",
+                "level": "http"}
+    if isinstance(ms, float) and ms > 0:
+        return {"status": "ok", "ok": True, "ms": ms, "error": "",
+                "level": "tcp"}
+    return {"status": "fail", "ok": False, "ms": None,
+            "error": "no http response"}
+
+
+def checkhost_http_check(ip: str, port: str, limiter: RateLimiter,
+                         timeout: float, api_key: str) -> dict:
+    """check-host 呼和浩特单节点 HTTPS 应用层确认（CN-32，同节点第三协议）。
+
+    对代理 ``ip:port`` 做 HTTPS GET（CF 边缘回 4xx 亦算完整往返），
+    ``http_status>0`` 即应用层确认（首个 http 级单节点源；``-CNH`` 证据）。
+    与 TCP/ping 版共用限速器（共享 250/h 匿名配额）。调用方只在
+    TCP-ok 且其余免额源 0 ok 时追加（第二确认猎取，配额敏感）。
+    不产 ``isp_ms``。不抛未捕获异常。
+    """
+    try:
+        limiter.acquire()
+    except RateLimited:
+        return {"status": "rate_limited", "ok": False, "ms": None,
+                "error": "hourly cap", "level": None}
+    hdrs = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": UA,
+    }
+    if api_key:
+        hdrs["Authorization"] = f"Bearer {api_key}"
+    body = json.dumps({"target": ip, "port": int(port), "region": ["CN"]}).encode()
+    try:
+        status, _, resp = request_follow(
+            CHECKHOST_HTTP_URL, hdrs, timeout, method="POST", data=body)
+    except urllib.error.HTTPError as e:
+        return {"status": "rate_limited" if e.code == 429 else "error",
+                "ok": False, "ms": None, "error": f"http {e.code}",
+                "level": None}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None}
+    if status == 429:
+        return {"status": "rate_limited", "ok": False, "ms": None,
+                "error": "rate limited", "level": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"http {status}", "level": None}
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad json", "level": None}
+    uuid = payload.get("uuid") or payload.get("request_id")
+    if not uuid:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no uuid", "level": None}
+    deadline = time.monotonic() + POLL_DEADLINE
+    last = None
+    while time.monotonic() < deadline:
+        time.sleep(POLL_INTERVAL)
+        try:
+            status, _, resp = request_follow(
+                CHECKHOST_REPORT_URL.format(uuid=uuid),
+                {"Accept": "application/json", "User-Agent": UA},
+                timeout,
+            )
+            if status != 200:
+                continue
+            payload = json.loads(resp.decode("utf-8", "replace"))
+        except Exception as exc:
+            logging.debug("check-host http poll: %s", _err(exc))
+            continue
+        last = parse_check_host_http_report(payload)
+        if last["status"] in ("ok", "fail"):
             return last
     out = last or {"status": "timeout", "ok": False, "ms": None,
                    "error": "poll timeout"}
@@ -3255,7 +3376,7 @@ def merge_verdict(sources: dict) -> dict:
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "xxapi", "xxping", "jkapi", "jkping")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -3282,7 +3403,7 @@ def merge_verdict(sources: dict) -> dict:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
-    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "xxapi", "xxping", "jkapi", "jkping")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
@@ -3840,7 +3961,9 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
         TCP 判 fail 时追加同节点 ICMP ping（checkhost_ping，共用限速器）：
         TCP-fail + ping-ok → 主机存活、端口层问题（uncertain，不误判死）；
-        双 fail → 置信定罪。TCP ok/error 时不追加（配额敏感）。
+        双 fail → 置信定罪。TCP-ok 且其余四免额源 0 ok 时追加同节点 HTTPS
+        应用层确认（checkhost_http）：第二确认猎取（uncertain→reachable），
+        其余情况不追加（配额敏感）。
         """
         _, key, ip, port, _ = item
         try:
@@ -3858,6 +3981,21 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 out["checkhost_ping"] = {
                     "status": "error", "ok": False, "ms": None,
                     "error": _err(exc), "level": None}
+        elif tcp.get("ok"):
+            entry = entries.get(key) or {}
+            free_ok = sum(
+                1 for n in ("xxapi", "xxping", "jkapi", "jkping")
+                if (entry.get(n) or {}).get("status") == "ok")
+            if free_ok == 0:
+                try:
+                    out["checkhost_http"] = checkhost_http_check(
+                        ip, port, ch_limiter, args.timeout, args.api_key)
+                except Exception as exc:
+                    logging.debug("l2 checkhost_http failed for %s: %s",
+                                  key, _err(exc))
+                    out["checkhost_http"] = {
+                        "status": "error", "ok": False, "ms": None,
+                        "error": _err(exc), "level": None}
         return key, out
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
     # - 免额四源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位

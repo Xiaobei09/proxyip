@@ -23,6 +23,213 @@ US_LINE = "5.6.7.8:443#\U0001F1FA\U0001F1F8US-8ms-5.86MB/s"
 
 
 
+class TestParseCheckHostHttp(unittest.TestCase):
+    """CN-32：check-host /http 报告解析（呼和浩特应用层）。"""
+
+    def _payload(self, check):
+        return {"data": {cc.CHECKHOST_NODE: {"checks": [check]}}}
+
+    def test_ok_http(self):
+        """http_status 404 亦为完整往返 → ok，level=http。"""
+        payload = self._payload(
+            {"status": 1, "connectiontime": 39, "http_status": 404,
+             "target_ip": "223.5.5.5"})
+        result = cc.parse_check_host_http_report(payload)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["ms"], 39.0)
+        self.assertEqual(result["level"], "http")
+
+    def test_ok_tcp_fallback(self):
+        """status=1 但无 HTTP 应答 → 传输层 ok（itdog connect_time 同理）。"""
+        payload = self._payload(
+            {"status": 1, "connectiontime": 39, "http_status": 0})
+        result = cc.parse_check_host_http_report(payload)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["level"], "tcp")
+
+    def test_fail_report(self):
+        payload = self._payload(
+            {"status": 0, "errortext": "Connection timed out"})
+        result = cc.parse_check_host_http_report(payload)
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("timed out", result["error"])
+
+    def test_pending_and_bad(self):
+        self.assertEqual(
+            cc.parse_check_host_http_report({"data": {}})["status"],
+            "pending")
+        self.assertEqual(cc.parse_check_host_http_report({})["status"],
+                         "error")
+        self.assertEqual(cc.parse_check_host_http_report(None)["status"],
+                         "error")
+
+
+class TestCheckhostHttpCheck(unittest.TestCase):
+    """CN-32：checkhost_http_check 提交＋轮询（mock，不触网）。"""
+
+    def _ok_report(self):
+        return json.dumps({
+            "data": {cc.CHECKHOST_NODE: {"checks": [
+                {"status": 1, "connectiontime": 39, "http_status": 200,
+                 "target_ip": "1.2.3.4"}]}}}).encode()
+
+    def _limiter(self):
+        return cc.RateLimiter(window=10.0, per_window=100, hour_cap=100)
+
+    def test_ok_flow_posts_http_endpoint(self):
+        submit = json.dumps({"uuid": "u9"}).encode()
+        calls = []
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            calls.append((url, method))
+            if method == "POST":
+                return 200, {}, submit
+            return 200, {}, self._ok_report()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.checkhost_http_check("1.2.3.4", "443",
+                                          self._limiter(), 10, "")
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["level"], "http")
+        self.assertTrue(calls[0][0].endswith("/http"))
+        self.assertNotIn("isp_ms", out)
+
+    def test_submit_body_carries_port(self):
+        """端口必须进提交体（逐端口 HTTPS 实测）。"""
+        seen = {}
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if method == "POST":
+                seen["body"] = json.loads(data.decode())
+                return 200, {}, json.dumps({"uuid": "u9"}).encode()
+            return 200, {}, self._ok_report()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            cc.checkhost_http_check("1.2.3.4", "8443", self._limiter(), 10, "")
+        self.assertEqual(seen["body"]["port"], 8443)
+        self.assertEqual(seen["body"]["target"], "1.2.3.4")
+
+    def test_submit_429_rate_limited(self):
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=urllib.error.HTTPError(
+                                   "http://x", 429, "Too Many Requests",
+                                   {}, io.BytesIO(b""))):
+            out = cc.checkhost_http_check("1.2.3.4", "443",
+                                          self._limiter(), 10, "")
+        self.assertEqual(out["status"], "rate_limited")
+
+    def test_no_uuid(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, b"{}")):
+            out = cc.checkhost_http_check("1.2.3.4", "443",
+                                          self._limiter(), 10, "")
+        self.assertEqual(out["status"], "error")
+
+
+class TestCheckhostHttpMergeVerdict(unittest.TestCase):
+    """CN-32：checkhost_http 并入单节点交叉（应用层第二确认）。"""
+
+    def test_second_confirm_reachable_http(self):
+        sources = {
+            "xxapi": {"status": "ok", "ok": True, "ms": 90},
+            "checkhost_http": {"status": "ok", "ok": True, "ms": 39,
+                               "level": "http"},
+        }
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["level"], "http")
+
+    def test_http_alone_uncertain(self):
+        sources = {"checkhost_http": {
+            "status": "ok", "ok": True, "ms": 39, "level": "http"}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_http_fail_harmless(self):
+        """http-fail 伴 TCP-ok 仍 uncertain（不定罪，fail 分析在 ok 之后）。"""
+        sources = {
+            "check_host": {"status": "ok", "ok": True, "ms": 100},
+            "checkhost_http": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+
+class TestCheckhostHttpWiring(unittest.TestCase):
+    """CN-32：http 只在 TCP-ok 且其余免额 0 ok 时猎取第二确认。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            skip_itdog=True,
+            skip_itdog_tcping=True,
+            pingpe_limit=0,
+            workers=4,
+            timeout=5,
+            api_key="",
+        )
+
+    def _item(self):
+        return ("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")
+
+    def _l2(self, tcp):
+        return [
+            mock.patch.object(cc, "xxapi_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "xxping_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "jkapi_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "jkping_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "check_host_check", return_value=tcp),
+        ]
+
+    def test_http_hunts_second_confirm(self):
+        tcp = {"status": "ok", "ok": True, "ms": 100}
+        http = {"status": "ok", "ok": True, "ms": 39, "level": "http"}
+        mocks = self._l2(tcp)
+        with mock.patch.object(cc, "checkhost_http_check",
+                               return_value=http) as mh:
+            for p in mocks:
+                p.start()
+            try:
+                entries, reachable, _ = cc.run_measurements([self._item()],
+                                                            self._args())
+            finally:
+                for p in mocks:
+                    p.stop()
+        self.assertEqual(mh.call_count, 1)
+        srcs = entries["9.9.9.9:443#US"]["sources"]
+        self.assertEqual(srcs["checkhost_http"]["level"], "http")
+        # TCP-ok + http-ok → 双确认 reachable（uncertain 翻正）
+        self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "reachable")
+        self.assertIn("9.9.9.9:443#US", reachable)
+
+    def test_http_skipped_when_already_confirmed(self):
+        """已有免额 ok 时不浪费配额猎取第三确认。"""
+        tcp = {"status": "ok", "ok": True, "ms": 100}
+        mocks = self._l2(tcp)
+        mocks[0] = mock.patch.object(
+            cc, "xxapi_check",
+            return_value={"status": "ok", "ok": True, "ms": 90})
+        with mock.patch.object(cc, "checkhost_http_check",
+                               side_effect=AssertionError("must not run")):
+            for p in mocks:
+                p.start()
+            try:
+                entries, _, _ = cc.run_measurements([self._item()],
+                                                    self._args())
+            finally:
+                for p in mocks:
+                    p.stop()
+        self.assertNotIn("checkhost_http",
+                         entries["9.9.9.9:443#US"]["sources"])
+
+
 class TestParseCheckHostPing(unittest.TestCase):
     """CN-31：check-host /ping 报告解析（呼和浩特 ICMP）。"""
 
@@ -2830,6 +3037,12 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxping_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "checkhost_http_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "checkhost_ping_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
