@@ -285,7 +285,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 - `tcptest.cn`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
 - `ip.net.coffee`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
-- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`ping.aa1.cn`（CN-27：独立运营商免费 API 站，WS 纯 JSON 零鉴权，28 城三网 TCPing，`operator` 原生分电信/联通/移动，`domain` 携真实端口逐端口实测；CI 以 200 键/6 并发启用）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
+- `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点，JWT+WS，TCP `ip:port`）、`antping_ping`（CN-28：同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点，服务端渲染 token + WS）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`ping.aa1.cn`（CN-27：独立运营商免费 API 站，WS 纯 JSON 零鉴权，28 城三网 TCPing，`operator` 原生分电信/联通/移动，`domain` 携真实端口逐端口实测；CI 以 200 键/6 并发启用）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
 - `tcpping.cn`：多运营商，需 `TCPPING_CN_TOKEN`，缺 key 自动跳过
 
@@ -321,6 +321,15 @@ oioweb 同类，不接入）；`api.boce.com`（404）；`itdog batch_https/dns`
 同轮产出：`ping.aa1.cn/tcping`（`wss://ping-qyc.aa1.cn/tcping` 纯 JSON
 零鉴权，28 城三网，`domain` 携端口实测）接入为 `aa1ping` 源（独立运营商，
 10 项已过，CI 200 键/6 并发启用）。
+CN-28 逆向复核（活体探针实证）：`api.qqsuu.cn`（`dm-ping` 需 ApiKey 登录，
+key 墙；`dm-tcping` 接口不存在。不接入）/`tool.lu`（首页零 ping/tcp
+提及，无网络测量工具。不接入）/`api.oick.cn`（聚合站 ping 路径猜测 404，
+无目录可循，停损）/`ping-qyc.aa1.cn`（WS 专用宿主，HTTP 根为宝塔占位页，
+无 REST 面；确认 aa1 后端为 WS-only）。
+同轮产出：`antping.com` code=3（PING）分支此前已实现但无调用方，单列
+`antping_ping` 源（同站同节点、不同协议层，低增益-同站；`level=icmp`、
+不产 `isp_ms`；活体 223.5.5.5→178/179、192.0.2.1→186 全 fail；CI 200 键/
+8 并发启用）。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
@@ -331,7 +340,7 @@ oioweb 同类，不接入）；`api.boce.com`（404）；`itdog batch_https/dns`
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/
-   antping/tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
+   antping/antping_ping/tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
 2. 单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain

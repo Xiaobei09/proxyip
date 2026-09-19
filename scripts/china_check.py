@@ -53,7 +53,7 @@
   itdog batch_ping 已接入；boce/17ce/aizhan 经逆向确认仍阻塞；ping.sx 零 CN）。
 
 保守判定逻辑（merge_verdict）：
-  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/
+  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/antping_ping/
   tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
   单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
@@ -246,6 +246,12 @@ ANTPING_WS = "wss://antping.com/ws/"
 ANTPING_REQ_TIMEOUT = 12
 ANTPING_WS_IDLE = 30.0
 
+# antping 同站 ICMP 复用（CN-28）：antping_check 的 code=3（PING）分支已实现
+# 但从未被调用（port 恒真 → 恒走 code=4 TCP）。单列 antping_ping 源走 ICMP，
+# 与 TCP 同站同节点、不同协议层（jkping/itdog_ping 同理，低增益-同站）。
+# level=icmp（显示层自动剔除）且不产 isp_ms（节点帧无运营商归一）。
+ANTPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
+
 # tcping.cn —— 免费大陆多节点 tcping（SHA-256 PoW + WS 鉴权），无 key：
 # GET /api/probe/page 拿挑战 {r,s,ts,d(=difficulty)} → 纯 Python 算
 # request_hash=sha256(cl)/yc(9轮)/bc(pow-salt) → 暴力搜 nonce 使
@@ -373,6 +379,7 @@ _SOURCE_MIN_RATIO = {
     "ping0": PING0_MIN_RATIO,
     "wansui": WANSUI_MIN_RATIO,
     "aa1ping": AA1PING_MIN_RATIO,
+    "antping_ping": ANTPING_PING_MIN_RATIO,
 }
 
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
@@ -1399,6 +1406,20 @@ def antping_check(ip: str, port: str, timeout: float) -> dict:
         "error": f"unreachable ({nodes} nodes)", "level": None,
         "ok_nodes": 0, "nodes": nodes, "ratio": 0.0,
     }
+
+
+def antping_ping_check(ip: str, port: str, timeout: float) -> dict:
+    """antping.com 单键多节点 ICMP ping（CN-28，同站同节点、不同协议层）。
+
+    复用 ``antping_check`` 的 code=3（PING）分支（该分支已实现但此前无调用
+    方）。``port`` 仅为槽位接口一致保留。节点成功语义/ms 口径与 TCP 同源；
+    ``level="icmp"``（显示层自动剔除，``common._cn_fallback_ms``）且不产出
+    ``isp_ms``（节点帧无运营商归一字段，chinaz/coffee/jkping 同口径）。
+    活体实证 2026-09-19：223.5.5.5 → 178/179 ok；192.0.2.1 → 186 全 fail。
+    不抛未捕获异常（内层已收敛）。
+    """
+    _ = port
+    return antping_check(ip, "", timeout)
 
 
 def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
@@ -2742,7 +2763,7 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping")]
 
@@ -2776,7 +2797,7 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "coffee",
-        "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
@@ -3201,11 +3222,12 @@ def _run_coffee_slots(
 def _run_ws_source_slots(
     candidates: list, entries: dict, timeout: float, source: str, concurrency: int
 ) -> None:
-    """JWT/WS 或 PoW/WS 类源的多键并发复核（antping / tcpingcn / chinaz）。
+    """JWT/WS 或 PoW/WS 类源的多键并发复核（antping / tcpingcn / chinaz / antping_ping）。
 
     每个源按 ``candidates`` 前段投递；只写 ``entries[key][source]``。"""
     fn = {
         "antping": lambda ip, port: antping_check(ip, port, timeout),
+        "antping_ping": lambda ip, port: antping_ping_check(ip, port, timeout),
         "tcpingcn": lambda ip, port: tcpingcn_check(ip, port, timeout),
         "chinaz": lambda ip, port: chinaz_check(ip, "", timeout),
     }[source]
@@ -3538,6 +3560,21 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("antping review: skipped (limit=0)", file=sys.stderr)
 
+    # antping_ping（CN-28）：同站 ICMP，主独立判 reachable；默认 0=跳过。
+    antping_ping_limit = getattr(args, "antping_ping_limit", 0)
+    if antping_ping_limit != 0:
+        cands = _pending_cands()
+        if antping_ping_limit is None or antping_ping_limit < 0:
+            antping_ping_limit = len(cands)
+        _run_ws_source_slots(
+            cands[:antping_ping_limit], entries, args.timeout, "antping_ping",
+            getattr(args, "antping_ping_concurrency", 8),
+        )
+        print(f"antping_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("antping_ping review: skipped (limit=0)", file=sys.stderr)
+
     tcpingcn_limit = getattr(args, "tcpingcn_limit", 0)
     if tcpingcn_limit != 0:
         cands = _pending_cands()
@@ -3789,6 +3826,10 @@ def main(argv=None) -> int:
                         help="antping.com 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--antping-concurrency", type=int, default=8,
                         help="antping.com 并发复核数（默认 8）")
+    parser.add_argument("--antping-ping-limit", type=int, default=0,
+                        help="antping.com ICMP 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--antping-ping-concurrency", type=int, default=8,
+                        help="antping.com ICMP 并发复核数（默认 8）")
     parser.add_argument("--tcpingcn-limit", type=int, default=0,
                         help="tcping.cn 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--tcpingcn-concurrency", type=int, default=6,

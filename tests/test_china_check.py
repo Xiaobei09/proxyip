@@ -2798,6 +2798,78 @@ class TestAa1pingSource(unittest.TestCase):
         self.assertEqual(sent["lines"], cc.AA1PING_LINES)
 
 
+class TestAntpingPingSource(unittest.TestCase):
+    """CN-28：antping_ping（同站 ICMP，复用 code=3 分支）。"""
+
+    def test_wrapper_forces_icmp_path(self):
+        """包装只转调 code=3：port 被忽略（仅槽位接口保留），target 走 ip。"""
+        ret = {"status": "ok", "ok": True, "ms": 1, "level": "icmp",
+               "ok_nodes": 178, "nodes": 179, "ratio": 0.994}
+        with mock.patch.object(cc, "antping_check",
+                               return_value=dict(ret)) as m:
+            out = cc.antping_ping_check("1.2.3.4", "443", 10)
+        m.assert_called_once_with("1.2.3.4", "", 10)
+        self.assertEqual(out, ret)
+        self.assertEqual(out["level"], "icmp")
+
+    def test_no_isp_ms_from_wrapper(self):
+        """节点帧无运营商归一，包装不得伪造 isp_ms。"""
+        ret = {"status": "ok", "ok": True, "ms": 1, "level": "icmp",
+               "ok_nodes": 150, "nodes": 160, "ratio": 0.94}
+        with mock.patch.object(cc, "antping_check", return_value=dict(ret)):
+            out = cc.antping_ping_check("1.2.3.4", "443", 10)
+        self.assertNotIn("isp_ms", out)
+
+    def test_strong_reachable(self):
+        sources = {"antping_ping": {
+            "status": "ok", "ok": True, "ms": 1, "level": "icmp",
+            "ok_nodes": 178, "nodes": 179, "ratio": 0.994}}
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["level"], "icmp")
+
+    def test_weak_ratio_uncertain(self):
+        sources = {"antping_ping": {
+            "status": "ok", "ok": True, "ms": 1, "level": "icmp",
+            "ok_nodes": 1, "nodes": 179, "ratio": 0.006}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_fail_plus_single_fail_unreachable(self):
+        sources = {
+            "antping_ping": {"status": "fail", "ok": False, "ms": None,
+                             "ok_nodes": 0, "nodes": 186, "ratio": 0.0},
+            "jkapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+    def test_ratio_threshold_wired(self):
+        src = {"status": "ok", "ok": True, "ms": 1, "level": "icmp",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        self.assertEqual(cc.merge_verdict({"antping_ping": dict(src)})["verdict"],
+                         "reachable")
+        old = cc._SOURCE_MIN_RATIO["antping_ping"]
+        cc._SOURCE_MIN_RATIO["antping_ping"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"antping_ping": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["antping_ping"] = old
+
+    def test_ws_slot_dispatch(self):
+        """通用 WS slot 须能派发 antping_ping 且只写本源键。"""
+        cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
+                  "1.2.3.4", "443", "US")]
+        entries: dict = {"1.2.3.4:443#US": {}}
+        with mock.patch.object(
+                cc, "antping_ping_check",
+                return_value={"status": "ok", "ok": True}) as m:
+            cc._run_ws_source_slots(cands, entries, 5, "antping_ping", 2)
+            m.assert_called_once_with("1.2.3.4", "443", 5)
+        self.assertEqual(
+            entries["1.2.3.4:443#US"]["antping_ping"]["status"], "ok")
+
+
 class TestAa1pingMergeVerdict(unittest.TestCase):
     """CN-27：aa1ping 并入多节点合成判定。"""
 
@@ -3843,7 +3915,8 @@ class TestCiEnabledSources(unittest.TestCase):
             encoding="utf-8")
         readme = (root / "README.md").read_text(encoding="utf-8")
         for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping"),
-                           ("aa1ping", "aa1ping")):
+                           ("aa1ping", "aa1ping"),
+                           ("antping-ping", "antping-ping")):
             m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
                           wf, re.S)
             self.assertIsNotNone(m, f"CI 未启用 {name}")
@@ -3866,6 +3939,19 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIsNotNone(m, "aa1ping-concurrency 参数定义丢失")
         self.assertEqual(int(m.group(1)), 6)
 
+    def test_antping_ping_cli_default_stays_opt_in(self):
+        """CN-28：antping-ping 本地默认 opt-in（0/8），只在 CI 显式启用。"""
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--antping-ping-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "antping-ping-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--antping-ping-concurrency", type=int, default=(\d+)',
+                      src)
+        self.assertIsNotNone(m, "antping-ping-concurrency 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 8)
+
     def test_all_enabled_l3_limits_present(self):
         """CN-12：CI 启用的全部 L3 复核源配额原地锁定（tcptest/coffee/
         pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding/aa1ping），防 CI 行
@@ -3877,7 +3963,7 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--tcpingcn-limit 400", "--chinaz-limit 200",
                      "--pingpe-limit 300",
                      "--ce98-limit 200", "--biuping-limit 200",
-                     "--aa1ping-limit 200"):
+                     "--aa1ping-limit 200", "--antping-ping-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
     def test_ci_flags_all_defined(self):

@@ -74,7 +74,8 @@ jobs:
           --tcptest-limit 800 --tcptest-concurrency 20
           --coffee-limit 1200 --coffee-concurrency 40
           --pingloc-limit 600 --pingloc-concurrency 12
-          --antping-limit 500 --antping-concurrency 8
+           --antping-limit 500 --antping-concurrency 8
+           --antping-ping-limit 200 --antping-ping-concurrency 8
           --tcpingcn-limit 400 --tcpingcn-concurrency 8
           --chinaz-limit 200 --chinaz-concurrency 8
            --ce98-limit 200 --ce98-concurrency 6
