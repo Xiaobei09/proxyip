@@ -3456,6 +3456,155 @@ class TestAntpingPingSource(unittest.TestCase):
             entries["1.2.3.4:443#US"]["antping_ping"]["status"], "ok")
 
 
+class TestTcptestPingSource(unittest.TestCase):
+    """CN-33：tcptest type=ping 同站 ICMP（mock request_follow，不触网）。"""
+
+    def _ping_result(self, ok=True, ms=14.8, uuid="u1"):
+        data = {"avg_ms": ms, "latest_ms": ms, "packets_received": 1,
+                "packet_loss_percent": 0.0} if ok else {"avg_ms": 0}
+        return {"node_uuid": uuid, "success": ok, "data": data}
+
+    def _run(self, results):
+        bodies = []
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if method == "POST" and url.endswith("/tasks"):
+                bodies.append(json.loads(data.decode()))
+                return 201, {}, json.dumps({"id": "t1"}).encode()
+            if "/results" in url:
+                return 200, {}, json.dumps({"results": results}).encode()
+            return 200, {}, json.dumps({"state": "succeeded"}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1", "u2"],
+                                   {"u1": "电信", "u2": "联通"},
+                                   probe_type="ping")
+        return out, bodies
+
+    def test_ping_ok_level_icmp_no_isp(self):
+        out, bodies = self._run(
+            [self._ping_result(True, 14.8, "u1"),
+             self._ping_result(True, 27.3, "u2")])
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ms"], 14.8)
+        self.assertEqual(out["level"], "icmp")
+        self.assertEqual(out["ok_nodes"], 2)
+        # ICMP 不产 isp_ms（与 chinaz 等同口径），即便有 operators 映射
+        self.assertNotIn("isp_ms", out)
+        # ping 目标为裸 IP（无端口概念）
+        create = next(b for b in bodies if b.get("type") == "ping")
+        self.assertEqual(create["target"], "1.2.3.4")
+
+    def test_ping_all_fail(self):
+        out, _ = self._run(
+            [self._ping_result(False, 0, "u1"),
+             self._ping_result(False, 0, "u2")])
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ratio"], 0.0)
+
+    def test_tcp_default_unchanged(self):
+        """默认仍走 TCP（connected 语义＋isp_ms），防重构回归。"""
+        res = {"node_uuid": "u1", "success": True,
+               "data": {"connected": True, "avg_ms": 60.0}}
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if method == "POST" and url.endswith("/tasks"):
+                return 201, {}, json.dumps({"id": "t1"}).encode()
+            if "/results" in url:
+                return 200, {}, json.dumps({"results": [res]}).encode()
+            return 200, {}, json.dumps({"state": "succeeded"}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1"],
+                                   {"u1": "电信"})
+        self.assertEqual(out["level"], "tcp")
+        self.assertEqual(out["isp_ms"], {"中国电信": 60.0})
+
+    def test_merge_strong_weak_fail(self):
+        strong = {"status": "ok", "ok": True, "ms": 15.0, "level": "icmp",
+                  "ok_nodes": 8, "nodes": 10, "ratio": 0.8}
+        self.assertEqual(cc.merge_verdict(
+            {"tcptest_ping": strong})["verdict"], "reachable")
+        self.assertEqual(cc.merge_verdict(
+            {"tcptest_ping": strong})["level"], "icmp")
+        weak = dict(strong, ok_nodes=1, nodes=10, ratio=0.1)
+        self.assertEqual(cc.merge_verdict(
+            {"tcptest_ping": weak})["verdict"], "uncertain")
+        fail = {"status": "fail", "ok": False, "ms": None,
+                "ok_nodes": 0, "nodes": 10, "ratio": 0.0}
+        self.assertEqual(cc.merge_verdict(
+            {"tcptest_ping": fail,
+             "xxapi": {"status": "fail", "ok": False,
+                       "ms": None}})["verdict"], "unreachable")
+
+    def test_ratio_threshold_wired(self):
+        src = {"status": "ok", "ok": True, "ms": 15.0, "level": "icmp",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        self.assertEqual(
+            cc.merge_verdict({"tcptest_ping": dict(src)})["verdict"],
+            "reachable")
+        old = cc._SOURCE_MIN_RATIO["tcptest_ping"]
+        cc._SOURCE_MIN_RATIO["tcptest_ping"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"tcptest_ping": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["tcptest_ping"] = old
+
+    def test_phase_runs_on_ping_limit_only(self):
+        """TCP 0 ＋ ping 1 → 只跑 ping（节点复用同一采样）。"""
+        from types import SimpleNamespace
+
+        args = SimpleNamespace(
+            skip_itdog=True, skip_itdog_tcping=True, pingpe_limit=0,
+            workers=4, timeout=5, api_key="", tcpping_token="",
+            tcptest_limit=0, tcptest_concurrency=2, tcptest_nodes=2,
+            tcptest_ping_limit=1, tcptest_ping_concurrency=2,
+            coffee_limit=0, pingloc_limit=0, antping_limit=0,
+            tcpingcn_limit=0, chinaz_limit=0, ce98_limit=0,
+            biuping_limit=0, boce_limit=0, ipip_limit=0,
+            antping_ping_limit=0, tcpingcn_ping_limit=0,
+            aa1ping_limit=0, aa1ping_concurrency=2,
+            **{"17ce_limit": 0, "ping0_limit": 0, "wansui_limit": 0})
+        item = ("10.9.9.9:443#US", "10.9.9.9:443#US", "10.9.9.9", "443", "US")
+        seen_types = []
+
+        def fake_check(ip, port, timeout, uuids, operators=None,
+                       probe_type="tcping"):
+            seen_types.append(probe_type)
+            return {"status": "ok", "ok": True, "ms": 15.0,
+                    "level": "icmp" if probe_type == "ping" else "tcp",
+                    "ok_nodes": 10, "nodes": 10, "ratio": 1.0}
+
+        def fake_l2(ip, port, timeout):
+            return {"status": "error", "ok": False, "ms": None, "error": "x"}
+
+        with mock.patch.object(cc, "tcptest_fetch_nodes",
+                               return_value=[{"uuid": "u1", "operator": "ct",
+                                              "enabled": True,
+                                              "runtime_state": "online"}]), \
+              mock.patch.object(cc, "tcptest_check", side_effect=fake_check), \
+              mock.patch.object(cc, "xxapi_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "xxping_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "jkapi_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "check_host_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "checkhost_ping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "checkhost_http_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}):
+            entries, reachable, _ = cc.run_measurements([item], args)
+        self.assertEqual(seen_types, ["ping"])
+        self.assertIn("tcptest_ping", entries["10.9.9.9:443#US"]["sources"])
+        self.assertNotIn("tcptest", entries["10.9.9.9:443#US"]["sources"])
+        self.assertIn("10.9.9.9:443#US", reachable)
+
+
 class TestAa1pingMergeVerdict(unittest.TestCase):
     """CN-27：aa1ping 并入多节点合成判定。"""
 
@@ -4832,7 +4981,8 @@ class TestCiEnabledSources(unittest.TestCase):
         for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping"),
                            ("aa1ping", "aa1ping"),
                            ("antping-ping", "antping-ping"),
-                           ("tcpingcn-ping", "tcpingcn-ping")):
+                           ("tcpingcn-ping", "tcpingcn-ping"),
+                           ("tcptest-ping", "tcptest-ping")):
             m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
                           wf, re.S)
             self.assertIsNotNone(m, f"CI 未启用 {name}")
@@ -4868,6 +5018,21 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIsNotNone(m, "antping-ping-concurrency 参数定义丢失")
         self.assertEqual(int(m.group(1)), 8)
 
+    def test_tcptest_ping_cli_default_stays_opt_in(self):
+        """CN-33：tcptest-ping 本地默认 opt-in（0/8，与 TCP 同并发），
+        只在 CI 显式启用（400/20）。"""
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--tcptest-ping-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "tcptest-ping-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--tcptest-ping-concurrency", type=int, default=([A-Za-z_0-9]+)',
+                      src)
+        self.assertIsNotNone(m, "tcptest-ping-concurrency 参数定义丢失")
+        self.assertEqual(m.group(1), "TCPTEST_CONCURRENCY")
+        self.assertEqual(cc.TCPTEST_CONCURRENCY, 8)
+
     def test_all_enabled_l3_limits_present(self):
         """CN-12：CI 启用的全部 L3 复核源配额原地锁定（tcptest/coffee/
         pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding/aa1ping），防 CI 行
@@ -4880,7 +5045,8 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--pingpe-limit 300",
                      "--ce98-limit 200", "--biuping-limit 200",
                      "--aa1ping-limit 200", "--antping-ping-limit 200",
-                     "--tcpingcn-ping-limit 200"):
+                     "--tcpingcn-ping-limit 200",
+                     "--tcptest-ping-limit 400"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
     def test_tcpingcn_limit_restored_after_altcha(self):

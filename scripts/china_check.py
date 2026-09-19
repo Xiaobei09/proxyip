@@ -413,6 +413,7 @@ _SOURCE_MIN_RATIO = {
     "aa1ping": AA1PING_MIN_RATIO,
     "antping_ping": ANTPING_PING_MIN_RATIO,
     "tcpingcn_ping": TCPINGCN_PING_MIN_RATIO,
+    "tcptest_ping": ITDOG_MIN_RATIO,
 }
 
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
@@ -1296,24 +1297,32 @@ def tcptest_pick_nodes(nodes: list[dict], count: int) -> list[str]:
 
 
 def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
-                  operators: dict | None = None) -> dict:
-    """tcptest.cn 单键 TCP 多点探测：建任务 → 轮询 → 逐节点结果聚合。
+                  operators: dict | None = None,
+                  probe_type: str = "tcping") -> dict:
+    """tcptest.cn 单键多点探测：建任务 → 轮询 → 逐节点结果聚合。
 
     返回与 itdog_aggregate 同构的 source_result：
     ``{status, ok, ms, error, level, ok_nodes, nodes, ratio}``。
-    节点成功 = 直连 TCP 握手成功（``success==true`` 且 ``connected==true``），
-    ``ms`` 取成功节点最小 RTT。整个探测为传输层 → ``level="tcp"``。
+    ``probe_type="tcping"``（默认）：节点成功 = 直连 TCP 握手成功
+    （``success==true`` 且 ``connected==true``），``ms`` 取成功节点最小
+    RTT。整个探测为传输层 → ``level="tcp"``。
+    ``probe_type="ping"``（CN-33）：节点成功 = ICMP 存活（``success==true``
+    且 ``avg_ms>0``），``ms`` 取成功节点最小 RTT；``level="icmp"`` 且不产
+    ``isp_ms``（ICMP 不进展示，chinaz 等同口径）。
     ``operators`` 为 ``{node_uuid: 运营商}`` 时（调用方由节点列表构造），
-    另按 itdog 口径归一出 ``isp_ms``（``{中国电信/联通/移动: 最小ms}``，
+    TCP 探测另按 itdog 口径归一出 ``isp_ms``（``{中国电信/联通/移动: 最小ms}``，
     海外/未知丢弃），供 ``merge_isp_ms`` 跨源合并；无映射时缺省该键。
     """
     if not node_uuids:
         return {"status": "error", "ok": False, "ms": None,
                 "error": "no nodes", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
-    target = f"[{ip}]:{port}" if ":" in ip and not ip.startswith("[") else f"{ip}:{port}"
+    if probe_type == "ping":
+        target = ip
+    else:
+        target = f"[{ip}]:{port}" if ":" in ip and not ip.startswith("[") else f"{ip}:{port}"
     body = {
-        "type": "tcping",
+        "type": probe_type,
         "target": target,
         "node_filter": {"node_uuids": node_uuids[:TCPTEST_NODES]},
     }
@@ -1390,11 +1399,20 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
                 "error": "bad results json", "level": None,
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     real = [r for r in results if isinstance(r, dict)]
-    ok = [
-        r for r in real
-        if r.get("success") is True
-        and (r.get("data") or {}).get("connected") is True
-    ]
+    if probe_type == "ping":
+        ok = [
+            r for r in real
+            if r.get("success") is True
+            and isinstance((r.get("data") or {}).get("avg_ms"),
+                           (int, float))
+            and (r.get("data") or {})["avg_ms"] > 0
+        ]
+    else:
+        ok = [
+            r for r in real
+            if r.get("success") is True
+            and (r.get("data") or {}).get("connected") is True
+        ]
     nodes = len(real) or len(node_uuids) or (total or len(node_uuids))
     if not real:
         nodes = total or len(node_uuids)
@@ -1406,11 +1424,11 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
         out = {
             "status": "ok", "ok": True,
             "ms": round(min(valids), 1) if valids else None,
-            "error": "", "level": "tcp",
+            "error": "", "level": "icmp" if probe_type == "ping" else "tcp",
             "ok_nodes": len(ok), "nodes": nodes,
             "ratio": round(len(ok) / nodes, 3),
         }
-        if isinstance(operators, dict):
+        if probe_type != "ping" and isinstance(operators, dict):
             isp_best: dict[str, float] = {}
             for r in ok:
                 data = r.get("data")
@@ -3373,7 +3391,7 @@ def merge_verdict(sources: dict) -> dict:
         level = None
 
     multi_ok = [s for s in ok_sources if s in (
-        "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
+        "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
@@ -3407,7 +3425,7 @@ def merge_verdict(sources: dict) -> dict:
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
-        "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "coffee",
+        "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "tcptest_ping", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
@@ -3784,20 +3802,25 @@ def _run_tcptest_slots(
     candidates: list, entries: dict, timeout: float,
     node_uuids: list[str], concurrency: int,
     operators: dict | None = None,
+    probe_type: str = "tcping", source: str = "tcptest",
 ) -> None:
-    """tcptest.cn 多节点 TCP 复核（免费 REST，端到端 ~2-6s/键）。节点列表
+    """tcptest.cn 多节点复核（免费 REST，端到端 ~2-6s/键）。节点列表
     进程内缓存，只取一次；每键在 concurrency 有界并发下建任务并轮询结果。
     ``operators``（``{uuid: 运营商}``）透传给 ``tcptest_check`` 产出
-    per-ISP ``isp_ms``。"""
+    per-ISP ``isp_ms``（仅 TCP；ping 按 ICMP 口径不产出）。
+    ``probe_type``/``source`` 选择 TCP（``tcptest``）或 ICMP
+    （``tcptest_ping``，CN-33）通道与落键。"""
 
     def work(item) -> None:
         _, key, ip, port, _ = item
         try:
-            entries[key]["tcptest"] = tcptest_check(
-                ip, port, timeout, node_uuids, operators)
+            entries[key][source] = tcptest_check(
+                ip, port, timeout, node_uuids, operators,
+                probe_type=probe_type)
         except Exception as exc:
-            logging.debug("tcptest failed for %s: %s", key, _err(exc))
-            entries.setdefault(key, {})["tcptest"] = {
+            logging.debug("tcptest %s failed for %s: %s",
+                          probe_type, key, _err(exc))
+            entries.setdefault(key, {})[source] = {
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
@@ -4102,14 +4125,17 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         file=sys.stderr,
     )
 
-    # tcptest.cn 多节点 TCP 复核（免费 REST，节点列表进程内缓存）：只投
-    # 「当前尚未被判可达」的键，先于 ping.pe（贵）跑，确认过的键会让位。
+    # tcptest.cn 多节点 TCP/ICMP 复核（免费 REST，节点列表进程内缓存）：
+    # 只投「当前尚未被判可达」的键，先于 ping.pe（贵）跑，确认过的键会让位。
     # --tcptest-limit -1 表示全池未定键全覆盖（uncertain/错误健全部扫过，
     # 让每个键都有资格走向 reachable 或 unreachable 定论）。
+    # --tcptest-ping-limit（CN-33）为同站 ICMP 通道（type=ping，无端口概念，
+    # level=icmp，不产 isp_ms），跑在 TCP 相之后（只投 TCP 仍未定论者）。
     tcptest_nodes = []
     tcptest_uuids = []
     tcptest_operators: dict | None = None
-    if getattr(args, "tcptest_limit", 0) != 0:
+    if getattr(args, "tcptest_limit", 0) != 0 or getattr(
+            args, "tcptest_ping_limit", 0) != 0:
         tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
         tcptest_uuids = tcptest_pick_nodes(
             tcptest_nodes, getattr(args, "tcptest_nodes", TCPTEST_NODES)
@@ -4138,6 +4164,31 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             f"({len(tcptest_candidates)} targets, {len(tcptest_uuids)} nodes)",
             file=sys.stderr,
         )
+        ping_limit = getattr(args, "tcptest_ping_limit", 0)
+        if ping_limit != 0:
+            ping_candidates = [
+                item for item in sample if needs_probe(entries, item[1])
+            ]
+            if ping_limit is None or ping_limit < 0:
+                ping_limit = len(ping_candidates)
+            _run_tcptest_slots(
+                ping_candidates[:ping_limit],
+                entries,
+                args.timeout,
+                tcptest_uuids,
+                getattr(args, "tcptest_ping_concurrency",
+                        TCPTEST_CONCURRENCY),
+                tcptest_operators,
+                probe_type="ping",
+                source="tcptest_ping",
+            )
+            print(
+                f"tcptest_ping review: {time.monotonic() - _t0:.1f}s "
+                f"({len(ping_candidates)} targets)",
+                file=sys.stderr,
+            )
+        else:
+            print("tcptest_ping review: skipped (limit=0)", file=sys.stderr)
     else:
         print(
             "tcptest review: skipped (no nodes or limit=0)",
@@ -4474,6 +4525,10 @@ def main(argv=None) -> int:
                         help=f"tcptest.cn 并发复核数（默认 {TCPTEST_CONCURRENCY}）")
     parser.add_argument("--tcptest-nodes", type=int, default=TCPTEST_NODES,
                         help=f"tcptest.cn 每键采样节点数（默认 {TCPTEST_NODES}）")
+    parser.add_argument("--tcptest-ping-limit", type=int, default=0,
+                        help="tcptest.cn ICMP 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--tcptest-ping-concurrency", type=int, default=TCPTEST_CONCURRENCY,
+                        help=f"tcptest.cn ICMP 并发复核数（默认 {TCPTEST_CONCURRENCY}）")
     parser.add_argument("--coffee-limit", type=int, default=0,
                         help="ip.net.coffee 单节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--coffee-concurrency", type=int, default=COFFEE_CONCURRENCY,
