@@ -2425,8 +2425,8 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
 def merge_isp_ms(entries: dict) -> None:
     """就地合并各源 ``isp_ms`` 到 per-key ``entry["isp_ms"]``（各运营商最小 RTT）。
 
-    源结果只需带 ``isp_ms``（``{运营商: ms}``，itdog 与 tcptest 提供，
-    其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
+    源结果只需带 ``isp_ms``（``{运营商: ms}``，itdog/tcptest/ce98/biuding
+    提供，其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
     per-ISP 读数的条目不写该字段，下游回退 ``cn_display_ms`` 单值口径。
     """
     for e in entries.values():

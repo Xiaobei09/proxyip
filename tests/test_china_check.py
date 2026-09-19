@@ -1274,6 +1274,22 @@ class TestMergeIspMs(unittest.TestCase):
         cc.merge_isp_ms(entries)
         self.assertNotIn("isp_ms", entries["a:443#US"])
 
+    def test_merge_four_isp_sources(self):
+        """CN-08：itdog/tcptest/ce98/biuping 四源 isp_ms 跨源取最小
+        （词表由各生产侧保证，合并只过滤非正数值）。"""
+        entries = {
+            "a:443#US": {"sources": {
+                "itdog": {"isp_ms": {"中国电信": 45.0, "中国联通": 88.0}},
+                "tcptest": {"isp_ms": {"中国电信": 20.0, "中国移动": 50.0}},
+                "ce98": {"isp_ms": {"中国联通": 9.0}},
+                "biuping": {"isp_ms": {"中国移动": 60.0}},
+            }},
+        }
+        cc.merge_isp_ms(entries)
+        self.assertEqual(
+            entries["a:443#US"]["isp_ms"],
+            {"中国电信": 20.0, "中国联通": 9.0, "中国移动": 50.0})
+
     def test_negative_ms_ignored(self):
         entries = {"a:443#US": {"sources": {"itdog": {"isp_ms": {"电信": -1.0}}}}}
         cc.merge_isp_ms(entries)
