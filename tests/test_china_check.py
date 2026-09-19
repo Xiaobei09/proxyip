@@ -3196,6 +3196,24 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIsNotNone(m, "biuping-concurrency 参数定义丢失")
         self.assertEqual(int(m.group(1)), 8)
 
+    def test_graduated_limits_match_readme(self):
+        """CN-10：已毕业源的 CI 配额须与 README 链一致（防 CI 行与文档
+        双边漂移；生产出数待下次 china 验证）。"""
+        import re
+        root = Path(__file__).resolve().parent.parent
+        wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
+            encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping")):
+            m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
+                          wf, re.S)
+            self.assertIsNotNone(m, f"CI 未启用 {name}")
+            limit, conc = m.group(1), m.group(2)
+            self.assertRegex(
+                readme,
+                re.compile(re.escape(f"{name}（{limit} 键/{conc} 并发")),
+                f"README 链与 CI 配额不一致：{name}")
+
 
 if __name__ == "__main__":
     unittest.main()
