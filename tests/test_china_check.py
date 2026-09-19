@@ -1236,6 +1236,24 @@ class TestItdogAggregate(unittest.TestCase):
         self.assertEqual(agg[1]["status"], "ok")
         self.assertEqual(agg[1]["isp_ms"], {})
 
+    def test_isp_ms_tcping_shape(self):
+        """CN-07：batch_tcping 降级通道（result 毫秒字符串、无 http_code）
+        同样经 node_isp 映射产出 isp_ms——双通道运营商视角不断档。"""
+        node_isp = {"dx": "中国电信", "yd": "中国移动"}
+        records = [
+            {"task_num": 1, "node_id": "dx", "result": "33",
+             "address": "Anycast/x"},
+            {"task_num": 1, "node_id": "yd", "result": "77",
+             "address": "Anycast/x"},
+            {"task_num": 1, "node_id": "zz", "result": "-1",
+             "address": "Anycast/x"},
+        ]
+        agg = ci.itdog_aggregate(records, 1, node_isp)
+        self.assertEqual(agg[1]["status"], "ok")
+        self.assertEqual(agg[1]["level"], "tcp")
+        self.assertEqual(
+            agg[1]["isp_ms"], {"中国电信": 33.0, "中国移动": 77.0})
+
 
 class TestMergeIspMs(unittest.TestCase):
     def test_merge_across_sources(self):
