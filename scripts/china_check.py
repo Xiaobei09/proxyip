@@ -2203,8 +2203,9 @@ def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict
     GET 壳页提取 session/cookie 与内联 token；后续 GET ``/api.php``（action=tcping）
     携带 token 防重放。token 也可经 ``--17ce-token`` 显式提供。纯 TCP →
     ``level="tcp"``。整站异常/验证码 → ``error``（fail-open）。
-    状态（2026-09 三轮复测）：壳页 200 存活但页内无 token/api.php 引用、
-    ``/api.php`` 404，工具路由已迁移，adapter 待重写，当前休眠。
+    状态（2026-09 四轮复测）：壳页 200 存活但页内无 token/api.php 引用、
+    ``/api.php`` 404，工具路由已迁移；`tool.17ce.com` 系 LibreSpeed 访客
+    自测（测访客自身链路，无大陆探测价值）。adapter 待重写，当前休眠。
     """
     extra = {}
     if token:
