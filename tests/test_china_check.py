@@ -3214,6 +3214,19 @@ class TestCiEnabledSources(unittest.TestCase):
                 re.compile(re.escape(f"{name}（{limit} 键/{conc} 并发")),
                 f"README 链与 CI 配额不一致：{name}")
 
+    def test_all_enabled_l3_limits_present(self):
+        """CN-12：CI 启用的全部 L3 复核源配额原地锁定（tcptest/coffee/
+        pingloc/antping/tcpingcn/chinaz/pingpe/ce98/biuding），防 CI 行
+        误删某源致覆盖无声缩水。"""
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        for flag in ("--tcptest-limit 800", "--coffee-limit 1200",
+                     "--pingloc-limit 600", "--antping-limit 500",
+                     "--tcpingcn-limit 400", "--chinaz-limit 200",
+                     "--pingpe-limit 300",
+                     "--ce98-limit 200", "--biuping-limit 200"):
+            self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
+
     def test_raw_slots_dispatch_mapping(self):
         """CN-11：通用 slot 按源名派发到对应 check 函数；异常收敛为
         error 记录（不抛、不串源）。"""
