@@ -1937,6 +1937,7 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
     ok_nodes = 0
     totals = 0
     ms_values: list[float] = []
+    isp_best: dict[str, float] = {}
     seen: set = set()
     for block in sse.split("\n\n"):
         data = None
@@ -1973,16 +1974,24 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
             if is_ok:
                 ok_nodes += 1
                 ms_values.append(float(latest))
+                isp = _cn_isp_label(res.get("isp", ""))
+                if isp:
+                    ms_f = float(latest)
+                    if ms_f < isp_best.get(isp, float("inf")):
+                        isp_best[isp] = ms_f
     # 若某节点重复推送，按 node_id 去重
     nodes = totals or 1
     if ok_nodes:
-        return {
+        out = {
             "status": "ok", "ok": True,
             "ms": round(min(ms_values), 1) if ms_values else None,
             "error": "", "level": "tcp" if port else "icmp",
             "ok_nodes": ok_nodes, "nodes": nodes,
             "ratio": round(ok_nodes / nodes, 3) if nodes else None,
         }
+        if isp_best:
+            out["isp_ms"] = {k: round(v, 1) for k, v in isp_best.items()}
+        return out
     return {
         "status": "fail", "ok": False, "ms": None,
         "error": f"unreachable ({nodes} nodes)", "level": None,

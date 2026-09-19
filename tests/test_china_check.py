@@ -2861,6 +2861,22 @@ class TestBiupingSource(unittest.TestCase):
         self.assertEqual(out["ms"], 4.8)
         self.assertEqual(out["level"], "tcp")
 
+    def test_biuping_isp_ms_per_carrier(self):
+        """CN-06：biuping 以结果自带 isp 字段归一出 isp_ms（未知丢弃）；
+        与 itdog/ce98/tcptest 同口径供跨源合并。"""
+        sse = self._sse([
+            {"ok": True, "results": [
+                {"node_id": 1, "isp": "电信", "status": "ok", "latest": 6.0},
+                {"node_id": 2, "isp": "电信", "status": "ok", "latest": 4.0},
+                {"node_id": 3, "isp": "移动", "status": "ok", "latest": 9.0},
+                {"node_id": 4, "isp": "阿里云", "status": "ok", "latest": 2.0},
+                {"node_id": 5, "status": "ok", "latest": 3.0}]},
+        ])
+        out = self._seed(sse)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(
+            out["isp_ms"], {"中国电信": 4.0, "中国移动": 9.0})
+
     def test_biuping_mixed(self):
         sse = self._sse([
             {"ok": True, "results": [
