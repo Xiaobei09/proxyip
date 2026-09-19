@@ -69,7 +69,8 @@ class TestReconcileViews(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.assertEqual(
             (valid / "countries" / "US" / "all.txt").read_text(encoding="utf-8"),
-            "1.1.1.1:443#US\n",
+            # R313 起回填缺失方向：越界行剔除后，master 缺失行按原字节补入
+            "1.1.1.1:443#US\n2.2.2.2:443#US\n",
         )
 
     def test_country_ltd_kept_within_country_all(self):
@@ -217,6 +218,34 @@ class TestReconcileViews(unittest.TestCase):
         self.assertEqual(
             (valid2 / "ports" / "443.txt").read_text(encoding="utf-8"),
             "1.1.1.1:443#US\n",
+        )
+
+    def test_backfill_missing_country_lines(self):
+        """R313：master 缺失行按原字节补入所属国家分裂（延迟升序建目录）；
+        键已存在不重复；#ALL 与不可解析行跳过。"""
+        d = Path(tempfile.mkdtemp())
+        valid = d / "valid"
+        (valid / "countries").mkdir(parents=True)
+        (valid / "all.txt").write_text(
+            "1.1.1.1:443#US-100ms\n"
+            "2.2.2.2:443#US-50ms\n"
+            "3.3.3.3:443#ALL\n"
+            "garbage-line\n",
+            encoding="utf-8",
+        )
+        removed = reconcile_views(valid)
+        self.assertEqual(removed, 0)
+        self.assertEqual(
+            (valid / "countries" / "US" / "all.txt").read_text(
+                encoding="utf-8"),
+            "2.2.2.2:443#US-50ms\n1.1.1.1:443#US-100ms\n",
+        )
+        # 幂等：再跑一次无新增无删除
+        self.assertEqual(reconcile_views(valid), 0)
+        self.assertEqual(
+            (valid / "countries" / "US" / "all.txt").read_text(
+                encoding="utf-8"),
+            "2.2.2.2:443#US-50ms\n1.1.1.1:443#US-100ms\n",
         )
 
 

@@ -16,6 +16,7 @@ where ``<type>`` is ``DC``/``RES``/``MOB``/``PROXY`` and ``<tier>`` is
 """
 
 import argparse
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -295,6 +296,14 @@ def reconcile_views(valid_dir: Path) -> int:
     剔除越界行。注意只对 master 修剪：entry/exit 归类迁移会让 ``ltd``
     与所在目录 ``all`` 的归属口径不同，那些键仍是活节点，不可因归属
     分歧删除。返回剔除行数。
+
+    缺失方向回填（R313）：master 新增行若缺失于所属国家分裂则按 master
+    字节原样补入（延迟升序）。背景是多写者快照 race 的结构性解——
+    reachability/quality 重写 master 不写分裂、只有 validate 全量重建；
+    reconcile 此前只修剪不回填，缺失累积成门禁死锁（R289）。键已存在
+    （注释漂移）不重复；``#ALL`` 与不可解析行跳过；sets/（精选子集，
+    归属需定义表判定）与 ports/（未观测漂移，最小 blast radius）不在
+    此列，下次 validate 自然重写。
     """
     all_txt = valid_dir / "all.txt"
     if not all_txt.exists():
@@ -322,6 +331,40 @@ def reconcile_views(valid_dir: Path) -> int:
             else:
                 write_text_if_changed(path, "\n".join(kept) + "\n")
 
+    def _lat(line: str) -> float:
+        m = re.search(r"-(\d+(?:\.\d+)?)ms", line)
+        return float(m.group(1)) if m else float("inf")
+
+    def backfill_countries() -> int:
+        """master 行补入缺失的国家分裂；返回补入行数。"""
+        want: dict[str, dict[str, str]] = {}
+        for line in all_txt.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            parsed = parse_ltd_line(line)
+            if not parsed or parsed[3] == "ALL":
+                continue
+            want.setdefault(parsed[3], {})[line.split("#", 1)[0]] = line
+        added = 0
+        cdir = valid_dir / "countries"
+        for cc in sorted(want):
+            path = cdir / cc / "all.txt"
+            have = (
+                path.read_text(encoding="utf-8").splitlines()
+                if path.exists() else []
+            )
+            have_keys = {ln.split("#", 1)[0] for ln in have if ln}
+            missing = [ln for k, ln in want[cc].items() if k not in have_keys]
+            if not missing:
+                continue
+            merged = sorted(have + missing, key=_lat)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_text_if_changed(path, "\n".join(merged) + "\n")
+            added += len(missing)
+        if added:
+            print(f"reconcile: backfilled {added} lines into countries splits")
+        return added
+
     for port_txt in sorted((valid_dir / "ports").glob("*.txt")):
         prune(port_txt)
 
@@ -334,6 +377,7 @@ def reconcile_views(valid_dir: Path) -> int:
     for path in sorted(valid_dir.glob("all_*.txt")):
         if path.name != "all.txt":
             prune(path)
+    backfill_countries()
     return removed
 
 
