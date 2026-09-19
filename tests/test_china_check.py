@@ -3214,6 +3214,26 @@ class TestCiEnabledSources(unittest.TestCase):
                 re.compile(re.escape(f"{name}（{limit} 键/{conc} 并发")),
                 f"README 链与 CI 配额不一致：{name}")
 
+    def test_raw_slots_dispatch_mapping(self):
+        """CN-11：通用 slot 按源名派发到对应 check 函数；异常收敛为
+        error 记录（不抛、不串源）。"""
+        cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
+                  "1.2.3.4", "443", "US")]
+        entries: dict = {"1.2.3.4:443#US": {}}
+        with mock.patch.object(
+                cc, "ce98_check",
+                return_value={"status": "ok", "ok": True}) as m:
+            cc._run_raw_slots(cands, entries, 5, "ce98", 2)
+            m.assert_called_once_with("1.2.3.4", "443", 5)
+        self.assertEqual(entries["1.2.3.4:443#US"]["ce98"]["status"], "ok")
+        with mock.patch.object(
+                cc, "biuping_check",
+                side_effect=RuntimeError("boom")):
+            cc._run_raw_slots(cands, entries, 5, "biuping", 2)
+        err = entries["1.2.3.4:443#US"]["biuping"]
+        self.assertEqual(err["status"], "error")
+        self.assertEqual(err["error"], "RuntimeError")
+
 
 if __name__ == "__main__":
     unittest.main()
