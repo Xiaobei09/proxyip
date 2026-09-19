@@ -39,12 +39,13 @@
   不进延迟显示/不产 isp_ms）+   `jkapi.com/zz_ssl`（CN-37：同站同节点 TLS
   握手，免 key，双镜像，`level="tcp"` 保守，无 ms，只作布尔见证）+
   `xxapi.cn/api/status`（CN-38：同站 HTTP 状态码，免 key，
-  `level="http"`，无 ms）+
+  `level="http"`，无 ms）+ `xxapi.cn/api/portscan`（CN-39：同站 8 端口
+  扫描，仅 443 键产出证据，`level="tcp"`，无 ms）+
   `check-host.cc/ping`（CN-31：同节点 ICMP，
   仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）+
   `check-host.cc/http`（CN-32：同节点 HTTPS 应用层确认，首个 http 级
   单节点源，仅 TCP-ok 且其余免额 0 ok 时追加猎取第二确认，共用配额）——
-  九只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
+  十只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
   的 250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
@@ -71,7 +72,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/antping/antping_ping/
   tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
-  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/xxstatus/jkapi/jkping/jkssl）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/xxstatus/xxscan/jkapi/jkping/jkssl）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -209,6 +210,18 @@ XXPING_TIMEOUT = 8.0  # 与 tcping 同口径：免额源不应拖慢整池 L2
 # -2；10.255.255.1 → -4。回滚：摘 l2_xxapi 一行。
 XXSTATUS_URL = "https://v2.xxapi.cn/api/status"
 XXSTATUS_TIMEOUT = 10.0  # HTTP 往返比 TCP ping 慢，单独放宽
+
+# v2.xxapi.cn（小小API）api/portscan —— 同运营商 8 端口扫描，免 key
+# （JSON，``?address=<ip>``，固定探测 21/22/3306/443/6379/80/8080/8888）：
+#   ``{"code":200,"data":{"443":true,"80":true,...}}``（布尔/端口）；
+#   全关示例 ``192.0.2.1`` → 8 端口全 false。
+# 池端口 6 档中仅 443 在固定集合内 → 本源只对 443 键产出证据，
+# 其余端口恒 ``skipped``（无信号，不定罪；tcpping 缺 key 同语义）。
+# TCP 建连证据 → ``level="tcp"``；无 ms（布尔见证），不产 ``isp_ms``。
+# 2026-09-19 活体实证（CN-39）：223.5.5.5 → 443/80 开；192.0.2.1 → 全关。
+# 回滚：摘 l2_xxapi 一行。
+XXSCAN_URL = "https://v2.xxapi.cn/api/portscan"
+XXSCAN_TIMEOUT = 12.0  # 8 端口串扫比单点慢，单独放宽
 
 # jkapi.com（无铭 API）zz_tcping —— 浙江宁波电信 1 节点（免 key，纯文本报告）。
 # 单节点大陆实测，返回平均延迟 ms；目标不可达返回「所有测试均失败」。
@@ -628,7 +641,12 @@ def _jkapi_fetch(urls: list[str], query: str, timeout: float) -> tuple[int, byte
 
 
 def jkapi_check(ip: str, port: str, timeout: float) -> dict:
-    """jkapi 单节点实测（浙江宁波电信，免 key）。不抛未捕获异常。"""
+    """jkapi 单节点实测（浙江宁波电信，免 key）。不抛未捕获异常。
+
+    ok 时附带 ``isp_ms={"中国电信": ms}``（CN-39 分运营商放量：节点归属
+    明确为宁波电信，L2 全池每键贡献一个电信样本；回退/显示层另有 >2ms
+    可信门，见 ``common.cn_fastest_ms``）。
+    """
     out = _jkapi_fetch(
         [JKAPI_URL, JKAPI_MIRROR_URL], f"?host={ip}&port={port}",
         min(timeout, JKAPI_TIMEOUT),
@@ -636,7 +654,11 @@ def jkapi_check(ip: str, port: str, timeout: float) -> dict:
     if isinstance(out, dict):
         return out
     _, resp = out
-    return parse_jkapi(resp.decode("utf-8", "replace"))
+    parsed = parse_jkapi(resp.decode("utf-8", "replace"))
+    if (parsed.get("ok") and isinstance(parsed.get("ms"), (int, float))
+            and parsed["ms"] > 0):
+        parsed["isp_ms"] = {"中国电信": parsed["ms"]}
+    return parsed
 
 
 def parse_jkping(text: str) -> dict:
@@ -1271,6 +1293,66 @@ def xxstatus_check(ip: str, port: str, timeout: float) -> dict:
                 "error": "bad json", "level": None}
     out = parse_xxstatus(payload)
     out["level"] = "http" if out.get("ok") else None
+    return out
+
+
+def parse_xxscan(payload, port: str) -> dict:
+    """``xxapi.cn api/portscan`` → ``{"status", "ok", "ms", "error"}``。
+
+    - 非 443 端口 → ``skipped``（固定集合不含该端口，无信号，不定罪）；
+    - ``code==200`` + ``data["443"] is True`` → ok（TCP 建连证据）；
+    - ``code==200`` + ``data["443"]`` 为 False/缺失 → fail；
+    - 其余 code/坏载荷 → error（fail-open）。
+    """
+    if str(port) != "443":
+        return {"status": "skipped", "ok": False, "ms": None,
+                "error": "port not scanned"}
+    if not isinstance(payload, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad payload"}
+    if payload.get("code") != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"api code {payload.get('code')}"}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "empty data"}
+    if data.get("443") is True:
+        return {"status": "ok", "ok": True, "ms": None, "error": ""}
+    return {"status": "fail", "ok": False, "ms": None,
+            "error": "port closed"}
+
+
+def xxscan_check(ip: str, port: str, timeout: float) -> dict:
+    """xxapi 单节点 8 端口扫描实测（免 key）。
+
+    只对 443 键产出证据（``level="tcp"``，布尔见证，无 ms，不产
+    ``isp_ms``）；其余端口 ``skipped``。无镜像（单 URL）。
+    不抛未捕获异常。
+    """
+    url = f"{XXSCAN_URL}?address={ip}"
+    try:
+        status, _, resp = request_follow(
+            url, {"User-Agent": UA, "Accept": "application/json"},
+            min(timeout, XXSCAN_TIMEOUT),
+        )
+    except urllib.error.HTTPError as e:
+        return {"status": "rate_limited" if e.code == 429 else "error",
+                "ok": False, "ms": None, "error": f"http {e.code}",
+                "level": None}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"http {status}", "level": None}
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad json", "level": None}
+    out = parse_xxscan(payload, port)
+    out["level"] = "tcp" if out.get("ok") else None
     return out
 
 
@@ -3577,8 +3659,9 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
 def merge_isp_ms(entries: dict) -> None:
     """就地合并各源 ``isp_ms`` 到 per-key ``entry["isp_ms"]``（各运营商最小 RTT）。
 
-    源结果只需带 ``isp_ms``（``{运营商: ms}``，itdog/tcptest/ce98/biuding
-    提供，其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
+    源结果只需带 ``isp_ms``（``{运营商: ms}``，itdog/tcptest/ce98/biuding/
+    aa1ping/tcptest_http 多节点源与 jkapi 单节点（宁波电信，CN-39）提供，
+    其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
     per-ISP 读数的条目不写该字段，下游回退 ``cn_display_ms`` 单值口径。
     """
     for e in entries.values():
@@ -3648,7 +3731,7 @@ def merge_verdict(sources: dict) -> dict:
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "ce98_ping", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "xxstatus", "jkapi", "jkping", "jkssl")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "xxstatus", "xxscan", "jkapi", "jkping", "jkssl")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -3675,7 +3758,7 @@ def merge_verdict(sources: dict) -> dict:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
-    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "xxstatus", "jkapi", "jkping", "jkssl")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "xxstatus", "xxscan", "jkapi", "jkping", "jkssl")]
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
@@ -4212,16 +4295,16 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     def l2_xxapi(item):
         """免额单节点源（xxapi 北京 TCP + xxping 枣庄 ICMP + xxstatus 状态码
-        + jkapi 宁波电信 TCP + jkping 宁波电信 ICMP + jkssl 宁波电信 TLS）
-        全池扫描，先建立候选集。
+        + xxscan 443 扫描 + jkapi 宁波电信 TCP + jkping 宁波电信 ICMP
+        + jkssl 宁波电信 TLS）全池扫描，先建立候选集。
 
-        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：六个源放进同池最多干到
+        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：七个源放进同池最多干到
         池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=56
-        实测各源均无 429），保键级数据一致性仍用逐键六源落盘。"""
+        实测各源均无 429），保键级数据一致性仍用逐键七源落盘。"""
         _, key, ip, port, _ = item
         out = {}
         for name, fn in (("xxapi", xxapi_check), ("xxping", xxping_check),
-                         ("xxstatus", xxstatus_check),
+                         ("xxstatus", xxstatus_check), ("xxscan", xxscan_check),
                          ("jkapi", jkapi_check), ("jkping", jkping_check),
                          ("jkssl", jkssl_check)):
             try:
@@ -4280,13 +4363,13 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                         "error": _err(exc), "level": None}
         return key, out
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
-    # - 免额六源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
+    # - 免额七源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
     # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         def _needs_ch(entry: dict) -> bool:
             free = [entry.get(n) or {}
-                    for n in ("xxapi", "xxping", "xxstatus",
+                    for n in ("xxapi", "xxping", "xxstatus", "xxscan",
                               "jkapi", "jkping", "jkssl")]
             if sum(1 for r in free if r.get("status") == "ok") >= 2:
                 return False
@@ -5029,8 +5112,8 @@ def main(argv=None) -> int:
         f"flappers: {flappers} cn-l2-ms: {cn_ms_covered}/{len(entries)}",
         file=sys.stderr,
     )
-    # per-key isp_ms（各运营商最小 RTT，来自 itdog/tcptest/ce98/biuping
-    # per-ISP 源）——
+    # per-key isp_ms（各运营商最小 RTT，来自 itdog/tcptest/ce98/biuding/
+    # aa1ping/tcptest_http 多节点源与 jkapi 单节点 per-ISP 源）——
     # 必须在中国 check 写 china.json 之前合并进 entries，单一事实源。
     merge_isp_ms(entries)
     n_isp = sum(

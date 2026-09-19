@@ -265,8 +265,12 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 - `xxapi.cn/api/status`（CN-38）：同站 HTTP 状态码，免 key（JSON；
   `level=http`，`-2` 判 fail、`-4` 拒绝按 error，无 ms，不产 `isp_ms`）。
   同站第四端点（TCP/ICMP/状态码）
+- `xxapi.cn/api/portscan`（CN-39）：同站 8 端口扫描，免 key（JSON；
+  固定集合仅含 443 一档池端口，非 443 键恒 skipped；`level="tcp"`，
+  布尔见证，无 ms，不产 `isp_ms`）
 - `jkapi.com/zz_tcping`：浙江宁波电信 TCP 1 节点，免 key（纯文本报告；
-  CN-26 起主站异常自动 failover 同站镜像 `api.jkapi.com`，429 不切换）
+  CN-26 起主站异常自动 failover 同站镜像 `api.jkapi.com`，429 不切换；
+  CN-39 起 ok 附 `isp_ms={中国电信}`，L2 全池电信放量）
 - `jkapi.com/zz_ping`（CN-25 新增）：同站同节点 ICMP 主机存活，免 key
   （纯文本报告；`level=icmp`，不进 `cn_display_ms`/`isp_ms`，与 chinaz/coffee
   同口径；同镜像 failover）。同站不同协议：TCP 握手与 ICMP 回显失效模式正交（端口封 vs
@@ -392,6 +396,13 @@ CN-38 逆向复核（活体探针实证）：websearch 挖出 `kkce`（openapi �
 `api/speed`（需 Key，不接入）＋`api/status`（免 key，`?url=`，
 400/404 均为应用层应答，`-2` 死、`-4` 拒）接入为 `xxstatus` 源
 （同站第四端点；`level=http`，无 ms；L2 全池）。
+CN-39 逆向复核（活体探针实证）：`xxapi.cn` 目录续挖出 `api/portscan`
+（`?address=`，固定 8 端口，443:true/全关两态）接入为 `xxscan` 源
+（仅 443 键产出，其余 skipped；`level="tcp"` 布尔见证；L2 全池）。
+分运营商放量：实测 china.json 23139 条仅 500 带 `isp_ms`；`jkapi
+zz_tcping`（宁波电信归属明确）ok 即附 `isp_ms={中国电信}`，L2 全池
+每键一个电信样本（北京/呼和浩特/BGP 节点归属不明，继续豁免；
+ICMP 全系继续豁免，规则：TCP/HTTP 产出、ICMP 豁免）。
 CN-33 逆向复核（活体探针实证）：`tcptest.cn type=ping`（202 建任务，
 158 节点，`avg_ms`/`packets_received`  schema 与 tcping 同构）接入为
 `tcptest_ping` 源（同站 ICMP，裸 IP 目标；`level=icmp`、不产 `isp_ms`；
@@ -438,7 +449,7 @@ annotate 系，待验证），机制已根治。
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/
    antping/antping_ping/tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/xxstatus/jkapi/jkping/jkssl）≥2 个 ok → reachable
+2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/xxstatus/xxscan/jkapi/jkping/jkssl）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、

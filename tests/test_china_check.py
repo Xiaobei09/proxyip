@@ -191,6 +191,9 @@ class TestCheckhostHttpWiring(unittest.TestCase):
             mock.patch.object(cc, "xxstatus_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
+            mock.patch.object(cc, "xxscan_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
             mock.patch.object(cc, "check_host_check", return_value=tcp),
         ]
 
@@ -395,6 +398,9 @@ class TestCheckhostPingWiring(unittest.TestCase):
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
             mock.patch.object(cc, "xxstatus_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "xxscan_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
             mock.patch.object(cc, "check_host_check", return_value=tcp),
@@ -858,6 +864,95 @@ class TestXxstatusMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
 
+class TestParseXxscan(unittest.TestCase):
+    """CN-39：xxapi api/portscan（8 端口扫描）JSON 解析。"""
+
+    def test_ok_443(self):
+        payload = {"code": 200,
+                   "data": {"21": False, "443": True, "80": True}}
+        result = cc.parse_xxscan(payload, "443")
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["ok"])
+
+    def test_closed_fail(self):
+        payload = {"code": 200, "data": {"443": False}}
+        result = cc.parse_xxscan(payload, "443")
+        self.assertEqual(result["status"], "fail")
+
+    def test_non_443_skipped(self):
+        """固定集合不含该端口 → skipped（无信号，不定罪）。"""
+        payload = {"code": 200, "data": {"443": True}}
+        for port in ("8443", "2053", "2083", "2087", "2096"):
+            result = cc.parse_xxscan(payload, port)
+            self.assertEqual(result["status"], "skipped", msg=port)
+
+    def test_bad(self):
+        self.assertEqual(cc.parse_xxscan(None, "443")["status"], "error")
+        self.assertEqual(cc.parse_xxscan({}, "443")["status"], "error")
+        self.assertEqual(
+            cc.parse_xxscan({"code": -2}, "443")["status"], "error")
+
+
+class TestXxscanCheck(unittest.TestCase):
+    """CN-39：xxscan_check 传输层（mock，不触网）。"""
+
+    _BODY = b'{"code":200,"data":{"443":true}}'
+
+    def test_ok_level_tcp(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, self._BODY)):
+            out = cc.xxscan_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["level"], "tcp")
+        self.assertNotIn("isp_ms", out)
+
+    def test_non_443_skipped(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, self._BODY)):
+            out = cc.xxscan_check("1.2.3.4", "8443", 10)
+        self.assertEqual(out["status"], "skipped")
+
+    def test_rate_limited(self):
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=urllib.error.HTTPError(
+                                   "http://x", 429, "Too Many Requests",
+                                   {}, io.BytesIO(b""))):
+            out = cc.xxscan_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "rate_limited")
+
+
+class TestXxscanMergeVerdict(unittest.TestCase):
+    """CN-39：xxscan 并入单节点交叉。"""
+
+    def test_double_ok_reachable(self):
+        sources = {
+            "xxscan": {"status": "ok", "ok": True, "ms": None,
+                       "level": "tcp"},
+            "jkapi": {"status": "ok", "ok": True, "ms": 11},
+        }
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["ms"], 11.0)
+
+    def test_alone_ok_uncertain(self):
+        sources = {"xxscan": {"status": "ok", "ok": True, "ms": None,
+                              "level": "tcp"}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_skipped_ignored(self):
+        """skipped 源不参与判定（全 skipped → skipped，不误判）。"""
+        sources = {"xxscan": {"status": "skipped", "ok": False, "ms": None,
+                              "error": "port not scanned"}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
+
+    def test_double_fail_unreachable(self):
+        sources = {
+            "xxscan": {"status": "fail", "ok": False, "ms": None},
+            "xxapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+
 class TestParseJkping(unittest.TestCase):
     """CN-25：jkapi zz_ping（宁波电信 ICMP）纯文本报告解析。"""
 
@@ -990,6 +1085,34 @@ class TestJkMirrorFailover(unittest.TestCase):
                                    primary_exc=urllib.error.URLError("reset"))):
             out = cc.jkapi_check("223.5.5.5", "443", 10)
         self.assertEqual(out["status"], "error")
+
+    def test_jkapi_ok_emits_telecom_isp(self):
+        """CN-39 分运营商放量：宁波电信单节点 ok 即带 isp_ms（L2 全池每键
+        一个电信样本；回退/显示层另有 >2ms 可信门）。"""
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=self._route(
+                                   primary_exc=urllib.error.URLError("reset"),
+                                   mirror_body=self._TCP_OK)):
+            out = cc.jkapi_check("223.5.5.5", "443", 10)
+        self.assertEqual(out["isp_ms"], {"中国电信": out["ms"]})
+
+    def test_jkapi_fail_no_isp(self):
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {},
+                                             "所有测试均失败".encode())):
+            out = cc.jkapi_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "fail")
+        self.assertNotIn("isp_ms", out)
+
+    def test_merge_isp_ms_picks_jkapi(self):
+        """merge 入口级汇聚收单节点电信读数（与多节点源同表）。"""
+        entries = {"k": {"sources": {
+            "jkapi": {"status": "ok", "ok": True, "ms": 11.0,
+                      "isp_ms": {"中国电信": 11.0}},
+            "xxapi": {"status": "error", "ok": False, "ms": None},
+        }}}
+        cc.merge_isp_ms(entries)
+        self.assertEqual(entries["k"]["isp_ms"], {"中国电信": 11.0})
 
     def test_jkapi_429_no_failover(self):
         """429 系共享配额限流：直接返回，不耗镜像配额。"""
@@ -3126,7 +3249,7 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                 mock.patch.object(cc, "xxstatus_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "xxscan_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -3164,7 +3287,7 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                 mock.patch.object(cc, "xxstatus_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "xxscan_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, _, _ = cc.run_measurements(items, self._args())
@@ -3202,7 +3325,7 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                 mock.patch.object(cc, "xxstatus_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "xxscan_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -3240,7 +3363,7 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                 mock.patch.object(cc, "xxstatus_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "xxscan_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -3278,13 +3401,51 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                 mock.patch.object(cc, "xxstatus_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "xxscan_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
 
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(set(reachable), {"7.7.7.7:80#US"})
+
+    def test_xxscan_second_confirm_skips_check_host(self):
+        """CN-39：免额七源中任 2 ok 即双确认——xxapi ok + xxscan ok
+        （余者 error）→ 稀配额 check-host 直接让位。"""
+        import unittest.mock as mock
+
+        items = [("8.8.4.4:80#US", "8.8.4.4:80#US", "8.8.4.4", "80", "US")]
+
+        def fake_xxapi(ip, port, timeout):
+            return {"status": "ok", "ok": True, "ms": 43.0}
+
+        def fake_check_host(ip, port, limiter, timeout, api_key):
+            return {"status": "ok", "ok": True, "ms": 1.0}
+
+        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
+            cc, "check_host_check", side_effect=fake_check_host
+        ) as mch, mock.patch.object(cc, "jkapi_check",
+                                    return_value={"status": "error", "ok": False,
+                                                  "ms": None, "error": "x"}), \
+                mock.patch.object(cc, "jkping_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "x"}), \
+                mock.patch.object(cc, "xxping_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "x"}), \
+                mock.patch.object(cc, "jkssl_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "x"}), \
+                mock.patch.object(cc, "xxstatus_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "x"}), \
+                mock.patch.object(cc, "xxscan_check",
+                                  return_value={"status": "ok", "ok": True,
+                                                "ms": None, "level": "tcp"}):
+            entries, reachable, _ = cc.run_measurements(items, self._args())
+
+        self.assertEqual(mch.call_args_list, [])
+        self.assertEqual(set(reachable), {"8.8.4.4:80#US"})
 
     def test_xxapi_error_still_gets_second_opinion(self):
         import unittest.mock as mock
@@ -3312,6 +3473,9 @@ class TestScarceQuotaAllocation(unittest.TestCase):
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "xxstatus_check",
+                                  return_value={"status": "error", "ok": False,
+                                                "ms": None, "error": "http 500"}), \
+                mock.patch.object(cc, "xxscan_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
                 mock.patch.object(cc, "checkhost_http_check",
@@ -3391,6 +3555,7 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
             mock.patch.object(cc, "xxping_check", side_effect=self._boom),
             mock.patch.object(cc, "jkssl_check", side_effect=self._boom),
             mock.patch.object(cc, "xxstatus_check", side_effect=self._boom),
+            mock.patch.object(cc, "xxscan_check", side_effect=self._boom),
             # check_host 也走槽位；抛异常同样须被隔离（l2_check_host 已有守卫）
             mock.patch.object(cc, "check_host_check", side_effect=self._boom),
             mock.patch.object(cc, "itdog_batch_run", return_value={}),
@@ -3405,7 +3570,7 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
         srcs = entries[item[1]]["sources"]
         for name in ("tcptest", "coffee", "pingloc", "antping", "tcpingcn",
                      "chinaz", "pingpe", "check_host", "jkping", "xxping",
-                     "jkssl", "xxstatus"):
+                     "jkssl", "xxstatus", "xxscan"):
             self.assertEqual(srcs[name]["status"], "error")
         # 全部错误 → 不误判（skipped/uncertain），且流程未中断
         self.assertIn(entries[item[1]]["verdict"], ("uncertain", "skipped"))
@@ -3463,6 +3628,9 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "xxstatus_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "xxscan_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "check_host_check",
@@ -3534,6 +3702,9 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "xxstatus_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "xxscan_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
               mock.patch.object(cc, "check_host_check",
@@ -3935,6 +4106,7 @@ class TestTcptestHttpSource(unittest.TestCase):
               mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
               mock.patch.object(cc, "jkssl_check", side_effect=fake_l2), \
               mock.patch.object(cc, "xxstatus_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "xxscan_check", side_effect=fake_l2), \
               mock.patch.object(cc, "check_host_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
@@ -4087,6 +4259,7 @@ class TestTcptestPingSource(unittest.TestCase):
               mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
               mock.patch.object(cc, "jkssl_check", side_effect=fake_l2), \
               mock.patch.object(cc, "xxstatus_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "xxscan_check", side_effect=fake_l2), \
               mock.patch.object(cc, "check_host_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
@@ -4207,6 +4380,9 @@ class TestItdogPingFallbackGuard(unittest.TestCase):
               mock.patch.object(cc, "xxstatus_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
+              mock.patch.object(cc, "xxscan_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
             entries, _, _ = cc.run_measurements(items, self._args())
 
@@ -4256,6 +4432,9 @@ class TestItdogPingFallbackGuard(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "xxstatus_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "xxscan_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
@@ -4426,6 +4605,9 @@ class TestPingpeConcurrency(unittest.TestCase):
               mock.patch.object(cc, "xxstatus_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
+              mock.patch.object(cc, "xxscan_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
               mock.patch.object(cc, "checkhost_ping_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
@@ -4497,6 +4679,9 @@ class TestItdogTcpingFallbackGuard(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "xxstatus_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "xxscan_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=failed_nodes) as mib:
