@@ -2813,6 +2813,57 @@ class TestCe98Source(unittest.TestCase):
         self.assertEqual(
             out["isp_ms"], {"中国电信": 6.0, "中国联通": 9.0})
 
+    def test_ce98_early_exit_when_all_nodes_reported(self):
+        """CN-15：页节点全部回执即提前结束，不空等 30s idle 窗口
+        （读次数 == started＋更新数，不再多一次 timeout 轮询）。"""
+        reads = []
+
+        class _CountingSIO(self._FakeSIO):
+            def read(self):
+                reads.append(1)
+                return super().read()
+
+        frames = [
+            ("event", ["continuous_tcping_started", {"job_id": "j1"}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "上海电信", "ok": True, "loss": 0,
+                        "latest": 5.0, "average": 5.0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "广州腾讯云", "ok": True, "loss": 0,
+                        "latest": 8.0, "average": 8.0}]),
+        ]
+        html = ('<html><script id="continuous-tcping-nodes-data">'
+                '[{"name":"上海电信","location":"上海市"},'
+                '{"name":"广州腾讯云","location":"广东省"}]'
+                '</script></html>').encode()
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, html)), \
+             mock.patch.object(cc, "_SocketIOClient",
+                               return_value=_CountingSIO(frames)):
+            out = cc.ce98_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(len(reads), 3)
+
+    def test_ce98_no_early_exit_on_partial(self):
+        """页节点未收齐时仍等到超时/结束（残缺样本不提前收兵）。"""
+        frames = [
+            ("event", ["continuous_tcping_started", {"job_id": "j1"}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "上海电信", "ok": True, "loss": 0,
+                        "latest": 5.0, "average": 5.0}]),
+        ]
+        html = ('<html><script id="continuous-tcping-nodes-data">'
+                '[{"name":"上海电信"},{"name":"广州腾讯云"},{"name":"北京联通"}]'
+                '</script></html>').encode()
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, html)), \
+             mock.patch.object(cc, "_SocketIOClient",
+                               return_value=self._FakeSIO(frames)):
+            out = cc.ce98_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 1)
+
     def test_ce98_mixed_with_lost(self):
         frames = [
             ("event", ["continuous_tcping_node_update",

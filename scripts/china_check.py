@@ -1851,6 +1851,11 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
                                 and ms_one > 0
                                 and ms_one < isp_best.get(isp, float("inf"))):
                             isp_best[isp] = ms_one
+                    # 页节点已全部回执即提前结束（R327 性能：此前空等满
+                    # 30s CE98_WS_IDLE，单键 ~34s；页表过期致数对不上时
+                    # 条件恒假，回落原超时语义）。
+                    if len(seen) >= len(nodes):
+                        break
             elif name == "connect_error":
                 break
     try:
