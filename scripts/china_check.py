@@ -50,6 +50,8 @@
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
   `ping.aa1.cn`（CN-27：独立运营商免费API 站 TCPing，WS 纯 JSON 无鉴权，
   28 城三网节点原生 per-ISP，端口直连）。
+  `tcptest.cn type=http`（CN-35：同站应用层，`status>0` 即确认，
+  `level=http`，ms 取 connect_ms；与 TCP 同节点采样）。
   `tcping.cn`（~163 TCP 节点 + CN-30 同通道 `tcpingcn_ping` ICMP，
   SHA-256 PoW + ALTCHA 会话复用纯 Python，真实端口直连）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
@@ -61,7 +63,7 @@
   itdog batch_ping 已接入；boce/17ce/aizhan 经逆向确认仍阻塞；ping.sx 零 CN）。
 
 保守判定逻辑（merge_verdict）：
-  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/coffee/pingloc/antping/antping_ping/
+  多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/antping/antping_ping/
   tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
   单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
@@ -422,6 +424,7 @@ _SOURCE_MIN_RATIO = {
     "antping_ping": ANTPING_PING_MIN_RATIO,
     "tcpingcn_ping": TCPINGCN_PING_MIN_RATIO,
     "tcptest_ping": ITDOG_MIN_RATIO,
+    "tcptest_http": ITDOG_MIN_RATIO,
     "biuping_ping": BIUPING_PING_MIN_RATIO,
 }
 
@@ -1305,6 +1308,32 @@ def tcptest_pick_nodes(nodes: list[dict], count: int) -> list[str]:
     return picked
 
 
+def _tcptest_http_code(row: dict) -> int:
+    """http 结果行 HTTP 状态码（>0 即应用层应答，含 4xx/5xx）。"""
+    if not isinstance(row, dict):
+        return 0
+    try:
+        return int((row.get("data") or {}).get("status") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _tcptest_http_ms(row: dict) -> float:
+    """http 结果行延迟：``connect_ms`` 优先（TCP 建连类比），回退
+    ``first_byte_ms``/``total_ms``；无正读数返回 0.0。"""
+    if not isinstance(row, dict):
+        return 0.0
+    data = row.get("data") or {}
+    for key in ("connect_ms", "first_byte_ms", "total_ms"):
+        try:
+            v = float(data.get(key))
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            return v
+    return 0.0
+
+
 def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
                   operators: dict | None = None,
                   probe_type: str = "tcping") -> dict:
@@ -1318,9 +1347,14 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
     ``probe_type="ping"``（CN-33）：节点成功 = ICMP 存活（``success==true``
     且 ``avg_ms>0``），``ms`` 取成功节点最小 RTT；``level="icmp"`` 且不产
     ``isp_ms``（ICMP 不进展示，chinaz 等同口径）。
+    ``probe_type="http"``（CN-35）：节点成功 = 应用层应答
+    （``success==true`` 且 ``status>0``，含 4xx/5xx——明文 HTTP 打到 TLS
+    端口收 CF 400 即完整往返证明，itdog ``http_code>0`` 同口径），``ms``
+    取 ``connect_ms``（回退 ``first_byte_ms``/``total_ms``）；``level="http"``。
     ``operators`` 为 ``{node_uuid: 运营商}`` 时（调用方由节点列表构造），
-    TCP 探测另按 itdog 口径归一出 ``isp_ms``（``{中国电信/联通/移动: 最小ms}``，
-    海外/未知丢弃），供 ``merge_isp_ms`` 跨源合并；无映射时缺省该键。
+    TCP/HTTP 探测另按 itdog 口径归一出 ``isp_ms``（``{中国电信/联通/移动: 最小ms}``，
+    海外/未知丢弃），供 ``merge_isp_ms`` 跨源合并；ICMP 不产出（上文）；
+    无映射时缺省该键。
     """
     if not node_uuids:
         return {"status": "error", "ok": False, "ms": None,
@@ -1328,6 +1362,8 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
                 "ok_nodes": 0, "nodes": 0, "ratio": None}
     if probe_type == "ping":
         target = ip
+    elif probe_type == "http":
+        target = f"http://{ip}:{port}/"
     else:
         target = f"[{ip}]:{port}" if ":" in ip and not ip.startswith("[") else f"{ip}:{port}"
     body = {
@@ -1416,6 +1452,12 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
                            (int, float))
             and (r.get("data") or {})["avg_ms"] > 0
         ]
+    elif probe_type == "http":
+        ok = [
+            r for r in real
+            if r.get("success") is True
+            and _tcptest_http_code(r) > 0
+        ]
     else:
         ok = [
             r for r in real
@@ -1426,23 +1468,31 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
     if not real:
         nodes = total or len(node_uuids)
     if ok:
-        mss = [r["data"].get("avg_ms") or r["data"].get("duration_ms")
-               for r in ok
-               if isinstance(r.get("data"), dict)]
+        if probe_type == "http":
+            mss = [_tcptest_http_ms(r) for r in ok]
+        else:
+            mss = [r["data"].get("avg_ms") or r["data"].get("duration_ms")
+                   for r in ok
+                   if isinstance(r.get("data"), dict)]
         valids = [m for m in mss if isinstance(m, (int, float)) and m > 0]
+        level = ("http" if probe_type == "http"
+                 else "icmp" if probe_type == "ping" else "tcp")
         out = {
             "status": "ok", "ok": True,
             "ms": round(min(valids), 1) if valids else None,
-            "error": "", "level": "icmp" if probe_type == "ping" else "tcp",
+            "error": "", "level": level,
             "ok_nodes": len(ok), "nodes": nodes,
             "ratio": round(len(ok) / nodes, 3),
         }
         if probe_type != "ping" and isinstance(operators, dict):
             isp_best: dict[str, float] = {}
             for r in ok:
-                data = r.get("data")
-                ms = (data.get("avg_ms") or data.get("duration_ms")
-                      if isinstance(data, dict) else None)
+                if probe_type == "http":
+                    ms = _tcptest_http_ms(r)
+                else:
+                    data = r.get("data")
+                    ms = (data.get("avg_ms") or data.get("duration_ms")
+                          if isinstance(data, dict) else None)
                 if not isinstance(ms, (int, float)) or ms <= 0:
                     continue
                 label = _TCPTEST_ISP_LABELS.get(operators.get(r.get("node_uuid")))
@@ -3414,7 +3464,7 @@ def merge_verdict(sources: dict) -> dict:
         level = None
 
     multi_ok = [s for s in ok_sources if s in (
-        "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "coffee",
+        "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping")]
@@ -3448,7 +3498,7 @@ def merge_verdict(sources: dict) -> dict:
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
-        "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "tcptest_ping", "coffee",
+        "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
@@ -4159,7 +4209,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     tcptest_uuids = []
     tcptest_operators: dict | None = None
     if getattr(args, "tcptest_limit", 0) != 0 or getattr(
-            args, "tcptest_ping_limit", 0) != 0:
+            args, "tcptest_ping_limit", 0) != 0 or getattr(
+            args, "tcptest_http_limit", 0) != 0:
         tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
         tcptest_uuids = tcptest_pick_nodes(
             tcptest_nodes, getattr(args, "tcptest_nodes", TCPTEST_NODES)
@@ -4213,6 +4264,31 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             )
         else:
             print("tcptest_ping review: skipped (limit=0)", file=sys.stderr)
+        http_limit = getattr(args, "tcptest_http_limit", 0)
+        if http_limit != 0:
+            http_candidates = [
+                item for item in sample if needs_probe(entries, item[1])
+            ]
+            if http_limit is None or http_limit < 0:
+                http_limit = len(http_candidates)
+            _run_tcptest_slots(
+                http_candidates[:http_limit],
+                entries,
+                args.timeout,
+                tcptest_uuids,
+                getattr(args, "tcptest_http_concurrency",
+                        TCPTEST_CONCURRENCY),
+                tcptest_operators,
+                probe_type="http",
+                source="tcptest_http",
+            )
+            print(
+                f"tcptest_http review: {time.monotonic() - _t0:.1f}s "
+                f"({len(http_candidates)} targets)",
+                file=sys.stderr,
+            )
+        else:
+            print("tcptest_http review: skipped (limit=0)", file=sys.stderr)
     else:
         print(
             "tcptest review: skipped (no nodes or limit=0)",
@@ -4568,6 +4644,10 @@ def main(argv=None) -> int:
                         help="tcptest.cn ICMP 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--tcptest-ping-concurrency", type=int, default=TCPTEST_CONCURRENCY,
                         help=f"tcptest.cn ICMP 并发复核数（默认 {TCPTEST_CONCURRENCY}）")
+    parser.add_argument("--tcptest-http-limit", type=int, default=0,
+                        help="tcptest.cn HTTP 应用层多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--tcptest-http-concurrency", type=int, default=TCPTEST_CONCURRENCY,
+                        help=f"tcptest.cn HTTP 并发复核数（默认 {TCPTEST_CONCURRENCY}）")
     parser.add_argument("--coffee-limit", type=int, default=0,
                         help="ip.net.coffee 单节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--coffee-concurrency", type=int, default=COFFEE_CONCURRENCY,

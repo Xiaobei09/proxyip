@@ -73,6 +73,7 @@ jobs:
           --source data/valid/all.txt --limit 0
           --tcptest-limit 800 --tcptest-concurrency 20
           --tcptest-ping-limit 400 --tcptest-ping-concurrency 20
+          --tcptest-http-limit 200 --tcptest-http-concurrency 8
           --coffee-limit 1200 --coffee-concurrency 40
           --pingloc-limit 600 --pingloc-concurrency 12
            --antping-limit 500 --antping-concurrency 8

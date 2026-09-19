@@ -294,6 +294,7 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 - `tcptest.cn`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
 - `tcptest_ping`（CN-33）：同站 `type=ping`（裸 IP 目标，无端口概念），节点成功 = `success`＋`avg_ms>0`，`level=icmp`，不产 `isp_ms`；与 TCP 共用节点采样，跑在 TCP 相之后（只投仍未定论者），CI 400 键/20 并发
+- `tcptest_http`（CN-35）：同站 `type=http`（`http://ip:port/`，明文打 TLS 端口收 CF 400 即完整往返，itdog 同口径），节点成功 = `success`＋`status>0`，`level=http`，ms 取 `connect_ms`，与 TCP 同口径产 `isp_ms`；跑在 ping 相之后（只投仍未定论者），CI 200 键/8 并发
 - `ip.net.coffee`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
 - `pingloc.com`（~12 ICMP 节点）、`antping.com`（~155 节点，JWT+WS，TCP `ip:port`）、`antping_ping`（CN-28：同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`tcping.cn`（~163 TCP 节点，SHA-256 PoW + WS）、`ping.chinaz.com`（~53 ICMP 节点，服务端渲染 token + WS）、`98ce.com`（34 大陆省市节点 TCPing，socket.io）、`biuping.com`（约 39 ISP×节点 TCPing，SSE）、`biuping_ping`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`；CI 200 键/8 并发）、`ping.aa1.cn`（CN-27：独立运营商免费 API 站，WS 纯 JSON 零鉴权，28 城三网 TCPing，`operator` 原生分电信/联通/移动，`domain` 携真实端口逐端口实测；CI 以 200 键/6 并发启用）、`boce.com`、`ipip.net`、`17ce.com`、`ping0.cc`、`wansui.cn`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用
 - `ping.pe`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
@@ -377,6 +378,15 @@ CN-33 逆向复核（活体探针实证）：`tcptest.cn type=ping`（202 建任
 `tcping.cn type=http/https`（http→403 墙、https→400 未知类型，不接入；
 站方频率敏感，不再深耗）/`ping.aa1.cn/batch_http`
 （与 batch_ping 同族，WS 即关史，不再深耗）。
+CN-35 逆向复核（活体探针实证）：`tcptest.cn type=http`（202 建任务，
+全字段 `status/connect_ms/speed_mbps/resolved_ip`；`https://` 型被拒，
+仅 `http://ip:port/` 可用；192.0.2.1 以 success=false＋prohibited 干脆
+拒绝）接入为 `tcptest_http` 源（同站应用层；`level=http`；ms 取
+`connect_ms`；与 TCP 同口径产 `isp_ms`——HTTP 层与 itdog 一致，ICMP 才
+豁免；跑在 ping 相之后；CI 200 键/8 并发）。
+`http.ping.pe`（530 源站死）/`ip.net.coffee/api/tcping`（404，纯 ping
+站）/`tool.lu`（无测量工具）/`yunaq`（非测量站）/`speedtest.cn`
+（自测站，无 ip:port 探针），不接入。
 CN-31 逆向复核（活体探针实证）：`ping.aa1.cn/batch_ping`（WS 即关，
 消息形不明，且节点表仅 4 个独立出口 IP——同站价值已由单目标流覆盖，
 不接入；待验证法：浏览器抓包确切首帧）/`v2.xxapi.cn/api/netCheck`
@@ -404,7 +414,7 @@ annotate 系，待验证），机制已根治。
        jkping: {...}, itdog: {...}, pingpe: {...}, tcptest: {...}, ...}
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
-1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/coffee/pingloc/
+1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/
    antping/antping_ping/tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
 2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable

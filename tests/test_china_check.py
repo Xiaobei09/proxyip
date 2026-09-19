@@ -3521,6 +3521,145 @@ class TestAntpingPingSource(unittest.TestCase):
             entries["1.2.3.4:443#US"]["antping_ping"]["status"], "ok")
 
 
+class TestTcptestHttpSource(unittest.TestCase):
+    """CN-35：tcptest type=http 同站应用层（mock，不触网）。"""
+
+    def _run(self, results):
+        bodies = []
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            if method == "POST" and url.endswith("/tasks"):
+                bodies.append(json.loads(data.decode()))
+                return 201, {}, json.dumps({"id": "t1"}).encode()
+            if "/results" in url:
+                return 200, {}, json.dumps({"results": results}).encode()
+            return 200, {}, json.dumps({"state": "succeeded"}).encode()
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1", "u2"],
+                                   {"u1": "电信", "u2": "联通"},
+                                   probe_type="http")
+        return out, bodies
+
+    def _ok_row(self, uuid="u1", status=400, ms=15.76):
+        return {"node_uuid": uuid, "success": True,
+                "data": {"status": status, "connect_ms": ms,
+                         "first_byte_ms": ms, "resolved_ip": "1.2.3.4"}}
+
+    def test_http_ok_level_http_with_isp(self):
+        out, bodies = self._run(
+            [self._ok_row("u1", 400, 15.76),
+             self._ok_row("u2", 404, 28.5)])
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ms"], 15.8)
+        self.assertEqual(out["level"], "http")
+        self.assertEqual(out["ok_nodes"], 2)
+        # HTTP 与 TCP 同口径产出 isp_ms（itdog 一致；ICMP 才豁免）
+        self.assertEqual(out["isp_ms"],
+                         {"中国电信": 15.8, "中国联通": 28.5})
+        create = next(b for b in bodies if b.get("type") == "http")
+        self.assertEqual(create["target"], "http://1.2.3.4:443/")
+
+    def test_http_all_fail(self):
+        bad = {"node_uuid": "u1", "success": False, "data": {},
+               "error": "timeout"}
+        out, _ = self._run([bad])
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ratio"], 0.0)
+
+    def test_http_code_zero_not_ok(self):
+        """无 HTTP 应答（status=0）不得冒充应用层确认。"""
+        row = self._ok_row("u1", 0, 15.76)
+        out, _ = self._run([row])
+        self.assertEqual(out["status"], "fail")
+
+    def test_merge_strong_weak_fail(self):
+        strong = {"status": "ok", "ok": True, "ms": 15.8, "level": "http",
+                  "ok_nodes": 8, "nodes": 10, "ratio": 0.8}
+        merged = cc.merge_verdict({"tcptest_http": strong})
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["level"], "http")
+        weak = dict(strong, ok_nodes=1, nodes=10, ratio=0.1)
+        self.assertEqual(cc.merge_verdict(
+            {"tcptest_http": weak})["verdict"], "uncertain")
+        fail = {"status": "fail", "ok": False, "ms": None,
+                "ok_nodes": 0, "nodes": 10, "ratio": 0.0}
+        self.assertEqual(cc.merge_verdict(
+            {"tcptest_http": fail,
+             "xxapi": {"status": "fail", "ok": False,
+                       "ms": None}})["verdict"], "unreachable")
+
+    def test_ratio_threshold_wired(self):
+        src = {"status": "ok", "ok": True, "ms": 15.8, "level": "http",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        self.assertEqual(
+            cc.merge_verdict({"tcptest_http": dict(src)})["verdict"],
+            "reachable")
+        old = cc._SOURCE_MIN_RATIO["tcptest_http"]
+        cc._SOURCE_MIN_RATIO["tcptest_http"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"tcptest_http": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["tcptest_http"] = old
+
+    def test_phase_runs_http_only(self):
+        """TCP/ping 0 ＋ http 1 → 只跑 http 通道。"""
+        from types import SimpleNamespace
+
+        args = SimpleNamespace(
+            skip_itdog=True, skip_itdog_tcping=True, pingpe_limit=0,
+            workers=4, timeout=5, api_key="", tcpping_token="",
+            tcptest_limit=0, tcptest_concurrency=2, tcptest_nodes=2,
+            tcptest_ping_limit=0, tcptest_ping_concurrency=2,
+            tcptest_http_limit=1, tcptest_http_concurrency=2,
+            coffee_limit=0, pingloc_limit=0, antping_limit=0,
+            tcpingcn_limit=0, chinaz_limit=0, ce98_limit=0,
+            biuping_limit=0, boce_limit=0, ipip_limit=0,
+            antping_ping_limit=0, tcpingcn_ping_limit=0,
+            aa1ping_limit=0, aa1ping_concurrency=2,
+            biuping_ping_limit=0, biuping_ping_concurrency=2,
+            **{"17ce_limit": 0, "ping0_limit": 0, "wansui_limit": 0})
+        item = ("10.9.9.9:443#US", "10.9.9.9:443#US", "10.9.9.9", "443", "US")
+        seen_types = []
+
+        def fake_check(ip, port, timeout, uuids, operators=None,
+                       probe_type="tcping"):
+            seen_types.append(probe_type)
+            return {"status": "ok", "ok": True, "ms": 15.8,
+                    "level": "http", "ok_nodes": 10, "nodes": 10,
+                    "ratio": 1.0}
+
+        def fake_l2(ip, port, timeout):
+            return {"status": "error", "ok": False, "ms": None, "error": "x"}
+
+        with mock.patch.object(cc, "tcptest_fetch_nodes",
+                               return_value=[{"uuid": "u1", "operator": "ct",
+                                              "enabled": True,
+                                              "runtime_state": "online"}]), \
+              mock.patch.object(cc, "tcptest_check", side_effect=fake_check), \
+              mock.patch.object(cc, "xxapi_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "xxping_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "jkapi_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "check_host_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "checkhost_ping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}), \
+              mock.patch.object(cc, "checkhost_http_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "x"}):
+            entries, reachable, _ = cc.run_measurements([item], args)
+        self.assertEqual(seen_types, ["http"])
+        self.assertIn("tcptest_http", entries["10.9.9.9:443#US"]["sources"])
+        self.assertNotIn("tcptest", entries["10.9.9.9:443#US"]["sources"])
+        self.assertNotIn("tcptest_ping", entries["10.9.9.9:443#US"]["sources"])
+        self.assertIn("10.9.9.9:443#US", reachable)
+
+
 class TestTcptestPingSource(unittest.TestCase):
     """CN-33：tcptest type=ping 同站 ICMP（mock request_follow，不触网）。"""
 
@@ -5048,7 +5187,8 @@ class TestCiEnabledSources(unittest.TestCase):
                            ("aa1ping", "aa1ping"),
                            ("antping-ping", "antping-ping"),
                            ("tcpingcn-ping", "tcpingcn-ping"),
-                           ("tcptest-ping", "tcptest-ping")):
+                           ("tcptest-ping", "tcptest-ping"),
+                           ("tcptest-http", "tcptest-http")):
             m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
                           wf, re.S)
             self.assertIsNotNone(m, f"CI 未启用 {name}")
@@ -5099,6 +5239,20 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(m.group(1), "TCPTEST_CONCURRENCY")
         self.assertEqual(cc.TCPTEST_CONCURRENCY, 8)
 
+    def test_tcptest_http_cli_default_stays_opt_in(self):
+        """CN-35：tcptest-http 本地默认 opt-in（0/8），只在 CI 显式启用。"""
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--tcptest-http-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "tcptest-http-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--tcptest-http-concurrency", type=int, default=([A-Za-z_0-9]+)',
+                      src)
+        self.assertIsNotNone(m, "tcptest-http-concurrency 参数定义丢失")
+        self.assertEqual(m.group(1), "TCPTEST_CONCURRENCY")
+        self.assertEqual(cc.TCPTEST_CONCURRENCY, 8)
+
     def test_biuping_ping_cli_default_stays_opt_in(self):
         """CN-34：biuping-ping 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         import re
@@ -5126,7 +5280,8 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--aa1ping-limit 200", "--antping-ping-limit 200",
                      "--tcpingcn-ping-limit 200",
                      "--tcptest-ping-limit 400",
-                     "--biuping-ping-limit 200"):
+                     "--biuping-ping-limit 200",
+                     "--tcptest-http-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
     def test_tcpingcn_limit_restored_after_altcha(self):
