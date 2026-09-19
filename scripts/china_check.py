@@ -3647,7 +3647,8 @@ def main(argv=None) -> int:
         f"flappers: {flappers} cn-l2-ms: {cn_ms_covered}/{len(entries)}",
         file=sys.stderr,
     )
-    # per-key isp_ms（各运营商最小 RTT，来自 itdog 等 per-ISP 源）——
+    # per-key isp_ms（各运营商最小 RTT，来自 itdog/tcptest/ce98/biuping
+    # per-ISP 源）——
     # 必须在中国 check 写 china.json 之前合并进 entries，单一事实源。
     merge_isp_ms(entries)
     n_isp = sum(
