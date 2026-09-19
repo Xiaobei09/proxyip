@@ -3050,6 +3050,17 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIn("--biuping-limit 200", wf)
         self.assertIn("--biuping-concurrency 8", wf)
 
+    def test_ping0_stays_disabled_for_captcha(self):
+        """CN-03：ping0.cc 有 captcha 墙（活体实证），启用即须绕过
+        反爬——合规禁区。CI 不得启用；若对方撤销验证墙，本锁须由人
+        复核后同步解除（改测试即改决策）。"""
+        import re
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        self.assertIsNone(
+            re.search(r"--ping0-limit\s+[1-9]", wf),
+            "ping0 在 captcha 墙移除前不得进 CI")
+
     def test_ce98_cli_default_stays_opt_in(self):
         import re
         src = (Path(__file__).resolve().parent.parent / "scripts"
