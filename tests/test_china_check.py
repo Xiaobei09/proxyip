@@ -1,5 +1,6 @@
 """Tests for china_check.py pure functions."""
 
+import base64
 import hashlib
 import io
 import json
@@ -1918,9 +1919,9 @@ class TestNewMultiSources(unittest.TestCase):
         page = {"r": "r1", "s": "salt1", "ts": "123456", "d": 0}
         task = {"k": "task-k", "r": "r-task", "u": "/api/ws/probe"}
 
-        with mock.patch.object(cc, "_tcpingcn_page_cookie", return_value="c=1"), \
-             mock.patch.object(cc, "_tcpingcn_get",
-                               return_value=page) as mg, \
+        with mock.patch.object(cc, "_tcpingcn_session_cookie", return_value="c=1"), \
+              mock.patch.object(cc, "_tcpingcn_get",
+                                return_value=page) as mg, \
              mock.patch.object(cc, "_tcpcn_pow_solve",
                                return_value=("42", 0.1)) as mp, \
              mock.patch.object(cc, "_tcpingcn_post",
@@ -1953,15 +1954,15 @@ class TestNewMultiSources(unittest.TestCase):
         self.assertEqual(out["ok_nodes"], 0)
 
     def test_tcpingcn_no_challenge(self):
-        with mock.patch.object(cc, "_tcpingcn_page_cookie", return_value=""), \
-             mock.patch.object(cc, "_tcpingcn_get", return_value={"d": 0}):
+        with mock.patch.object(cc, "_tcpingcn_session_cookie", return_value=""), \
+              mock.patch.object(cc, "_tcpingcn_get", return_value={"d": 0}):
             out = cc.tcpingcn_check("1.2.3.4", "80", 10)
         self.assertEqual(out["status"], "error")
 
     def test_tcpingcn_pow_valueerror_kept_inline(self):
         """远端 d 非数字（int() 抛 ValueError）→ 按探测失败处理，不逃逸整轮。"""
-        with mock.patch.object(cc, "_tcpingcn_page_cookie", return_value=""), \
-             mock.patch.object(cc, "_tcpingcn_get", return_value={"r": "r", "s": "s", "ts": 1, "d": "abc"}), \
+        with mock.patch.object(cc, "_tcpingcn_session_cookie", return_value=""), \
+              mock.patch.object(cc, "_tcpingcn_get", return_value={"r": "r", "s": "s", "ts": 1, "d": "abc"}), \
              mock.patch.object(cc, "_tcpcn_yc", return_value="p"), \
              mock.patch.object(cc, "_tcpcn_bc", return_value="salt"), \
              mock.patch.object(cc, "_tcpcn_pow_solve",
@@ -3904,6 +3905,314 @@ class TestWsBufferCaps(unittest.TestCase):
         self.assertLessEqual(len(client.buf), cc.WS_MAX_BUF + 65536)
 
 
+class TestTcpingcnAltchaSession(unittest.TestCase):
+    """CN-30：ALTCHA 握手＋进程级会话缓存＋403 自愈（全部 mock，不触网）。"""
+
+    def setUp(self):
+        self._saved = dict(cc._TCPINGCN_SESSION)
+
+    def tearDown(self):
+        cc._TCPINGCN_SESSION.clear()
+        cc._TCPINGCN_SESSION.update(self._saved)
+
+    class _FakeResp:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self._body
+
+    class _FakeOp:
+        """按 URL 供 canned JSON；solve 时向 jar 植入 pass cookie。"""
+
+        def __init__(self, jar, challenge, solve_ok=True):
+            self.jar = jar
+            self.challenge = challenge
+            self.solve_ok = solve_ok
+            self.posts = []
+
+        def open(self, req, timeout=None):
+            url = req.full_url
+            if url.endswith("/api/probe/page"):
+                return TestTcpingcnAltchaSession._FakeResp(
+                    json.dumps({"r": "r", "s": "s", "ts": 1,
+                                "d": 0}).encode())
+            if url.endswith("/api/probe/captcha-challenge"):
+                return TestTcpingcnAltchaSession._FakeResp(
+                    json.dumps(self.challenge).encode())
+            if url.endswith("/api/probe/captcha-solve"):
+                raw = req.data.decode()
+                self.posts.append(json.loads(raw))
+                if self.solve_ok:
+                    from http.cookiejar import Cookie
+                    self.jar.set_cookie(Cookie(
+                        0, "probe_captcha_pass", "PASS1", None, False,
+                        "www.tcping.cn", False, False, "/", True,
+                        False, None, False, None, None, {}))
+                    return TestTcpingcnAltchaSession._FakeResp(b'{"ok":true}')
+                return TestTcpingcnAltchaSession._FakeResp(b'{"ok":false}')
+            raise AssertionError(f"unexpected url {url}")
+
+    def _challenge(self):
+        salt = "s?x=1"
+        target = hashlib.sha256(f"{salt}7".encode()).hexdigest()
+        return {"algorithm": "SHA-256", "challenge": target,
+                "maxNumber": 64, "salt": salt, "signature": "sig"}
+
+    def _factory(self, challenge=None, solve_ok=True):
+        ch = challenge or self._challenge()
+        ops = []
+
+        def build(jar):
+            op = self._FakeOp(jar, ch, solve_ok)
+            ops.append(op)
+            return op
+
+        return build, ops
+
+    def test_handshake_ok_returns_cookie(self):
+        build, ops = self._factory()
+        cookie = cc._tcpingcn_altcha_handshake(5, _build_opener=build)
+        self.assertEqual(cookie, "probe_captcha_pass=PASS1")
+        # solve 载荷须为 base64（裸对象回 400 参数错误，活体结论锁定）
+        sent = ops[0].posts[0]["payload"]
+        payload = json.loads(base64.b64decode(sent).decode())
+        self.assertEqual(payload["number"], 7)
+        self.assertIn("signature", payload)
+
+    def test_handshake_solve_rejected(self):
+        build, _ = self._factory(solve_ok=False)
+        with self.assertRaises(RuntimeError):
+            cc._tcpingcn_altcha_handshake(5, _build_opener=build)
+
+    def test_handshake_no_challenge(self):
+        build, _ = self._factory(challenge={"maxNumber": 0})
+        with self.assertRaises(RuntimeError):
+            cc._tcpingcn_altcha_handshake(5, _build_opener=build)
+
+    def test_session_cached_within_ttl(self):
+        calls = []
+
+        def fake_handshake(timeout):
+            calls.append(timeout)
+            return "probe_captcha_pass=X"
+
+        with mock.patch.object(cc, "_tcpingcn_altcha_handshake",
+                               side_effect=fake_handshake):
+            cc._TCPINGCN_SESSION.clear()
+            self.assertEqual(cc._tcpingcn_session_cookie(5),
+                             "probe_captcha_pass=X")
+            self.assertEqual(cc._tcpingcn_session_cookie(5),
+                             "probe_captcha_pass=X")
+        self.assertEqual(len(calls), 1)  # 频率敏感：窗内只握手一次
+
+    def test_invalidate_clears_session(self):
+        cc._TCPINGCN_SESSION.update({"cookie": "c", "at": 1.0})
+        cc._tcpingcn_invalidate_session()
+        self.assertEqual(cc._TCPINGCN_SESSION["cookie"], "")
+
+    def test_tcpingcn_403_reauth_retry_ok(self):
+        """任务 403-altcha → 清会话重握手 → 第二次提交成功（仅重试一次）。"""
+        task = {"k": "k", "r": "r", "u": "/u"}
+
+        class _WS:
+            def __init__(self, *a, **k):
+                pass
+
+            def settimeout(self, t):
+                pass
+
+            def send_text(self, p):
+                pass
+
+            def read(self):
+                return ("evt", {"event": "complete", "data": {}})
+
+            def close(self):
+                pass
+
+        posted = []
+
+        def fake_post(url, body, cookie=""):
+            posted.append(cookie)
+            if len(posted) == 1:
+                raise RuntimeError(
+                    'HTTP 403: {"captcha":"altcha","error":"x"}')
+            return task
+
+        with mock.patch.object(cc, "_tcpingcn_session_cookie",
+                               side_effect=["c-old", "c-new"]), \
+              mock.patch.object(cc, "_tcpingcn_invalidate_session") as mi, \
+              mock.patch.object(cc, "_tcpingcn_get",
+                                return_value={"r": "r", "s": "s",
+                                              "ts": 1, "d": 0}), \
+              mock.patch.object(cc, "_tcpcn_pow_solve",
+                                return_value=("42", 0.1)), \
+              mock.patch.object(cc, "_tcpingcn_post",
+                                side_effect=fake_post), \
+              mock.patch.object(cc, "_WebSocket", _WS):
+            out = cc.tcpingcn_check("1.2.3.4", "443", 10)
+        self.assertEqual(mi.call_count, 1)
+        self.assertEqual(posted, ["c-old", "c-new"])
+        # complete 即收尾、0 行 → fail（不可达），但关键是走完重试不断言崩
+        self.assertEqual(out["status"], "fail")
+
+    def test_tcpingcn_403_twice_gives_error(self):
+        """两次 403 即认失败（不死循环）。"""
+        def always_403(url, body, cookie=""):
+            raise RuntimeError('HTTP 403: {"captcha":"altcha"}')
+
+        with mock.patch.object(cc, "_tcpingcn_session_cookie",
+                               return_value="c"), \
+              mock.patch.object(cc, "_tcpingcn_invalidate_session"), \
+              mock.patch.object(cc, "_tcpingcn_get",
+                                return_value={"r": "r", "s": "s",
+                                              "ts": 1, "d": 0}), \
+              mock.patch.object(cc, "_tcpcn_pow_solve",
+                                return_value=("42", 0.1)), \
+              mock.patch.object(cc, "_tcpingcn_post",
+                                side_effect=always_403):
+            out = cc.tcpingcn_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "error")
+
+
+class TestTcpingcnPingSource(unittest.TestCase):
+    """CN-30：tcpingcn_ping（同站 ICMP，紧凑键解析）。"""
+
+    class _FakeWS:
+        def __init__(self, frames):
+            self._frames = list(frames)
+
+        def settimeout(self, t):
+            pass
+
+        def send_text(self, p):
+            pass
+
+        def read(self):
+            if self._frames:
+                return self._frames.pop(0)
+            return "timeout", None
+
+        def close(self):
+            pass
+
+    def _row(self, area, isp, rtt, loss=0):
+        return {"a": area, "i": isp, "r": rtt, "m": rtt, "q": loss}
+
+    def _run(self, frames):
+        page = {"r": "r", "s": "s", "ts": 1, "d": 0}
+        task = {"k": "k", "r": "r", "u": "/u"}
+        with mock.patch.object(cc, "_tcpingcn_session_cookie",
+                               return_value="c"), \
+              mock.patch.object(cc, "_tcpingcn_get",
+                                return_value=page), \
+              mock.patch.object(cc, "_tcpcn_pow_solve",
+                                return_value=("42", 0.1)), \
+              mock.patch.object(cc, "_tcpingcn_post",
+                                return_value=task), \
+              mock.patch.object(cc, "_WebSocket",
+                                return_value=self._FakeWS(frames)):
+            return cc.tcpingcn_ping_check("1.2.3.4", "443", 10)
+
+    def test_ok_with_dedup_and_complete(self):
+        frames = [
+            ("evt", {"event": "hello", "data": {}}),
+            ("evt", {"event": "result",
+                     "data": self._row("上海", "联通", 5.0)}),
+            ("evt", {"event": "result",
+                     "data": self._row("上海", "电信", 9.0)}),
+            ("evt", {"event": "result",
+                     "data": self._row("上海", "联通", 6.0)}),  # 同键去重
+            ("evt", {"event": "complete", "data": {}}),
+            ("evt", {"event": "result",
+                     "data": self._row("北京", "移动", 1.0)}),  # complete 后忽略
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ok_nodes"], 2)
+        self.assertEqual(out["nodes"], 2)
+        self.assertEqual(out["ms"], 5.0)
+        self.assertEqual(out["level"], "icmp")
+        self.assertNotIn("isp_ms", out)  # 显示语义未定，宁缺勿假
+
+    def test_all_fail(self):
+        frames = [
+            ("evt", {"event": "result",
+                     "data": self._row("上海", "联通", 0)}),
+            ("evt", {"event": "complete", "data": {}}),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "fail")
+        self.assertEqual(out["ratio"], 0.0)
+
+    def test_loss_timeout_fails(self):
+        """loss≥100（前端 yl 口径超时）即便 rtt>0 也不算可达。"""
+        frames = [
+            ("evt", {"event": "result",
+                     "data": self._row("上海", "电信", 30.0, loss=100)}),
+            ("evt", {"event": "complete", "data": {}}),
+        ]
+        out = self._run(frames)
+        self.assertEqual(out["status"], "fail")
+
+    def test_rtt_helpers(self):
+        self.assertEqual(cc._tcpingcn_ping_rtt({"r": 12.5}), 12.5)
+        self.assertEqual(cc._tcpingcn_ping_rtt({"rtt_avg": 7.0}), 7.0)
+        self.assertEqual(cc._tcpingcn_ping_rtt({"m": 0}), 0.0)
+        self.assertEqual(cc._tcpingcn_ping_rtt({}), 0.0)
+        self.assertEqual(cc._tcpingcn_ping_loss({"q": 0}), 0.0)
+        self.assertEqual(cc._tcpingcn_ping_loss({}), 0.0)
+
+    def test_merge_strong_weak_fail(self):
+        strong = {"status": "ok", "ok": True, "ms": 22.0, "level": "icmp",
+                  "ok_nodes": 100, "nodes": 160, "ratio": 0.625}
+        self.assertEqual(cc.merge_verdict(
+            {"tcpingcn_ping": strong})["verdict"], "reachable")
+        weak = dict(strong, ok_nodes=1, nodes=160, ratio=0.006)
+        self.assertEqual(cc.merge_verdict(
+            {"tcpingcn_ping": weak})["verdict"], "uncertain")
+        fail = {"status": "fail", "ok": False, "ms": None,
+                "ok_nodes": 0, "nodes": 160, "ratio": 0.0}
+        self.assertEqual(cc.merge_verdict(
+            {"tcpingcn_ping": fail,
+             "xxapi": {"status": "fail", "ok": False,
+                       "ms": None}})["verdict"], "unreachable")
+
+    def test_ratio_threshold_wired(self):
+        src = {"status": "ok", "ok": True, "ms": 20.0, "level": "icmp",
+               "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
+        self.assertEqual(
+            cc.merge_verdict({"tcpingcn_ping": dict(src)})["verdict"],
+            "reachable")
+        old = cc._SOURCE_MIN_RATIO["tcpingcn_ping"]
+        cc._SOURCE_MIN_RATIO["tcpingcn_ping"] = 0.75
+        try:
+            self.assertEqual(
+                cc.merge_verdict({"tcpingcn_ping": dict(src)})["verdict"],
+                "uncertain")
+        finally:
+            cc._SOURCE_MIN_RATIO["tcpingcn_ping"] = old
+
+    def test_ws_slot_dispatch(self):
+        cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
+                  "1.2.3.4", "443", "US")]
+        entries: dict = {"1.2.3.4:443#US": {}}
+        with mock.patch.object(
+                cc, "tcpingcn_ping_check",
+                return_value={"status": "ok", "ok": True}) as m:
+            cc._run_ws_source_slots(cands, entries, 5, "tcpingcn_ping", 2)
+            m.assert_called_once_with("1.2.3.4", "443", 5)
+        self.assertEqual(
+            entries["1.2.3.4:443#US"]["tcpingcn_ping"]["status"], "ok")
+
+
 class TestTcpingcnHttpParity(unittest.TestCase):
     """``_tcpingcn_get/_post`` 对 HTTPError 的转换须对称（RuntimeError 带状态码），
     且畸形 JSON 不伪装成空成功。"""
@@ -4104,7 +4413,8 @@ class TestCiEnabledSources(unittest.TestCase):
         readme = (root / "README.md").read_text(encoding="utf-8")
         for name, flag in (("98ce.com", "ce98"), ("biuping.com", "biuping"),
                            ("aa1ping", "aa1ping"),
-                           ("antping-ping", "antping-ping")):
+                           ("antping-ping", "antping-ping"),
+                           ("tcpingcn-ping", "tcpingcn-ping")):
             m = re.search(rf"--{flag}-limit (\d+).*?--{flag}-concurrency (\d+)",
                           wf, re.S)
             self.assertIsNotNone(m, f"CI 未启用 {name}")
@@ -4148,24 +4458,25 @@ class TestCiEnabledSources(unittest.TestCase):
               / "workflows" / "china-check.yml").read_text(encoding="utf-8")
         for flag in ("--tcptest-limit 800", "--coffee-limit 1200",
                      "--pingloc-limit 600", "--antping-limit 500",
-                     "--chinaz-limit 200",
+                     "--tcpingcn-limit 400", "--chinaz-limit 200",
                      "--pingpe-limit 300",
                      "--ce98-limit 200", "--biuping-limit 200",
-                     "--aa1ping-limit 200", "--antping-ping-limit 200"):
+                     "--aa1ping-limit 200", "--antping-ping-limit 200",
+                     "--tcpingcn-ping-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
-    def test_tcpingcn_stays_disabled_until_altcha(self):
-        """CN-29：tcping.cn 已确认死亡（/api/probe/task 403 ALTCHA，
-        tcping/ping 双类型同墙），CI 配额须为 0 停烧；代码保留待复活
-        （ALTCHA 半破解：challenge 数学已复刻，见 docs/logic.md）。
-        复活时同步解除本锁（改测试即改决策，ping0 同模式）。"""
+    def test_tcpingcn_limit_restored_after_altcha(self):
+        """CN-30：tcping.cn ALTCHA 打通后复活——CI 配额恢复 400，
+        同通道 ping 200 并行（停烧锁已解除，复活验证见本轮活体）。"""
         import re
         wf = (Path(__file__).resolve().parent.parent / ".github"
               / "workflows" / "china-check.yml").read_text(encoding="utf-8")
         m = re.search(r"--tcpingcn-limit (\d+)", wf)
         self.assertIsNotNone(m, "tcpingcn-limit flag 丢失")
-        self.assertEqual(int(m.group(1)), 0,
-                         "tcpingcn 未复活前 CI 不得启用（烧配额）")
+        self.assertEqual(int(m.group(1)), 400)
+        m = re.search(r"--tcpingcn-ping-limit (\d+)", wf)
+        self.assertIsNotNone(m, "tcpingcn-ping-limit flag 丢失")
+        self.assertEqual(int(m.group(1)), 200)
 
     def test_ci_flags_all_defined(self):
         """CN-13：CI 传给 china_check.py 的每个 flag 必须在 argparse 中

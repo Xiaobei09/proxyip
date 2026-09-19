@@ -347,6 +347,16 @@ TLS 指纹差；验证方法：同脚本复测 solve→verify→task 全链）�
 ICMP，活体 223.5.5.5→8.239ms、8.8.8.8→42ms，TEST-NET 回显失配判 fail，
 私网 -4 拒绝按 error）接入为 `xxping` 源（地理＋协议双差异，中增益；
 L2 全池；`level=icmp`、不产 `isp_ms`）。
+CN-30 逆向决战 tcping.cn（活体全链路打通）：ALTCHA 为标准规范纯计算
+（challenge：SHA-256、maxNumber 50000、~0.1s；solve 载荷须 base64，
+裸对象回 400），会话绑定铁律——只带 `probe_captcha_pass`（忌预载壳页
+`ip_page_token`）、全站高频握手触发静默升级（短时 ~20 次即 403；
+进程级缓存会话 TTL 1800s、任务 403 自愈重试一次）。`type=ping` 同通道
+可用（结果帧紧凑键经前端 a2 映射确认：`r`=rtt_avg、`m`=rtt_min、
+`q`=loss、`i`=isp、`a`=地域；`complete` 帧收尾）。
+同轮产出：`tcpingcn` 复活（CI 400 恢复，会话复用＋403 重试）＋新源
+`tcpingcn_ping`（同站 ICMP，`level=icmp`，地域|ISP 去重，不产 `isp_ms`；
+显示语义未定前宁缺勿假；CI 200 键/6 并发）。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）

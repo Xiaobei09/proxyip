@@ -45,6 +45,8 @@
   `tcpping.cn`（多运营商，需 ``TCPPING_CN_TOKEN``，缺 key 自动跳过）。
   `ping.aa1.cn`（CN-27：独立运营商免费API 站 TCPing，WS 纯 JSON 无鉴权，
   28 城三网节点原生 per-ISP，端口直连）。
+  `tcping.cn`（~163 TCP 节点 + CN-30 同通道 `tcpingcn_ping` ICMP，
+  SHA-256 PoW + ALTCHA 会话复用纯 Python，真实端口直连）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
 - 2026-09 穷尽复核（CN-19/21/22）：boce（API 404＋AliyunCaptcha）、ipip
   （POST 405）、17ce（路由迁移）、ping0（Turnstile＋端点 404）、wansui
@@ -55,7 +57,7 @@
 
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/antping_ping/
-  tcpingcn/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
+  tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
   单节点源（check_host/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
@@ -276,16 +278,16 @@ ANTPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
 # sha256(f"{r}\n{salt}\n{request_hash}\n{nonce}") 前 d 位为 0 →
 # POST /api/probe/task（body 含 r/ts/p/nonce）拿 {k,r,u} → 连 wss:{u} 发
 # {"k":..,"r":..} → 收 hello/start/result/complete 逐节点结果（rtt_avg）。
-# 状态（CN-29 确认死亡）：/api/probe/task 现回 403
-# ``{"captcha":"altcha","error":"需要完成人机验证"}``（tcping/ping 双类型
-# 同墙）。ALTCHA 半破解：challenge 数学已复刻（SHA-256，maxNumber 50000，
-# ~0.1s；payload 须 base64，solve 200 ok:true），但会话绑定未过
-# （verify/task 仍 403；续攻方向见 docs/logic.md）。CI 配额已降为 0
-# （停烧，代码保留待复活；见 test_tcpingcn_stays_disabled_until_altcha）。
+# 状态（CN-30 已复活，见 _tcpingcn_altcha_handshake）：/api/probe/task 曾回
+# 403 ALTCHA；CI 配额恢复 400（复活验证见 test_tcpingcn_limit_restored）。
 TCPINGCN_URL = "https://www.tcping.cn"
 TCPINGCN_REQ_TIMEOUT = 15
 TCPINGCN_POW_DIFFICULTY = 15
 TCPINGCN_WS_IDLE = 40.0
+
+# tcping.cn 同站 ICMP 复用（CN-30，见 tcpingcn_ping_check）：节点池与 TCP
+# 同源（~163），阈值同口径。
+TCPINGCN_PING_MIN_RATIO = ITDOG_MIN_RATIO
 
 # ping.chinaz.com —— 免费大陆多节点 ping（服务端渲染 token + WS），无 key：
 # GET https://ping.chinaz.com/<host> 拿壳页（let token=...; serverList 53 节点）
@@ -404,6 +406,7 @@ _SOURCE_MIN_RATIO = {
     "wansui": WANSUI_MIN_RATIO,
     "aa1ping": AA1PING_MIN_RATIO,
     "antping_ping": ANTPING_PING_MIN_RATIO,
+    "tcpingcn_ping": TCPINGCN_PING_MIN_RATIO,
 }
 
 WS_MAX_HEAD = 32 * 1024  # WS 握手响应头上限（防上游无界冲刷）
@@ -1298,7 +1301,160 @@ def _coffee_aggregate(results: dict) -> dict:
         }
     return {
         "status": "fail", "ok": False, "ms": None,
-        "error": f"icmp unreachable ({nodes} nodes)", "level": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
+        "ok_nodes": 0, "nodes": nodes, "ratio": 0.0 if nodes else None,
+    }
+
+
+def _tcpingcn_ping_rtt(row: dict) -> float:
+    """ping 结果行 RTT：紧凑键 ``r``（=rtt_avg，见前端 a2 映射）优先，
+    兼容 verbose ``rtt_avg``/``avg``；无正读数返回 0.0。"""
+    if not isinstance(row, dict):
+        return 0.0
+    for key in ("r", "rtt_avg", "avg"):
+        try:
+            v = float(row.get(key))
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            return v
+    return 0.0
+
+
+def _tcpingcn_ping_loss(row: dict) -> float:
+    """丢包率：紧凑键 ``q`` 优先，兼容 verbose（缺失按 0 计）。"""
+    if not isinstance(row, dict):
+        return 0.0
+    for key in ("q", "loss", "packet_loss"):
+        try:
+            return float(row.get(key))
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def tcpingcn_ping_check(ip: str, port: str, timeout: float) -> dict:
+    """tcping.cn 单键多节点 ICMP ping（CN-30，同站同通道、不同类型）。
+
+    与 tcping 共用 ALTCHA 会话/PoW/WS 通道（``u.type="ping"``，端口恒 0，
+    活体实证值）。结果帧为紧凑键（前端 a2 映射：``r``=rtt_avg、
+    ``m``=rtt_min、``q``=loss、``i``=isp、``a``=地域）：节点成功 =
+    ``rtt>0 且 loss<100``（前端 yl 口径）；去重键为地域|ISP（同地域
+    多运营商并存）；``complete`` 帧即收尾。
+    ``level="icmp"`` 且不产 ``isp_ms``（ICMP 不进展示，chinaz 等同口径；
+    ISP 原生字段虽存在，显示语义未定前宁缺勿假）。
+    """
+    _ = port
+    try:
+        cookie = _tcpingcn_session_cookie(min(timeout, TCPINGCN_REQ_TIMEOUT))
+    except RuntimeError as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    try:
+        page = _tcpingcn_get(f"{TCPINGCN_URL}/api/probe/page", cookie=cookie)
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(page, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad page json", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    r, s, ts = page.get("r"), page.get("s"), page.get("ts")
+    d = page.get("d") or TCPINGCN_POW_DIFFICULTY
+    if not all((r, s, ts)):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no challenge", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    u = {"type": "ping", "host": ip, "port": 0,
+         "scope": "global", "region": "all", "ip_type": 1,
+         "dns_server": "", "dns_record_type": "", "slow": False}
+    request_hash = _tcpcn_b64url_sha256(_tcpcn_cl(u))
+    p = _tcpcn_yc(r, s, u, ts, request_hash)
+    salt = _tcpcn_bc(r, s, request_hash)
+    try:
+        nonce, _ = _tcpcn_pow_solve(r, salt, request_hash, d)
+    except (RuntimeError, ValueError) as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    u2 = dict(u, r=r, ts=int(ts), p=p, nonce=nonce,
+              via="0", user_agent="", method="", referer="", cookie="")
+    try:
+        task = _tcpingcn_post(f"{TCPINGCN_URL}/api/probe/task", u2, cookie=cookie)
+    except RuntimeError as e:
+        if "HTTP 403" not in str(e) or "altcha" not in str(e):
+            return {"status": "error", "ok": False, "ms": None,
+                    "error": _err(e), "level": None,
+                    "ok_nodes": 0, "nodes": 0, "ratio": None}
+        _tcpingcn_invalidate_session()
+        try:
+            cookie = _tcpingcn_session_cookie(min(timeout, TCPINGCN_REQ_TIMEOUT))
+            task = _tcpingcn_post(
+                f"{TCPINGCN_URL}/api/probe/task", u2, cookie=cookie)
+        except Exception as e2:
+            return {"status": "error", "ok": False, "ms": None,
+                    "error": _err(e2), "level": None,
+                    "ok_nodes": 0, "nodes": 0, "ratio": None}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    if not isinstance(task, dict) or not task.get("k") or not task.get("u"):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no task", "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    ws_url = f"wss://www.tcping.cn{task['u']}"
+    try:
+        ws = _WebSocket(ws_url, timeout=TCPINGCN_WS_IDLE)
+        ws.send_text(json.dumps({"k": task["k"], "r": task["r"]}))
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
+    seen: dict = {}
+    deadline = time.monotonic() + TCPINGCN_WS_IDLE
+    while time.monotonic() < deadline:
+        try:
+            ws.settimeout(max(1.0, deadline - time.monotonic()))
+            kind, msg = ws.read()
+        except Exception:
+            break
+        if kind in ("err", "close", "closed"):
+            break
+        if kind == "timeout":
+            break
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("event") == "complete":
+            break
+        if msg.get("event") != "result":
+            continue
+        data = msg.get("data")
+        if not isinstance(data, dict):
+            continue
+        key = (data.get("a") or data.get("probe_loc") or data.get("province")
+               or "?", data.get("i") or data.get("isp") or data.get("line")
+               or "?")
+        if key in seen:
+            continue
+        seen[key] = data
+    ws.close()
+    ok = [row for row in seen.values()
+          if _tcpingcn_ping_rtt(row) > 0 and _tcpingcn_ping_loss(row) < 100]
+    nodes = len(seen)
+    if ok:
+        mss = [_tcpingcn_ping_rtt(row) for row in ok]
+        return {
+            "status": "ok", "ok": True,
+            "ms": round(min(mss), 1), "error": "",
+            "level": "icmp", "ok_nodes": len(ok), "nodes": nodes,
+            "ratio": round(len(ok) / nodes, 3) if nodes else None,
+        }
+    return {
+        "status": "fail", "ok": False, "ms": None,
+        "error": f"unreachable ({nodes} nodes)", "level": None,
         "ok_nodes": 0, "nodes": nodes, "ratio": 0.0 if nodes else None,
     }
 
@@ -1516,13 +1672,136 @@ def antping_ping_check(ip: str, port: str, timeout: float) -> dict:
     return antping_check(ip, "", timeout)
 
 
+# tcping.cn 会话级 ALTCHA 握手（CN-30 全链路打通）：站方在 /api/probe/task
+# 前加 ALTCHA（altcha.org 规范，纯计算、无需人类交互，页面自身 auto 解算）：
+#   GET /api/probe/captcha-challenge → {algorithm,salt,challenge,maxNumber,
+#   signature} → 穷举 number 使 SHA256(salt+number)==challenge（maxNumber
+#   50000，~0.1s）→ POST /api/probe/captcha-solve {payload: base64(json)}
+#   （裸对象回 400 参数错误，必须 base64）→ 置 probe_captcha_pass 会话。
+# 两条铁律（活体试出）：① 只带 probe_captcha_pass（预载 /ping 壳页会引入
+# ip_page_token）；② 频率敏感（短时 ~20 次握手即被静默升级，需整进程
+# 缓存会话、任务复用，见 _TCPINGCN_SESSION；300s 内复测从 403 恢复）。
+_TCPINGCN_SESSION_TTL = 1800.0  # 验证会话复用窗口（任务 expires 60s 级，会话级 pass 更长）
+_TCPINGCN_SESSION: dict = {"cookie": "", "at": 0.0}
+_TCPINGCN_SESSION_LOCK = threading.Lock()
+
+
+def _tcpingcn_altcha_handshake(timeout: float, _build_opener=None) -> str:
+    """执行一次 ALTCHA 握手，返回 ``probe_captcha_pass=...`` cookie 值。
+
+    纯标准库复刻页面自带流程（urllib opener + CookieJar 会话保持）：
+    page（取 PoW 参数，顺带建会话）→ challenge → 穷举 → solve → 校验
+    ok:true。任一步失败抛 RuntimeError（调用方收敛为 error 源，不崩轮）。
+    ``_build_opener`` 仅供单测注入（默认真实 opener）。
+    """
+    jar: http.cookiejar.CookieJar = http.cookiejar.CookieJar()
+    if _build_opener is None:
+        op = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(jar))
+    else:
+        op = _build_opener(jar)
+    base_hdrs = {
+        "User-Agent": UA,
+        "Referer": f"{TCPINGCN_URL}/ping",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": TCPINGCN_URL,
+    }
+
+    def _get(path: str) -> object:
+        req = urllib.request.Request(
+            f"{TCPINGCN_URL}{path}", headers=base_hdrs)
+        try:
+            with op.open(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"HTTP {e.code}") from None
+        except Exception as e:
+            raise RuntimeError(_err(e)) from None
+
+    def _post(path: str, obj: dict) -> object:
+        req = urllib.request.Request(
+            f"{TCPINGCN_URL}{path}", data=json.dumps(obj).encode(),
+            method="POST",
+            headers={**base_hdrs, "Content-Type": "application/json"},
+        )
+        try:
+            with op.open(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"HTTP {e.code}") from None
+        except Exception as e:
+            raise RuntimeError(_err(e)) from None
+
+    _get("/api/probe/page")
+    ch = _get("/api/probe/captcha-challenge")
+    if not isinstance(ch, dict) or not ch.get("challenge"):
+        raise RuntimeError("no challenge")
+    salt = ch.get("salt") or ""
+    target = ch.get("challenge") or ""
+    number = None
+    for n in range(int(ch.get("maxNumber") or 0) + 1):
+        if hashlib.sha256(f"{salt}{n}".encode()).hexdigest() == target:
+            number = n
+            break
+    if number is None:
+        raise RuntimeError("pow unsolved")
+    payload = {
+        "algorithm": ch.get("algorithm") or "SHA-256",
+        "challenge": target, "number": number, "salt": salt,
+        "signature": ch.get("signature") or "",
+    }
+    solved = _post("/api/probe/captcha-solve", {
+        "payload": base64.b64encode(
+            json.dumps(payload).encode()).decode(),
+    })
+    if not isinstance(solved, dict) or solved.get("ok") is not True:
+        raise RuntimeError("solve rejected")
+    for c in jar:
+        if c.name == "probe_captcha_pass" and c.value:
+            return f"{c.name}={c.value}"
+    raise RuntimeError("no pass cookie")
+
+
+def _tcpingcn_session_cookie(timeout: float) -> str:
+    """进程级缓存的验证会话 cookie（频率敏感：握手限 1/TTL 窗口）。"""
+    now = time.monotonic()
+    hit = _TCPINGCN_SESSION.get("cookie")
+    if hit and now - _TCPINGCN_SESSION.get("at", 0.0) < _TCPINGCN_SESSION_TTL:
+        return hit
+    with _TCPINGCN_SESSION_LOCK:
+        now = time.monotonic()
+        hit = _TCPINGCN_SESSION.get("cookie")
+        if hit and now - _TCPINGCN_SESSION.get("at", 0.0) < _TCPINGCN_SESSION_TTL:
+            return hit
+        cookie = _tcpingcn_altcha_handshake(timeout)
+        _TCPINGCN_SESSION["cookie"] = cookie
+        _TCPINGCN_SESSION["at"] = now
+        return cookie
+
+
+def _tcpingcn_invalidate_session() -> None:
+    """任务 403（验证过期/被升级）时清会话，下一次检查重握手（仅一次重试）。"""
+    with _TCPINGCN_SESSION_LOCK:
+        _TCPINGCN_SESSION["cookie"] = ""
+        _TCPINGCN_SESSION["at"] = 0.0
+
+
 def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
     """tcping.cn 单键多节点 TCP 探测（SHA-256 PoW + WS 鉴权，纯 Python）。
 
     PoW 是标准 SHA-256（与前端逐字节一致，difficulty 15 ~0.3-0.5s），无 wasm/
     无 JS 依赖。节点成功 = ``rtt_avg>0``。传输层 → ``level="tcp"``。
+    CN-30：站方加 ALTCHA，会话经 ``_tcpingcn_session_cookie`` 复用
+    （进程级缓存，频率敏感）；任务 403-altcha 时清会话重握手、仅重试一次。
     """
-    cookie = _tcpingcn_page_cookie()
+    try:
+        cookie = _tcpingcn_session_cookie(min(timeout, TCPINGCN_REQ_TIMEOUT))
+    except RuntimeError as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None,
+                "ok_nodes": 0, "nodes": 0, "ratio": None}
     try:
         page = _tcpingcn_get(f"{TCPINGCN_URL}/api/probe/page", cookie=cookie)
     except Exception as e:
@@ -1557,6 +1836,21 @@ def tcpingcn_check(ip: str, port: str, timeout: float) -> dict:
               via="0", user_agent="", method="", referer="", cookie="")
     try:
         task = _tcpingcn_post(f"{TCPINGCN_URL}/api/probe/task", u2, cookie=cookie)
+    except RuntimeError as e:
+        if "HTTP 403" not in str(e) or "altcha" not in str(e):
+            return {"status": "error", "ok": False, "ms": None,
+                    "error": _err(e), "level": None,
+                    "ok_nodes": 0, "nodes": 0, "ratio": None}
+        # 会话过期/被升级：清缓存重握手后仅重试一次（仍 403 即认失败）。
+        _tcpingcn_invalidate_session()
+        try:
+            cookie = _tcpingcn_session_cookie(min(timeout, TCPINGCN_REQ_TIMEOUT))
+            task = _tcpingcn_post(
+                f"{TCPINGCN_URL}/api/probe/task", u2, cookie=cookie)
+        except Exception as e2:
+            return {"status": "error", "ok": False, "ms": None,
+                    "error": _err(e2), "level": None,
+                    "ok_nodes": 0, "nodes": 0, "ratio": None}
     except Exception as e:
         return {"status": "error", "ok": False, "ms": None,
                 "error": _err(e), "level": None,
@@ -2857,7 +3151,7 @@ def merge_verdict(sources: dict) -> dict:
 
     multi_ok = [s for s in ok_sources if s in (
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
-        "pingloc", "antping", "antping_ping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping", "xxping")]
 
@@ -2891,7 +3185,7 @@ def merge_verdict(sources: dict) -> dict:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
         "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "coffee",
-        "pingloc", "antping", "antping_ping", "tcpingcn", "chinaz", "ce98", "biuping", "aa1ping",
+        "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
@@ -3316,13 +3610,14 @@ def _run_coffee_slots(
 def _run_ws_source_slots(
     candidates: list, entries: dict, timeout: float, source: str, concurrency: int
 ) -> None:
-    """JWT/WS 或 PoW/WS 类源的多键并发复核（antping / tcpingcn / chinaz / antping_ping）。
+    """JWT/WS 或 PoW/WS 类源的多键并发复核（antping / tcpingcn / chinaz / antping_ping / tcpingcn_ping）。
 
     每个源按 ``candidates`` 前段投递；只写 ``entries[key][source]``。"""
     fn = {
         "antping": lambda ip, port: antping_check(ip, port, timeout),
         "antping_ping": lambda ip, port: antping_ping_check(ip, port, timeout),
         "tcpingcn": lambda ip, port: tcpingcn_check(ip, port, timeout),
+        "tcpingcn_ping": lambda ip, port: tcpingcn_ping_check(ip, port, timeout),
         "chinaz": lambda ip, port: chinaz_check(ip, "", timeout),
     }[source]
 
@@ -3685,6 +3980,21 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("tcpingcn review: skipped (limit=0)", file=sys.stderr)
 
+    # tcpingcn_ping（CN-30）：同站 ICMP，主独立判 reachable；默认 0=跳过。
+    tcpingcn_ping_limit = getattr(args, "tcpingcn_ping_limit", 0)
+    if tcpingcn_ping_limit != 0:
+        cands = _pending_cands()
+        if tcpingcn_ping_limit is None or tcpingcn_ping_limit < 0:
+            tcpingcn_ping_limit = len(cands)
+        _run_ws_source_slots(
+            cands[:tcpingcn_ping_limit], entries, args.timeout, "tcpingcn_ping",
+            getattr(args, "tcpingcn_ping_concurrency", 6),
+        )
+        print(f"tcpingcn_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+              file=sys.stderr)
+    else:
+        print("tcpingcn_ping review: skipped (limit=0)", file=sys.stderr)
+
     chinaz_limit = getattr(args, "chinaz_limit", 0)
     if chinaz_limit != 0:
         cands = _pending_cands()
@@ -3930,6 +4240,10 @@ def main(argv=None) -> int:
                         help="tcping.cn 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--tcpingcn-concurrency", type=int, default=6,
                         help="tcping.cn 并发复核数（默认 6）")
+    parser.add_argument("--tcpingcn-ping-limit", type=int, default=0,
+                        help="tcping.cn ICMP 多节点复核条数（0=跳过；-1=全部未定键）")
+    parser.add_argument("--tcpingcn-ping-concurrency", type=int, default=6,
+                        help="tcping.cn ICMP 并发复核数（默认 6）")
     parser.add_argument("--chinaz-limit", type=int, default=0,
                         help="ping.chinaz.com 多节点复核条数（0=跳过；-1=全部未定键）")
     parser.add_argument("--chinaz-concurrency", type=int, default=6,
