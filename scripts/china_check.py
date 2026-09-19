@@ -3216,7 +3216,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # 新增四源多节点复核（全部无 key、大陆多节点）：pingloc（HTTP+SSE）、
     # antping（JWT+WS）、tcpingcn（PoW+WS 纯 TCP）、chinaz（token+WS 纯 ICMP）。
-    # 各自按 --<name>-limit 投递（默认 -1=全部未定键，0=跳过）；均为多节点源，
+    # 各自按 --<name>-limit 投递（默认 0=跳过，-1=全部未定键）；均为多节点源，
     # 达标即可独立判 reachable，整站失败也可与单节点源联动判 unreachable。
 
     pingloc_limit = getattr(args, "pingloc_limit", 0)
@@ -3277,7 +3277,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # 新增多节点 TCP 复核源：ce98（socket.io-WS，34 大陆节点）、biuping
     # （HTTP-SSE，节点数动态，实测 ~39 测量单元）。均已实测出数、零 key；达标即可独立判 reachable，
-    # 整站失败也可与单节点源联动判 unreachable。默认 -1=全部未定键，0=跳过。
+    # 整站失败也可与单节点源联动判 unreachable。默认 0=跳过，-1=全部未定键。
     ce98_limit = getattr(args, "ce98_limit", 0)
     if ce98_limit != 0:
         cands = _pending_cands()
