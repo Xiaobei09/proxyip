@@ -2015,7 +2015,8 @@ def boce_check(ip: str, port: str, timeout: float) -> dict:
     反爬处理：完整 cookie 往返 + CSRF token + JSON content-type + UA。整站失败
     （连接/鉴权异常）→ ``error`` 可作不可达联动证据；纯 TCP → ``level="tcp"``。
     状态（2026-09 三轮复测）：壳页 200 存活但 ``/api/v1|v2/probe`` 均 404，
-    工具路由已迁移， adapter 待重写，当前休眠。
+    工具路由已迁移；/tcping 新页挂 AliyunCaptcha（交互验证禁区）。
+    adapter 待重写，当前休眠。
     """
     try:
         status, headers, resp = request_follow(
@@ -2278,6 +2279,7 @@ def ping0_check(ip: str, port: str, timeout: float) -> dict:
     直接判 ``error``，避免伪造手柄。纯 TCP → ``level="tcp"``。
     状态（2026-09 四轮复测：Turnstile 墙持续）：交互验证属合规禁区，
     不得绕过，永久休眠（解除须人工复核，见 test_ping0_stays_disabled）。
+    另：``POST /api/probe`` 直调回 404（端点并行下线），双重出局。
     """
     headers = {"User-Agent": UA, "Accept": "text/html"}
     try:
