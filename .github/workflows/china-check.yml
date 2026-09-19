@@ -77,6 +77,7 @@ jobs:
           --antping-limit 500 --antping-concurrency 8
           --tcpingcn-limit 400 --tcpingcn-concurrency 8
           --chinaz-limit 200 --chinaz-concurrency 8
+          --ce98-limit 200 --ce98-concurrency 6
           --pingpe-limit 300
 
       - name: Annotate and classify

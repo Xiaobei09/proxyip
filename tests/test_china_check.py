@@ -3029,5 +3029,30 @@ class TestMainExitCodes(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class TestCiEnabledSources(unittest.TestCase):
+    """CN-01：CI 启用的复核源与文档一致（防 CI 行与 README 链漂移）。
+
+    ce98（34 大陆省运营商节点 TCPing）毕业为默认启用：CI 传
+    `--ce98-limit 200 --ce98-concurrency 6`（chinaz 同级预算）；
+    CLI 默认仍 0（本地按需显式启用）。"""
+
+    def test_ci_enables_ce98(self):
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        self.assertIn("--ce98-limit 200", wf)
+        self.assertIn("--ce98-concurrency 6", wf)
+
+    def test_ce98_cli_default_stays_opt_in(self):
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        m = re.search(r'"--ce98-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "ce98-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--ce98-concurrency", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "ce98-concurrency 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 6)
+
+
 if __name__ == "__main__":
     unittest.main()
