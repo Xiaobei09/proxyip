@@ -2757,6 +2757,28 @@ class TestCe98Source(unittest.TestCase):
         self.assertEqual(out["ms"], 5.0)
         self.assertEqual(out["level"], "tcp")
 
+    def test_ce98_isp_ms_per_carrier(self):
+        """CN-05：ce98 以节点名关键词归一运营商出 isp_ms（云厂商/
+        裸地名丢弃）；与 itdog 口径一致供跨源合并。"""
+        frames = [
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "上海电信", "ok": True, "loss": 0,
+                        "latest": 6.0, "average": 6.0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "北京联通", "ok": True, "loss": 0,
+                        "latest": 9.0, "average": 9.0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "广州腾讯云", "ok": True, "loss": 0,
+                        "latest": 8.0, "average": 8.0}]),
+            ("event", ["continuous_tcping_node_update",
+                       {"node_name": "深圳", "ok": True, "loss": 0,
+                        "latest": 7.0, "average": 7.0}]),
+        ]
+        out = self._seed(frames)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(
+            out["isp_ms"], {"中国电信": 6.0, "中国联通": 9.0})
+
     def test_ce98_mixed_with_lost(self):
         frames = [
             ("event", ["continuous_tcping_node_update",

@@ -1721,6 +1721,21 @@ class _SocketIOClient:
             logging.debug("socketio close: %s", _err(exc))
 
 
+# 大陆节点名运营商关键词 → itdog 口径归一（电信/联通/移动），供各源
+# isp_ms 跨源合并；云厂商/裸地名/未知返回 None（不贡献运营商视角）。
+_CN_ISP_KEYWORDS = (("电信", "中国电信"), ("联通", "中国联通"), ("移动", "中国移动"))
+
+
+def _cn_isp_label(node_name: str) -> str | None:
+    """节点名含运营商关键词即归一返回，否则 None。"""
+    if not isinstance(node_name, str) or not node_name:
+        return None
+    for kw, label in _CN_ISP_KEYWORDS:
+        if kw in node_name:
+            return label
+    return None
+
+
 def ce98_check(ip: str, port: str, timeout: float) -> dict:
     """98ce.com 单键多节点 TCP 探测（socket.io v4 over WebSocket，零 key）。
 
@@ -1794,6 +1809,7 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
     totals = 0
     seen: set = set()
     ms_values: list[float] = []
+    isp_best: dict[str, float] = {}
     job_id = None
     deadline = time.monotonic() + CE98_WS_IDLE
     while time.monotonic() < deadline:
@@ -1825,6 +1841,16 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
                         ms_values.append(avg)
                     elif ok and isinstance(latest, (int, float)) and latest > 0:
                         ms_values.append(latest)
+                    if ok:
+                        ms_one = (avg if isinstance(avg, (int, float)) and avg > 0
+                                  else latest)
+                        isp = _cn_isp_label(
+                            arg.get("node_name")
+                            if isinstance(arg.get("node_name"), str) else "")
+                        if (isp and isinstance(ms_one, (int, float))
+                                and ms_one > 0
+                                and ms_one < isp_best.get(isp, float("inf"))):
+                            isp_best[isp] = ms_one
             elif name == "connect_error":
                 break
     try:
@@ -1836,13 +1862,16 @@ def ce98_check(ip: str, port: str, timeout: float) -> dict:
         client.close()
     nodes = totals or 1
     if ok_nodes:
-        return {
+        out = {
             "status": "ok", "ok": True,
             "ms": round(min(ms_values), 1) if ms_values else None,
             "error": "", "level": "tcp",
             "ok_nodes": ok_nodes, "nodes": nodes,
             "ratio": round(ok_nodes / nodes, 3) if nodes else None,
         }
+        if isp_best:
+            out["isp_ms"] = {k: round(v, 1) for k, v in isp_best.items()}
+        return out
     return {
         "status": "fail", "ok": False, "ms": None,
         "error": f"unreachable ({nodes} nodes)", "level": None,
