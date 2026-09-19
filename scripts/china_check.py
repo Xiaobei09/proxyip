@@ -133,6 +133,7 @@ POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
 
 # check-host.cc —— 呼和浩特（阿里云 AS37963），每目标仅 1 大陆节点
+# （同品牌 check-host.net 前端 59 节点无一 CN，不可迁移，2026-09 实测）。
 CHECKHOST_URL = "https://api.check-host.cc/tcp"
 CHECKHOST_REPORT_URL = "https://api.check-host.cc/report/{uuid}"
 CHECKHOST_NODE = "CN-HOH-Alibaba"
