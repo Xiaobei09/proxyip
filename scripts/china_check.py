@@ -36,8 +36,10 @@
   BGP 节点 ICMP，免 key，`level=icmp`，echo 校验防垃圾回显）+
   `jkapi.com/zz_tcping`（浙江宁波电信 TCP，免 key）+
   `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，`level=icmp`，
-  不进延迟显示/不产 isp_ms）——四只免额单节点源中任 2 ok 即双确认
-  （single_ok≥2→reachable），check-host 的 250/h 配额不再是可达判定的瓶颈。
+  不进延迟显示/不产 isp_ms）+ `check-host.cc/ping`（CN-31：同节点 ICMP，
+  仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）——五只免额
+  单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host 的
+  250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
   判定）；`98ce.com`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
@@ -58,7 +60,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/antping/antping_ping/
   tcpingcn/tcpingcn_ping/chinaz/ce98/biuping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
-  单节点源（check_host/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源（check_host/checkhost_ping/xxapi/xxping/jkapi/jkping）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -157,6 +159,7 @@ POLL_INTERVAL = 3.0
 # check-host.cc —— 呼和浩特（阿里云 AS37963），每目标仅 1 大陆节点
 # （同品牌 check-host.net 前端 59 节点无一 CN，不可迁移，2026-09 实测）。
 CHECKHOST_URL = "https://api.check-host.cc/tcp"
+CHECKHOST_PING_URL = "https://api.check-host.cc/ping"
 CHECKHOST_REPORT_URL = "https://api.check-host.cc/report/{uuid}"
 CHECKHOST_NODE = "CN-HOH-Alibaba"
 CH_WINDOW_SEC = 10.0
@@ -473,6 +476,33 @@ def parse_check_host_report(payload) -> dict:
         "ok": False,
         "ms": None,
         "error": str(c.get("errortext") or "unreachable")[:120],
+    }
+
+
+def parse_check_host_ping_report(payload) -> dict:
+    """``/ping`` 报告 → ``{"status", "ok", "ms", "error"}``（CN-31）。
+
+    成功形（活体实证）：``checks[0] == {"status": 1, "connectiontime": 13,
+    "target_ip": ..., "errortext": ""}`` → ok，ms 取 connectiontime（ping
+    RTT）。``status`` 非 1 → fail（errortext/errortype 透出）；无 checks →
+    pending（与 TCP 版同语义）。
+    """
+    if not isinstance(payload, dict):
+        return {"status": "error", "ok": False, "ms": None, "error": "bad payload"}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {"status": "error", "ok": False, "ms": None, "error": "no data"}
+    checks = (data.get(CHECKHOST_NODE) or {}).get("checks") or []
+    if not checks:
+        return {"status": "pending", "ok": False, "ms": None, "error": ""}
+    c = checks[0]
+    if c.get("status") == 1:
+        return {"status": "ok", "ok": True, "ms": c.get("connectiontime"), "error": ""}
+    return {
+        "status": "fail",
+        "ok": False,
+        "ms": None,
+        "error": str(c.get("errortext") or c.get("errortype") or "unreachable")[:120],
     }
 
 
@@ -795,6 +825,78 @@ def check_host_check(ip: str, port: str, limiter: RateLimiter, timeout: float, a
         if last["status"] in ("ok", "fail"):
             return last
     return last or {"status": "timeout", "ok": False, "ms": None, "error": "poll timeout"}
+
+
+def checkhost_ping_check(ip: str, limiter: RateLimiter, timeout: float, api_key: str) -> dict:
+    """check-host 呼和浩特单节点 ICMP ping（CN-31，同节点、不同协议层）。
+
+    与 TCP 版同限速器（共享 250/h 匿名配额）/同轮询（POLL_DEADLINE）。
+    ``level`` 恒 ``"icmp"``（主机存活），不产 ``isp_ms``（阿里云机房，
+    非三网运营商）。调用方只在 TCP 版判 fail 时追加调用（主机/端口死因
+    消歧，配额敏感）。不抛未捕获异常。
+    """
+    try:
+        limiter.acquire()
+    except RateLimited:
+        return {"status": "rate_limited", "ok": False, "ms": None,
+                "error": "hourly cap", "level": None}
+    hdrs = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": UA,
+    }
+    if api_key:
+        hdrs["Authorization"] = f"Bearer {api_key}"
+    body = json.dumps({"target": ip, "region": ["CN"]}).encode()
+    try:
+        status, _, resp = request_follow(
+            CHECKHOST_PING_URL, hdrs, timeout, method="POST", data=body)
+    except urllib.error.HTTPError as e:
+        return {"status": "rate_limited" if e.code == 429 else "error",
+                "ok": False, "ms": None, "error": f"http {e.code}",
+                "level": None}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None}
+    if status == 429:
+        return {"status": "rate_limited", "ok": False, "ms": None,
+                "error": "rate limited", "level": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"http {status}", "level": None}
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad json", "level": None}
+    uuid = payload.get("uuid") or payload.get("request_id")
+    if not uuid:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "no uuid", "level": None}
+    deadline = time.monotonic() + POLL_DEADLINE
+    last = None
+    while time.monotonic() < deadline:
+        time.sleep(POLL_INTERVAL)
+        try:
+            status, _, resp = request_follow(
+                CHECKHOST_REPORT_URL.format(uuid=uuid),
+                {"Accept": "application/json", "User-Agent": UA},
+                timeout,
+            )
+            if status != 200:
+                continue
+            payload = json.loads(resp.decode("utf-8", "replace"))
+        except Exception as exc:
+            logging.debug("check-host ping poll: %s", _err(exc))
+            continue
+        last = parse_check_host_ping_report(payload)
+        if last["status"] in ("ok", "fail"):
+            last["level"] = "icmp" if last["ok"] else None
+            return last
+    out = last or {"status": "timeout", "ok": False, "ms": None,
+                   "error": "poll timeout"}
+    out["level"] = None
+    return out
 
 
 def xxapi_check(ip: str, port: str, timeout: float) -> dict:
@@ -3153,7 +3255,7 @@ def merge_verdict(sources: dict) -> dict:
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "biuping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping", "xxping")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "xxapi", "xxping", "jkapi", "jkping")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -3180,7 +3282,7 @@ def merge_verdict(sources: dict) -> dict:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
-    single_failed = [s for s in fail_sources if s in ("check_host", "xxapi", "jkapi", "jkping", "xxping")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "xxapi", "xxping", "jkapi", "jkping")]
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
@@ -3734,15 +3836,29 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             entries[key] = sources
 
     def l2_check_host(item):
-        """稀缺配额源（check-host 呼和浩特节点 ~250/h）二次确认。"""
+        """稀缺配额源（check-host 呼和浩特节点 ~250/h）二次确认。
+
+        TCP 判 fail 时追加同节点 ICMP ping（checkhost_ping，共用限速器）：
+        TCP-fail + ping-ok → 主机存活、端口层问题（uncertain，不误判死）；
+        双 fail → 置信定罪。TCP ok/error 时不追加（配额敏感）。
+        """
         _, key, ip, port, _ = item
         try:
-            return key, {
-                "check_host": check_host_check(ip, port, ch_limiter, args.timeout, args.api_key)
-            }
+            tcp = check_host_check(ip, port, ch_limiter, args.timeout, args.api_key)
         except Exception as exc:
             logging.debug("l2 check_host failed for %s: %s", key, _err(exc))
-            return key, {"check_host": {"status": "error", "ok": False, "ms": None, "error": _err(exc)}}
+            tcp = {"status": "error", "ok": False, "ms": None, "error": _err(exc)}
+        out = {"check_host": tcp}
+        if tcp.get("status") == "fail":
+            try:
+                out["checkhost_ping"] = checkhost_ping_check(
+                    ip, ch_limiter, args.timeout, args.api_key)
+            except Exception as exc:
+                logging.debug("l2 checkhost_ping failed for %s: %s", key, _err(exc))
+                out["checkhost_ping"] = {
+                    "status": "error", "ok": False, "ms": None,
+                    "error": _err(exc), "level": None}
+        return key, out
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
     # - 免额四源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）

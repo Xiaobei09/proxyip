@@ -23,6 +23,205 @@ US_LINE = "5.6.7.8:443#\U0001F1FA\U0001F1F8US-8ms-5.86MB/s"
 
 
 
+class TestParseCheckHostPing(unittest.TestCase):
+    """CN-31：check-host /ping 报告解析（呼和浩特 ICMP）。"""
+
+    def _payload(self, checks):
+        return {"data": {cc.CHECKHOST_NODE: {"checks": checks}}}
+
+    def test_ok_report(self):
+        payload = self._payload(
+            [{"status": 1, "connectiontime": 13,
+              "target_ip": "223.5.5.5", "errortext": ""}])
+        result = cc.parse_check_host_ping_report(payload)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["ms"], 13)
+
+    def test_fail_report(self):
+        payload = self._payload(
+            [{"status": 0, "errortext": "Connection timed out"}])
+        result = cc.parse_check_host_ping_report(payload)
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("timed out", result["error"])
+
+    def test_pending_and_bad(self):
+        self.assertEqual(
+            cc.parse_check_host_ping_report({"data": {}})["status"],
+            "pending")
+        self.assertEqual(cc.parse_check_host_ping_report({})["status"],
+                         "error")
+        self.assertEqual(cc.parse_check_host_ping_report(None)["status"],
+                         "error")
+
+
+class TestCheckhostPingCheck(unittest.TestCase):
+    """CN-31：checkhost_ping_check 提交＋轮询（mock request_follow）。"""
+
+    def _ok_report(self):
+        return json.dumps({
+            "data": {cc.CHECKHOST_NODE: {"checks": [
+                {"status": 1, "connectiontime": 13,
+                 "target_ip": "1.2.3.4", "errortext": ""}]}}}).encode()
+
+    def test_ok_flow(self):
+        submit = json.dumps({"uuid": "u1"}).encode()
+        calls = []
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            calls.append((url, method))
+            if method == "POST":
+                return 200, {}, submit
+            return 200, {}, self._ok_report()
+
+        limiter = cc.RateLimiter(window=10.0, per_window=100, hour_cap=100)
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.checkhost_ping_check("1.2.3.4", limiter, 10, "")
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["ms"], 13)
+        self.assertEqual(out["level"], "icmp")
+        self.assertTrue(calls[0][0].endswith("/ping"))
+        self.assertNotIn("isp_ms", out)
+
+    def test_submit_429_rate_limited(self):
+        limiter = cc.RateLimiter(window=10.0, per_window=100, hour_cap=100)
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=urllib.error.HTTPError(
+                                   "http://x", 429, "Too Many Requests",
+                                   {}, io.BytesIO(b""))):
+            out = cc.checkhost_ping_check("1.2.3.4", limiter, 10, "")
+        self.assertEqual(out["status"], "rate_limited")
+
+    def test_hour_cap_no_network(self):
+        limiter = cc.RateLimiter(window=10.0, per_window=100, hour_cap=1)
+        limiter.acquire()  # 占满配额
+        with mock.patch.object(
+                cc, "request_follow",
+                side_effect=AssertionError("no network")):
+            out = cc.checkhost_ping_check("1.2.3.4", limiter, 10, "")
+        self.assertEqual(out["status"], "rate_limited")
+
+    def test_no_uuid(self):
+        limiter = cc.RateLimiter(window=10.0, per_window=100, hour_cap=100)
+        with mock.patch.object(cc, "request_follow",
+                               return_value=(200, {}, b"{}")):
+            out = cc.checkhost_ping_check("1.2.3.4", limiter, 10, "")
+        self.assertEqual(out["status"], "error")
+
+
+class TestCheckhostPingMergeVerdict(unittest.TestCase):
+    """CN-31：checkhost_ping 并入单节点交叉（主机/端口死因消歧）。"""
+
+    def test_tcp_fail_plus_ping_ok_uncertain(self):
+        """TCP 双 fail 原判 unreachable；ping 证主机存活 → 回退 uncertain。"""
+        sources = {
+            "check_host": {"status": "fail", "ok": False, "ms": None},
+            "xxapi": {"status": "fail", "ok": False, "ms": None},
+            "checkhost_ping": {"status": "ok", "ok": True, "ms": 13,
+                               "level": "icmp"},
+        }
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "uncertain")
+        self.assertEqual(merged["level"], "icmp")
+
+    def test_dual_fail_unreachable(self):
+        """同节点 TCP+ICMP 双 fail → 置信定罪。"""
+        sources = {
+            "check_host": {"status": "fail", "ok": False, "ms": None},
+            "checkhost_ping": {"status": "fail", "ok": False, "ms": None},
+            "xxapi": {"status": "error", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
+
+    def test_ping_ok_plus_single_ok_reachable(self):
+        sources = {
+            "checkhost_ping": {"status": "ok", "ok": True, "ms": 13,
+                               "level": "icmp"},
+            "jkapi": {"status": "ok", "ok": True, "ms": 11},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
+
+    def test_ping_alone_ok_uncertain(self):
+        sources = {"checkhost_ping": {
+            "status": "ok", "ok": True, "ms": 13, "level": "icmp"}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+
+class TestCheckhostPingWiring(unittest.TestCase):
+    """CN-31：ping 只在 TCP fail 时追加（配额敏感），落 entries 源键。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            skip_itdog=True,
+            skip_itdog_tcping=True,
+            pingpe_limit=0,
+            workers=4,
+            timeout=5,
+            api_key="",
+        )
+
+    def _item(self):
+        return ("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")
+
+    def _l2(self, tcp, ping_ret=None):
+        mocks = [
+            mock.patch.object(cc, "xxapi_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "xxping_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "jkapi_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "jkping_check",
+                              return_value={"status": "error", "ok": False,
+                                            "ms": None, "error": "x"}),
+            mock.patch.object(cc, "check_host_check", return_value=tcp),
+        ]
+        if ping_ret is not None:
+            mocks.append(mock.patch.object(cc, "checkhost_ping_check",
+                                           return_value=ping_ret))
+        return mocks
+
+    def test_ping_runs_on_tcp_fail(self):
+        tcp = {"status": "fail", "ok": False, "ms": None, "error": ""}
+        ping = {"status": "ok", "ok": True, "ms": 13, "level": "icmp"}
+        mocks = self._l2(tcp)
+        with mock.patch.object(cc, "checkhost_ping_check",
+                               return_value=ping) as mp:
+            for p in mocks:
+                p.start()
+            try:
+                entries, _, _ = cc.run_measurements([self._item()],
+                                                    self._args())
+            finally:
+                for p in mocks:
+                    p.stop()
+        self.assertEqual(mp.call_count, 1)
+        srcs = entries["9.9.9.9:443#US"]["sources"]
+        self.assertEqual(srcs["checkhost_ping"]["ms"], 13)
+        # TCP-fail + ping-ok + 全 error → uncertain（不误判死）
+        self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "uncertain")
+
+    def test_ping_skipped_on_tcp_ok(self):
+        tcp = {"status": "ok", "ok": True, "ms": 100}
+        mocks = self._l2(tcp)
+        with mock.patch.object(cc, "checkhost_ping_check",
+                               side_effect=AssertionError("must not run")):
+            for p in mocks:
+                p.start()
+            try:
+                entries, _, _ = cc.run_measurements([self._item()],
+                                                    self._args())
+            finally:
+                for p in mocks:
+                    p.stop()
+        self.assertNotIn("checkhost_ping",
+                         entries["9.9.9.9:443#US"]["sources"])
+
+
 class TestParseCheckHost(unittest.TestCase):
     def test_ok_report(self):
         payload = {
@@ -3250,6 +3449,9 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
               mock.patch.object(cc, "xxping_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "http 500"}), \
+              mock.patch.object(cc, "checkhost_ping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": "http 500"}), \
               mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog), \
              mock.patch.object(cc, "pingpe_check",
                                return_value={
@@ -3344,6 +3546,9 @@ class TestPingpeConcurrency(unittest.TestCase):
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "xxping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "checkhost_ping_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
               mock.patch.object(cc, "PINGPE_SLOT_GAP", 0.01), \
