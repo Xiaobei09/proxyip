@@ -1010,6 +1010,14 @@ class TestItdogParseNodes(unittest.TestCase):
         html = '<optgroup label="中国电信"><option value="aaa">x</option></optgroup>'
         self.assertEqual(ci.itdog_parse_nodes(html, 1), ["aaa"])
 
+    def test_fetch_captcha_page_fails_open(self):
+        """CN-18：取节点页遇验证码墙 → ([], {}) 静默失败开放，不抛异常；
+        上游 itdog_batch_run 按无节点处理（实证：受限出口被风控拦截）。"""
+        html = ('<html><div class="clicaptcha">请完成验证</div></html>').encode()
+        with mock.patch.object(ci, "request_follow",
+                               return_value=(200, {}, html)):
+            self.assertEqual(ci.itdog_fetch_nodes(2, "https://x/"), ([], {}))
+
 
 class TestItdogParseSubmit(unittest.TestCase):
     def test_task_id(self):
