@@ -3042,6 +3042,14 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIn("--ce98-limit 200", wf)
         self.assertIn("--ce98-concurrency 6", wf)
 
+    def test_ci_enables_biuping(self):
+        """CN-02：biuping 毕业（约 39 ISP×节点，活体 21 单元出数）
+        与 ce98 同级预算；CLI 默认仍 0。"""
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        self.assertIn("--biuping-limit 200", wf)
+        self.assertIn("--biuping-concurrency 8", wf)
+
     def test_ce98_cli_default_stays_opt_in(self):
         import re
         src = (Path(__file__).resolve().parent.parent / "scripts"
@@ -3052,6 +3060,12 @@ class TestCiEnabledSources(unittest.TestCase):
         m = re.search(r'"--ce98-concurrency", type=int, default=(\d+)', src)
         self.assertIsNotNone(m, "ce98-concurrency 参数定义丢失")
         self.assertEqual(int(m.group(1)), 6)
+        m = re.search(r'"--biuping-limit", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "biuping-limit 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 0)
+        m = re.search(r'"--biuping-concurrency", type=int, default=(\d+)', src)
+        self.assertIsNotNone(m, "biuping-concurrency 参数定义丢失")
+        self.assertEqual(int(m.group(1)), 8)
 
 
 if __name__ == "__main__":
