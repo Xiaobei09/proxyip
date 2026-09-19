@@ -36,13 +36,15 @@
   BGP 节点 ICMP，免 key，`level=icmp`，echo 校验防垃圾回显）+
   `jkapi.com/zz_tcping`（浙江宁波电信 TCP，免 key）+
   `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，`level=icmp`，
-  不进延迟显示/不产 isp_ms）+ `jkapi.com/zz_ssl`（CN-37：同站同节点 TLS
+  不进延迟显示/不产 isp_ms）+   `jkapi.com/zz_ssl`（CN-37：同站同节点 TLS
   握手，免 key，双镜像，`level="tcp"` 保守，无 ms，只作布尔见证）+
+  `xxapi.cn/api/status`（CN-38：同站 HTTP 状态码，免 key，
+  `level="http"`，无 ms）+
   `check-host.cc/ping`（CN-31：同节点 ICMP，
   仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）+
   `check-host.cc/http`（CN-32：同节点 HTTPS 应用层确认，首个 http 级
   单节点源，仅 TCP-ok 且其余免额 0 ok 时追加猎取第二确认，共用配额）——
-  八只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
+  九只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），check-host
   的 250/h 配额不再是可达判定的瓶颈。
 - L3 多节点复核（有界并发小样本）：`ping.pe`（约 13 个大陆节点，≥7/13 可达即判可达）；
   `tcptest.cn`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
@@ -69,7 +71,7 @@
 保守判定逻辑（merge_verdict）：
   多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/antping/antping_ping/
   tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一 ok 且成功率达标 → reachable；
-  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping/jkssl）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+  单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/xxstatus/jkapi/jkping/jkssl）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -194,6 +196,19 @@ XXAPI_URL = "https://v2.xxapi.cn/api/tcping"
 # （运营商不明，不产 isp_ms）。回滚：摘 l2_xxapi 一行。
 XXPING_URL = "https://v2.xxapi.cn/api/ping"
 XXPING_TIMEOUT = 8.0  # 与 tcping 同口径：免额源不应拖慢整池 L2
+
+# v2.xxapi.cn（小小API）api/status —— 同运营商 HTTP 状态码探测，免 key
+# （JSON，``?url=http://<ip>:<port>/``；具体服务机房未公开）：
+#   存活 → ``{"code":200,"data":"400"}``（明文 HTTP 打 TLS 端口收 CF
+#   400 即完整往返证明，itdog ``http_code>0``/checkhost_http 同口径）；
+#   不可达 → ``{"code":-2,"msg":"请求失败"}``；私网目标 →
+#   ``{"code":-4,"msg":"禁止访问该URL"}``（后端拒绝，无信号，按 error）。
+# 同站第四端点（TCP/ICMP/状态码）：应用层证据，``level="http"``；
+# 无 ms 字段（布尔见证），不产 ``isp_ms``。单 URL（apex 404，无镜像）。
+# 2026-09-19 活体实证（CN-38）：223.5.5.5:443 → 400；192.0.2.1/8.8.8.8 →
+# -2；10.255.255.1 → -4。回滚：摘 l2_xxapi 一行。
+XXSTATUS_URL = "https://v2.xxapi.cn/api/status"
+XXSTATUS_TIMEOUT = 10.0  # HTTP 往返比 TCP ping 慢，单独放宽
 
 # jkapi.com（无铭 API）zz_tcping —— 浙江宁波电信 1 节点（免 key，纯文本报告）。
 # 单节点大陆实测，返回平均延迟 ms；目标不可达返回「所有测试均失败」。
@@ -1194,6 +1209,68 @@ def xxping_check(ip: str, port: str, timeout: float) -> dict:
                 "error": "bad json", "level": None}
     out = parse_xxping(payload, ip)
     out["level"] = "icmp" if out.get("ok") else None
+    return out
+
+
+def parse_xxstatus(payload) -> dict:
+    """``xxapi.cn api/status`` → ``{"status", "ok", "ms", "error"}``。
+
+    - ``code==200`` + ``data`` 为正 HTTP 状态码（含 4xx/5xx，完整往返
+      即应用层确认）→ ok（无 ms 字段，布尔见证）；
+    - ``code==-2``（请求失败：不可达/无 HTTP 应答）→ fail；
+    - 其余 code（含 -4 禁止访问：后端拒绝测试）/坏载荷 → error
+      （fail-open，无信号）。
+    """
+    if not isinstance(payload, dict):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad payload"}
+    if payload.get("code") == 200:
+        try:
+            code = int(str(payload.get("data")).strip())
+        except (TypeError, ValueError):
+            code = 0
+        if code > 0:
+            return {"status": "ok", "ok": True, "ms": None, "error": ""}
+        return {"status": "inconclusive", "ok": False, "ms": None,
+                "error": "no http status"}
+    if payload.get("code") == -2:
+        return {"status": "fail", "ok": False, "ms": None,
+                "error": str(payload.get("msg") or "unreachable")[:120]}
+    return {"status": "error", "ok": False, "ms": None,
+            "error": f"api code {payload.get('code')}"}
+
+
+def xxstatus_check(ip: str, port: str, timeout: float) -> dict:
+    """xxapi 单节点 HTTP 状态码实测（免 key）。
+
+    对 ``http://ip:port/`` 取状态码（明文 HTTP，打 TLS 端口收 CF 4xx
+    即证明）。``level`` 恒 ``"http"``（首批 http 级免额单节点之一，
+    与 checkhost_http 同级）；``ms`` 恒空；不产 ``isp_ms``。
+    无镜像（单 URL）。不抛未捕获异常。
+    """
+    url = f"{XXSTATUS_URL}?url={urllib.parse.quote(f'http://{ip}:{port}/', safe='')}"
+    try:
+        status, _, resp = request_follow(
+            url, {"User-Agent": UA, "Accept": "application/json"},
+            min(timeout, XXSTATUS_TIMEOUT),
+        )
+    except urllib.error.HTTPError as e:
+        return {"status": "rate_limited" if e.code == 429 else "error",
+                "ok": False, "ms": None, "error": f"http {e.code}",
+                "level": None}
+    except Exception as e:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": _err(e), "level": None}
+    if status != 200:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": f"http {status}", "level": None}
+    try:
+        payload = json.loads(resp.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "bad json", "level": None}
+    out = parse_xxstatus(payload)
+    out["level"] = "http" if out.get("ok") else None
     return out
 
 
@@ -3571,7 +3648,7 @@ def merge_verdict(sources: dict) -> dict:
         "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "tcptest_ping", "tcptest_http", "coffee",
         "pingloc", "antping", "antping_ping", "tcpingcn", "tcpingcn_ping", "chinaz", "ce98", "ce98_ping", "biuping", "biuping_ping", "aa1ping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
-    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping", "jkssl")]
+    single_ok = [s for s in ok_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "xxstatus", "jkapi", "jkping", "jkssl")]
 
     def strong_valid(source: str) -> bool:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
@@ -3598,7 +3675,7 @@ def merge_verdict(sources: dict) -> dict:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
     # 单节点源（大陆境内自备服务器实测）≥2 个不约而同 fail → 足够置信判 unreachable
-    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "jkapi", "jkping", "jkssl")]
+    single_failed = [s for s in fail_sources if s in ("check_host", "checkhost_ping", "checkhost_http", "xxapi", "xxping", "xxstatus", "jkapi", "jkping", "jkssl")]
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
@@ -4134,15 +4211,17 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     _t0 = time.monotonic()
 
     def l2_xxapi(item):
-        """免额单节点源（xxapi 北京 TCP + xxping 枣庄 ICMP + jkapi 宁波电信 TCP
-        + jkping 宁波电信 ICMP + jkssl 宁波电信 TLS）全池扫描，先建立候选集。
+        """免额单节点源（xxapi 北京 TCP + xxping 枣庄 ICMP + xxstatus 状态码
+        + jkapi 宁波电信 TCP + jkping 宁波电信 ICMP + jkssl 宁波电信 TLS）
+        全池扫描，先建立候选集。
 
-        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：五个源放进同池最多干到
+        L2 是并发受限（aggregate QPS），非逐键串行瓶颈：六个源放进同池最多干到
         池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=56
-        实测各源均无 429），保键级数据一致性仍用逐键五源落盘。"""
+        实测各源均无 429），保键级数据一致性仍用逐键六源落盘。"""
         _, key, ip, port, _ = item
         out = {}
         for name, fn in (("xxapi", xxapi_check), ("xxping", xxping_check),
+                         ("xxstatus", xxstatus_check),
                          ("jkapi", jkapi_check), ("jkping", jkping_check),
                          ("jkssl", jkssl_check)):
             try:
@@ -4201,13 +4280,14 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                         "error": _err(exc), "level": None}
         return key, out
     # check_host 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
-    # - 免额五源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
+    # - 免额六源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
     # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         def _needs_ch(entry: dict) -> bool:
             free = [entry.get(n) or {}
-                    for n in ("xxapi", "xxping", "jkapi", "jkping", "jkssl")]
+                    for n in ("xxapi", "xxping", "xxstatus",
+                              "jkapi", "jkping", "jkssl")]
             if sum(1 for r in free if r.get("status") == "ok") >= 2:
                 return False
             if any(r.get("status") == "fail" for r in free):

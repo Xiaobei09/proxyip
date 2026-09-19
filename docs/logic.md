@@ -262,6 +262,9 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 - `xxapi.cn/api/ping`（CN-29）：山东枣庄 BGP 节点 ICMP，免 key（JSON；
   `level=icmp`，echo 校验防垃圾回显，不产 `isp_ms`）。同运营商、不同城市
   服务器＋不同协议（地理＋协议双差异，中增益）
+- `xxapi.cn/api/status`（CN-38）：同站 HTTP 状态码，免 key（JSON；
+  `level=http`，`-2` 判 fail、`-4` 拒绝按 error，无 ms，不产 `isp_ms`）。
+  同站第四端点（TCP/ICMP/状态码）
 - `jkapi.com/zz_tcping`：浙江宁波电信 TCP 1 节点，免 key（纯文本报告；
   CN-26 起主站异常自动 failover 同站镜像 `api.jkapi.com`，429 不切换）
 - `jkapi.com/zz_ping`（CN-25 新增）：同站同节点 ICMP 主机存活，免 key
@@ -383,6 +386,12 @@ CN-37 逆向复核（活体探针实证）：`jkapi.com/api/zz_ssl`（`?domain=&
 存活回完整证书链＋协议/套件/有效期，死亡回 `success:false`；镜像
 `api.jkapi.com` 同形存活）接入为 `jkssl` 源（同站第三协议 TCP/ICMP/TLS；
 `level="tcp"` 保守，无 ms；L2 全池；双镜像 failover）。
+CN-38 逆向复核（活体探针实证）：websearch 挖出 `kkce`（openapi 需点数，
+付费墙；web 端 WS 403＋登录门，不接入）/`dnspup`（WAF 硬拦截 403，
+不接入）/`tance`（TLS 握手失败，不接入）；`xxapi.cn` 目录深挖出
+`api/speed`（需 Key，不接入）＋`api/status`（免 key，`?url=`，
+400/404 均为应用层应答，`-2` 死、`-4` 拒）接入为 `xxstatus` 源
+（同站第四端点；`level=http`，无 ms；L2 全池）。
 CN-33 逆向复核（活体探针实证）：`tcptest.cn type=ping`（202 建任务，
 158 节点，`avg_ms`/`packets_received`  schema 与 tcping 同构）接入为
 `tcptest_ping` 源（同站 ICMP，裸 IP 目标；`level=icmp`、不产 `isp_ms`；
@@ -429,7 +438,7 @@ annotate 系，待验证），机制已根治。
 1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/tcptest_ping/tcptest_http/coffee/pingloc/
    antping/antping_ping/tcpingcn/tcpingcn_ping/chinaz/ce98/ce98_ping/biuping/biuping_ping/aa1ping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/jkapi/jkping/jkssl）≥2 个 ok → reachable
+2. 单节点源（check_host/checkhost_ping/checkhost_http/xxapi/xxping/xxstatus/jkapi/jkping/jkssl）≥2 个 ok → reachable
 3. 多节点源仅弱确认（如 itdog 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
