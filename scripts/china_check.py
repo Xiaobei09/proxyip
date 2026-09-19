@@ -795,6 +795,11 @@ def tcptest_fetch_nodes(
     return online
 
 
+# tcptest 节点运营商 → itdog 口径归一（供 isp_ms 跨源合并；海外/未知
+# 不贡献大陆运营商视角，随 itdog 同口径丢弃）。
+_TCPTEST_ISP_LABELS = {"电信": "中国电信", "联通": "中国联通", "移动": "中国移动"}
+
+
 def tcptest_pick_nodes(nodes: list[dict], count: int) -> list[str]:
     """按运营商均衡采样 ``count`` 个节点的 uuid（跨省跨 ISP，避免扎堆）。"""
     if not nodes:
@@ -821,13 +826,17 @@ def tcptest_pick_nodes(nodes: list[dict], count: int) -> list[str]:
     return picked
 
 
-def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str]) -> dict:
+def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str],
+                  operators: dict | None = None) -> dict:
     """tcptest.cn 单键 TCP 多点探测：建任务 → 轮询 → 逐节点结果聚合。
 
     返回与 itdog_aggregate 同构的 source_result：
     ``{status, ok, ms, error, level, ok_nodes, nodes, ratio}``。
     节点成功 = 直连 TCP 握手成功（``success==true`` 且 ``connected==true``），
     ``ms`` 取成功节点最小 RTT。整个探测为传输层 → ``level="tcp"``。
+    ``operators`` 为 ``{node_uuid: 运营商}`` 时（调用方由节点列表构造），
+    另按 itdog 口径归一出 ``isp_ms``（``{中国电信/联通/移动: 最小ms}``，
+    海外/未知丢弃），供 ``merge_isp_ms`` 跨源合并；无映射时缺省该键。
     """
     if not node_uuids:
         return {"status": "error", "ok": False, "ms": None,
@@ -925,13 +934,29 @@ def tcptest_check(ip: str, port: str, timeout: float, node_uuids: list[str]) -> 
                for r in ok
                if isinstance(r.get("data"), dict)]
         valids = [m for m in mss if isinstance(m, (int, float)) and m > 0]
-        return {
+        out = {
             "status": "ok", "ok": True,
             "ms": round(min(valids), 1) if valids else None,
             "error": "", "level": "tcp",
             "ok_nodes": len(ok), "nodes": nodes,
             "ratio": round(len(ok) / nodes, 3),
         }
+        if isinstance(operators, dict):
+            isp_best: dict[str, float] = {}
+            for r in ok:
+                data = r.get("data")
+                ms = (data.get("avg_ms") or data.get("duration_ms")
+                      if isinstance(data, dict) else None)
+                if not isinstance(ms, (int, float)) or ms <= 0:
+                    continue
+                label = _TCPTEST_ISP_LABELS.get(operators.get(r.get("node_uuid")))
+                if not label:
+                    continue
+                if ms < isp_best.get(label, float("inf")):
+                    isp_best[label] = ms
+            if isp_best:
+                out["isp_ms"] = {k: round(v, 1) for k, v in isp_best.items()}
+        return out
     return {
         "status": "fail", "ok": False, "ms": None,
         "error": f"unreachable ({len(real)} nodes)",
@@ -2362,8 +2387,8 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
 def merge_isp_ms(entries: dict) -> None:
     """就地合并各源 ``isp_ms`` 到 per-key ``entry["isp_ms"]``（各运营商最小 RTT）。
 
-    源结果只需带 ``isp_ms``（``{运营商: ms}``，当前 itdog 提供，其他源缺省
-    {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
+    源结果只需带 ``isp_ms``（``{运营商: ms}``，itdog 与 tcptest 提供，
+    其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
     per-ISP 读数的条目不写该字段，下游回退 ``cn_display_ms`` 单值口径。
     """
     for e in entries.values():
@@ -2840,14 +2865,18 @@ def _run_pingpe_slots(
 def _run_tcptest_slots(
     candidates: list, entries: dict, timeout: float,
     node_uuids: list[str], concurrency: int,
+    operators: dict | None = None,
 ) -> None:
     """tcptest.cn 多节点 TCP 复核（免费 REST，端到端 ~2-6s/键）。节点列表
-    进程内缓存，只取一次；每键在 concurrency 有界并发下建任务并轮询结果。"""
+    进程内缓存，只取一次；每键在 concurrency 有界并发下建任务并轮询结果。
+    ``operators``（``{uuid: 运营商}``）透传给 ``tcptest_check`` 产出
+    per-ISP ``isp_ms``。"""
 
     def work(item) -> None:
         _, key, ip, port, _ = item
         try:
-            entries[key]["tcptest"] = tcptest_check(ip, port, timeout, node_uuids)
+            entries[key]["tcptest"] = tcptest_check(
+                ip, port, timeout, node_uuids, operators)
         except Exception as exc:
             logging.debug("tcptest failed for %s: %s", key, _err(exc))
             entries.setdefault(key, {})["tcptest"] = {
@@ -3083,11 +3112,16 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 让每个键都有资格走向 reachable 或 unreachable 定论）。
     tcptest_nodes = []
     tcptest_uuids = []
+    tcptest_operators: dict | None = None
     if getattr(args, "tcptest_limit", 0) != 0:
         tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
         tcptest_uuids = tcptest_pick_nodes(
             tcptest_nodes, getattr(args, "tcptest_nodes", TCPTEST_NODES)
         )
+        tcptest_operators = {
+            n.get("uuid"): n.get("operator") for n in tcptest_nodes
+            if isinstance(n, dict) and n.get("uuid")
+        }
     if tcptest_uuids:
         tcptest_candidates = [
             item for item in sample if needs_probe(entries, item[1])
@@ -3101,6 +3135,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             args.timeout,
             tcptest_uuids,
             getattr(args, "tcptest_concurrency", TCPTEST_CONCURRENCY),
+            tcptest_operators,
         )
         print(
             f"tcptest review: {time.monotonic() - _t0:.1f}s "

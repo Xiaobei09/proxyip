@@ -1685,6 +1685,52 @@ class TestTcptestSource(unittest.TestCase):
         out = cc.tcptest_check("1.2.3.4", "443", 10, [])
         self.assertEqual(out["status"], "error")
 
+    def test_check_isp_ms_per_carrier(self):
+        """CN-04：tcptest 以 uuid 关联节点运营商，按 itdog 口径归一
+        出 isp_ms（海外/未知丢弃）；无映射时缺省该键。"""
+        results = json.dumps({"results": [
+            {"success": True, "node_uuid": "u-telecom",
+             "data": {"connected": True, "avg_ms": 30.0}},
+            {"success": True, "node_uuid": "u-telecom2",
+             "data": {"connected": True, "avg_ms": 20.0}},
+            {"success": True, "node_uuid": "u-mobile",
+             "data": {"connected": True, "avg_ms": 50.0}},
+            {"success": True, "node_uuid": "u-oversea",
+             "data": {"connected": True, "avg_ms": 5.0}},
+            {"success": True, "node_uuid": "u-unknown",
+             "data": {"connected": True, "avg_ms": 7.0}},
+            {"success": False, "node_uuid": "u-unicom",
+             "data": {"connected": False}},
+        ]}).encode()
+        states = [json.dumps({"id": "t1"}).encode(),
+                  json.dumps({"state": "succeeded"}).encode(), results]
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            return 200, {}, states.pop(0)
+        operators = {"u-telecom": "电信", "u-telecom2": "电信",
+                     "u-mobile": "移动", "u-oversea": "海外"}
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check(
+                "1.2.3.4", "443", 10, ["u-telecom"], operators)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(
+            out["isp_ms"], {"中国电信": 20.0, "中国移动": 50.0})
+
+    def test_check_no_isp_ms_without_operators(self):
+        results = json.dumps({"results": [
+            {"success": True, "node_uuid": "u1",
+             "data": {"connected": True, "avg_ms": 12.5}},
+        ]}).encode()
+        states = [json.dumps({"id": "t1"}).encode(),
+                  json.dumps({"state": "succeeded"}).encode(), results]
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            return 200, {}, states.pop(0)
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.tcptest_check("1.2.3.4", "443", 10, ["u1"])
+        self.assertEqual(out["status"], "ok")
+        self.assertNotIn("isp_ms", out)
+
 
 class TestItdogMergeVerdict(unittest.TestCase):
     def _s(self, status):
