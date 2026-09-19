@@ -1929,6 +1929,9 @@ def biuping_check(ip: str, port: str, timeout: float) -> dict:
         ) as resp:
             chunks = b""
             deadline = time.monotonic() + BIUPING_SSE_TIMEOUT
+            # 注：此处不做 ce98 式"收齐即返"早退——实测服务端在末节点
+            # 上报后即主动断流（单块、~8s 到齐），流本身已自终止，
+            # 逐块增量解析省不出时间，反增分片解码复杂度（R328 实测）。
             while time.monotonic() < deadline:
                 got = resp.read(65536)
                 if not got:
