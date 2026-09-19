@@ -31,11 +31,19 @@ def _err(e: Exception) -> str:
 
 ITDOG_BATCH_URL = "https://www.itdog.cn/batch_http/"
 ITDOG_TCPING_URL = "https://www.itdog.cn/batch_tcping/"
+ITDOG_PING_URL = "https://www.itdog.cn/batch_ping/"
 ITDOG_WS_BASE = "wss://www.itdog.cn/websockets"
 ITDOG_TOKEN = "What this is is no longer important."
 ITDOG_BATCH_SIZE = 5  # itdog 每任务仅返回前 5 个目标的记录
 ITDOG_NODES_PER_ISP = 8  # 电信/联通/移动各取 N 节点（默认 8 → 共 24，池子 ~80/ISP）
 ITDOG_TCPING_NODES_PER_ISP = 8  # batch_tcping 节点池大（每 ISP ~75-88），取 8 → 共 24
+# batch_ping ICMP 补测通道（CN-26）：节点池更大（电信 87 / 联通 83 /
+# 移动 89，活体实证），默认等距取 8×3=24 节点；提交参数/WS 收数与
+# batch_http 系完全同构（task_id + md5(task+TOKEN)），记录形
+# ``{"task_num","result": ms字串,"node_id"}`` 与 batch_tcping 同构，
+# 由既有 ``itdog_rec_ok`` result 分支直接解析（调用方须把 level 改写
+# 为 icmp 并剥离 isp_ms，见 china_check._itdog_ping_normalize）。
+ITDOG_PING_NODES_PER_ISP = 8
 ITDOG_CONCURRENCY = 8
 ITDOG_PACING = 0.5  # 两次任务启动的最小间隔（秒），全局节流
 ITDOG_TASK_TIMEOUT = 45.0  # 单任务收结果上限

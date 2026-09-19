@@ -253,10 +253,11 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 - `check-host.cc`：呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 `--api-key` 可放宽
 - `xxapi.cn`：北京节点，免 key
-- `jkapi.com/zz_tcping`：浙江宁波电信 TCP 1 节点，免 key（纯文本报告）
+- `jkapi.com/zz_tcping`：浙江宁波电信 TCP 1 节点，免 key（纯文本报告；
+  CN-26 起主站异常自动 failover 同站镜像 `api.jkapi.com`，429 不切换）
 - `jkapi.com/zz_ping`（CN-25 新增）：同站同节点 ICMP 主机存活，免 key
   （纯文本报告；`level=icmp`，不进 `cn_display_ms`/`isp_ms`，与 chinaz/coffee
-  同口径）。同站不同协议：TCP 握手与 ICMP 回显失效模式正交（端口封 vs
+  同口径；同镜像 failover）。同站不同协议：TCP 握手与 ICMP 回显失效模式正交（端口封 vs
   禁 Ping），独立性评级低增益-同站（新增协议层证据，非地理/ISP 覆盖）
 
 **batch_tcping 补测（降级通道）**：
@@ -266,6 +267,17 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 - 节点池大得多（电信/联通/移动各 ~75-88 个，默认等距取 8×3=24 节点）
 - 结果记为独立多节点源 `itdog_tcping`（`result>0` → 可达，`-1` → 失败），
   单独 ok 即可判 reachable
+
+**batch_ping 补测（CN-26，ICMP 主机存活通道）**：
+
+- 同上触发条件（仅 error/rate_limited 键；TCP 实测 fail 的键不用 ICMP
+  翻案，保守），改用 `itdog.cn/batch_ping` ICMP 复测
+- 节点池电信 87 / 联通 83 / 移动 89（默认等距取 8×3=24 节点）；提交参数、
+  WS 收数（`task_id` + `md5(task+TOKEN)` 同口令）、记录形
+  （`{"task_num","result": ms字串,"node_id"}`）与 batch 系完全同构，活体实证
+- 结果记为独立多节点源 `itdog_ping`，归一为 `level=icmp` 且不产 `isp_ms`
+  （ICMP 不得进展示延迟，chinaz/coffee/jkping 同口径），强确认单独 ok
+  即可判 reachable
 
 #### L3 多节点复核（有界并发小样本）
 
@@ -291,6 +303,15 @@ pingtool（404 且无 CN）、oioweb/uomg（TLS 坏）。CN-25 在同站内再�
 仍可产出正交证据；用户已授权逆向与反爬对抗（2026-09-19，源越多越好），
 下一阶段按此新口径复活 captcha 墙后休眠源（boce 新路由/17ce 新端点/
 aizhan 签名/ping0），此前"新源唯一现实路径为用户 key"的结论作废。
+CN-26 首轮逆向复核（均为活体探针实证）：
+`boce.com`（`/tcping` 页 200 存活但提交链为 AliyunCaptcha＋`encryptFun`
+加密提交，匿名无协议旁路，仍阻塞）、`17ce.com`（提交签名为静态盐 SHA1
+可复刻，但匿名提交强制图片验证码 `/site/verify` 且 TCPing 路由
+`/site/tcping` 404 无 TCP 能力，仍阻塞）、`ping.sx`（421KB 前端包零
+China/节点提及，`public-us` 美区 playground，无 CN 覆盖，不接入）、
+`api.xxapi.cn`/`xxapi.cn`（TLS 中断/404，无第二 vantage）。
+同轮产出：`itdog.cn/batch_ping`（提交/WS/记录与 batch 系全同构，无新增
+反爬动作）接入为 `itdog_ping` 源；`api.jkapi.com` 双镜像 failover。
 （`ping.chinaz.com` 的公共表单端反爬成本高，但对应实验性 `.com` REST 通道已由 WS 版 `chinaz` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
@@ -300,7 +321,7 @@ aizhan 签名/ping0），此前"新源唯一现实路径为用户 key"的结论�
        jkping: {...}, itdog: {...}, pingpe: {...}, tcptest: {...}, ...}
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
-1. 多节点源（pingpe/itdog/itdog_tcping/tcpping/tcptest/coffee/pingloc/
+1. 多节点源（pingpe/itdog/itdog_tcping/itdog_ping/tcpping/tcptest/coffee/pingloc/
    antping/tcpingcn/chinaz/ce98/biuping/boce/ipip/17ce/ping0/wansui）任一
    强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
 2. 单节点源（check_host/xxapi/jkapi/jkping）≥2 个 ok → reachable

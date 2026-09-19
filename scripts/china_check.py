@@ -26,6 +26,11 @@
 - L2 itdog batch_tcping 补测（降级通道）：batch_http 对某目标失败/被限时，
   改用 `batch_tcping` 纯 TCPING 复测——节点池大得多（每 ISP ~75-88 个，
   默认取 8×3=24 节点），结果记为独立多节点源 ``itdog_tcping``。
+- L2 itdog batch_ping 补测（CN-26，ICMP 主机存活通道）：同上触发条件，
+  改用 `batch_ping` ICMP 复测——节点池电信 87 / 联通 83 / 移动 89（默认
+  取 8×3=24 节点；提交/WS/记录形与 batch 系完全同构，活体实证），结果记
+  为独立多节点源 ``itdog_ping``（``level`` 归一为 ``icmp`` 且不产
+  ``isp_ms``，ICMP 不得进展示延迟，chinaz/coffee/jkping 同口径）。
 - L2 单节点实测（并发）：`check-host.cc`（呼和浩特阿里云 1 节点，需控速）+
   `xxapi.cn`（北京节点，免 key）+ `jkapi.com/zz_tcping`（浙江宁波电信 TCP，
   免 key）+ `jkapi.com/zz_ping`（同站同节点 ICMP 主机存活，免 key，
@@ -116,6 +121,8 @@ from china_itdog import (
     ITDOG_CONCURRENCY,
     ITDOG_NODES_PER_ISP,
     ITDOG_PACING,
+    ITDOG_PING_NODES_PER_ISP,
+    ITDOG_PING_URL,
     ITDOG_TASK_TIMEOUT,
     ITDOG_TCPING_NODES_PER_ISP,
     ITDOG_TCPING_URL,
@@ -157,6 +164,9 @@ XXAPI_URL = "https://v2.xxapi.cn/api/tcping"
 # 独立完成双源确认（merge_verdict 单节点源 ≥2 ok → reachable）。
 JKAPI_URL = "https://jkapi.com/api/zz_tcping"
 JKAPI_TIMEOUT = 8.0  # 拉低单次超时上限：免额源不应拖慢整池 L2
+# 同站镜像（CN-26 活体实证：同报告格式、同宁波电信节点）：主站传输异常/
+# 非 200 时自动 failover，429 限流不切换（两站共享配额，切换无意义）。
+JKAPI_MIRROR_URL = "https://api.jkapi.com/api/zz_tcping"
 
 # jkapi.com（无铭 API）zz_ping —— 与 zz_tcping 同站同节点（浙江宁波电信）的
 # ICMP ping，免 key（纯文本报告，``?host=`` 单参，无端口概念）：
@@ -170,6 +180,8 @@ JKAPI_TIMEOUT = 8.0  # 拉低单次超时上限：免额源不应拖慢整池 L2
 # （run_measurements.l2_xxapi），其余源零影响。
 JK_PING_URL = "https://jkapi.com/api/zz_ping"
 JK_PING_TIMEOUT = 8.0  # 与 zz_tcping 同口径：免额源不应拖慢整池 L2
+# 同站镜像（CN-26 活体实证：同报告格式、同节点；主站异常时 failover）。
+JK_PING_MIRROR_URL = "https://api.jkapi.com/api/zz_ping"
 # 报告 footer 恒为「测试节点:浙江宁波电信」→ 中国电信（仅文档记录；
 # 本源 level=icmp，刻意不产出 isp_ms，防 ICMP RTT 污染 cn_fastest_ms，
 # 与 chinaz/coffee（ICMP 不出 isp_ms）同口径）。
@@ -437,20 +449,49 @@ def parse_jkapi(text: str) -> dict:
             "error": "unrecognized text"}
 
 
+def _jkapi_fetch(urls: list[str], query: str, timeout: float) -> tuple[int, bytes] | dict:
+    """jk 系端点抓取：主站 → 镜像 failover（CN-26）。
+
+    成功/业务响应返回 ``(status, body)``；429 限流直接返回错误 dict（两站
+    共享配额，切换无意义）；其他 HTTPError/传输异常/非 200 记末错并试
+    下一镜像；两站全败返回末错 error dict。不抛未捕获异常。
+    """
+    last: dict | None = None
+    for base in urls:
+        url = f"{base}{query}"
+        try:
+            status, _, resp = request_follow(
+                url, {"User-Agent": UA}, timeout
+            )
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                return {"status": "rate_limited", "ok": False, "ms": None,
+                        "error": f"http {e.code}"}
+            last = {"status": "error", "ok": False, "ms": None,
+                    "error": f"http {e.code}"}
+            continue
+        except Exception as e:
+            last = {"status": "error", "ok": False, "ms": None,
+                    "error": _err(e)}
+            continue
+        if status != 200:
+            last = {"status": "error", "ok": False, "ms": None,
+                    "error": f"http {status}"}
+            continue
+        return status, resp
+    return last or {"status": "error", "ok": False, "ms": None,
+                    "error": "no mirror"}
+
+
 def jkapi_check(ip: str, port: str, timeout: float) -> dict:
     """jkapi 单节点实测（浙江宁波电信，免 key）。不抛未捕获异常。"""
-    url = f"{JKAPI_URL}?host={ip}&port={port}"
-    try:
-        status, _, resp = request_follow(
-            url, {"User-Agent": UA}, min(timeout, JKAPI_TIMEOUT)
-        )
-    except urllib.error.HTTPError as e:
-        return {"status": "rate_limited" if e.code == 429 else "error",
-                "ok": False, "ms": None, "error": f"http {e.code}"}
-    except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": _err(e)}
-    if status != 200:
-        return {"status": "error", "ok": False, "ms": None, "error": f"http {status}"}
+    out = _jkapi_fetch(
+        [JKAPI_URL, JKAPI_MIRROR_URL], f"?host={ip}&port={port}",
+        min(timeout, JKAPI_TIMEOUT),
+    )
+    if isinstance(out, dict):
+        return out
+    _, resp = out
     return parse_jkapi(resp.decode("utf-8", "replace"))
 
 
@@ -494,28 +535,21 @@ def jkping_check(ip: str, port: str, timeout: float) -> dict:
     （≥2 单节点 ok 才判 reachable），且 ``level`` 恒标 ``"icmp"``
     （主机存活，非端口可达）：显示层（``common._cn_fallback_ms``）按
     level 剔除，不冒充大陆代理延迟；亦不产出 ``isp_ms``（ICMP RTT 非
-    代理延迟上界，chinaz/coffee 同口径）。``port`` 仅为槽位接口一致
+    代理延迟上界，chinaz/coffee 同口径）。    ``port`` 仅为槽位接口一致
     保留（zz_ping 无端口概念）。不抛未捕获异常。
     """
     _ = port
-    url = f"{JK_PING_URL}?host={ip}"
-    try:
-        status, _, resp = request_follow(
-            url, {"User-Agent": UA}, min(timeout, JK_PING_TIMEOUT)
-        )
-    except urllib.error.HTTPError as e:
-        return {"status": "rate_limited" if e.code == 429 else "error",
-                "ok": False, "ms": None, "error": f"http {e.code}",
-                "level": None}
-    except Exception as e:
-        return {"status": "error", "ok": False, "ms": None,
-                "error": _err(e), "level": None}
-    if status != 200:
-        return {"status": "error", "ok": False, "ms": None,
-                "error": f"http {status}", "level": None}
-    out = parse_jkping(resp.decode("utf-8", "replace"))
-    out["level"] = "icmp" if out.get("ok") else None
-    return out
+    out = _jkapi_fetch(
+        [JK_PING_URL, JK_PING_MIRROR_URL], f"?host={ip}",
+        min(timeout, JK_PING_TIMEOUT),
+    )
+    if isinstance(out, dict):
+        out.setdefault("level", None)
+        return out
+    _, resp = out
+    parsed = parse_jkping(resp.decode("utf-8", "replace"))
+    parsed["level"] = "icmp" if parsed.get("ok") else None
+    return parsed
 
 
 def parse_xxapi(payload) -> dict:
@@ -2602,7 +2636,7 @@ def merge_verdict(sources: dict) -> dict:
         level = None
 
     multi_ok = [s for s in ok_sources if s in (
-        "pingpe", "itdog", "tcpping", "itdog_tcping", "tcptest", "coffee",
+        "pingpe", "itdog", "tcpping", "itdog_tcping", "itdog_ping", "tcptest", "coffee",
         "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     single_ok = [s for s in ok_sources if s in ("check_host", "xxapi", "jkapi", "jkping")]
@@ -2636,7 +2670,7 @@ def merge_verdict(sources: dict) -> dict:
     if len(single_failed) >= 2:
         return {"verdict": "unreachable", "basis": fail_sources, "ms": None, "level": None}
     multi_failed = [s for s in fail_sources if s in (
-        "itdog", "itdog_tcping", "pingpe", "tcptest", "coffee",
+        "itdog", "itdog_tcping", "itdog_ping", "pingpe", "tcptest", "coffee",
         "pingloc", "antping", "tcpingcn", "chinaz", "ce98", "biuping",
         "boce", "ipip", "17ce", "ping0", "wansui")]
     if len(multi_failed) >= 2 or (len(multi_failed) >= 1 and len(single_failed) >= 1):
@@ -3137,6 +3171,19 @@ def _run_raw_slots(
             fut.result()
 
 
+def _itdog_ping_normalize(res: dict) -> dict:
+    """batch_ping 结果归一：记录形与 batch_tcping 同构，遂 ``itdog_rec_ok``
+    的 result 分支会标 ``level="tcp"`` 并产出 ``isp_ms``；实为 ICMP 回显，
+    改写 ``level="icmp"`` 并剥离 ``isp_ms``（ICMP RTT 不得进展示延迟与
+    ``cn_fastest_ms``；chinaz/coffee/jkping 同口径）。fail/error 原样。
+    """
+    res = dict(res)
+    if res.get("ok"):
+        res["level"] = "icmp"
+    res.pop("isp_ms", None)
+    return res
+
+
 def run_measurements(sample, args) -> tuple[dict, set, set]:
     """L2 分两段并发（xxapi 全池免额候选 → check_host 稀缺配额只投决策键）、itdog
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
@@ -3248,6 +3295,35 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     logging.debug("itdog_tcping fallback failed: %s", _err(exc))
                     print(f"itdog_tcping fallback failed (skipped): {_err(exc)}",
                           file=sys.stderr)
+        # batch_ping ICMP 补测（CN-26）：同上触发条件（batch_http error/
+        # rate_limited 且节点拉取成功），用 batch_ping（ICMP，大节点池
+        # 电信 87 / 联通 83 / 移动 89）复测主机存活。结果记为独立多节点源
+        # itdog_ping（归一为 level=icmp、不产 isp_ms）；TCP 实测 fail 的键
+        # 不投（fail 是端口层实测结论，不用 ICMP 主机存活翻案，保守）。
+        ping_pending = [
+            item for item in _itdog_cands
+            if entries.get(item[1], {}).get("itdog", {}).get("status")
+            in ("error", "rate_limited")
+        ]
+        if ping_pending and node_fetch_ok:
+            print(
+                f"itdog_ping fallback: {len(ping_pending)} targets",
+                file=sys.stderr,
+            )
+            try:
+                for key, res in itdog_batch_run(
+                    ping_pending,
+                    args,
+                    page_url=ITDOG_PING_URL,
+                    nodes_per_isp=ITDOG_PING_NODES_PER_ISP,
+                ).items():
+                    entries.setdefault(key, {})["itdog_ping"] = (
+                        _itdog_ping_normalize(res)
+                    )
+            except Exception as exc:
+                logging.debug("itdog_ping fallback failed: %s", _err(exc))
+                print(f"itdog_ping fallback failed (skipped): {_err(exc)}",
+                      file=sys.stderr)
     print(
         f"itdog phases: {time.monotonic() - _t0:.1f}s",
         file=sys.stderr,

@@ -201,6 +201,68 @@ class TestJkpingCheck(unittest.TestCase):
         self.assertEqual(out["status"], "error")
 
 
+class TestJkMirrorFailover(unittest.TestCase):
+    """CN-26：jk 系双镜像（jkapi.com → api.jkapi.com，同站同节点活体实证）。"""
+
+    _TCP_OK = ("=== TCPing测试报告 ===\n平均延迟: 10.91 ms\n"
+               "测试节点:浙江宁波电信\n").encode()
+    _PING_OK = ("=== Ping测试报告 ===\n平均延迟:12.65ms\n"
+                "测试节点:浙江宁波电信\n").encode()
+
+    def _route(self, primary_exc=None, primary_status=200, primary_body=b"",
+               mirror_body=None):
+        """按 URL 分流的 request_follow 替身：主站按设定失败，镜像回业务体。"""
+        def fake(url, headers, timeout, method="GET", data=None):
+            if "api.jkapi.com" in url:
+                if mirror_body is None:
+                    raise urllib.error.URLError("mirror down")
+                return 200, {}, mirror_body
+            if primary_exc is not None:
+                raise primary_exc
+            return primary_status, {}, primary_body
+        return fake
+
+    def test_jkapi_primary_down_mirror_ok(self):
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=self._route(
+                                   primary_exc=urllib.error.URLError("reset"),
+                                   mirror_body=self._TCP_OK)):
+            out = cc.jkapi_check("223.5.5.5", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertAlmostEqual(out["ms"], 10.91)
+
+    def test_jkapi_both_down_error(self):
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=self._route(
+                                   primary_exc=urllib.error.URLError("reset"))):
+            out = cc.jkapi_check("223.5.5.5", "443", 10)
+        self.assertEqual(out["status"], "error")
+
+    def test_jkapi_429_no_failover(self):
+        """429 系共享配额限流：直接返回，不耗镜像配额。"""
+        seen = []
+
+        def fake(url, headers, timeout, method="GET", data=None):
+            seen.append(url)
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, io.BytesIO(b""))
+
+        with mock.patch.object(cc, "request_follow", side_effect=fake):
+            out = cc.jkapi_check("1.2.3.4", "443", 10)
+        self.assertEqual(out["status"], "rate_limited")
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("api.jkapi.com", seen[0])
+
+    def test_jkping_primary_500_mirror_ok(self):
+        with mock.patch.object(cc, "request_follow",
+                               side_effect=self._route(
+                                   primary_status=500, primary_body=b"err",
+                                   mirror_body=self._PING_OK)):
+            out = cc.jkping_check("223.5.5.5", "443", 10)
+        self.assertEqual(out["status"], "ok")
+        self.assertAlmostEqual(out["ms"], 12.65)
+        self.assertEqual(out["level"], "icmp")
+
+
 class TestParsePingpePage(unittest.TestCase):
     def test_extracts_cookie_token_and_cn_ids(self):
         html = (
@@ -732,6 +794,48 @@ class TestJkpingMergeVerdict(unittest.TestCase):
                         "level": "tcp"},
         }
         self.assertEqual(cc.merge_verdict(sources)["level"], "tcp")
+
+
+class TestItdogPingSource(unittest.TestCase):
+    """CN-26：itdog batch_ping（同站 ICMP，大节点池）→ 独立多节点源 itdog_ping。"""
+
+    def test_normalize_ok_to_icmp_no_isp(self):
+        """tcping 形记录（level=tcp + isp_ms）归一为 icmp 且剥离 isp_ms。"""
+        out = cc._itdog_ping_normalize({
+            "status": "ok", "ok": True, "ms": 22.0, "level": "tcp",
+            "ok_nodes": 20, "nodes": 24, "ratio": 0.83,
+            "isp_ms": {"中国电信": 5.0},
+        })
+        self.assertEqual(out["level"], "icmp")
+        self.assertNotIn("isp_ms", out)
+        self.assertEqual(out["ms"], 22.0)
+
+    def test_normalize_fail_passthrough(self):
+        src = {"status": "fail", "ok": False, "ms": None, "error": "x",
+               "level": None, "ok_nodes": 0, "nodes": 24, "ratio": 0.0}
+        self.assertEqual(cc._itdog_ping_normalize(src)["status"], "fail")
+
+    def test_strong_reachable_level_icmp(self):
+        sources = {"itdog_ping": {
+            "status": "ok", "ok": True, "ms": 22.0, "level": "icmp",
+            "ok_nodes": 20, "nodes": 24, "ratio": 0.83}}
+        merged = cc.merge_verdict(sources)
+        self.assertEqual(merged["verdict"], "reachable")
+        self.assertEqual(merged["level"], "icmp")
+
+    def test_weak_ratio_uncertain(self):
+        sources = {"itdog_ping": {
+            "status": "ok", "ok": True, "ms": 22.0, "level": "icmp",
+            "ok_nodes": 1, "nodes": 24, "ratio": 0.04}}
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
+
+    def test_fail_plus_single_fail_unreachable(self):
+        sources = {
+            "itdog_ping": {"status": "fail", "ok": False, "ms": None,
+                           "ok_nodes": 0, "nodes": 24, "ratio": 0.0},
+            "xxapi": {"status": "fail", "ok": False, "ms": None},
+        }
+        self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
 
 class TestAnnotations(unittest.TestCase):
@@ -2563,12 +2667,116 @@ class TestItdogRestrictedToUndecidedKeys(unittest.TestCase):
             entries, _, _ = cc.run_measurements([a, b], self._args())
 
         calls = [c for c in mib.call_args_list]
-        self.assertEqual(len(calls), 2)
+        # batch_http + batch_tcping 兜底 + batch_ping 兜底（CN-26 新增）
+        self.assertEqual(len(calls), 3)
         page_urls = [c.kwargs.get("page_url") for c in calls]
         self.assertIn(cc.ITDOG_TCPING_URL, page_urls)
+        self.assertIn(cc.ITDOG_PING_URL, page_urls)
         fallback = next(c for c in calls if c.kwargs.get("page_url") == cc.ITDOG_TCPING_URL)
         self.assertEqual([key for _, key, _, _, _ in fallback.args[0]],
                          ["10.7.0.1:80#US"])
+        ping_call = next(c for c in calls if c.kwargs.get("page_url") == cc.ITDOG_PING_URL)
+        self.assertEqual([key for _, key, _, _, _ in ping_call.args[0]],
+                         ["10.7.0.1:80#US"])
+        # ping 结果归一落地：level=icmp、无 isp_ms
+        ping_res = entries["10.7.0.1:80#US"]["sources"]["itdog_ping"]
+        self.assertEqual(ping_res["status"], "error")  # 替身回 error，原样落地
+
+
+class TestItdogPingFallbackGuard(unittest.TestCase):
+    """CN-26：batch_ping 只补 error/rate_limited 键；TCP 实测 fail 的键
+    不用 ICMP 主机存活翻案（保守）；整站失败时不空转。"""
+
+    def _args(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            skip_itdog=False,
+            skip_itdog_tcping=False,
+            pingpe_limit=0,
+            pingpe_concurrency=4,
+            workers=4,
+            timeout=5,
+            api_key="",
+            tcpping_token="",
+        )
+
+    def _item(self, ip):
+        return (f"{ip}:80#US", f"{ip}:80#US", ip, "80", "US")
+
+    def test_tcp_fail_keys_excluded_from_ping(self):
+        """itdog 实测 fail（端口层结论）→ ping_pending 为空，不发 ping 任务。"""
+        import unittest.mock as mock
+
+        items = [self._item("10.9.0.1")]
+
+        def fake_itdog(sample, args, page_url=None, **kw):
+            if page_url == cc.ITDOG_PING_URL:
+                raise AssertionError("ping must not run for fail keys")
+            return {key: {"status": "fail", "ok": False, "ms": None,
+                          "error": "unreachable"}
+                    for _, key, _, _, _ in sample}
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": ""}), \
+              mock.patch.object(cc, "check_host_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkapi_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
+            entries, _, _ = cc.run_measurements(items, self._args())
+
+        self.assertNotIn("itdog_ping", entries["10.9.0.1:80#US"]["sources"])
+
+    def test_ping_ok_lands_normalized(self):
+        """ping 兜底 ok → sources.itdog_ping 归一为 icmp 且无 isp_ms。"""
+        import unittest.mock as mock
+
+        items = [self._item("10.10.0.1"), self._item("10.10.0.2")]
+
+        def fake_itdog(sample, args, page_url=None, **kw):
+            if page_url == cc.ITDOG_PING_URL:
+                return {key: {"status": "ok", "ok": True, "ms": 22.0,
+                              "level": "tcp", "ok_nodes": 20, "nodes": 24,
+                              "ratio": 0.83, "isp_ms": {"中国电信": 5.0}}
+                        for _, key, _, _, _ in sample}
+            out = {}
+            for _, key, _, _, _ in sample:
+                # .1 http 即 ok（证站点存活，node_fetch_ok=True）；
+                # .2 http error（进 tcping/ping 兜底链）。
+                if key == "10.10.0.1:80#US":
+                    out[key] = {"status": "ok", "ok": True, "ms": 30.0,
+                                "level": "tcp", "ok_nodes": 20, "nodes": 24,
+                                "ratio": 0.83}
+                else:
+                    out[key] = {"status": "error", "ok": False, "ms": None,
+                                "error": "rl"}
+            return out
+
+        with mock.patch.object(cc, "xxapi_check",
+                               return_value={"status": "error", "ok": False,
+                                             "ms": None, "error": ""}), \
+              mock.patch.object(cc, "check_host_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkapi_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "jkping_check",
+                                return_value={"status": "error", "ok": False,
+                                              "ms": None, "error": ""}), \
+              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_itdog):
+            entries, reachable, _ = cc.run_measurements(items, self._args())
+
+        ping_res = entries["10.10.0.2:80#US"]["sources"]["itdog_ping"]
+        self.assertEqual(ping_res["level"], "icmp")
+        self.assertNotIn("isp_ms", ping_res)
+        self.assertIn("10.10.0.2:80#US", reachable)
 
 
 class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
