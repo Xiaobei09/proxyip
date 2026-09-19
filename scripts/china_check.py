@@ -2014,6 +2014,8 @@ def boce_check(ip: str, port: str, timeout: float) -> dict:
     提交任务 → 轮询 ``/api/v1/probe/result?taskId=`` 直到各节点达标收齐。
     反爬处理：完整 cookie 往返 + CSRF token + JSON content-type + UA。整站失败
     （连接/鉴权异常）→ ``error`` 可作不可达联动证据；纯 TCP → ``level="tcp"``。
+    状态（2026-09 三轮复测）：壳页 200 存活但 ``/api/v1|v2/probe`` 均 404，
+    工具路由已迁移， adapter 待重写，当前休眠。
     """
     try:
         status, headers, resp = request_follow(
@@ -2125,6 +2127,8 @@ def ipip_check(ip: str, port: str, timeout: float) -> dict:
     POST ``/api/v1/ping`` JSON body；收多轮 JSON 结果（逐节点 node_name/delay）。
     反爬处理：JSON content-type + X-Requested-With + UA + Referer。纯 TCP →
     ``level="tcp"``。整站异常 → ``error``。
+    状态（2026-09 三轮复测）：``POST /api/v1/ping`` 回 405（端点下线），
+    adapter 待重写，当前休眠。
     """
     headers = {"User-Agent": UA, "Accept": "application/json",
                "Content-Type": "application/json",
@@ -2192,6 +2196,8 @@ def seventeen_check(ip: str, port: str, timeout: float, token: str = "") -> dict
     GET 壳页提取 session/cookie 与内联 token；后续 GET ``/api.php``（action=tcping）
     携带 token 防重放。token 也可经 ``--17ce-token`` 显式提供。纯 TCP →
     ``level="tcp"``。整站异常/验证码 → ``error``（fail-open）。
+    状态（2026-09 三轮复测）：壳页 200 存活但页内无 token/api.php 引用、
+    ``/api.php`` 404，工具路由已迁移，adapter 待重写，当前休眠。
     """
     extra = {}
     if token:
@@ -2268,8 +2274,10 @@ def ping0_check(ip: str, port: str, timeout: float) -> dict:
     """ping0.cc 多节点 TCPing（HTTP + localStorage/header token；遇 Turnstile 即 fail-open）。
 
     免挑战路径：GET 首页（无 Turnstile/挑战）后直接 POST ``/api/probe``（JSON body），
-    从响应解析节点结果。若站点返回验证码/挑战（首字节含 turnstile/challenge 特征）则
+    从响应解析节点结果。    若站点返回验证码/挑战（首字节含 turnstile/challenge 特征）则
     直接判 ``error``，避免伪造手柄。纯 TCP → ``level="tcp"``。
+    状态（2026-09 四轮复测：Turnstile 墙持续）：交互验证属合规禁区，
+    不得绕过，永久休眠（解除须人工复核，见 test_ping0_stays_disabled）。
     """
     headers = {"User-Agent": UA, "Accept": "text/html"}
     try:
@@ -2340,6 +2348,8 @@ def wansui_check(ip: str, port: str, timeout: float) -> dict:
 
     GET 壳页拿 token（meta name="token"）→ 连 wss://www.wansui.cn/ws 发
     tcping 任务帧 → 收逐节点 rtt 结果帧。整站失败/验证码 → ``error``。
+    状态（2026-09 三轮复测）：TLS 主机名错乱（证书与站点不匹配），结构性
+    不可用，adapter 待重写，当前休眠。
     """
     try:
         status, headers, resp = request_follow(
