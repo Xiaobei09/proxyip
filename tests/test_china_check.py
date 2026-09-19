@@ -3227,6 +3227,23 @@ class TestCiEnabledSources(unittest.TestCase):
                      "--ce98-limit 200", "--biuping-limit 200"):
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
+    def test_ci_flags_all_defined(self):
+        """CN-13：CI 传给 china_check.py 的每个 flag 必须在 argparse 中
+        有定义（防死 flag：CI 改名/脚本改名不同步则作业 argparse 直接
+        报错整轮失败）。"""
+        import re
+        root = Path(__file__).resolve().parent.parent
+        wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
+            encoding="utf-8")
+        src = (root / "scripts" / "china_check.py").read_text(
+            encoding="utf-8")
+        defined = set(re.findall(r'"(--[a-z0-9-]+)"', src))
+        used = set(re.findall(r"--[a-z0-9-]+", wf))
+        script_flags = {f for f in used if not f.startswith("--jq")
+                        and f != "--json" and f != "--workflow"}
+        unknown = sorted(script_flags - defined)
+        self.assertEqual(unknown, [], f"CI 用了未定义的 flag：{unknown}")
+
     def test_raw_slots_dispatch_mapping(self):
         """CN-11：通用 slot 按源名派发到对应 check 函数；异常收敛为
         error 记录（不抛、不串源）。"""
