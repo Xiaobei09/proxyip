@@ -1003,7 +1003,7 @@ class TestProxyMirrorSources(unittest.TestCase):
 
     def test_five_cf_proxyip_sources_registered(self):
         # 新一批 A 类：Wwuyi123/CF-Proxyip（3 文件）与 wanwushequ/ProxyIP
-        # 地区优选榜（US/JP），均裸 IP 入 443 桶，各带可读标签。
+        # 地区优选榜（US/JP/HK），均裸 IP 入 443 桶，各带可读标签。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         for u, label in (
             ("https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/proxyip.txt",
@@ -1016,6 +1016,8 @@ class TestProxyMirrorSources(unittest.TestCase):
              "wanwu_us"),
             ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/JP.txt",
              "wanwu_jp"),
+            ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/HK.txt",
+             "wanwu_hk"),
         ):
             self.assertIn(u, urls)
             self.assertEqual(dp.source_label(u), label)
