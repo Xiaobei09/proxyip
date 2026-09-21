@@ -3925,5 +3925,21 @@ class TestLoaderBindingsLive(unittest.TestCase):
             self.assertIsNotNone(getattr(cc, name, None), name)
 
 
+class TestWorkflowCodesInRegistry(unittest.TestCase):
+    """R10：workflow 通用配额拼写的代号必须全部存在于注册表
+    （拼写错误代号会静默落到 default；CI 无包时跳过，终态直连后常跑）。"""
+
+    def test_workflow_codes_subset_of_registry(self):
+        import re
+        reg = _registry_sources(self)
+        known = set(reg.codes())
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        used = set(re.findall(r"--cn-(?:limit|concurrency|nodes) ([A-Za-z0-9_]+)=", wf))
+        self.assertTrue(used, "workflow 未见通用配额")
+        unknown = sorted(c for c in used if c not in known)
+        self.assertEqual(unknown, [], f"workflow 引用未知代号：{unknown}")
+
+
 if __name__ == "__main__":
     unittest.main()
