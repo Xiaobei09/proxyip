@@ -1298,9 +1298,9 @@ def cn_opt(args, code, kind="limit", legacy=None, default=0):
     """源选项解析（代号运行时件）。
 
     优先级：generic ``--cn-<kind> CODE=N`` > legacy ``<stem>_<kind>``
-    属性（过渡期由调用方经 ``legacy=`` 传入，终轮随 legacy 旗标一并删除）
-    > PCB 注册表默认 > ``default``。无包且无 legacy 属性时取 ``default``，
-    单测/CI 与有无 bundle 无关。
+    属性（仅单测直调时传入；生产命名空间已无 legacy 属性）> PCB 注册表
+    默认 > ``default``。无包且无属性时取 ``default``，单测/CI 与有无
+    bundle 无关。
     """
     code = code.lower()
     generic = getattr(args, _CN_KIND_ATTR[kind], None)
@@ -1462,7 +1462,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                         pending,
                         args,
                         page_url=ITDOG_TCPING_URL,
-                        nodes_per_isp=cn_opt(args, "cn02", "nodes", legacy="itdog_tcping_nodes",
+                        nodes_per_isp=cn_opt(args, "cn02", "nodes",
                              default=0)
                         or ITDOG_TCPING_NODES_PER_ISP,
                     ).items():
@@ -1515,18 +1515,17 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     tcptest_uuids = []
     tcptest_operators: dict | None = None
     if tcptest_fetch_nodes is not None and tcptest_pick_nodes is not None and (
-            cn_opt(args, "cn30", "limit", legacy="tcptest_limit",
+            cn_opt(args, "cn30", "limit",
                    default=0) != 0 or cn_opt(
-            args, "cn31", "limit", legacy="tcptest_ping_limit",
+            args, "cn31", "limit",
             default=0) != 0 or cn_opt(
-            args, "cn32", "limit", legacy="tcptest_http_limit",
+            args, "cn32", "limit",
             default=0) != 0 or cn_opt(
-            args, "cn33", "limit", legacy="tcptest_trace_limit",
+            args, "cn33", "limit",
             default=0) != 0):
         tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
         tcptest_uuids = tcptest_pick_nodes(
             tcptest_nodes, cn_opt(args, "cn30", "nodes",
-                                  legacy="tcptest_nodes",
                                   default=TCPTEST_NODES)
         )
         tcptest_operators = {
@@ -1537,7 +1536,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         tcptest_candidates = [
             item for item in sample if needs_probe(entries, item[1])
         ]
-        limit = cn_opt(args, "cn30", "limit", legacy="tcptest_limit",
+        limit = cn_opt(args, "cn30", "limit",
                        default=0)
         if limit is None or limit < 0:
             limit = len(tcptest_candidates)
@@ -1547,7 +1546,6 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             args.timeout,
             tcptest_uuids,
             cn_opt(args, "cn30", "concurrency",
-                   legacy="tcptest_concurrency",
                    default=TCPTEST_CONCURRENCY),
             tcptest_operators,
         )
@@ -1557,7 +1555,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             file=sys.stderr,
         )
         ping_limit = cn_opt(args, "cn31", "limit",
-                            legacy="tcptest_ping_limit", default=0)
+                            default=0)
         if ping_limit != 0:
             ping_candidates = [
                 item for item in sample if needs_probe(entries, item[1])
@@ -1570,7 +1568,6 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 args.timeout,
                 tcptest_uuids,
                 cn_opt(args, "cn31", "concurrency",
-                       legacy="tcptest_ping_concurrency",
                        default=TCPTEST_CONCURRENCY),
                 tcptest_operators,
                 probe_type="ping",
@@ -1584,7 +1581,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         else:
             print(f"{TCPTEST_PING_CODE} review: skipped (limit=0)", file=sys.stderr)
         http_limit = cn_opt(args, "cn32", "limit",
-                            legacy="tcptest_http_limit", default=0)
+                            default=0)
         if http_limit != 0:
             http_candidates = [
                 item for item in sample if needs_probe(entries, item[1])
@@ -1597,7 +1594,6 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 args.timeout,
                 tcptest_uuids,
                 cn_opt(args, "cn32", "concurrency",
-                       legacy="tcptest_http_concurrency",
                        default=TCPTEST_CONCURRENCY),
                 tcptest_operators,
                 probe_type="http",
@@ -1611,7 +1607,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         else:
             print(f"{TCPTEST_HTTP_CODE} review: skipped (limit=0)", file=sys.stderr)
         trace_limit = cn_opt(args, "cn33", "limit",
-                             legacy="tcptest_trace_limit", default=0)
+                             default=0)
         if trace_limit != 0:
             trace_candidates = [
                 item for item in sample if needs_probe(entries, item[1])
@@ -1624,7 +1620,6 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 args.timeout,
                 tcptest_uuids,
                 cn_opt(args, "cn33", "concurrency",
-                       legacy="tcptest_trace_concurrency",
                        default=TCPTEST_CONCURRENCY),
                 tcptest_operators,
                 probe_type="traceroute",
@@ -1645,7 +1640,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn07 大陆多节点 ICMP 复核（免费、空闲量大）：全池未定键横扫，
     # 为主机存活提供独立多节点证据（端口层以 cn30/cn01 等 TCP 源为准）。
-    coffee_limit = cn_opt(args, "cn07", "limit", legacy="coffee_limit",
+    coffee_limit = cn_opt(args, "cn07", "limit",
                 default=0)
     if coffee_limit != 0:
         coffee_candidates = [
@@ -1658,7 +1653,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             entries,
             args.timeout,
             COFFEE_CODE,
-            cn_opt(args, "cn07", "concurrency", legacy="coffee_concurrency",
+            cn_opt(args, "cn07", "concurrency",
            default=COFFEE_CONCURRENCY),
         )
         print(
@@ -1679,7 +1674,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 各自按 --<name>-limit 投递（默认 0=跳过，-1=全部未定键）；均为多节点源，
     # 达标即可独立判 reachable，整站失败也可与单节点源联动判 unreachable。
 
-    pingloc_limit = cn_opt(args, "cn08", "limit", legacy="pingloc_limit",
+    pingloc_limit = cn_opt(args, "cn08", "limit",
                  default=0)
     if pingloc_limit != 0:
         cands = _pending_cands()
@@ -1687,7 +1682,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             pingloc_limit = len(cands)
         _run_pingloc_slots(
             cands[:pingloc_limit], entries, args.timeout,
-            cn_opt(args, "cn08", "concurrency", legacy="pingloc_concurrency",
+            cn_opt(args, "cn08", "concurrency",
            default=8),
         )
         print(f"pingloc review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1695,7 +1690,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("pingloc review: skipped (limit=0)", file=sys.stderr)
 
-    antping_limit = cn_opt(args, "cn14", "limit", legacy="antping_limit",
+    antping_limit = cn_opt(args, "cn14", "limit",
                  default=0)
     if antping_limit != 0:
         cands = _pending_cands()
@@ -1703,7 +1698,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             antping_limit = len(cands)
         _run_ws_source_slots(
             cands[:antping_limit], entries, args.timeout, ANTPING_CODE,
-            cn_opt(args, "cn14", "concurrency", legacy="antping_concurrency",
+            cn_opt(args, "cn14", "concurrency",
            default=8),
         )
         print(f"antping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1712,7 +1707,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         print("antping review: skipped (limit=0)", file=sys.stderr)
 
     # antping_ping（CN-28）：同站 ICMP，主独立判 reachable；默认 0=跳过。
-    antping_ping_limit = cn_opt(args, "cn15", "limit", legacy="antping_ping_limit",
+    antping_ping_limit = cn_opt(args, "cn15", "limit",
                       default=0)
     if antping_ping_limit != 0:
         cands = _pending_cands()
@@ -1720,7 +1715,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             antping_ping_limit = len(cands)
         _run_ws_source_slots(
             cands[:antping_ping_limit], entries, args.timeout, ANTPING_PING_CODE,
-            cn_opt(args, "cn15", "concurrency", legacy="antping_ping_concurrency",
+            cn_opt(args, "cn15", "concurrency",
            default=8),
         )
         print(f"antping_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1728,7 +1723,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("antping_ping review: skipped (limit=0)", file=sys.stderr)
 
-    tcpingcn_limit = cn_opt(args, "cn17", "limit", legacy="tcpingcn_limit",
+    tcpingcn_limit = cn_opt(args, "cn17", "limit",
                   default=0)
     if tcpingcn_limit != 0:
         cands = _pending_cands()
@@ -1736,7 +1731,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             tcpingcn_limit = len(cands)
         _run_ws_source_slots(
             cands[:tcpingcn_limit], entries, args.timeout, TCPINGCN_CODE,
-            cn_opt(args, "cn17", "concurrency", legacy="tcpingcn_concurrency",
+            cn_opt(args, "cn17", "concurrency",
            default=6),
         )
         print(f"tcpingcn review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1745,7 +1740,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         print("tcpingcn review: skipped (limit=0)", file=sys.stderr)
 
     # cn18（CN-30）：同站 ICMP ping（tcpingcn_ping），主独立判 reachable；默认 0=跳过。
-    tcpingcn_ping_limit = cn_opt(args, "cn18", "limit", legacy="tcpingcn_ping_limit",
+    tcpingcn_ping_limit = cn_opt(args, "cn18", "limit",
                        default=0)
     if tcpingcn_ping_limit != 0:
         cands = _pending_cands()
@@ -1753,7 +1748,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             tcpingcn_ping_limit = len(cands)
         _run_ws_source_slots(
             cands[:tcpingcn_ping_limit], entries, args.timeout, TCPINGCN_PING_CODE,
-            cn_opt(args, "cn18", "concurrency", legacy="tcpingcn_ping_concurrency",
+            cn_opt(args, "cn18", "concurrency",
            default=6),
         )
         print(f"tcpingcn_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1763,7 +1758,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn19（CN-44）：同站 MTR（约 139 节点，末跳达目标即见证），
     # 主独立判 reachable；默认 0=跳过，-1=全部未定键。
-    tcpingcn_mtr_limit = cn_opt(args, "cn19", "limit", legacy="tcpingcn_mtr_limit",
+    tcpingcn_mtr_limit = cn_opt(args, "cn19", "limit",
                       default=0)
     if tcpingcn_mtr_limit != 0:
         cands = _pending_cands()
@@ -1771,7 +1766,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             tcpingcn_mtr_limit = len(cands)
         _run_ws_source_slots(
             cands[:tcpingcn_mtr_limit], entries, args.timeout, TCPINGCN_MTR_CODE,
-            cn_opt(args, "cn19", "concurrency", legacy="tcpingcn_mtr_concurrency",
+            cn_opt(args, "cn19", "concurrency",
            default=6),
         )
         print(f"tcpingcn_mtr review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1779,7 +1774,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("tcpingcn_mtr review: skipped (limit=0)", file=sys.stderr)
 
-    chinaz_limit = cn_opt(args, "cn16", "limit", legacy="chinaz_limit",
+    chinaz_limit = cn_opt(args, "cn16", "limit",
                 default=0)
     if chinaz_limit != 0:
         cands = _pending_cands()
@@ -1787,7 +1782,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             chinaz_limit = len(cands)
         _run_ws_source_slots(
             cands[:chinaz_limit], entries, args.timeout, CHINAZ_CODE,
-            cn_opt(args, "cn16", "concurrency", legacy="chinaz_concurrency",
+            cn_opt(args, "cn16", "concurrency",
            default=6),
         )
         print(f"chinaz review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1798,7 +1793,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 新增多节点 TCP 复核源：cn11（socket.io-WS，34 大陆节点）、cn09
     # （HTTP-SSE，节点数动态，实测 ~39 测量单元）。均已实测出数、零 key；达标即可独立判 reachable，
     # 整站失败也可与单节点源联动判 unreachable。默认 0=跳过，-1=全部未定键。
-    ce98_limit = cn_opt(args, "cn11", "limit", legacy="ce98_limit",
+    ce98_limit = cn_opt(args, "cn11", "limit",
               default=0)
     if ce98_limit != 0:
         cands = _pending_cands()
@@ -1806,7 +1801,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ce98_limit = len(cands)
         _run_raw_slots(
             cands[:ce98_limit], entries, args.timeout, CE98_CODE,
-            cn_opt(args, "cn11", "concurrency", legacy="ce98_concurrency",
+            cn_opt(args, "cn11", "concurrency",
            default=6),
         )
         print(f"ce98 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1816,7 +1811,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # ce98_ping（CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
-    ce98_ping_limit = cn_opt(args, "cn12", "limit", legacy="ce98_ping_limit",
+    ce98_ping_limit = cn_opt(args, "cn12", "limit",
                    default=0)
     if ce98_ping_limit != 0:
         cands = _pending_cands()
@@ -1824,7 +1819,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ce98_ping_limit = len(cands)
         _run_raw_slots(
             cands[:ce98_ping_limit], entries, args.timeout, CE98_PING_CODE,
-            cn_opt(args, "cn12", "concurrency", legacy="ce98_ping_concurrency",
+            cn_opt(args, "cn12", "concurrency",
            default=6),
         )
         print(f"ce98_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1832,7 +1827,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("ce98_ping review: skipped (limit=0)", file=sys.stderr)
 
-    biuping_limit = cn_opt(args, "cn09", "limit", legacy="biuping_limit",
+    biuping_limit = cn_opt(args, "cn09", "limit",
                  default=0)
     if biuping_limit != 0:
         cands = _pending_cands()
@@ -1840,7 +1835,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             biuping_limit = len(cands)
         _run_raw_slots(
             cands[:biuping_limit], entries, args.timeout, BIUPING_CODE_TCPING,
-            cn_opt(args, "cn09", "concurrency", legacy="biuping_concurrency",
+            cn_opt(args, "cn09", "concurrency",
            default=8),
         )
         print(f"biuping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1849,7 +1844,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         print("biuping review: skipped (limit=0)", file=sys.stderr)
 
     # biuping_ping（CN-34）：同站 ICMP，主独立判 reachable；默认 0=跳过。
-    biuping_ping_limit = cn_opt(args, "cn10", "limit", legacy="biuping_ping_limit",
+    biuping_ping_limit = cn_opt(args, "cn10", "limit",
                       default=0)
     if biuping_ping_limit != 0:
         cands = _pending_cands()
@@ -1857,7 +1852,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             biuping_ping_limit = len(cands)
         _run_raw_slots(
             cands[:biuping_ping_limit], entries, args.timeout, BIUPING_CODE_PING,
-            cn_opt(args, "cn10", "concurrency", legacy="biuping_ping_concurrency",
+            cn_opt(args, "cn10", "concurrency",
            default=8),
         )
         print(f"biuping_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1867,7 +1862,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn04（CN-27）：独立运营商 28 城三网 TCPing（纯 WS，零 key）。
     # 达标即可独立判 reachable；默认 0=跳过，-1=全部未定键。
-    aa1ping_limit = cn_opt(args, "cn04", "limit", legacy="aa1ping_limit",
+    aa1ping_limit = cn_opt(args, "cn04", "limit",
                  default=0)
     if aa1ping_limit != 0:
         cands = _pending_cands()
@@ -1875,7 +1870,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             aa1ping_limit = len(cands)
         _run_raw_slots(
             cands[:aa1ping_limit], entries, args.timeout, AA1_CODE_PING,
-            cn_opt(args, "cn04", "concurrency", legacy="aa1ping_concurrency",
+            cn_opt(args, "cn04", "concurrency",
            default=6),
         )
         print(f"cn04 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1885,7 +1880,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn05（CN-50）：同站 HTTP 测速通道（28 城三网，
     # 原生 operator isp_ms）。仅 443 键可用；默认 0=跳过，-1=全部未定键。
-    aa1http_limit = cn_opt(args, "cn05", "limit", legacy="aa1http_limit",
+    aa1http_limit = cn_opt(args, "cn05", "limit",
                  default=0)
     if aa1http_limit != 0:
         cands = [item for item in _pending_cands() if item[3] == "443"]
@@ -1893,7 +1888,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             aa1http_limit = len(cands)
         _run_raw_slots(
             cands[:aa1http_limit], entries, args.timeout, AA1_CODE_HTTP,
-            cn_opt(args, "cn05", "concurrency", legacy="aa1http_concurrency",
+            cn_opt(args, "cn05", "concurrency",
            default=6),
         )
         print(f"cn05 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1904,7 +1899,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # cn06（CN-42）：公开 WS 通道，约 16 节点 TCPing
     #（纯 WS，零 key，原生三网 isp_ms）。达标即可独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
-    tcpping_ws_limit = cn_opt(args, "cn06", "limit", legacy="tcpping_ws_limit",
+    tcpping_ws_limit = cn_opt(args, "cn06", "limit",
                     default=0)
     if tcpping_ws_limit != 0:
         cands = _pending_cands()
@@ -1912,7 +1907,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             tcpping_ws_limit = len(cands)
         _run_raw_slots(
             cands[:tcpping_ws_limit], entries, args.timeout, TCPPING_WS_CODE,
-            cn_opt(args, "cn06", "concurrency", legacy="tcpping_ws_concurrency",
+            cn_opt(args, "cn06", "concurrency",
            default=6),
         )
         print(f"cn06 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1923,7 +1918,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # cn34（CN-43 复活）：多节点 TCPing（GET+SSE，约 287 节点，
     # 原生三网 isp_ms）。SSE 单键约 90s 采集窗，CI 配额 100 键/8 并发
     # （约 20min）；默认 0=跳过，-1=全部未定键。
-    ipip_limit = cn_opt(args, "cn34", "limit", legacy="ipip_limit",
+    ipip_limit = cn_opt(args, "cn34", "limit",
               default=0)
     if ipip_limit != 0:
         cands = _pending_cands()
@@ -1931,7 +1926,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ipip_limit = len(cands)
         _run_raw_slots(
             cands[:ipip_limit], entries, args.timeout, IPIP_CODE,
-            cn_opt(args, "cn34", "concurrency", legacy="ipip_concurrency",
+            cn_opt(args, "cn34", "concurrency",
            default=6),
         )
         print(f"{IPIP_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1942,7 +1937,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # cn35（CN-45）：同站路由追踪（GET+SSE，约 57 节点，hop 行目标 IP
     # 即见证）。SSE 单键约 80s 采集窗，CI 配额 100 键/8 并发（约 17min）；
     # 默认 0=跳过，-1=全部未定键。
-    ipip_trace_limit = cn_opt(args, "cn35", "limit", legacy="ipip_trace_limit",
+    ipip_trace_limit = cn_opt(args, "cn35", "limit",
                     default=0)
     if ipip_trace_limit != 0:
         cands = _pending_cands()
@@ -1950,7 +1945,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ipip_trace_limit = len(cands)
         _run_raw_slots(
             cands[:ipip_trace_limit], entries, args.timeout, IPIP_TRACE_CODE,
-            cn_opt(args, "cn35", "concurrency", legacy="ipip_trace_concurrency",
+            cn_opt(args, "cn35", "concurrency",
            default=6),
         )
         print(f"{IPIP_TRACE_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1960,7 +1955,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn36（CN-46）：社区探针北京节点 ICMP（匿名 250/h 配额）。
     # 单键约 30s，CI 配额 60 键/4 并发（约 8min）；默认 0=跳过，-1=全部未定键。
-    globalping_limit = cn_opt(args, "cn36", "limit", legacy="globalping_limit",
+    globalping_limit = cn_opt(args, "cn36", "limit",
                     default=0)
     if globalping_limit != 0:
         cands = _pending_cands()
@@ -1968,7 +1963,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             globalping_limit = len(cands)
         _run_raw_slots(
             cands[:globalping_limit], entries, args.timeout, GLOBALPING_CODE,
-            cn_opt(args, "cn36", "concurrency", legacy="globalping_concurrency",
+            cn_opt(args, "cn36", "concurrency",
            default=4),
         )
         print(f"{GLOBALPING_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1978,7 +1973,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn37（CN-47）：同 API 路由追踪（末跳达目标即见证）。
     # 单键约 100s，CI 配额 40 键/4 并发（约 17min）；默认 0=跳过，-1=全部未定键。
-    globalping_trace_limit = cn_opt(args, "cn37", "limit", legacy="globalping_trace_limit",
+    globalping_trace_limit = cn_opt(args, "cn37", "limit",
                           default=0)
     if globalping_trace_limit != 0:
         cands = _pending_cands()
@@ -1987,7 +1982,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         _run_raw_slots(
             cands[:globalping_trace_limit], entries, args.timeout,
             GLOBALPING_TRACE_CODE,
-            cn_opt(args, "cn37", "concurrency", legacy="globalping_trace_concurrency",
+            cn_opt(args, "cn37", "concurrency",
            default=4),
         )
         print(f"{GLOBALPING_TRACE_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -1997,7 +1992,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn38（CN-48）：同 API 应用层确认（明文打 TLS 端口，服务端状态码
     # 即完整往返）。单键约 30s，CI 配额 40 键/4 并发；默认 0=跳过，-1=全部未定键。
-    globalping_http_limit = cn_opt(args, "cn38", "limit", legacy="globalping_http_limit",
+    globalping_http_limit = cn_opt(args, "cn38", "limit",
                          default=0)
     if globalping_http_limit != 0:
         cands = _pending_cands()
@@ -2006,7 +2001,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         _run_raw_slots(
             cands[:globalping_http_limit], entries, args.timeout,
             GLOBALPING_HTTP_CODE,
-            cn_opt(args, "cn38", "concurrency", legacy="globalping_http_concurrency",
+            cn_opt(args, "cn38", "concurrency",
            default=4),
         )
         print(f"{GLOBALPING_HTTP_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -2016,7 +2011,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn39（CN-49）：同 API MTR（末跳达目标即见证）。
     # 单键约 100s，CI 配额 40 键/4 并发（约 17min）；默认 0=跳过，-1=全部未定键。
-    globalping_mtr_limit = cn_opt(args, "cn39", "limit", legacy="globalping_mtr_limit",
+    globalping_mtr_limit = cn_opt(args, "cn39", "limit",
                         default=0)
     if globalping_mtr_limit != 0:
         cands = _pending_cands()
@@ -2025,7 +2020,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         _run_raw_slots(
             cands[:globalping_mtr_limit], entries, args.timeout,
             GLOBALPING_MTR_CODE,
-            cn_opt(args, "cn39", "concurrency", legacy="globalping_mtr_concurrency",
+            cn_opt(args, "cn39", "concurrency",
            default=4),
         )
         print(f"{GLOBALPING_MTR_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -2042,7 +2037,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 防 limit≠0 时双跑。
     for src, check_name in ((BOCE_CODE, "bo" + "ce"), (SEVENTEEN_CODE, "17" + "ce"),
                             (PING0_CODE, "ping" + "0"), (WANSUI_CODE, "wan" + "sui")):
-        limit = cn_opt(args, src, "limit", legacy=f"{check_name}_limit",
+        limit = cn_opt(args, src, "limit",
                      default=0)
         if limit != 0:
             cands = _pending_cands()
@@ -2050,7 +2045,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 limit = len(cands)
             _run_raw_slots(
                 cands[:limit], entries, args.timeout, src,
-                cn_opt(args, src, "concurrency", legacy=f"{check_name}_concurrency",
+                cn_opt(args, src, "concurrency",
              default=6),
             )
             print(f"{check_name} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
@@ -2067,11 +2062,11 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     ]
     _run_pingpe_slots(
         pingpe_candidates[: cn_opt(args, "cn40", "limit",
-                                 legacy="pingpe_limit", default=0)],
+                                 default=0)],
         entries,
         args.timeout,
         getattr(args, "tcpping_token", ""),
-        cn_opt(args, "cn40", "concurrency", legacy="pingpe_concurrency",
+        cn_opt(args, "cn40", "concurrency",
              default=PINGPE_CONCURRENCY),
     )
     print(
