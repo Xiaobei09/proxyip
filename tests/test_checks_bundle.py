@@ -182,3 +182,71 @@ class TestPcbLeakGuard(unittest.TestCase):
         self.assertTrue(hasattr(cb, "load_plugin"))
         self.assertEqual(cb.INTERFACE_VERSION, 1)
         self.assertIsInstance(cb.bundle_available(), bool)
+
+
+# 文档侧禁区（R13）：研究日志/散文中的我方源域名与真名键（已逐项收敛，
+# 决策记录类的第三方排除项与信誉族不在此列，见轮次日志）。
+_DOC_BANS = (
+    "boce" + ".com",
+    "17ce" + ".com",
+    "ping0" + ".cc",
+    "tools.ipip" + ".net",
+    "ipip" + ".net",
+    "check-host" + ".cc",
+    "xxapi" + ".cn",
+    "jkapi" + ".com",
+    "antping" + ".com",
+    "chinaz" + ".com",
+    "98ce" + ".com",
+    "wansui" + ".cn",
+    "pingloc" + ".com",
+    "tcping" + ".cn",
+    "tcp.ping" + ".pe",
+    "api.hostmonit" + ".com",
+    '"' + "boce" + '"',
+    "'" + "boce" + "'",
+    '"' + "17ce" + '"',
+    "'" + "17ce" + "'",
+    '"' + "ping0" + '"',
+    "'" + "ping0" + "'",
+    '"' + "tcpping" + '"',
+    "'" + "tcpping" + "'",
+    '"' + "pingpe" + '"',
+    "'" + "pingpe" + "'",
+    '"' + "coffee" + '"',
+    "'" + "coffee" + "'",
+    '"' + "chinaz" + '"',
+    "'" + "chinaz" + "'",
+    '"' + "antping" + '"',
+    "'" + "antping" + "'",
+    '"' + "xxapi" + '"',
+    "'" + "xxapi" + "'",
+    '"' + "jkapi" + '"',
+    "'" + "jkapi" + "'",
+    '"' + "check_host" + '"',
+    "'" + "check_host" + "'",
+    '"' + "tcptest" + '"',
+    "'" + "tcptest" + "'",
+    '"' + "ipip" + '"',
+    "'" + "ipip" + "'",
+    '"' + "globalping" + '"',
+    "'" + "globalping" + "'",
+    '"' + "wansui" + '"',
+    "'" + "wansui" + "'",
+    '"' + "ce98" + '"',
+    "'" + "ce98" + "'",
+)
+
+
+class TestDocsLeakGuard(unittest.TestCase):
+    def test_docs_source_endpoints_absent(self):
+        pats = [re.compile(p) for p in _DOC_BANS]
+        hits = []
+        targets = list(sorted((ROOT / "docs").glob("*.md")))
+        targets.append(ROOT / "README.md")
+        for f in targets:
+            text = f.read_text(encoding="utf-8")
+            for pat in pats:
+                if pat.search(text):
+                    hits.append(f"{f.name}: {pat.pattern}")
+        self.assertEqual(hits, [])
