@@ -568,24 +568,6 @@ CN_TOKEN = "CN"
 
 # ------------------------------------------------------------ 探测 I/O（网络）
 
-def tcpping_check(ip: str, port: str, token: str, timeout: float) -> dict:
-    if not token:
-        return {"status": "skipped", "ok": False, "ms": None, "error": "no token"}
-    url = f"{TCPPING_URL}?url={ip}&port={port}&token={urllib.parse.quote(token)}"
-    try:
-        status, _, resp = request_follow(url, {"User-Agent": UA, "Accept": "application/json"}, timeout)
-    except urllib.error.HTTPError as e:
-        return {"status": "error", "ok": False, "ms": None, "error": f"http {e.code}"}
-    except Exception as e:
-        return {"status": "error", "ok": False, "ms": None, "error": _err(e)}
-    if status != 200:
-        return {"status": "error", "ok": False, "ms": None, "error": f"http {status}"}
-    try:
-        payload = json.loads(resp.decode("utf-8", "replace"))
-    except json.JSONDecodeError:
-        return {"status": "error", "ok": False, "ms": None, "error": "bad json"}
-    return parse_tcpping(payload)
-
 # ------------------------------------------------------------ cn11-cn12（socket.io）/ cn09-cn10（SSE）
 
 

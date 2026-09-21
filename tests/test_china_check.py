@@ -3848,5 +3848,50 @@ class TestRegistryDocsTable(unittest.TestCase):
                              else str(e["concurrency"]), e["code"])
 
 
+class TestNoStaleProtocolDefs(unittest.TestCase):
+    """R455：loader 回绑名不得被模块内协议定义遮蔽（R442 tcpping_check
+    重复定义复发：有 token 即 NameError，空 token 恰好行为一致而潜伏）；
+    协议常量（*_URL）亦不得残留。纯 AST，CI 无包可跑。"""
+
+    STALE_DEFS = ("tcpping_check", "parse_tcpping", "pingpe_check",
+                  "parse_pingpe_page", "parse_pingpe_results",
+                  "pingpe_verdict", "boce_check", "seventeen_check",
+                  "ping0_check", "ipip_check", "ipip_trace_check",
+                  "tcptest_check", "tcptest_fetch_nodes",
+                  "tcptest_pick_nodes", "coffee_check", "pingloc_check",
+                  "antping_check", "antping_ping_check", "chinaz_check",
+                  "tcpingcn_check", "tcpingcn_ping_check",
+                  "tcpingcn_mtr_check", "ce98_check", "ce98_ping_check",
+                  "biuping_check", "biuping_ping_check", "aa1ping_check",
+                  "aa1http_check", "check_host_check",
+                  "checkhost_ping_check", "checkhost_http_check",
+                  "xxapi_check", "xxping_check", "xxstatus_check",
+                  "xxscan_check", "jkapi_check", "jkping_check",
+                  "jkssl_check", "globalping_check",
+                  "globalping_trace_check", "globalping_http_check",
+                  "globalping_mtr_check", "wansui_check",
+                  "itdog_batch_run")
+    STALE_CONSTS = ("TCPPING_URL", "PINGPE_URL", "BOCE_URL",
+                    "SEVENTEEN_URL", "PING0_URL", "IPIP_URL")
+
+    def test_no_stale_defs_or_consts(self):
+        import ast
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        defs = {n.name for n in ast.walk(tree)
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        consts = {t.id for t in ast.walk(tree)
+                  if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)}
+        bad_defs = sorted(set(self.STALE_DEFS) & defs)
+        bad_consts = sorted(set(self.STALE_CONSTS) & consts)
+        self.assertEqual(bad_defs, [], f"残留协议定义遮蔽 loader：{bad_defs}")
+        self.assertEqual(bad_consts, [], f"残留协议常量：{bad_consts}")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
 if __name__ == "__main__":
     unittest.main()
