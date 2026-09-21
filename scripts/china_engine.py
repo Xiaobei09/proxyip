@@ -141,7 +141,7 @@ except Exception:
     CN43_CODE = "cn43"
     CN44_CODE = "cn44"
 
-DEFAULT_MIN_RATIO = 0.5   # itdog 系列单源确认所需的最小节点成功率（防单节点假阳性）
+DEFAULT_MIN_RATIO = 0.5   # 多节点源单源确认所需的最小节点成功率（防单节点假阳性）
 MULTI_MIN_NODES = 5  # 多节点源至少报告 5 个节点才可作强确认（防限流残缺样本退化）
 CN07_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节点 ICMP 优势）
 CN16_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值

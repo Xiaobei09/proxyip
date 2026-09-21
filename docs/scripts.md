@@ -282,7 +282,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 大陆连通性检测（独立 CI 运行）。CI 以 `--source data/valid/all.txt --limit 0` 全量池检测；本地缺省按 `data/valid/all_rep.txt` 信誉降序采样前 250 条（缺失时回退 `all.txt`，`FALLBACK_SOURCE`）。从大陆视角实测 TCP 可达性，分三层判定（曾有的 **L1 启发式**基于行内 `-CF` 死标记记录 heuristic 源，随 CF token 废弃一并移除，china.json 不再写 `cf_heuristic` 字段）：
 
-- **L2 批量通道 cn01 实测（主源）**：每任务 5 目标 × 电信/联通/移动各 6 节点（共 18 节点，`ITDOG_NODES_PER_ISP=6`），经 WebSocket 收结果，TCP 连通即判可达；节点按运营商归属（id 映射兜底节点名关键词），任务级另出 per-ISP 最小 RTT（`isp_ms`），落 china.json 后供 CN 清单取**最快运营商视角**（`common.cn_fastest_ms`）渲染展示延迟与 `≈XMB/s` 速度。cn01 失败/被限的键另有两条同站降级：纯 TCP 大节点池（记 `cn02` 源）；CN-26 ICMP 大节点池电信 87/联通 83/移动 89（记 `cn03` 源，归一 `level=icmp`、不产 `isp_ms`）
+- **L2 批量通道 cn01 实测（主源）**：每任务 5 目标 × 电信/联通/移动各 6 节点（共 18 节点，`CN01_NODES_PER_ISP=6`），经 WebSocket 收结果，TCP 连通即判可达；节点按运营商归属（id 映射兜底节点名关键词），任务级另出 per-ISP 最小 RTT（`isp_ms`），落 china.json 后供 CN 清单取**最快运营商视角**（`common.cn_fastest_ms`）渲染展示延迟与 `≈XMB/s` 速度。cn01 失败/被限的键另有两条同站降级：纯 TCP 大节点池（记 `cn02` 源）；CN-26 ICMP 大节点池电信 87/联通 83/移动 89（记 `cn03` 源，归一 `level=icmp`、不产 `isp_ms`）
 - **L2 单节点实测（并发）**：`cn27`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽；CN-31 起 TCP-fail 追加同节点 ICMP ping 消歧，CN-32 起 TCP-ok 且其余免额 0 ok 追加同节点 HTTPS 应用层确认，共用配额）+ `cn20`（北京节点 TCP，免 key）+ `cn21`（CN-29：山东枣庄 BGP 节点 ICMP，免 key，`level=icmp`，echo 校验，不产 `isp_ms`）+ `cn22`（CN-38：同站 HTTP 状态码，免 key，`level=http`，`-2` 判 fail，无 ms）+ `cn23`（CN-39：同站 8 端口扫描，仅 443 键产出，`level="tcp"` 布尔见证）+ `cn24`（浙江宁波电信 TCP，免 key 双镜像；CN-39 起 ok 附 `isp_ms={中国电信}`）+ `cn25`（CN-25 新增：同站同节点 ICMP 主机存活，免 key，`level=icmp`，不进延迟显示/不产 `isp_ms`，与 ICMP 源同口径；CN-26 起三端点主站异常自动 failover 同站镜像，429 不切换）+ `cn26`（CN-37 新增：同站同节点 TLS 握手，免 key，`level="tcp"` 保守，无 ms 只作布尔见证）+ `cn36`（CN-46 新增：社区探针北京节点 ICMP ping，匿名免 key（250/h 配额），`level="icmp"`，不产 `isp_ms`；CI 以 60 键/4 并发启用）+ `cn37`（CN-47 新增：同站同 API 路由追踪，末跳达目标即见证，`ms` 恒空，`level="icmp"`，不产 `isp_ms`；CI 以 40 键/4 并发启用）+ `cn38`（CN-48 新增：同站同 API 应用层确认，明文打 TLS 端口状态码即往返，`ms` 取 `timings.tcp`，`level="http"`，不产 `isp_ms`；CI 以 40 键/4 并发启用）+ `cn39`（CN-49 新增：同站同 API MTR，任一 hop 末跳达目标即见证，`ms` 恒空，`level="icmp"`，不产 `isp_ms`；CI 以 40 键/4 并发启用）。**保守判定：多节点源（cn40/cn01/cn41/cn02/cn03/cn30/cn31/cn32/cn07/cn08/cn14/cn15/cn17/cn18/cn16/cn11/cn12/cn09/cn10/cn04/cn34/cn42/cn43/cn44/cn13，与 `merge_verdict` 的 `multi_ok` 表一致）单独确认 → reachable；单节点源（cn27/cn28/cn29/cn20/cn21/cn22/cn23/cn24/cn25/cn26/cn36/cn37/cn38/cn39）≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
 - **L3 多节点复核（有界并发小样本）**：`cn30`（免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP `ip:port` 直连，节点成功率达 50% 即判可达）先于 cn40 跑——免费、端到端 ~2-6s/键，确认过的键自动让位；`cn31`（CN-33：同站 `type=ping`，裸 IP 目标，`success`＋`avg_ms>0`，`level=icmp`，不产 `isp_ms`，与 TCP 共用节点采样跑在 TCP 相之后）；`cn32`（CN-35：同站 `type=http`，`http://ip:port/`，`success`＋`status>0` 即应用层确认，`level=http`，ms 取 `connect_ms`，与 TCP 同口径产 `isp_ms`，跑在 ping 相之后）；`cn33`（CN-40：同站 `type=traceroute`，裸 IP 目标，`success` 即达判，`ms` 恒空，`level=icmp`，不产 `isp_ms`，跑在 http 相之后）；`cn07`（18 ICMP 节点，成功率达 50% 判可达，专测中国大陆主机存活）；`cn08`（~12 节点 ICMP ping，纯 HTTP+SSE 零鉴权）；`cn14`（~155 节点，JWT+WS，ICMP ping / TCP `ip:port` 均可）；`cn17`（~163 TCP 节点，SHA-256 PoW + ALTCHA 会话复用纯 Python 求解 + WS，真实端口直连；CN-30 起同通道 `cn18` ICMP 并行，`level=icmp`，紧凑键 `r/q` 判定，不产 `isp_ms`；CN-44 起同基建 `cn19` MTR 通道，约 139 节点，末跳达目标即见证，`level=icmp`，不产 `ms`/`isp_ms`，同族 `traceroute` 型后端容量不稳不接入）；`cn16`（~53 ICMP 节点，服务端渲染 token + WS）；`cn11`（34 个大陆各省运营商节点持续 TCPing，socket.io v4 over WebSocket，CF 反爬用 HTTPS+Referer 壳页取节点、连 `wss://<源站>/socket.io` 发/收事件，零 key，实测 35/35 节点出数）；`cn12`（CN-36：同站 continuous-ping，35 节点 socket.io，事件与 TCP 全同形，`level=icmp`，不产 `isp_ms`，活体 35/35 出数）；`cn09`（约 39 个 ISP×节点 TCPing 测量单元，HTTP+SSE 零鉴权，协议细节已迁 PCB，实测 39/39 出数）；`cn10`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`，活体 39/39 出数）；`cn04`（CN-27：28 城三网 TCPing，`level=tcp`，原生分 ISP；CI 200 键/6 并发启用）；`cn05`（CN-50：同站 HTTP 测速通道，`status_code>0` 即应用层确认，`level=http`，活体 27/28 出数；仅 443 键可用；CI 200 键/6 并发启用）；`cn06`（CN-42：公开 WS 通道约 16 节点 TCPing，原生分三网，活体 16 节点出数；CI 以 200 键/6 并发启用）；`cn34`（CN-43 复活：tools.ipip.net 同路径 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网，活体 287 节点出数；CI 以 100 键/8 并发启用）＋`cn35`（CN-45：同站路由追踪，hop 行目标 IP 即见证，`level=icmp`，不产 `ms`/`isp_ms`，CI 以 100 键/8 并发启用）；`cn15`（CN-28：cn14 同站 ICMP，复用 code=3 分支，`level=icmp`，不产 `isp_ms`，活体 178/179 出数）；随后 `cn40`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive），各源均只投「当前尚未被 cn01/单节点源判可达」的键且按 `--cn-limit CODE=N` 有界；多节点源须「≥ `MULTI_MIN_NODES`（5）个节点 + 成功率达标」才可独立判 reachable，防限流残缺样本假阳性；可选 `cn41`（tcpping.cn 多运营商，需站长签发 token（`--tcpping-token`/`TCPPING_CN_TOKEN` env），缺则自动跳过）
 
@@ -294,13 +294,13 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | cn27 站 key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | cn41 复核 token（读 `TCPPING_CN_TOKEN`） | 空 |
-| `--itdog-nodes` | cn01 每大陆运营商取节点数（`--itdog-nodes`×3 → 跨省等距采样） | 6 |
-| `--itdog-batch-size` | cn01 每任务目标数（上限 5） | 5 |
-| `--itdog-concurrency` | cn01 并发任务数 | 8 |
-| `--itdog-pacing` | cn01 两次任务启动最小间隔（秒） | 0.5 |
-| `--itdog-timeout` | cn01 单任务收结果上限（秒） | 45 |
-| `--skip-itdog` | 跳过 cn01 批量探测 | 关 |
-| `--skip-itdog-tcping` | 跳过 cn02 大节点池补测 | 关 |
+| `--cn01-nodes` | cn01 每大陆运营商取节点数（`--cn01-nodes`×3 → 跨省等距采样） | 6 |
+| `--cn01-batch-size` | cn01 每任务目标数（上限 5） | 5 |
+| `--cn01-concurrency` | cn01 并发任务数 | 8 |
+| `--cn01-pacing` | cn01 两次任务启动最小间隔（秒） | 0.5 |
+| `--cn01-timeout` | cn01 单任务收结果上限（秒） | 45 |
+| `--skip-cn01` | 跳过 cn01 批量探测 | 关 |
+| `--skip-cn02` | 跳过 cn02 大节点池补测 | 关 |
 | `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
 | `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
 | `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
@@ -607,12 +607,12 @@ cn01 批量大陆可达性探测已迁入私有检查包（PCB 私有仓，代�
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `--itdog-batch-size` | 每任务目标数 | 5 |
-| `--itdog-concurrency` | 同时批量任务数 | 见 china_check 表 |
-| `--itdog-nodes` | 抓取节点数 | 见 china_check 表 |
-| `--itdog-pacing` | 任务间隔节流（秒） | 见 china_check 表 |
-| `--skip-itdog` | 跳过 cn01 批量探测 | 关 |
-| `--skip-itdog-tcping` | 跳过 cn02 大节点池补测 | 关 |
+| `--cn01-batch-size` | 每任务目标数 | 5 |
+| `--cn01-concurrency` | 同时批量任务数 | 见 china_check 表 |
+| `--cn01-nodes` | 抓取节点数 | 见 china_check 表 |
+| `--cn01-pacing` | 任务间隔节流（秒） | 见 china_check 表 |
+| `--skip-cn01` | 跳过 cn01 批量探测 | 关 |
+| `--skip-cn02` | 跳过 cn02 大节点池补测 | 关 |
 
 ## `common.py` 共享模块：错误日志脱敏约定
 

@@ -151,7 +151,7 @@ try:
     CN01_CONCURRENCY = _itdog.ITDOG_CONCURRENCY
     CN01_NODES_PER_ISP = _itdog.ITDOG_NODES_PER_ISP
     CN01_PACING = _itdog.ITDOG_PACING
-    ITDOG_PING_NODES_PER_ISP = _itdog.ITDOG_PING_NODES_PER_ISP
+    CN03_NODES_PER_ISP = _itdog.ITDOG_PING_NODES_PER_ISP
     CN03_PAGE_URL = _itdog.ITDOG_PING_URL
     CN01_TASK_TIMEOUT = _itdog.ITDOG_TASK_TIMEOUT
     CN02_NODES_PER_ISP = _itdog.ITDOG_TCPING_NODES_PER_ISP
@@ -163,7 +163,7 @@ except Exception:
     CN01_CONCURRENCY = 8
     CN01_NODES_PER_ISP = 8
     CN01_PACING = 0.5
-    ITDOG_PING_NODES_PER_ISP = 8
+    CN03_NODES_PER_ISP = 8
     CN03_PAGE_URL = None
     CN01_TASK_TIMEOUT = 45.0
     CN02_NODES_PER_ISP = 8
@@ -549,7 +549,7 @@ except Exception:
     cn13_check = None
     CN13_CODE = "cn13"
 
-# itdog.cn —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × CN01_NODES_PER_ISP
+# cn01 —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × CN01_NODES_PER_ISP
 # 节点（默认 8 → 24），需走 WebSocket 收结果，任务级另出 per-ISP 最小 RTT）
 
 CN_TOKEN = "CN"
@@ -1396,24 +1396,24 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         file=sys.stderr,
     )
 
-    if not args.skip_itdog and not _CN01_BUNDLE:
+    if not args.skip_cn01 and not _CN01_BUNDLE:
         print("pcb bundle missing: batch-source phases skipped",
               file=sys.stderr)
-    if not args.skip_itdog and _CN01_BUNDLE:
+    if not args.skip_cn01 and _CN01_BUNDLE:
         # 批量通道代价高（批任务端到端慢），只投仍未定论的键；已由
         # 双免额单节点源定论的键（≥2 ok / ≥2 fail）跳过其复核。
         # 无 PCB 时整段跳过（fail-open，公开 CI/无包环境不触批量通道）。
-        _itdog_cands = [item for item in sample if needs_probe(entries, item[1])]
+        _cn01_cands = [item for item in sample if needs_probe(entries, item[1])]
         try:
-            for key, res in cn01_batch_run(_itdog_cands, args).items():
+            for key, res in cn01_batch_run(_cn01_cands, args).items():
                 entries.setdefault(key, {})[CN01_CODE] = res
         except Exception as exc:
             logging.debug("cn01 batch failed: %s", _err(exc))
             print(f"cn01 batch failed (skipped): {_err(exc)}", file=sys.stderr)
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
-        if not getattr(args, "skip_itdog_tcping", False):
+        if not getattr(args, "skip_cn02", False):
             pending = [
-                item for item in _itdog_cands
+                item for item in _cn01_cands
                 if entries.get(item[1], {}).get(CN01_CODE, {}).get("status")
                 in ("error", "rate_limited")
             ]
@@ -1424,8 +1424,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             # 大陆可达键不可能整批 0 ok，全 fail 时同站的 tcping 一样是死路）。
             node_fetch_ok = any(
                 entries.get(key, {}).get(CN01_CODE, {}).get("status") == "ok"
-                for _, key, _, _, _ in _itdog_cands
-            ) if _itdog_cands else False
+                for _, key, _, _, _ in _cn01_cands
+            ) if _cn01_cands else False
             if pending and node_fetch_ok:
                 print(
                     f"cn02 fallback: {len(pending)} targets",
@@ -1451,7 +1451,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         # cn03（归一为 level=icmp、不产 isp_ms）；TCP 实测 fail 的键
         # 不投（fail 是端口层实测结论，不用 ICMP 主机存活翻案，保守）。
         ping_pending = [
-            item for item in _itdog_cands
+            item for item in _cn01_cands
             if entries.get(item[1], {}).get(CN01_CODE, {}).get("status")
             in ("error", "rate_limited")
         ]
@@ -1465,7 +1465,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     ping_pending,
                     args,
                     page_url=CN03_PAGE_URL,
-                    nodes_per_isp=ITDOG_PING_NODES_PER_ISP,
+                    nodes_per_isp=CN03_NODES_PER_ISP,
                 ).items():
                     entries.setdefault(key, {})[CN03_CODE] = (
                         _batch_ping_normalize(res)
@@ -2170,19 +2170,19 @@ def main(argv=None) -> int:
                         help="cn27 站 API key（默认读 CHINA_CHECK_API_KEY，可选）")
     parser.add_argument("--tcpping-token", default="",
                         help="cn41 复核 token（默认读 TCPPING_CN_TOKEN env，缺则跳过）")
-    parser.add_argument("--itdog-nodes", type=int, default=CN01_NODES_PER_ISP,
+    parser.add_argument("--cn01-nodes", type=int, default=CN01_NODES_PER_ISP,
                         help=f"批量通道每大陆运营商取 N 节点（跨省等距采样；默认 {CN01_NODES_PER_ISP} → 共 {CN01_NODES_PER_ISP * 3}）")
-    parser.add_argument("--itdog-batch-size", type=int, default=CN01_BATCH_SIZE,
+    parser.add_argument("--cn01-batch-size", type=int, default=CN01_BATCH_SIZE,
                         help=f"批量通道每任务目标数（上限 {CN01_BATCH_SIZE}；默认 {CN01_BATCH_SIZE}）")
-    parser.add_argument("--itdog-concurrency", type=int, default=CN01_CONCURRENCY,
+    parser.add_argument("--cn01-concurrency", type=int, default=CN01_CONCURRENCY,
                         help=f"批量通道并发任务数（默认 {CN01_CONCURRENCY}）")
-    parser.add_argument("--itdog-pacing", type=float, default=CN01_PACING,
+    parser.add_argument("--cn01-pacing", type=float, default=CN01_PACING,
                         help=f"批量通道任务启动最小间隔秒（默认 {CN01_PACING}）")
-    parser.add_argument("--itdog-timeout", type=float, default=CN01_TASK_TIMEOUT,
+    parser.add_argument("--cn01-timeout", type=float, default=CN01_TASK_TIMEOUT,
                         help=f"批量通道单任务收结果上限秒（默认 {CN01_TASK_TIMEOUT}）")
-    parser.add_argument("--skip-itdog", action="store_true",
+    parser.add_argument("--skip-cn01", action="store_true",
                         help="跳过批量通道探活 cn01（快速冒烟用）")
-    parser.add_argument("--skip-itdog-tcping", action="store_true",
+    parser.add_argument("--skip-cn02", action="store_true",
                         help="跳过 cn02 补测（cn01 失败时的大节点池降级）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只输出计划，不做任何网络请求与写盘")

@@ -64,8 +64,8 @@ class TestCheckhostHttpWiring(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_itdog=True,
-            skip_itdog_tcping=True,
+            skip_cn01=True,
+            skip_cn02=True,
                 
             workers=4,
             timeout=5,
@@ -187,8 +187,8 @@ class TestCheckhostPingWiring(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_itdog=True,
-            skip_itdog_tcping=True,
+            skip_cn01=True,
+            skip_cn02=True,
                 
             workers=4,
             timeout=5,
@@ -1574,8 +1574,8 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         from types import SimpleNamespace
 
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_itdog=True,
-            skip_itdog_tcping=True,
+            skip_cn01=True,
+            skip_cn02=True,
                 
             workers=4,
             timeout=5,
@@ -1865,8 +1865,8 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
         from types import SimpleNamespace
 
         return SimpleNamespace(cn_limit={"cn07": 1 if limits else 0, "cn08": 1 if limits else 0, "cn14": 1 if limits else 0, "cn16": 1 if limits else 0, "cn17": 1 if limits else 0, "cn30": 1 if limits else 0, "cn40": 1}, cn_concurrency={"cn07": 2, "cn08": 2, "cn14": 2, "cn16": 2, "cn17": 2, "cn30": 2}, cn_nodes={"cn30": 2}, 
-            skip_itdog=True,
-            skip_itdog_tcping=True,
+            skip_cn01=True,
+            skip_cn02=True,
             
             workers=4,
             timeout=5,
@@ -1955,18 +1955,18 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
         from types import SimpleNamespace
 
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_itdog=False,
-            skip_itdog_tcping=False,
+            skip_cn01=False,
+            skip_cn02=False,
                 
             workers=4,
             timeout=5,
             api_key="",
             cn41_token="",
-            itdog_nodes=2,
-            itdog_batch_size=5,
-            itdog_concurrency=2,
-            itdog_pacing=0.0,
-            itdog_timeout=10,
+            cn01_nodes=2,
+            cn01_batch_size=5,
+            cn01_concurrency=2,
+            cn01_pacing=0.0,
+            cn01_timeout=10,
         )
 
     def test_cn01_sees_only_undecided_keys(self):
@@ -2353,7 +2353,7 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn10": 0, "cn11": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 0, "cn32": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn10": 2, "cn30": 2, "cn31": 2, "cn32": 2}, cn_nodes={"cn30": 2}, 
-            skip_itdog=True, skip_itdog_tcping=True, 
+            skip_cn01=True, skip_cn02=True, 
             workers=4, timeout=5, api_key="", cn41_token="",
               
              
@@ -2449,7 +2449,7 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn11": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn30": 2, "cn31": 2}, cn_nodes={"cn30": 2}, 
-            skip_itdog=True, skip_itdog_tcping=True, 
+            skip_cn01=True, skip_cn02=True, 
             workers=4, timeout=5, api_key="", cn41_token="",
               
              
@@ -2541,7 +2541,7 @@ class TestTcptestTraceMergeVerdict(unittest.TestCase):
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn10": 0, "cn11": 0, "cn12": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 0, "cn32": 0, "cn33": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn10": 2, "cn12": 2, "cn30": 2, "cn31": 2, "cn32": 2, "cn33": 2}, cn_nodes={"cn30": 2}, 
-            skip_itdog=True, skip_itdog_tcping=True, 
+            skip_cn01=True, skip_cn02=True, 
             workers=4, timeout=5, api_key="", cn41_token="",
               
              
@@ -2679,8 +2679,8 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, cn_concurrency={"cn40": 4}, 
-            skip_itdog=False,
-            skip_itdog_tcping=False,
+            skip_cn01=False,
+            skip_cn02=False,
                 
             
             workers=4,
@@ -2799,8 +2799,8 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 10}, 
-            skip_itdog=False,
-            skip_itdog_tcping=True,
+            skip_cn01=False,
+            skip_cn02=True,
                 
             workers=4,
             timeout=5,
@@ -2870,8 +2870,8 @@ class TestPingpeConcurrency(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 6}, cn_concurrency={"cn40": 4}, 
-            skip_itdog=True,
-            skip_itdog_tcping=True,
+            skip_cn01=True,
+            skip_cn02=True,
                 
             
             workers=4,
@@ -2947,8 +2947,8 @@ class TestCn01TcpingFallbackGuard(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, cn_concurrency={"cn40": 4}, 
-            skip_itdog=False,
-            skip_itdog_tcping=False,
+            skip_cn01=False,
+            skip_cn02=False,
                 
             
             workers=4,
