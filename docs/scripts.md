@@ -357,6 +357,8 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `cn43` | cn43 多节点 TCPing 复核（休眠） | 0 | 6 |
 | `cn44` | cn44 多节点 TCPing 复核（休眠） | 0 | 6 |
 
+**CN 检测耗时基线**（R21 实测）：无缓存全量复测约 4h40m；`--cn-cache-ttl 21600`（6h）稳态约 3m17s（复用约 16300 键、复测约 2200 键，命中约 88%）。删除或调小该 TTL 即回到数小时全量（CI 配额与上游负载同步放大）。
+
 结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict；cn01 源另含每运营商最小 RTT `isp_ms`）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，仅含本轮判定 reachable 的行，历史累积 `-CN` 不再自动纳入；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等，当前不可达者撤销失效 `-CN`）。
 
 **代号注册表终态**（R13 结论）：源元数据唯一真相源为 PCB `pcb/plugins/_sources.py`（44 代号：family/runner/channel/level/flag/limit/concurrency/min_ratio/verdict/desc）；公开侧旗标默认值、dispatch 码、engine 判定集/比率表、本表默认值、毕业链配额校验（`TestWorkflowCodesInRegistry`/`TestRegistryDocsTable`）全部由其派生（帮助文案仍为手写，由 `TestChinaHelpFlagsMatchDocs` 锁与本表对等）。以下三类字面保留，属结构必需而非硬编码信息：① `cn_opt(args, "cn30", …)` 类调用点代号（join key；通用 phase 循环可收敛但徒增间接层，另议）；② 无包回退静态表（CI 无 PCB 时 fail-open 的基石，移除条件＝CI 直连 PCB 即 `BUNDLE_PAT` 落地）；③ workflow 配额与 china.json 键中的代号（算子配置引用 ID，非代码硬编码；一致性由上锁测试保证）。

@@ -4219,5 +4219,18 @@ class TestCiChainDefinition(unittest.TestCase):
             self.assertIn(f'cron: "{cron}"', text, f"{name} 调度丢失")
 
 
+class TestCnCacheTtlLocked(unittest.TestCase):
+    """R21：CI 的 `--cn-cache-ttl 21600` 不得删除或调小（删即回到数小时
+    全量复测；R13–R17 实测 4h40m→3m17s）。"""
+
+    def test_workflow_keeps_cache_ttl(self):
+        import re
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        m = re.search(r"--cn-cache-ttl (\d+)", wf)
+        self.assertIsNotNone(m, "CI 缓存 TTL 丢失")
+        self.assertGreaterEqual(int(m.group(1)), 21600)
+
+
 if __name__ == "__main__":
     unittest.main()
