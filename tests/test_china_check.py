@@ -4175,5 +4175,49 @@ class TestNoLegacySourceFlags(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
+class TestCiChainDefinition(unittest.TestCase):
+    """R20：CI 链定义锁（文件名/cron/concurrency 组/contents 权限；
+    防误删改名与调度丢失；cancel-in-progress 调优不在此列）。"""
+
+    WORKFLOWS = (
+        "annotate-classify.yml",
+        "build-good.yml",
+        "china-check.yml",
+        "deep-speed.yml",
+        "exit-family.yml",
+        "quality-check.yml",
+        "stats.yml",
+        "update-proxies.yml",
+    )
+    CRONS = {
+        "china-check.yml": "11 * * * *",
+        "deep-speed.yml": "7 3 * * 6",
+        "stats.yml": "40 */2 * * *",
+        "update-proxies.yml": "0 */2 * * *",
+    }
+
+    def test_workflow_files_and_groups(self):
+        import re
+        d = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+        self.assertEqual(sorted(f.name for f in d.glob("*.yml")),
+                         sorted(self.WORKFLOWS))
+        for name in self.WORKFLOWS:
+            text = (d / name).read_text(encoding="utf-8")
+            stem = name[: -len(".yml")]
+            m = re.search(r"concurrency:\s*\n\s*group:\s*(\S+)", text)
+            self.assertIsNotNone(m, f"{name} 缺 concurrency 组")
+            self.assertEqual(m.group(1), stem, f"{name} 组名漂移")
+
+    def test_schedules_and_permissions(self):
+        import re
+        d = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+        for name in self.WORKFLOWS:
+            text = (d / name).read_text(encoding="utf-8")
+            self.assertIn("contents: write", text, f"{name} 缺写权限")
+        for name, cron in self.CRONS.items():
+            text = (d / name).read_text(encoding="utf-8")
+            self.assertIn(f'cron: "{cron}"', text, f"{name} 调度丢失")
+
+
 if __name__ == "__main__":
     unittest.main()
