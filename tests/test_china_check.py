@@ -3965,5 +3965,101 @@ class TestDrainFutures(unittest.TestCase):
                 cc._drain_futures([pool.submit(boom)])
 
 
+class TestSlotPhaseDispatchPerCode(unittest.TestCase):
+    """R12：逐码复核相派发接线（limit=1＋check 抛错 → 该码 error 行）。
+    任一码的相未接线/守卫错即爆红——cn06 式整族熄火（R3）不再潜伏。
+    有包/无包双态同断言（fail-open 行同样落键）。"""
+
+    PHASES = (
+        ("cn04", "cn04_check"), ("cn05", "cn05_check"),
+        ("cn06", "cn06_check"), ("cn07", "cn07_check"),
+        ("cn08", "cn08_check"), ("cn09", "cn09_check"),
+        ("cn10", "cn10_check"), ("cn11", "cn11_check"),
+        ("cn12", "cn12_check"), ("cn13", "cn13_check"),
+        ("cn14", "cn14_check"), ("cn15", "cn15_check"),
+        ("cn16", "cn16_check"), ("cn17", "cn17_check"),
+        ("cn18", "cn18_check"), ("cn19", "cn19_check"),
+        ("cn30", "cn30_check"), ("cn31", "cn30_check"),
+        ("cn32", "cn30_check"), ("cn33", "cn30_check"),
+        ("cn34", "cn34_check"), ("cn35", "cn35_check"),
+        ("cn36", "cn36_check"), ("cn37", "cn37_check"),
+        ("cn38", "cn38_check"), ("cn39", "cn39_check"),
+        ("cn40", "cn40_check"), ("cn42", "cn42_check"),
+        ("cn43", "cn43_check"), ("cn44", "cn44_check"),
+    )
+
+    def _args(self, code):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            cn_limit={"cn30": 0, "cn40": 0, code: 1},
+            cn_concurrency={code: 2},
+            skip_cn01=True, skip_cn02=True,
+            workers=4, timeout=5, api_key="", tcpping_token="")
+
+    def _boom(self, *a, **k):
+        raise RuntimeError("boom")
+
+    def _err(self, *a, **k):
+        return {"status": "error", "ok": False, "ms": None,
+                "error": "x"}
+
+    def test_each_phase_dispatches(self):
+        import unittest.mock as mock
+        item = ("10.9.9.9:443#US", "10.9.9.9:443#US", "10.9.9.9",
+                "443", "US")
+        for code, binding in self.PHASES:
+            with self.subTest(code=code):
+                patches = [
+                    mock.patch.object(cc, binding,
+                                      side_effect=self._boom),
+                    mock.patch.object(cc, "cn30_fetch_nodes",
+                                      return_value=[{"uuid": "u1",
+                                                     "operator": "ct",
+                                                     "enabled": True,
+                                                     "runtime_state": "online"}]),
+                    mock.patch.object(cc, "cn30_pick_nodes",
+                                      side_effect=lambda n, c: ["u1"]),
+                    mock.patch.object(cc, "cn20_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn21_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn22_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn23_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn24_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn25_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn26_check",
+                                      side_effect=self._err),
+                    mock.patch.object(cc, "cn27_check",
+                                      return_value={"status": "error",
+                                                    "ok": False, "ms": None,
+                                                    "error": "x"}),
+                    mock.patch.object(cc, "cn28_check",
+                                      return_value={"status": "error",
+                                                    "ok": False, "ms": None,
+                                                    "error": "x"}),
+                    mock.patch.object(cc, "cn29_check",
+                                      return_value={"status": "error",
+                                                    "ok": False, "ms": None,
+                                                    "error": "x"}),
+                    mock.patch.object(cc, "cn41_check",
+                                      return_value={"status": "skipped"}),
+                ]
+                for pm in patches:
+                    pm.start()
+                try:
+                    entries, _, _ = cc.run_measurements(
+                        [item], self._args(code))
+                finally:
+                    for pm in patches:
+                        pm.stop()
+                row = entries["10.9.9.9:443#US"]["sources"].get(code)
+                self.assertIsNotNone(row, f"{code} 相未派发")
+                self.assertEqual(row["status"], "error", code)
+
+
 if __name__ == "__main__":
     unittest.main()
