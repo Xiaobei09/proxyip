@@ -161,5 +161,47 @@ class TestCallSignatureGuard(unittest.TestCase):
         )
 
 
+class TestNoCredentialNamesInLogs(unittest.TestCase):
+    """R22：日志/打印调用不得引用凭证变量（token/secret/api_key 类名；
+    裸 `key` 多为代理 dict 键故排除，真凭证明确命名即命中。别名绕过
+    不在静态能力内，见下注释。）"""
+
+    CRED = ("token", "secret", "password", "api_key", "tcpping_token")
+
+    def test_no_credential_names_in_log_calls(self):
+        offenders: list[str] = []
+        for py in SCRIPTS.glob("*.py"):
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                is_log = (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr
+                    in ("debug", "info", "warning", "error", "critical")
+                )
+                is_print = (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "print"
+                )
+                if not (is_log or is_print):
+                    continue
+                names = {
+                    n.id
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Name)
+                }
+                hit = sorted(
+                    nm
+                    for nm in names
+                    if nm.lower() in self.CRED
+                    or "token" in nm.lower()
+                    or "secret" in nm.lower()
+                )
+                if hit:
+                    offenders.append(f"{py.name}:{node.lineno} {hit}")
+        self.assertEqual(offenders, [])
+
+
 if __name__ == "__main__":
     unittest.main()
