@@ -4081,5 +4081,47 @@ class TestSlotPhaseDispatchPerCode(unittest.TestCase):
                 self.assertEqual(row["status"], "error", code)
 
 
+class TestArgparseDestConsumed(unittest.TestCase):
+    """R18：argparse 每个 dest 必须被消费（直接读取/字符串引用/插件透传
+    白名单三者居其一；死旗标 --itdog-tcping-nodes/--17ce-token 即因此类
+    审计发现，不再复发）。"""
+
+    PASSTHROUGH = {"cn01_nodes", "cn01_batch_size", "cn01_concurrency",
+                   "cn01_pacing", "cn01_timeout"}
+
+    def test_all_dests_consumed(self):
+        import ast
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        dests = {}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add_argument"):
+                continue
+            flags = [a.value for a in node.args
+                     if isinstance(a, ast.Constant)
+                     and isinstance(a.value, str)
+                     and a.value.startswith("-")]
+            if not flags:
+                continue
+            longs = [f for f in flags if f.startswith("--")]
+            dest = (longs[0] if longs else flags[0]).lstrip("-").replace(
+                "-", "_")
+            dests[dest] = node.lineno
+        dead = []
+        for dest, ln in sorted(dests.items()):
+            read = (
+                re.search(r"args\." + re.escape(dest) + r"\b", src)
+                or re.search(r'"' + re.escape(dest) + r'"', src)
+                or dest in self.PASSTHROUGH
+            )
+            if not read:
+                dead.append(f"{dest} (line {ln})")
+        self.assertEqual(dead, [])
+
+
 if __name__ == "__main__":
     unittest.main()
