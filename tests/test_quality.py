@@ -4492,6 +4492,14 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self._reg()
         self.assertTrue(qr._REP_SOURCES_BUNDLE)
 
+    def test_lookup_binding_live_with_pcb(self):
+        """R17：抓取回绑必须非空且配额与插件一致（插件属性漂移即整通道
+        静默跳过；loader 右值回指已在 R16 验证）。"""
+        reg = self._reg()
+        self.assertIsNotNone(qr.scamalytics_lookup_sync)
+        self.assertTrue(qr._REP_SCAMALYTICS_BUNDLE)
+        self.assertEqual(qr.SCAMALYTICS_CAP, reg.CAP if hasattr(reg, "CAP") else 1500)
+
 
 if __name__ == "__main__":
     unittest.main()
