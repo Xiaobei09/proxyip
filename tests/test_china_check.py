@@ -4232,5 +4232,33 @@ class TestCnCacheTtlLocked(unittest.TestCase):
         self.assertGreaterEqual(int(m.group(1)), 21600)
 
 
+class TestWorkflowTriggerEdges(unittest.TestCase):
+    """R23：workflow_run 触发边锁（ chain 拓扑：删触发即断链；
+    根工作流仅 schedule/dispatch，无 workflow_run 父边）。"""
+
+    EDGES = {
+        "annotate-classify.yml": ["Quality check"],
+        "build-good.yml": ["Quality check", "China check"],
+        "exit-family.yml": ["Quality check"],
+        "quality-check.yml": ["Update proxy list"],
+        "stats.yml": ["Quality check", "China check",
+                      "Exit family check", "Build good lists"],
+        "china-check.yml": [],
+        "update-proxies.yml": [],
+        "deep-speed.yml": [],
+    }
+
+    def test_trigger_edges(self):
+        import re
+        d = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+        for name, want in sorted(self.EDGES.items()):
+            text = (d / name).read_text(encoding="utf-8")
+            m = re.search(r"workflows:\s*\[(.*?)\]", text)
+            got = ([x.strip().strip('"').strip("'") for x in m.group(1).split(",")]
+                   if m else [])
+            got = [x for x in got if x]
+            self.assertEqual(got, want, f"{name} 触发边漂移")
+
+
 if __name__ == "__main__":
     unittest.main()
