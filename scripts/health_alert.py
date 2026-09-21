@@ -1,0 +1,598 @@
+#!/usr/bin/env python3
+"""Pool health watchdog with webhook alerting.
+
+Compares the latest round against recent history and fires alerts when:
+
+- **pool crash**  — alive count dropped ≥ ``POOL_DROP_PCT`` (default 30%)
+                    vs the median of the last 24 rounds (不含当前轮);
+- **CN collapse** — china.json reachable count dropped ≥ ``CN_DROP_PCT``
+                    (default 50%) vs the previous round's snapshot stored
+                    in the alert state file;
+- **source collapse** — an upstream source's unique-count dropped ≥ ``SOURCE_DROP_PCT``
+                    (default 55%) vs the median of its last 8 rounds, from
+                    ``data/quality/source_history.json``;
+- **stale data**  — newest history record older than ``STALE_HOURS``
+                    (default 8h).
+
+Delivery: POSTs JSON to the URL in ``$ALERT_WEBHOOK_URL`` (Discord uses
+``{"content": ...}``, Slack ``{"text": ...}`` — both are sent). Without
+the env var, alerts only print to stderr. State (last CN count) persists
+in ``data/quality/alert_state.json`` so cross-run drops are detectable.
+
+Exit code is always 0 unless ``--strict`` (alerts → exit 1 for CI gating).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+import re
+import statistics
+import sys
+import time
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from common import CHINA_FILE, QUALITY_DIR, read_json, deadline_open  # noqa: E402
+
+HISTORY_FILE = QUALITY_DIR / "history.jsonl"
+VALID_HISTORY_FILE = QUALITY_DIR.parent / "valid" / "history.jsonl"
+STATE_FILE = QUALITY_DIR / "alert_state.json"
+
+POOL_DROP_PCT = 30
+CN_DROP_PCT = 50
+CN_MIN_BASELINE = 20    # CN 上一轮基准 ≥ 此值才评估塌方
+CN_STALE_HOURS = 12     # china.json 超过此年龄且曾有可达样本 → CN 链疑似静默停机
+EXIT_FAMILY_HOURS = 12      # exit_family.json 超龄 → exit-family 链疑似停机
+EXIT_FAMILY_MIN_ENTRIES = 100
+QUALITY_META_HOURS = 12     # quality_meta.json 超龄 → 质量链疑似静默停机
+GOOD_META_HOURS = 12        # good_meta.json 超龄 → build-good 链疑似静默停机
+VALID_LISTS_HOURS = 5       # valid/meta.json 超龄 → validate(update) 链停机
+DEEP_SPEED_HOURS = 240      # deep_speed.json 超龄（10 天 = DEEP_SPEED_TTL_DAYS）→ deep-speed 链停机；深测数据过期即 quality 链失去 deep_bonus，无此告警时会静默降级
+COUNTRY_DROP_PCT = 60   # 单国 alive 相对上一轮下降阈值（防小样本抖动）
+COUNTRY_MIN_BASELINE = 60
+STALE_HOURS = 8
+ALERT_REPEAT_COOLDOWN_S = 6 * 3600  # 相同告警组合的重复投递冷却
+SOURCE_DROP_PCT = 55       # 上游源 unique 相对近 8 轮中位数下降超此百分比触发
+SOURCE_MIN_SAMPLES = 8     # 至少积累这么多历史点才评估
+SOURCE_MIN_SIZE = 500      # 历史中位数 ≥ 此规模的源才告警（过滤小源噪音）
+SOURCE_LOOKBACK = 8        # 取最近几轮作基准
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def load_history(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    out = []
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        try:
+            out.append(json.loads(ln))
+        except json.JSONDecodeError:
+            continue
+    return sorted(out, key=lambda r: r.get("ts", ""))
+
+
+def _median(nums: list[float]) -> float:
+    s = sorted(nums)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def check_pool(history: list[dict], drop_pct: float = POOL_DROP_PCT) -> str | None:
+    """Alive-count crash vs median of previous rounds (~最近 24 轮)。"""
+    pts = [r for r in history if isinstance(r.get("alive"), int)]
+    base_nums = [r["alive"] for r in pts[:-1]]
+    if len(base_nums) < 2:
+        return None
+    med = _median(base_nums[-24:])
+    if med <= 0:
+        return None
+    cur = pts[-1]["alive"]
+    drop = (med - cur) / med * 100
+    if drop >= drop_pct:
+        return (
+            f"pool crash: alive {cur} vs median {int(med)} "
+            f"(-{drop:.0f}%) at {pts[-1].get('ts')}"
+        )
+    return None
+
+
+def _ts(ts: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return _now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def check_stale(history: list[dict], hours: float = STALE_HOURS) -> str | None:
+    """Newest record too old → pipeline silently broken."""
+    if not history:
+        return "no history records at all"
+    age_h = (_now() - _ts(history[-1].get("ts", ""))).total_seconds() / 3600
+    if age_h > hours:
+        return f"stale data: last record {age_h:.1f}h ago (> {hours}h)"
+    return None
+
+
+def cn_carrier_stats(proxies: dict) -> dict:
+    """分运营商（移动/电信/联通）可达数与延迟统计。
+
+    仅在 per-key ``isp_ms`` 存在时产出（它它自 cn01 等 per-ISP 源）：
+    某运营商覆盖键=本轮有 ``isp_ms[isp]`` 读数的键；其中 ``verdict ==
+    "reachable"`` 计入可达；``min_ms``/``median_ms`` 取覆盖键读数。
+    全池无 isp_ms（cn01 被风控/未启用）时返回 ``{}``——调用方回退整体
+    聚合口径，绝不以其为据误报。
+    """
+    per: dict[str, dict] = {}
+    for v in proxies.values():
+        if not isinstance(v, dict):
+            continue
+        im = v.get("isp_ms")
+        if not isinstance(im, dict):
+            continue
+        reachable = v.get("verdict") == "reachable"
+        for isp, ms in im.items():
+            if not isinstance(ms, (int, float)) or ms <= 0:
+                continue
+            st = per.setdefault(isp, {"sampled": 0, "reachable": 0, "ms": []})
+            st["sampled"] += 1
+            st["ms"].append(float(ms))
+            if reachable:
+                st["reachable"] += 1
+    out: dict[str, dict] = {}
+    for isp, st in per.items():
+        lat = sorted(st["ms"])
+        out[isp] = {
+            "sampled": st["sampled"],
+            "reachable": st["reachable"],
+            "min_ms": round(lat[0], 1),
+            "median_ms": round(statistics.median(lat), 1),
+        }
+    return out
+
+
+def check_cn(state: dict, cn_file: Path, drop_pct: float = CN_DROP_PCT) -> tuple[str | None, dict]:
+    """Reachable-count collapse vs persisted previous-round snapshot.
+
+    文件缺失或载荷无任何检测条目（损坏/空）时不评估、不覆盖历史快照
+    （与 check_countries 同款守卫，避免瞬时空窗误报全塌方）。
+    """
+    if not cn_file.exists():
+        return None, dict(state or {})
+    proxies = read_json(cn_file).get("proxies", {})
+    if not isinstance(proxies, dict) or not proxies:
+        return None, dict(state or {})
+    cur = sum(
+        1
+        for v in proxies.values()
+        if isinstance(v, dict) and v.get("verdict") == "reachable"
+    )
+    new_state = dict(state or {})
+    new_state["cn_reachable"] = cur
+    new_state["cn_ts"] = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    by_isp = cn_carrier_stats(proxies)
+    new_state["cn_by_isp"] = by_isp
+    prev = (state or {}).get("cn_reachable")
+    msgs: list[str] = []
+    if isinstance(prev, int) and prev >= CN_MIN_BASELINE:
+        drop = (prev - cur) / prev * 100
+        if drop >= drop_pct:
+            msgs.append(f"CN collapse: reachable {cur} vs {prev} (-{drop:.0f}%)")
+    prev_isp = (state or {}).get("cn_by_isp") or {}
+    for isp, st in by_isp.items():
+        pst = prev_isp.get(isp)
+        if not isinstance(pst, dict) or not isinstance(pst.get("reachable"), int):
+            continue
+        if pst["reachable"] < CN_MIN_BASELINE:
+            continue
+        drop = (pst["reachable"] - st["reachable"]) / pst["reachable"] * 100
+        if drop >= drop_pct:
+            msgs.append(
+                f"CN collapse ({isp}): reachable {st['reachable']} vs "
+                f"{pst['reachable']} (-{drop:.0f}%)"
+            )
+    if msgs:
+        return "\n".join(msgs), new_state
+    return None, new_state
+
+
+CN_HISTORY_DAYS = 8     # cn_history.jsonl 保留天数（近 7 天趋势 + 冗余量）
+CN_HISTORY_FILE = "cn_history.jsonl"
+
+
+def record_cn_history(path: Path, state: dict) -> None:
+    """把本轮 CN 分运营商快照追加进趋势历史（每 2h stats 心跳 + 每轮链触发）。
+
+    ``state`` 为 ``check_cn`` 产物（含 ``cn_ts``/``cn_reachable``/``cn_by_isp``）。
+    保留最近 ``CN_HISTORY_DAYS`` 天；文件缺失/畸形时静默重建。写入不影响门控。
+    """
+    ts = (state or {}).get("cn_ts")
+    if not ts:
+        return
+    rec = {
+        "ts": ts,
+        "cn_reachable": state.get("cn_reachable", 0),
+        "cn_by_isp": state.get("cn_by_isp", {}),
+    }
+    try:
+        lines: list[str] = []
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").splitlines()
+        lines.append(json.dumps(rec, ensure_ascii=False))
+        cutoff = time.time() - CN_HISTORY_DAYS * 86400
+        kept: list[str] = []
+        for ln in lines[-2000:]:
+            try:
+                r = json.loads(ln)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            e = r.get("ts")
+            if e:
+                try:
+                    t = datetime.fromisoformat(
+                        e.replace("Z", "+00:00")
+                    ).timestamp()
+                except ValueError:
+                    continue
+                if t < cutoff:
+                    continue
+            kept.append(ln)
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except OSError:
+        logging.exception("record_cn_history")
+
+
+def check_cn_stale(
+    cn_file: Path, hours: float = CN_STALE_HOURS, min_reachable: int = CN_MIN_BASELINE
+) -> str | None:
+    """china.json 时效告警：CN 专链静默失败时总体数据仍新鲜、check_cn
+    快照对比恒等，只有此检查能暴露 ''CN 数据已停止刷新''。"""
+    data = read_json(cn_file) or {}
+    ts = data.get("ts")
+    proxies = data.get("proxies") or {}
+    reachable = sum(
+        1
+        for v in proxies.values()
+        if isinstance(v, dict) and v.get("verdict") == "reachable"
+    )
+    if not isinstance(ts, str) or reachable < min_reachable:
+        return None
+    age_h = (_now() - _ts(ts)).total_seconds() / 3600
+    if age_h > hours:
+        return f"CN data stale: china.json {age_h:.1f}h old (> {hours}h)"
+    return None
+
+
+def check_artifact_stale(
+    label: str,
+    path: Path,
+    hours: float,
+    min_entries: int = 0,
+    require_proxies: bool = True,
+    ts_field: str = "ts",
+) -> str | None:
+    """任一产物 JSON 的时效告警（label 给出可读名）。
+
+    ``require_proxies=True`` 限 keyed 产物（``proxies`` 容器条目数 ≥
+    ``min_entries`` 才评估，防空跑误报）；summary 型产物（如
+    ``quality_meta.json``，无 proxies 容器）传 ``require_proxies=False``，
+    仅按年龄评估。
+    """
+    data = read_json(path) or {}
+    ts = data.get(ts_field)
+    if not isinstance(ts, str):
+        return None
+    if require_proxies:
+        proxies = data.get("proxies") or {}
+        if len(proxies) < min_entries:
+            return None
+    age_h = (_now() - _ts(ts)).total_seconds() / 3600
+    if age_h > hours:
+        return f"{label} stale: {path.name} {age_h:.1f}h old (> {hours}h)"
+    return None
+
+
+def check_countries(
+    state: dict, meta_path: Path,
+    drop_pct: float = COUNTRY_DROP_PCT,
+    min_baseline: int = COUNTRY_MIN_BASELINE,
+) -> tuple[str | None, dict]:
+    """单国 alive 数相对上一轮快照骤降告警（区域性断网/上游掉源）。
+
+    上一轮基准 < ``min_baseline`` 的国家忽略；meta 缺失时静默。
+    """
+    meta = read_json(meta_path) or {}
+    cur = {
+        cc: int(c)
+        for cc, c in (meta.get("per_country") or {}).items()
+        if isinstance(c, (int, float))
+    }
+    new_state = dict(state or {})
+    # meta 缺失/无数据时不覆盖历史快照，也不做对比评估（避免瞬时空窗
+    # 误报"所有国家全灭"；池级断供由 check_pool 兜底）
+    if not cur:
+        return None, new_state
+    new_state["countries"] = {
+        cc: int(c) for cc, c in sorted(cur.items())
+    }
+    alerts = []
+    prev = (state or {}).get("countries") or {}
+    for cc, before in prev.items():
+        if before < min_baseline:
+            continue
+        after = cur.get(cc, 0)
+        drop = (before - after) / before * 100
+        if drop >= drop_pct:
+            alerts.append(
+                f"country {cc} collapsed {before}->{after} (-{drop:.0f}%)"
+            )
+    return ("\n".join(alerts) if alerts else None), new_state
+
+
+def check_sources(
+    path: Path,
+    drop_pct: float = SOURCE_DROP_PCT,
+    min_samples: int = SOURCE_MIN_SAMPLES,
+    min_size: int = SOURCE_MIN_SIZE,
+    lookback: int = SOURCE_LOOKBACK,
+) -> str | None:
+    """上游源 unique 覆盖率骤降告警（相对近 ``lookback`` 轮中位数）。
+
+    累积点数不足 / 源规模太小 / 数据缺失时静默。
+    """
+    data = read_json(path) or {}
+    runs = data.get("runs") or []
+    if len(runs) < min_samples:
+        return None
+    series: dict[str, list[int]] = {}
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        counts = run.get("counts") or {}
+        if not isinstance(counts, dict):
+            continue
+        for label, count in counts.items():
+            try:
+                series.setdefault(label, []).append(int(count))
+            except (TypeError, ValueError):
+                continue  # 畸形计数不拖垮整轮看门狗
+    alerts = []
+    for label, vals in series.items():
+        if len(vals) < min_samples:
+            continue
+        window = vals[-lookback:]
+        if len(window) < 2:
+            continue
+        baseline = window[:-1]
+        med = statistics.median(baseline) if baseline else 0
+        if med < min_size:
+            continue
+        last = window[-1]
+        if last < med * (100 - drop_pct) / 100:
+            drop = (med - last) / med * 100
+            alerts.append(
+                f"source {label} collapsed {med}->{last} (-{drop:.0f}%)"
+            )
+    return "\n".join(alerts) if alerts else None
+
+
+def notify(alerts: list[str]) -> bool:
+    """POST to webhook; returns delivered flag. Always prints to stderr."""
+    msg = "[proxyip] ALERT\n" + "\n".join(f"- {a}" for a in alerts)
+    print(msg, file=sys.stderr)
+    url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+    if not url:
+        return False
+    if not re.match(r"^https://", url):
+        # 合规硬约束：仅允许 https，防止 webhook  token/内容经 http 明文泄露
+        print("webhook delivery skipped: only https:// is allowed",
+              file=sys.stderr)
+        return False
+    body = json.dumps({"content": msg, "text": msg}).encode()
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with deadline_open(req, 15):
+            return True
+    except TimeoutError:
+        # 超时异常含 full_url（webhook URL 内嵌 Discord token），净化入日志
+        # 并维持「webhook 失败不阻断主流程」语义（return False）。
+        print("webhook delivery timed out (token redacted)", file=sys.stderr)
+        return False
+    except OSError as exc:
+        # OSError 属类含 URLError/HTTPError，str(exc) 会内嵌完整请求 URL
+        # （Discord webhook URL 含 token），净化到不含 URL 的通用文案。
+        print(
+            f"webhook delivery failed: {type(exc).__name__} "
+            "(details redacted; webhook token must not leak)",
+            file=sys.stderr,
+        )
+        return False
+
+
+def _alert_fingerprint(alerts: list[str]) -> str:
+    return hashlib.md5(
+        "|".join(sorted(alerts)).encode("utf-8")
+    ).hexdigest()
+
+
+def _suppress_repeat(state: dict, alerts: list[str]) -> bool:
+    """同一告警组合在冷却窗口内不再重复投递（防长时间故障刷屏 webhook）。"""
+    last_at = state.get("last_alert_at")
+    if not isinstance(last_at, (int, float)):
+        return False
+    if state.get("last_alert_hash") != _alert_fingerprint(alerts):
+        return False
+    return (time.time() - last_at) < ALERT_REPEAT_COOLDOWN_S
+
+
+def check_degraded_batch(meta_path: Path) -> str | None:
+    """quality_meta.json 的 ``skipped`` 非空 → 降级批告警（R201/R202）。
+
+    time-budget 穷尽时部分相位被跳过但 meta 照常生成且 ts 新鲜——单纯
+    时效检查无法发现「伪装成完整批的降级批」，故在此显式读 skipped。
+    """
+    meta = read_json(meta_path) or {}
+    skipped = meta.get("skipped")
+    if not isinstance(skipped, list) or not skipped:
+        return None
+    return "degraded batch: quality phases skipped: {}".format(
+        ", ".join(str(s) for s in skipped[:8])
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--data-dir", type=Path, default=None,
+                    help="repo root containing data/ (default: auto)")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 1 when any alert fired")
+    args = ap.parse_args(argv)
+
+    root = args.data_dir or Path(__file__).resolve().parent.parent
+
+    history = load_history(root / "data" / "valid" / "history.jsonl")
+    if not history:
+        history = load_history(root / "data" / "quality" / "history.jsonl")
+
+    state = read_json(root / "data" / "quality" / "alert_state.json")
+    alerts: list[str] = []
+
+    a = check_pool(history)
+    if a:
+        alerts.append(a)
+    a = check_stale(history)
+    if a:
+        alerts.append(a)
+    a, new_state = check_cn(
+        state or {}, root / "data" / "quality" / CHINA_FILE.name
+    )
+    if a:
+        alerts.append(a)
+    if "cn_ts" in new_state:
+        record_cn_history(
+            root / "data" / "quality" / CN_HISTORY_FILE, new_state
+        )
+    a, new_state = check_countries(
+        new_state, root / "data" / "valid" / "meta.json"
+    )
+    if a:
+        alerts.append(a)
+    a = check_sources(root / "data" / "quality" / "source_history.json")
+    if a:
+        alerts.append(a)
+    a = check_cn_stale(root / "data" / "quality" / CHINA_FILE.name)
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "exit-family",
+        root / "data" / "quality" / "exit_family.json",
+        hours=EXIT_FAMILY_HOURS,
+        min_entries=EXIT_FAMILY_MIN_ENTRIES,
+    )
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "quality-meta",
+        root / "data" / "quality" / "quality_meta.json",
+        hours=QUALITY_META_HOURS,
+        require_proxies=False,
+    )
+    if a:
+        alerts.append(a)
+    a = check_degraded_batch(root / "data" / "quality" / "quality_meta.json")
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "good-lists",
+        root / "data" / "quality" / "good_meta.json",
+        hours=GOOD_META_HOURS,
+        require_proxies=False,
+    )
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "valid-lists",
+        root / "data" / "valid" / "meta.json",
+        hours=VALID_LISTS_HOURS,
+        require_proxies=False,
+    )
+    if a:
+        alerts.append(a)
+    a = check_artifact_stale(
+        "deep-speed",
+        root / "data" / "quality" / "deep_speed.json",
+        hours=DEEP_SPEED_HOURS,
+        min_entries=1,
+        ts_field="generated",
+    )
+    if a:
+        alerts.append(a)
+
+    if alerts:
+        if _suppress_repeat(state or {}, alerts):
+            print("health: alerts unchanged, suppressed repeat", file=sys.stderr)
+        else:
+            notify(alerts)
+            new_state["last_alert_hash"] = _alert_fingerprint(alerts)
+            new_state["last_alert_at"] = time.time()
+    update_badge(root, alerts)
+    write_state(new_state, root / "data" / "quality" / "alert_state.json")
+    print(f"health: {'ALERT ' + str(len(alerts)) if alerts else 'ok'}")
+    return 1 if args.strict and alerts else 0
+
+
+def update_badge(root: Path, alerts: list[str]) -> None:
+    """有告警时把 ``data/output/badge.json`` 标红（同 job 内 stats 已先渲染）。
+
+    README 的 Status 徽章由此直接显示停机原因；无告警时不改动
+    （保持 generate_stats 的 fresh/stale 判定）。
+    """
+    if not alerts:
+        return
+    # badge 名称 = 首条告警的冒号前段（如 "stale data"/"CN collapse"）；
+    # 无冒号消息（source/country collapsed）则回退整条文案。
+    # 截断防止超长文案撑爆 SVG 徽章尺寸。
+    msg = (alerts[0].split(":")[0].strip() if alerts[0] else "status")[:60]
+    write_data_json(
+        root / "data" / "output" / "badge.json",
+        {"schemaVersion": 1, "label": "status", "message": msg, "color": "red"},
+    )
+
+
+def write_data_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def write_state(state: dict, path: Path | None = None) -> None:
+    p = path or STATE_FILE
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(state, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    tmp.replace(p)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""Generic TLS probing engine (extracted from the former quality_streaming).
+
+TLS direct GETs through proxies (``tls_get_direct``), external exit-geo
+echo API (``check_external_api``) and ip-api geo batch lookups.
+Imported by ``quality_check``. 流媒体解锁逻辑已整体移除。
+"""
+
+import argparse
+import asyncio
+import json
+import logging
+import ssl
+import time
+import urllib.request
+
+from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...)
+from common import _SSL_CTX  # noqa: F401  (import * skips underscore-prefixed names)
+from common import fetch_with_deadline  # noqa: F401  (import * 已含，显式声明便于检索)
+
+IPAPI_GET_URL = "[REDACTED_PRIVATE_RESOURCE]"
+IPAPI_FIELDS = (
+    "status,message,country,countryCode,regionName,city,"
+    "as,asn,org,isp,proxy,hosting,mobile"
+)
+TIMEOUT = 6
+READ_CAP = 524288
+READ_TIMEOUT = 3
+HEADER_CAP = 65536
+WORKERS = 60
+PROGRESS_EVERY_S = 120  # 探针相位进度上报间隔（CI 长时间静默的可观测性）
+
+
+async def read_until(
+    reader: asyncio.StreamReader, delim: bytes, cap: int
+) -> bytes:
+    """Read until ``delim`` (inclusive) or EOF; never over-read the stream.
+
+    首选 ``reader.readuntil``：它把分隔符之后、同一次 TCP 交付的多余字节
+    留在缓冲区（天然回退），避免此前 ``read(65536)`` 一次吞入整个响应时
+    ``read_chunked`` 把后续 body 误当 chunk 头解析而丢数据。``cap`` 为防御
+    上限（真实响应头远小于缓冲 limit，一般不会触发）。
+    """
+    try:
+        return await asyncio.wait_for(
+            reader.readuntil(delim), timeout=READ_TIMEOUT
+        )
+    except asyncio.IncompleteReadError as exc:
+        return exc.partial
+    except asyncio.LimitOverrunError:
+        data = await asyncio.wait_for(reader.read(cap), timeout=READ_TIMEOUT)
+        idx = data.find(delim)
+        if idx < 0:
+            return data
+        return data[: idx + len(delim)]
+
+
+async def read_chunked(
+    reader: asyncio.StreamReader, cap: int, body: bytes
+) -> bytes:
+    while len(body) < cap:
+        head = await read_until(reader, b"\r\n", 64)
+        try:
+            size = int(head.split(b";", 1)[0].strip() or b"0", 16)
+        except ValueError:
+            break
+        if size == 0:
+            await read_until(reader, b"\r\n", 4096)
+            break
+        remain = size
+        while remain > 0 and len(body) < cap:
+            chunk = await asyncio.wait_for(
+                reader.read(min(remain, 65536)), timeout=READ_TIMEOUT
+            )
+            if not chunk:
+                break
+            body += chunk
+            remain -= len(chunk)
+        await asyncio.wait_for(reader.read(2), timeout=READ_TIMEOUT)
+    return body[:cap]
+
+
+async def read_http_response(
+    reader: asyncio.StreamReader, cap: int
+) -> tuple[int | None, dict, bytes]:
+    raw = await read_until(reader, b"\r\n\r\n", HEADER_CAP)
+    if b"\r\n\r\n" not in raw:
+        return None, {}, b""
+    head, body = raw.split(b"\r\n\r\n", 1)
+    status, headers = parse_headers(head)
+    if status is None:
+        return None, headers, body
+    if "chunked" in headers.get("transfer-encoding", "").lower():
+        body = await read_chunked(reader, cap, body)
+    else:
+        clen = headers.get("content-length")
+        try:
+            want = min(int(clen), cap - len(body)) if clen else cap - len(body)
+        except (ValueError, TypeError):
+            want = cap - len(body)
+        while len(body) < want:
+            chunk = await asyncio.wait_for(
+                reader.read(65536), timeout=READ_TIMEOUT
+            )
+            if not chunk:
+                break
+            body += chunk
+    return status, headers, body[:cap]
+
+
+async def tls_get_direct(
+    ip: str,
+    port: str,
+    host: str,
+    path: str,
+    timeout: int,
+    read_cap: int,
+) -> tuple[int | None, dict, bytes, str | None]:
+    """Direct TLS to a Cloudflare-edge proxy with ``host`` as SNI.
+
+    .. legacy:: 无调用方（当前主探测路径是 ``check_external_api`` 外部 echo
+       API）；保留供直连 TLS 探测方案复用，移除前需同步清顶部 docstring。
+    """
+    try:
+        reader, writer = await asyncio.open_connection(
+            ip, int(port), ssl=_SSL_CTX, server_hostname=host
+        )
+    except (OSError, asyncio.TimeoutError, ssl.SSLError, ValueError) as exc:
+        return None, {}, b"", f"tls: {err_name(exc)}"
+    try:
+        writer.write(build_request("GET", path, host))
+        await writer.drain()
+        status, headers, body = await read_http_response(reader, read_cap)
+        return status, headers, body, None
+    except (OSError, asyncio.TimeoutError, ssl.SSLError, ConnectionError) as exc:
+        return None, {}, b"", err_name(exc)
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except OSError:
+            pass
+
+
+async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
+    """Call external ProxyIP verification API.
+
+    Returns a dict with ``success``, ``response_ms``, ``colo``,
+    ``ipv4_ok``, ``ipv6_ok`` and ``exit_geo`` fields. On any error
+    returns ``{"success": false}``.
+    """
+    url = f"{EXTERNAL_CHECK_URL}?proxyip={ip}:{port}"
+
+    def _fetch() -> dict:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "proxyip-checker/1.0"},
+        )
+        raw = fetch_with_deadline(req, timeout)
+        return json.loads(raw.decode("utf-8", errors="replace"))
+
+    try:
+        data = await asyncio.to_thread(_fetch)
+        ipv4 = data.get("probe_results", {}).get("ipv4", {})
+        ipv6 = data.get("probe_results", {}).get("ipv6", {})
+        return {
+            "success": data.get("success") is True,
+            "response_ms": data.get("responseTime"),
+            "colo": data.get("colo"),
+            "ipv4_ok": bool(ipv4.get("ok")),
+            "ipv6_ok": bool(ipv6.get("ok")),
+            "exit_geo": ipv4.get("exit"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logging.debug("check_external_api %s:%s failed: %s", ip, port, err_name(exc))
+        return {"success": False}
+
+
+async def check_one(entry: tuple, method: str, args: argparse.Namespace) -> dict:
+    """Run the checks for a single proxy entry."""
+    key, ip, port, cc = entry
+    base = {"key": key, "ip": ip, "port": port, "cc": cc, "method": "tls", "tls": True}
+    base["external_check"] = await check_external_api(ip, port, timeout=30)
+    return base
+
+
+async def run_checks(
+    entries: list, methods: dict, args: argparse.Namespace
+) -> dict:
+    sem = asyncio.Semaphore(args.workers)
+    lock = asyncio.Lock()
+    results: dict = {}
+
+    async def work(entry: tuple) -> None:
+        key = entry[0]
+        async with sem:
+            res = await check_one(entry, methods.get(key, "tls"), args)
+        async with lock:
+            results[key] = res
+
+    tasks = [asyncio.create_task(work(e)) for e in entries]
+    total = len(entries)
+    t0 = time.monotonic()
+    reporter = asyncio.create_task(
+        _progress_reporter(results, lock, total, t0)
+    )
+    try:
+        done, pending = await asyncio.wait(
+            tasks, timeout=args.time_budget or None
+        )
+    finally:
+        reporter.cancel()
+        await asyncio.gather(reporter, return_exceptions=True)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    for task in done:
+        try:
+            task.result()
+        except Exception as exc:
+            logging.debug("probe task result: %s", err_name(exc))
+    return results
+
+
+async def _progress_reporter(
+    results: dict, lock: asyncio.Lock, total: int, t0: float = 0.0
+) -> None:
+    """周期上报探针完成数与已耗时，打破长时子进程/CI 静默（含 budget 截断前可见性）。
+
+    纯观测：除 print 外无副作用；锁保护下只读计数，不扰动 wait 语义。
+    """
+    while True:
+        await asyncio.sleep(PROGRESS_EVERY_S)
+        try:
+            async with lock:
+                n = len(results)
+            elapsed = int(time.monotonic() - t0) if t0 else 0
+            print(
+                f"Progress: {n}/{total} proxies checked "
+                f"({elapsed}s elapsed)",
+                flush=True,
+            )
+        except Exception:
+            logging.exception("progress reporter")
+
+
+def group_chunks(items: list, size: int = IPAPI_BATCH_SIZE) -> list[list]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def ipapi_batch_sync(ips: list) -> list:
+    payload = json.dumps(ips).encode("utf-8")
+    req = urllib.request.Request(
+        IPAPI_BATCH_URL + "?fields=" + IPAPI_FIELDS,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "proxyip/quality 1.0",
+        },
+    )
+    raw = fetch_with_deadline(req, 15)
+    return json.loads(raw.decode("utf-8"))
+
+
+def ipapi_get_sync(ip: str) -> dict:
+    req = urllib.request.Request(
+        IPAPI_GET_URL.format(ip=ip) + "?fields=" + IPAPI_FIELDS,
+        headers={"User-Agent": "proxyip/quality 1.0"},
+    )
+    raw = fetch_with_deadline(req, 10)
+    return json.loads(raw.decode("utf-8"))
+
+
+async def batch_ipapi(ips: list, deadline: float | None = None) -> dict:
+    """Batch geo lookup for exit IPs; falls back to rate-limited per-IP GET.
+
+    ``deadline``（``time.monotonic()`` 绝对时刻）用于墙钟止损：批量分块与
+    per-IP 兜底循环都会在超龄后提前退出，避免上游全挂时 1.5s/IP 的顺序
+    兜底把整个质量相位拖到 CI 硬杀（D-42 时间预算因此也覆盖相位内部）。
+    """
+    def _over() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
+    def _warn_cut(got: int, total: int) -> None:
+        print(
+            "Warning: ip-api geo truncated by time deadline; "
+            f"returning partial results ({got}/{total})",
+            file=sys.stderr,
+        )
+
+    ips_uniq = list(dict.fromkeys(ips))
+    chunks = group_chunks(ips_uniq)
+    out: dict[str, dict] = {}
+    any_batch_ok = False
+    cut_by_deadline = False
+    for chunk in chunks:
+        if _over():
+            cut_by_deadline = True
+            break
+        try:
+            data = await asyncio.to_thread(ipapi_batch_sync, chunk)
+            any_batch_ok = True
+        except Exception as exc:
+            logging.debug("ipapi batch failed: %s", err_name(exc))
+            continue
+        for idx, item in enumerate(data):
+            if not isinstance(item, dict) or item.get("status") != "success":
+                continue
+            ip = item.get("query")
+            if not (isinstance(ip, str) and ip in chunk):
+                ip = chunk[idx] if idx < len(chunk) else None
+            if ip:
+                out[ip] = item
+        await asyncio.sleep(IPAPI_BATCH_DELAY)
+    if any_batch_ok or out:
+        if cut_by_deadline and len(out) < len(ips_uniq):
+            _warn_cut(len(out), len(ips_uniq))
+        return out
+    for ip in ips_uniq:
+        if _over():
+            cut_by_deadline = True
+            break
+        try:
+            item = await asyncio.to_thread(ipapi_get_sync, ip)
+            if item.get("status") == "success":
+                out[ip] = item
+        except Exception as exc:
+            logging.debug("ipapi get %s: %s", ip, err_name(exc))
+        await asyncio.sleep(1.5)
+    if cut_by_deadline and len(out) < len(ips_uniq):
+        _warn_cut(len(out), len(ips_uniq))
+    return out

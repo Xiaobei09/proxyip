@@ -1,0 +1,111 @@
+name: Deep speed probe
+
+on:
+  schedule:
+    # 每周六 03:07 UTC 自动深测：取 country_speed.json p50 最优国家
+    - cron: "7 3 * * 6"
+  workflow_dispatch:
+    inputs:
+      cc:
+        description: "逗号分隔国家码（如 US,CA）；与 source 二选一"
+        required: false
+        default: ""
+      source:
+        description: "显式池文件路径（优先于 cc）"
+        required: false
+        default: ""
+      limit:
+        description: "最多探测节点数（0=全部）"
+        required: false
+        default: "30"
+      bytes_mb:
+        description: "单流下载上限 MB"
+        required: false
+        default: "20"
+      streams:
+        description: "每节点并发流数"
+        required: false
+        default: "3"
+      targets:
+        description: "目标列表：cf_speed,cdnjs,ovh,cf_trace"
+        required: false
+        default: "cf_speed,ovh"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deep-speed
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Large-sample multi-stream speed
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Pick weekly countries
+        if: github.event_name == 'schedule'
+        id: pick
+        run: |
+          CC=$(python3 - <<'EOF'
+          import json, pathlib
+          p = pathlib.Path("data/output/country_speed.json")
+          d = json.loads(p.read_text()) if p.exists() else {}
+          cands = [(v.get("p50", 0), cc) for cc, v in d.items()
+                   if isinstance(v, dict) and v.get("n", 0) >= 20]
+          cands.sort(reverse=True)
+          print(",".join(cc for _s, cc in cands[:8]))
+          EOF
+          )
+          echo "cc=$CC" >> "$GITHUB_OUTPUT"
+          echo "weekly countries: $CC"
+
+      - name: Deep probe
+        id: probe
+        run: |
+          # github.event.inputs 仅在 workflow_dispatch 存在；schedule 触发会
+          # 展开为空串，直塞 argparse 会因缺参崩溃——统一按事件源装配默认值。
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CC="${{ github.event.inputs.cc }}"
+            SRC="${{ github.event.inputs.source }}"
+            LIMIT="${{ github.event.inputs.limit }}"
+            BYTES="${{ github.event.inputs.bytes_mb }}"
+            STREAMS="${{ github.event.inputs.streams }}"
+            TARGETS="${{ github.event.inputs.targets }}"
+          else
+            CC="${{ steps.pick.outputs.cc }}"
+            SRC=""
+            LIMIT=30; BYTES=20; STREAMS=3; TARGETS="cf_speed,ovh"
+          fi
+          # pick/输入可能为空（首轮、country_speed.json 稀疏或暂时缺失）：
+          # 缺 --cc/--source 会直塞 argparse 触发 parser.error 使 schedule 每跑必败。
+          # 兜底用全球覆盖默认国（无池国仅 warn 不失败），保证调度永不空转失败。
+          if [ -z "$CC" ] && [ -z "$SRC" ]; then
+            CC="US,CN,JP,HK"
+          fi
+          args=()
+          [ -n "$SRC" ] && args+=( --source "$SRC" )
+          [ -n "$CC" ] && args+=( --cc "$CC" )
+          args+=( --limit "$LIMIT" --bytes-mb "$BYTES" --streams "$STREAMS" \
+                  --targets "$TARGETS" )
+          python scripts/deep_speed.py "${args[@]}"
+
+      - name: Commit changes
+        if: steps.probe.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): deep speed probe ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

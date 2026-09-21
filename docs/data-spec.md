@@ -1,0 +1,382 @@
+# 数据规范
+
+本文件归档「数据规范 / 国家集合 / 可用性验证 / 更新差异 / 数据文件参考」，供仓库数据消费者查阅。目录浏览入口（层级视图与工件索引）见 [`../data/README.md`](../data/README.md)。
+
+## 数据规范
+
+### 格式
+
+- 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
+- `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段（`ip:port#🇺🇸US-120ms`）
+- **入口/出口地区**：质量 CI 检测后，已知出口地区的行会在国家代号后插入 `→<出口>`（如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码（`US`/`JP`/`DE`…），来自 `ipinfo.json` 的 `country_code` 字段。入口未知的 `#ALL` 行同样标注出口（如 `1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
+- **质量检测备注**：质量 CI 运行后，被检测的行在既有后缀后追加 `-[-<出口类型段>][-<信誉分>][-U<NN>]`。出口类型段为 `DC`/`RES`/`MOB`/`PROXY`（机房/住宅/移动/匿名）与可选 `DS`/`V6`（双栈/纯 IPv6）；信誉分为 0-100 整数（来自 `reputation.json`）；`U<NN>` 为 7 天滚动存活率百分比（来自 `uptime.json`，如 `-U35`）。实际 token 顺序：`<出口类型>` 后依次是速度档（`fast`/`mid`/`slow`）、家族（`V4`/`V6`/`DS`）、大陆标记（`CN`/`CNH`）、信誉分、`U<NN>`，示例 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-RES-fast-V4-CN-29-U35`。无结果的行保持原样。（tls 方法标记 `CF` 曾作为死标记生成，现池子全为 CF 边缘端口恒真、归一化时丢弃，新行不再含该 token；历史行上的流媒体标记 `NF(区域)/D+/YT/MX/PV/GPT` 仍被解析器容忍但已停止生成）
+- **去重**：同一 `ip:port` 组合在**同一国家标签内**唯一；同一入口可能被不同订阅标为多国出口（此时保留多国条目，池中存在少量跨标签重复属设计内；下载历史 `unique` 按真实 `ip:port` 唯一数计算）
+- **排序**：未验证目录按 IP 数字序（八位组数值比较，`1.2.3.4 < 10.0.0.1`）；`data/valid/` 按延迟升序（`all_cn*.txt` 及其 http/stable 可靠性子集按**大陆实测延迟**升序；`all_cn4/6/46` 沿用全量池序），`data/valid/*_ltd.txt`（及各目录 `ltd.txt`）按速度降序；`rep.txt` 按信誉分降序（同分按延迟升序）；`good.txt` 按综合分降序（同分按延迟升序再按 IP 序）
+
+### 备注段（note）与 token 规范
+
+统一解析（`common.parse_line`）：`ip:port#<cc><note>` 中，`key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它，例如 `1.2.3.4:443#🇺🇸US→US-120ms-RES-fast-V4-CN-29-U35` 的 note 为 `→US-120ms-RES-fast-V4-CN-29-U35`）。
+
+- token 是 note 中以**段首或 `-` 为界**的独立子串（`common.has_token(note, token)`，等价 `(?:^|-)TOKEN(?:$|-)`）。如 `-RES-fast-V4-CN-29-U35` 含 token `RES`、`fast`、`V4`、`CN`、`29`、`U35`，不含 `CF`。
+- 单一职责：`exit_family.has_family_note`（`V4`/`V6`/`DS`）、`china_check.has_cn_note`（`CN`）均基于 `has_token` 实现，新增/判断 token 不得另写正则。（历史 `is_cf_heuristic` 随 CF token 废弃移除。）
+- token 分隔符统一为 `-`。历史以空格分隔的流媒体段（`NF(US) D+ YT`）在 `normalize_note` 时被 `_flatten_segs` 拆解为 `-` 连接的独立 token（归一化后渲染 `-NF(US)-D+-YT-`），因此可被 `has_token`/merge 判重命中；**空格不是维护态 token 分隔符**。
+- 幂等：追加 token 前先 `has_token` 判重（`annotate_family`/`annotate_cn`），避免重复标注。
+
+### 处理流程
+
+主要来源为 `all.json`（JSON 数组，含逐 IP 元数据），zip 归档作为回退。脚本依次：
+
+1. 下载 zip 归档（默认来源 `zip.cm.edu.kg`，可 `-u` 指定）
+2. 解压并按 `data/raw/<port>/<country>.txt` 重新组织（含上游聚合文件 `ALL.txt` → `#ALL`；`raw/` 为可重建中间产物，git 不入库，仅下载侧在 CI 运行期生成）
+3. 并行拉取并合并 CF 反代补充来源（见下方「CF 反代补充来源」；`--no-extra-sources` 跳过），无国家标签的条目经 `ip-api.com/batch` 尽力补齐国家码（失败保留 `#ALL`）；合并时同端口已有国家标注的重复 `#ALL` 条目会被剔除
+4. 按国家汇总为 `data/download/countries/<country>.txt`（跨端口去重，不含 ALL）
+5. 按端口汇总为 `data/download/ports/<port>.txt`（跨国家去重；`#ALL` 条目亦计入）
+6. 按常用集合汇总为 `data/download/sets/<集合>.txt`（见下方集合表）
+7. 去重合并为 `data/download/all.txt`（含 `#ALL` 条目）
+
+### 限量版 `_ltd`
+
+- 下载侧 `data/download/sets/<集合>_ltd.txt`、`data/download/all_ltd.txt`：每国最多取前 `--per-country-limit` 条（默认 20，按 IP 序）；`#ALL` 条目在 `all_ltd` 中单独取前 `--per-country-limit` 条
+- 验证侧 `data/valid/*_ltd.txt` 及各国家/集合目录内 `ltd.txt`：每国取**实测下载速度最快**的 20 条（速度并列/无速度时按延迟兜底），集合内与 `all_ltd` 全局按速度降序
+- `--per-country-limit 0` 时不生成限量文件
+
+## 国家集合
+
+| 集合 | 覆盖国家/地区 | 用途 |
+|---|---|---|
+| `europe` | AL AT BE BG BY CH CY CZ DE DK EE ES FI FR GB GR HR HU IE IS IT LT LV MD MK NL NO PL PT RO RS RU SE SI SK UA（36） | 欧洲全域 |
+| `asia` | AE AM AZ BH CN GE HK ID IL IN JP KG KH KR KZ MO MY OM PH SA SG TH TR TW UZ VN（26） | 亚洲全域 |
+| `north_america` | CA MX US VG（4） | 北美 |
+| `south_america` | AR BR CL CO EC（5） | 南美 |
+| `oceania` | AU NZ（2） | 大洋洲 |
+| `africa` | EG NA NG ZA（4） | 非洲 |
+| `middle_east` | AE BH IL OM SA TR（6） | 中东 |
+| `hot` | AU CA DE FR GB HK JP KR NL SG TW US RU（13） | 热门线路 |
+| `cn_common` | HK TW SG JP KR US DE GB FR NL RU CA AU（13） | 中国大陆常用 |
+| `hk_us_jp_sg_tw_kr` | HK US JP SG TW KR（6） | 港美日新台韩 |
+
+## 可用性验证
+
+CI 每次更新后对 `data/download/all.txt` 做连通性检查，输出镜像 `data/` 结构的存活列表到 `data/valid/`。非限量清单**按延迟升序**（最快在前），`_ltd` 限量清单**按实测下载速度降序**。
+
+### TLS 握手检测
+
+对每个代理做 TLS 握手（SNI=`cdnjs.cloudflare.com`），成功即判定存活：
+
+### 速度测试
+
+每个存活代理在新建 TLS 连接上做真实下载测速：发送 `GET /ajax/libs/three.js/r128/three.js`（约 530 KB），
+最多读取 `--speed-bytes`（默认 1 MB）字节或持续 `--speed-timeout`（默认 5s）秒，得到吞吐速度（MB/s，两位小数）。
+
+测速为 **稳态测量**：响应头先解析，仅接受 HTTP 2xx（403 错误页等一律视为测速失败）；
+前 `--speed-warmup-bytes`（默认 256 KB）字节覆盖 TCP 慢启动爬坡，不计入计时；
+速度只按其后稳态窗口的字节量 ÷ 耗时计算，慢启动不再拉低读数，高/低延迟代理之间可比性更强。
+稳态样本不足时（传输在预热段内即 EOF / 超时）回退为全程平均，覆盖率与旧版一致。
+测速失败仅使速度置空，不影响存活判定。速度仅供排序与统计，不做二次筛选。
+
+默认启用 **RTT 自适应下载窗口**：根据 TLS 握手测得的延迟动态调整测速时长和下载量，
+使高延迟代理也能完成 TCP 慢启动进入稳态，消除延迟对速度测量的偏差。
+延迟越低（≤100ms）窗口不变（5s / 5MB），延迟越高窗口越大（500ms → 15s / 15MB，1s → 30s / 30MB）。
+可用 `--no-adaptive-speed` 关闭，回退到固定5s / 1MB。
+
+下载测速受独立并发上限 `--speed-workers`（默认 30）约束——判活（TCP/TLS）仍以 `--workers`（默认 500）
+高并发进行，但同一时刻最多 30 个测速下载在飞，避免 CI 出口带宽被打满导致测速值拉平、区分度下降。并发越低
+测速越准确，但全量测速耗时越长（并发 30 时约 30-40 分钟）。
+
+### 并发与容错
+
+- **asyncio 并发**：默认 500 个在飞任务（`-w` 可调），有界任务池实现严格限时
+- **超时**：单代理 5s（`-t`）
+- **自动重试**：TCP 能连通但 TLS 检测超时的代理，短暂间隔后重试一次，降低单次丢包误杀
+- **时间预算**：`--time-budget N` 是运行级墙钟上限：`quality_check.py` 在到点后停止开启新相位（探测相位让出 600s 给地理/信誉/滥用后处理）、已得结果仍落盘提交部分产物；`validate_proxies.py` 到点直接停止并提交已验证子集。默认 `0` = 不限制（跑完全部存活代理），实践中 CI 为控制流程时点显式设置预算（update 3600s、quality 5400s，见 README 流程两段）
+
+### 输出
+
+- `data/valid/all.txt`、`all_ltd.txt`：存活代理，格式 `ip:port#🇺🇸US-120ms-0.44MB/s`；`all.txt` 按延迟排序，`all_ltd.txt` 按速度排序；`#ALL` 条目（入口未知）只出现在这两个文件，不进入 `countries/`
+- `data/valid/countries/<国家>/`、`data/valid/sets/<集合>/`：按**出口国**（详见 reorg_country，三源汇聚的 `→<出口>`；行内 `#<入口>` 不参与目录归属）/集合分组的存活列表（同样含延迟/速度），每目录 `all.txt`（全量，延迟升序）、`ltd.txt`（限量，速度降序）、`rep.txt`（信誉排序，质量 CI 生成）、`good.txt`（综合最优，质量 CI 生成）；`ports/` 为按端口分组的平铺存活列表
+ - 分组文件（每国家/集合目录，validation CI 生成）：在 `all.txt`/`ltd.txt`/`rep.txt` 之外，每个目录还按 **出口家族 × 大陆可达** 派生以下清单（各带 `*_ltd.txt` 限量版，规则同 `ltd.txt`）：
+   - `v4.txt` — 出口为 IPv4-only 的代理；`v6.txt` — IPv6-only；`46.txt` — 双栈（v4+v6）
+   - `cn.txt` — 大陆可达（行内 `-CN` 或 `china.json` `verdict==reachable`，含 fallback 兜底）；`cn4.txt`/`cn6.txt`/`cn46.txt` — 大陆可达 × 对应家族
+   - 家族判定优先 `exit_family.json`（`ipv4`/`ipv6`/`dual`），无记录时回退行内 `-V4`/`-V6`/`-DS` 备注；记录为 `unknown` 时判定无家族（不回落行内旧 token，R165/R166）；`unknown` 家族只可能进 `cn` 组。空组不落盘（并清理上轮残留）
+   - 根级另有 `all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`（及 `*_ltd.txt`）；v4/v6 复用既有 `all_ipv4.txt`/`all_ipv6.txt`，不重复生成
+   - **可靠性变体**：家族×大陆分组清单（`v4`/`v6`/`46`/`cn`/`cn4`/`cn6`/`cn46`，含每目录分组与根级 `all_46`/`all_cn4`/`all_cn6`/`all_cn46`）同步派生 `*_verified.txt` 与 `*_stable.txt` 两个维度（如 `countries/US/cn4_verified.txt`、根级 `all_cn4_stable.txt`）；其余根级清单（`all_cn`、`all_ipv4`/`all_ipv6`）无此直接变体（`all_cn` 不经家族分支，自行产出 http/stable 子集）：
+     - `*_verified` — **全链路验证**子集：本轮测速成功 = TLS 握手 + HTTP 2xx 响应 + 真实下载全部通过，过滤"能握手但不吐数据"的半死代理
+     - `*_stable` — **连续两轮存活**交集：上一轮 `index.json` 与本轮存活的交集，对抗代理池快速 churn（首轮无上一轮数据时不生成）
+     - 空清单不落盘（并清理上轮残留）；数量计入 `meta.json` 的 `sets.all_verified` / `sets.all_stable`
+     - **跨家族联动**：`ltd` / `rep` / `good` 家族派生变体——验证 CI 为 ltd 池写 `ltd_verified.txt` / `ltd_stable.txt`（每目录）与根级 `all_ltd_verified` / `all_ltd_stable` / `all_{g}_ltd_stable` 等；质量 CI 为 rep 清单派生（根级 `all_rep(+v/s)`、`all_rep_ltd(+v/s)`、`all_{g}_rep(+v/s)`、`all_{g}_rep_ltd(+v/s)`，子目录 `rep(+v/s)`/`rep_ltd(+v/s)`，子目录分组 `{g}_rep` 单维度）；good CI 写 `good(+_verified/_stable/_uptime)` 与 `good_ltd(+_verified/_stable)`（根级与每目录，基于 ltd 池过滤）。质量侧 `_stable` 信号为 china.json streak≥2（连续两轮大陆可达），与验证侧"两轮存活"语义互补
+
+- `data/valid/meta.json`：本次验证汇总（字段见下）
+- `data/valid/index.json`：每存活代理的结构化索引（延迟 + 检测方法）
+- `data/valid/speed.json`：每测速成功代理的实测速度（MB/s，按速度降序）
+- `data/valid/history.jsonl`：每次验证的历史记录（最多 1000 条，供趋势图）
+
+- `data/quality/exit_family.json`：实际出口家族探测结果（exit-family 工作流，随 Quality check 完成后触发）。顶层 `ts` + `proxies`：每个 `ip:port#国家` 的值为 `{method, ts, family(ipv4/ipv6/dual/unknown), evidence(详见 evidence 语法), v4_src/v6_src, exit_v4/exit_v6(实测出口), shared_exit(复用同一出口的条数>1 时标记), upstream_client_ip(上游观测出口), upstream_family, upstream_absent, upstream_match}`。**部分字段按需填充**：`upstream_*` 只在有 v6 出口探测结果时出现（ipv6/dual），`shared_exit` 在 ipv4/unknown/dual 有值；缺字段视为无上游数据。探测字段之外（line/ip/port/cc 等可推导项）刻意不落盘。`family` 是分组/清单的权威来源（优先于行内 `-V4`/`-V6`/`-DS` 备注）。同时产出 `*_verified.txt` 家族判定依据。
+
+### 常用命令
+
+```bash
+python3 scripts/validate_proxies.py                    # 验证全部
+python3 scripts/validate_proxies.py --limit 50         # 冒烟测试前 50 条
+python3 scripts/validate_proxies.py --time-budget 180  # 最多跑 180 秒
+```
+
+## 更新差异
+
+每次更新对比上一版（`git show HEAD:data/download/all.txt`）生成差异：
+
+- `data/diff/latest.json`：最近一次 `added`/`removed` 列表
+- `data/diff/<时间戳>.json`：有变化时按次归档，最多保留最近 50 份
+- `data/quality/history.jsonl`：每条记录含 `added`/`removed` 计数
+
+`data/diff/` 由下载链每轮写在工作树，但**刻意不进版本库**（`commit_data.sh`
+按 `data/diff/` 路径排除，防提交面膨胀）；它只留存于 CI/本地磁盘供审计，
+版本库中 diff 属历史遗留（如 latest.json 的旧快照）。据此判断 diff 是否需要
+提交时，以工作树文件变化为准，而非 git 历史。
+
+## 数据文件参考
+
+### `data/output/stats.json`
+
+统计汇总（供徽章与外部消费），字段：
+
+| 字段 | 含义 |
+|---|---|
+| `ts` | 生成时间 |
+| `updated_at` | 数据最后更新时间 |
+| `unique` / `total` | 去重代理数 / 上游原始条目数 |
+| `countries` / `ports` | 国家数 / 端口数 |
+| `sets` | 各集合条数 |
+| `alive` / `alive_checked` / `alive_rate` | 存活数 / 检测数 / 存活率 |
+| `alive_countries` / `alive_sets` | 存活国家数 / 存活集合条数 |
+| `latency` | 延迟统计（`avg_ms`/`median_ms`/`p90_ms`/`max_ms`，毫秒） |
+| `latency_dist` | 延迟分桶直方图（如 `0-100`、`1000+`，毫秒） |
+| `speed` | 测速统计（`avg_mbps`/`median_mbps`/`p90_mbps`/`max_mbps`，MB/s） |
+| `speed_dist` | 速度分桶直方图（如 `0-0.5`、`5+`，MB/s） |
+| `ip_type` / `family` / `dual_stack` / `country_mismatch` | 出口 IP 类型分布 / 地址族分布 / 双栈数 / 错区数 |
+| `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
+| `history_records` / `alive_history_records` | 历史记录条数 |
+| `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable`=china.json 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served`=实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（china_check 空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts`=china.json 生成时间 |
+
+### `data/quality/cn_history.jsonl`
+
+**CN 分运营商趋势**（health_alert 每心跳追加，generate_stats 渲染近 7 天）：每行一快照 `{ts, cn_reachable, cn_by_isp}`；`cn_by_isp` 为 `{运营商: {sampled, reachable, min_ms, median_ms}}`（仅当 china.json per-key `isp_ms` 有读数时出现，全无则为 `{}`）。保留最近 `CN_HISTORY_DAYS`（8）天，`chart_cn_7d.svg` 用 `_windowed(…, 7)` 取其近 7 天窗口。
+
+### `data/output/badge.json`
+
+Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与外部 `![](…badge.json)` 消费），字段：
+
+| 字段 | 含义 |
+|---|---|
+| `schemaVersion` | 恒为 `1`（shields.io 端点规范） |
+| `label` | 恒为 `status` |
+| `message` | `fresh`（数据未过期）或 `stale`（年龄超过 3 小时） |
+| `color` | 对应 `brightgreen` / `red` |
+
+### `data/output/country_speed.json`
+
+按国家（ISO2 代码）的出口测速分布，供 `chart_country_speed.svg` 与外部消费。键为 `cc`，值为：
+
+| 字段 | 含义 |
+|---|---|
+| `n` | 该国参与测速的代理数 |
+| `p25` / `p50` / `p75` | 速度分位数（MB/s） |
+| `max` | 该国测速最大值（MB/s） |
+| `spread_pct` | 国内容量差异度：`round((p75-p25)/p50×100)`，取整 |
+
+示例：`"US": {"max": 47.64, "n": 2000, "p25": 3.43, "p50": 3.94, "p75": 6.2, "spread_pct": 70}`
+
+### `data/valid/meta.json`
+
+| 字段 | 含义 |
+|---|---|
+| `total` / `checked` / `alive` / `dead` | 总条目 / 实际检测数（含重试）/ 存活 / 失效 |
+| `elapsed_s` / `checked_per_s` | 耗时（秒）/ 吞吐（条/秒） |
+| `by_method` | 各判定方法（tls）的存活数 |
+| `latency` | 延迟统计（`avg_ms`/`median_ms`/`p90_ms`/`max_ms`，毫秒） |
+| `latency_dist` | 延迟分桶直方图（毫秒） |
+| `speed` | 测速统计（`avg_mbps`/`median_mbps`/`p90_mbps`/`max_mbps`，MB/s） |
+| `speed_dist` | 速度分桶直方图（MB/s） |
+| `per_country` / `per_port` | 各国 / 各端口存活数 |
+| `prefiltered` | 进入完整检测的条目数（`--quick-prefilter` 启用时为 TCP 预筛后保留数，未启用时等于 `total`） |
+| `sets` | 各集合存活条数 |
+| `ext_check` | 外部 API 检测汇总（仅 `--ext-check` 时出现）：`ext_check_total`/`ext_check_ok`/`ext_check_uncertain`/`ext_check_dead`/`ext_avg_response_ms` |
+
+### `data/valid/index.json`
+
+单行 JSON 结构化索引，键为 `ip:port#国家`，值为 `[延迟ms, 检测方法]`，按延迟升序：
+
+```json
+{"proxies": {"1.2.3.4:443#US": [640.1, "tls"], "5.6.7.8:8443#JP": [80.1, "tls"]}}
+```
+
+### `data/valid/speed.json`
+
+单行 JSON，键为 `ip:port#国家`，值为实测速度（MB/s，两位小数），按速度降序（仅含测速成功的代理）：
+
+```json
+{"proxies": {"5.6.7.8:8443#JP": 1.25, "1.2.3.4:443#US": 0.44}}
+```
+
+数据未变化时文件不变（避免无意义提交）。运行时间见 `meta.json` 的 `ts`。
+
+### `data/valid/ext_check.json`
+
+外部 API 多源验证逐条结果（仅 `--ext-check` 时生成），单行 JSON，键为 `ip:port#国家`，值为：
+
+```json
+{
+  "sources": ["090227", "cmliu"],
+  "alive": true,
+  "response_ms": 120.5,
+  "colo": "LAX",
+  "ipv4_ok": true,
+  "ipv6_ok": false,
+  "dual_stack": false,
+  "inferred_stack": "ipv4",
+  "exit_geo": {"countryCode": "US", "city": "Los Angeles", "asn": 13335, "org": "Cloudflare"}
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `sources` | 确认存活的 API 源列表（至少 2 个） |
+| `alive` | 共识结果：`true`/`"uncertain"`（仅 1 源确认）/`false` |
+| `response_ms` | 最快 API 响应时间（毫秒） |
+| `colo` | Cloudflare datacenter IATA（仅 090227/cmliu 源） |
+| `ipv4_ok` / `ipv6_ok` | IPv4/IPv6 出口可达 |
+| `dual_stack` | 双栈出口 |
+| `inferred_stack` | 推断出口栈类型：`ipv4`/`ipv6`/`dual` |
+| `exit_geo` | 出口地理信息（`countryCode`、`city`、`asn`、`org`） |
+
+数据未变化时文件不变（避免无意义提交）。
+
+### `data/quality/external_check.json`
+
+质量 CI 的 `external_check` 探测输出：顶层 `proxies` 键为 `ip:port#国家`，值为 `{success, response_ms, colo, ipv4_ok, ipv6_ok, exit_geo}`——外部出口地理回显（单源 `090227`）探测结果：`success` 回显成功与否、`response_ms` 耗时、`colo` CF 边缘 IATA、`ipv4_ok`/`ipv6_ok` 出口族可达标注、`exit_geo` 回显出口的 `countryCode`/`city`/`asn`/`org`。与 validate 的多源 `data/valid/ext_check.json` 不同：本文件是 quality 链以外部 API 为真相的独立证据（不做本地 TLS 握手），供 `build_exit_cc_map` 三源汇聚与 `resolve_exit_ips` 消费；**不写** `sources`/`dual_stack`（双栈权威在 `exit_family.json`）。
+
+### `data/quality/ipinfo.json`（质量 CI 输出）
+
+单行 JSON，顶层 `proxies` 键为 `ip:port#国家`，值为出口 IP 信息：`exit_ip`、`country`/`country_code`/`region`/`city`（出口地理）、`asn`/`org`/`isp`、`proxy`/`hosting`/`mobile` 标志、`ip_type`（DC/RES/MOB/PROXY）、`listed_country` 与 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、`ext_ok`/`ext_colo`/`ext_response_ms`（external_check 探测概要：成功与否 / 边缘 colo / 响应耗时）、`reputation`（0-100 信誉分，见下方口径说明）、`rep_flags`（共识确定的语义维度：proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、`rep_sources`（参与投票的源列表）、`risk_sources`（参与连续型风险罚分的源列表）、`reputation_source`（netcoffee/ncgy/ip-api/ipquery/ffraud/blackbox/otx/ipsum/ipapi_is/ipdata/whatismyip/dc_asn/abuse_list/vpn_asn/resproxy_asn/proxycheck/ip2location/stopforumspam/maltiverse/tor_exit/spamhaus/getipintel/abuseipdb/ipqs/dnsbl/spamcop/abuseipdb_public/wwuyi_unreachable/wwuyi_blocked/firehol_level2/bruteforceblocker/dataplane_vncrfb/drb_c2/nordvpn_exits/blackhole_monster/myipms_blacklist/ipnoise，多源时为 multi；实际数据中另出现过下载侧 legacy 来源标记 `blocklist_de`/`firehol_level1`/`freeipapi`/`hackmyip`/`iplocation`/`scamalytics` 等；`ipwhois` 免费层已不再返回 `connection`/`security`、`ipapi_is` 在 CI 出口从未成功响应，二者均退出默认源仅作 opt-in）、`risk`（由信誉分推导或滥用分）。注：地址族（`family`）和双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件；各 API 源的原始信号仅在 `reputation_cache.json`（7 天 TTL）中，ipinfo 不再冗余携带。
+
+**口径说明**：`reputation` 为**含 ip-api 地理信号**的运行维度分（`build_ipinfo_map`，ip-api 查到 `countryCode` 即参与投票；存在 abuse 分时直接 `100-abuse`）；行尾 `-<score>` 注解与 `reputation.json` 的 `score` 为**不含 ip-api** 的静态黑名单信号分（`build_reputation_map`，build_good 的 ≥80 门槛与 premium 消费此口径）。启用 abuse 服务时两数差距可不止单源权重（`reputation` 走 `100-abuse`，`reputation.json` 仍纯信号分），勿跨文件混用。
+
+### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
+
+`node_seen.json`：`{runs: {<YYYY-MM-DD>: 轮次计数}, proxies: {<key>: [出现日期…]}}`——滚动 45 天窗口的按轮存活记录。
+
+`uptime.json`：`{proxies: {<key>: {pct7, pct30, hits7, hits30, last_seen}}, runs7, runs30, ts}`。pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（去重，同日多轮算 1 天）的百分比——存现与分母同按日粒度，每个运行日都在场即 100%，缺一天按比例扣分（同一运行日多次运行不稀释分母，避免全勤节点被轮次总数低估）。
+
+### `data/valid/all.json`
+
+结构化代理池导出（`export_json.py`），数组元素：
+`{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`。
+`cn` 为该行 note 中存在 `CN`/`CN4`/`CN6`/`CN46`/`CNH` 任一 token 即 true（`CNH` 应用层确认蕴含 `CN`）；`exit` 为 `→CC` 后的实测出口 CC（无 `→` 时为 `null`）；`latency_ms`/`speed_mbps` 只取 note 中首个 `Nms`/`N.MB/s` token——`≈XMB/s` 大陆估算 token 因 `≈` 前缀开头的非数值无法经 `float()` 解析，`speed_mbps` 记 `null`（CN 视图估算不进入机器可读导出）。
+
+### `data/valid/all_diverse.txt`
+
+出口多样性视图：按实测出口 IP（exit_family 的 `exit_v4`/`exit_v6`，缺省回退入口 /24 网段）分组，每组仅保留综合分最高一条，全表按分数降序。
+
+### `data/quality/quality_meta.json`
+
+质量检测汇总（供 stats 消费）：`ts`（生成时间戳 ISO-8601）、`total`（代理总数）、`tls`（参与本轮质量检测的键数——quality 链以外部 API 回显判活、不做本地 TLS 握手，故含 validate `--ext-check` 复活的 `method=ext` 键，勿与 `index.json` 的 by_method 口径混用）、`by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`（外部 API 检查计数，`ok`=被外检覆盖的 TLS 存活键数 + 外检复活键数）、`country_mismatch`（错区数）、`risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100 分桶）、`rep_avg`/`rep_median`、`skipped`（本轮因 time-budget 耗尽而未执行的相位名列表，如 `ip-api geo`/`reputation lookup`；空列表=完整批次，供下游识别降级批）。
+
+### `data/quality/abuse.json`
+
+提供滥用分 key 时输出：键为 `ip:port#国家`，值为 `{service, score, risk, ...}` 滥用分与标志。若 `--time-budget` 导致滥用相位被跳过或截断，本轮以最近一次 `abuse.json`（年龄 ≤ 1 天，`ABUSE_STALE_TTL`）补齐缺失键作为兜底——滥用分在信誉合成中优先级最高，缺失会静默降级为纯共识分。仅当启用滥用服务（非 `none` 且有 key）时才会标记该相位为「跳过」，`abuse_service=none` 不产生假降级。
+
+### `data/quality/entry_audit.json`
+
+**入口国家标签审计**（audit_entry_cc CI 输出）：顶层 `generated_at`/`total`/`summary`（verdict 计数），`proxies` 键为 `ip:port#国家`，值为 `{listed, exit_cc, entry_ip, entry_geo, verdict, asn}`：`listed` 为订阅行内 `#CC` 标签，`exit_cc` 为 `build_exit_cc_map` 三源汇聚的出口国（无观测时 `None`），`entry_ip` 为入口 IP（域名入口时为 `null`），`entry_geo`/`asn` 为 ip-api 实测（查询失败为 `null`），`verdict` 见 scripts.md 表（`ok`/`ok_with_drift`/`tag_mismatch`/`cf_fronted`/`domain_entry`/`entry_unknown`）。只读不改行、不参与门控。
+
+### `data/quality/entry_geo.json`
+
+**入口地理缓存**（audit_entry_cc 轮间复用）：顶层 `updated_at`（ISO-8601）与 `ips`（`{ip: {cc, asn}}`——当前批入口 IP 的 ip-api 实测结果）。audit_entry_cc 仅对 `all.txt` 中缺失于缓存的入口 IP 发批量查询，命中则跳过以消除冗余外部依赖；`ips` 仅保留当前批存在的入口，过期 IP 随批次自然淘汰。由脚本重生成（CI quality 链产出）。
+
+### `data/quality/premium_meta.json`
+
+**premium 产物汇总**（build_premium 输出）：`{ts, file_count, proxy_count}`——生成时间与落盘的 `premium*.txt` 文件数/总行数（空清单时 `proxy_count=0`）。
+
+### `data/quality/reputation.json`
+
+单行 JSON，顶层 `proxies` 键为 `ip:port#国家`，值为 `{score, risk, source, sources, flags, numeric[, deep_bonus]}`：`score` 为 0-100 信誉分（越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），`source` 为 `netcoffee`/`ncgy`/`ip-api`/`ipquery`/`ffraud`/`blackbox`/`otx`/`ipsum`/`ipapi_is`/`ipdata`/`whatismyip`/`dc_asn`/`abuse_list`/`vpn_asn`/`resproxy_asn`/`proxycheck`/`ip2location`/`stopforumspam`/`maltiverse`/`tor_exit`/`spamhaus`/`getipintel`/`abuseipdb`/`ipqs`/`spamcop`/`dnsbl`（多源时为 `multi`；见上方 ipinfo 段 legacy 来源列表），`sources` 为实际参与合分的源列表，`flags` 为共识确定的语义维度列表，`numeric` 为参与连续型罚分的源列表，`deep_bonus` 为有深测带宽加成时的 +0~10 值（无则缺省）。按分数降序、同分按键序排列。
+
+### `data/quality/reputation_cache.json`
+
+单行 JSON，顶层 `proxies` 键为出口 IP，值为 `{<source>: {"ts": …, "data": …}}`——每个源独立记录最近一次查询的 epoch 秒时间戳与原始信号（逐源独立 TTL），TTL 内（默认 7 天）复用缓存信号重新计算分数，只对缺失/过期的 IP×源发起外部查询；**过期条目不删除**：过期后每轮尝试刷新，若刷新失败则回退使用最近一次缓存信号（尽可能保持数据最新而非过期即丢失），直至被新条目挤出缓存上限。静态列表信号不缓存。`--rep-cache-ttl` 调整有效期，`--no-rep-cache` 禁用缓存；表按每个 IP 最近信号时间封顶 4 万条，超限裁剪最旧。
+
+### `data/valid/all_rep.txt`
+
+与 `all.txt` 同源（全量存活池）的**信誉排行**：被检测的行按信誉分降序（同分按延迟升序再按 IP 序），无分数条目排在末尾保持原序；每行携带完整备注（流媒体/类型/信誉分）。每国/每集合目录下的 `rep.txt` 用同样的排序规则，源为对应目录的 `all.txt`（全量存活集）。
+
+### `data/valid/all_good.txt` 及各目录 `good.txt`
+
+**综合最优清单**（质量 CI 生成，`build_good.py`）：从对应池（根级 `all.txt` / 各国家、集合目录 `all.txt`）中筛选同时满足以下条件的代理：
+
+1. 大陆可达（`china.json` 判定 `reachable`，仅当期可达集，过期历史 `-CN` 不再兜底——与 `all_cn.txt` 同规则，见 `scripts/china_check.py`「严格交战」）
+2. 信誉分 ≥ 80（存在于 `reputation.json` 且 `score >= 80`）
+3. 非高风险（`reputation.json` 的 `risk != high`）
+
+按综合分降序排列：`round(0.6×信誉分 + 0.2×延迟分 + 0.2×速度分)`；延迟分 ≤100ms 记 100、≥1500ms 记 0 线性递减，速度分 `min(MB/s÷5, 1)×100`，缺失均记 0；同分依次按延迟升序、IP 序。**每一份 `good` 清单都是仅含大陆可达行的 CN 列表，因此全部输出统一渲染 CN 视图**：行内 ms 为大陆实测 RTT、速度 token 改写为 `≈XMB/s` 大陆视角估算（语义同 `all_cn.txt`，`common._rewrite_cn_speed`）；无 `cn_ms` 数据时行保持原样。
+
+### `data/valid/all_premium.txt` 及各目录 `premium.txt`
+
+**高端优质清单**（质量 CI 生成，`build_premium.py`）：从对应池中筛选同时满足以下条件的代理（比 `good` 更严格）：
+
+1. 大陆可达（`china.json` 判定 `reachable`，与 `good` 同规则）
+2. 信誉分 ≥ 95（存在于 `reputation.json` 且 `score >= 95`）
+3. 真实住宅 IP（`ipinfo.json` 的 `ip_type == "RES"` **且 `geo_checked == true`**——查不到出口地理时 `classify_ip({})` 默认 RES 只是未知，不得当作实测住宅）
+4. 非高风险（`reputation.json` 的 `risk != high`）
+
+综合分公式与 `good` 一致（信誉为主），按综合分降序排列。**每一份 `premium` 清单都是仅含大陆可达行的 CN 列表，因此全部输出统一渲染 CN 视图**（大陆实测 ms + `≈XMB/s` 大陆估算，语义同 `all_cn.txt`；无 `cn_ms` 数据时行保持原样）。同步派生 `_verified.txt`/`_stable.txt`/`_uptime.txt` 可靠性变体与 `_<tier>.txt` 速度档变体；另按出口家族派生 `*_v4.txt`/`*_v6.txt`/`*_46.txt` 分支（优先 `exit_family.json`，回退行内 `-V4`/`-V6`/`-DS`，与 `all_cn4/cn6/cn46` 同规则），各分支同样派生全部变体，空家族分支不留盘并清理残留。
+
+### `data/quality/china.json`（china-check CI 输出）
+
+顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为 `ip`/`port`/`cc`、`verdict`（`reachable`/`unreachable`/`uncertain`/`skipped`）、`basis`（判据源，如 `cn27`/`cn20`/`itdog`/`itdog_tcping`/`cn40`；保守判定需 ≥2 方法确认才标 reachable，多节点源单独 ok 即可达）、`ms`（可达延迟）、`level`（证据分级：任一成功源给出应用层 HTTP 确认 → `http`，仅传输层 TCP → `tcp`，无成功源 → `null`）、`streak`（连续可达轮数，跨轮累计）、`sources`（各源原始结果，itdog 源含 `level`；batch_http 失败时由 `itdog_tcping` 大节点池补测）、`ts`（检测时间）、`fallback`（上一轮可达、本轮仅因源配额/抖动未获确认而经 `compute_fallback_merge` 并入历史兜底的键置位）、`flip`（本轮起连续翻转计数，稳定子集准入排除 `> STABLE_MAX_FLIP` 的慢性抖动源）、`cn_mainland`（大陆视角 RTT 是否低于 `--cn-latency-cap` 门槛）、`isp_ms`（各运营商最小 RTT 汇聚，`{运营商: ms}`，取 fastest-isp 时即用户当前的最快运营商视角；来源 itdog 等 per-ISP 节点，无读数则不写该字段）。非 `reachable` 键（`unreachable`/`uncertain`/`skipped`，含历史兜底残留）无 `ms`/`isp_ms` 字段属预期——`ms` 缺失仅出现在未确认可达的行，`all_cn.txt` 这类可达清单才保证逐行有 ms（其健康自检覆盖行数/噪声/缺 ms 三项）。（历史字段 `cf_heuristic` 随 L1 启发式移除，不再写入）。
+
+### `data/valid/all_cn.txt`
+
+**全量大陆可达清单**（china-check CI）：从 `data/valid/all.txt` 全量存活池中筛出本次判 `reachable` 的行（缺 all.txt 时回退 `all_ltd.txt`；含经 `compute_fallback_merge` 并入的历史兜底键，其 verdict 已在写 `china.json` 前改写为 reachable，见 `logic.md`），统一追加 `-CN` 备注（应用层确认行再追加 `-CNH`）；按**大陆实测延迟升序**（缺失垫底、同值稳定）。**清单保持完整（全可达集，正常水平 ≥1 万），不按大陆延迟门槛精简**。每行的 ms 为大陆视角读数（`common.cn_fastest_ms`：最快运营商视角优先，即取 `isp_ms` 各运营商最小 RTT 的全局最小——大陆用户体验上界；无 per-ISP 读数回退 `cn_display_ms` 可信大陆探测源 cn20/cn24/cn27；L3 复核源 1ms 噪声不落地），速度 token 同步改写为 `≈XMB/s` 大陆视角估算。逐条检测明细见 `china.json`；落地自带健康自检（行数 ≥1 万、无 ≤2ms 噪声、无缺 ms 行，见 `check_cn_health`）。
+
+### `data/valid/all_cn_http.txt` / `data/valid/all_cn_stable.txt`
+
+china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序）：
+
+- `all_cn_http.txt` — **应用层确认**子集：本轮任一成功源给出 HTTP 级确认（`level=http`）或历史已带 `-CNH` 的行。TCP 通但应用层被干扰的代理不会进入此清单。`-CNH` 为**粘性标**（反映最近一次应用层确认，非逐轮新鲜；`common` 渲染 CNH 恒蕴含 CN，因此弱确认键的池行仍显示 `-CN-CNH`，但不会进入 `all_cn.txt`）
+- `all_cn_stable.txt` — **跨轮稳定**子集：连续 ≥2 轮判 `reachable` 的行（strict，不含历史 `-CN` 兜底），对抗单轮误判与快速 churn
+
+推荐消费顺序：`all_cn_stable.txt` > `all_cn_http.txt` > `all_cn.txt`。
+
+### `data/valid/all_46.txt` / `all_cn4.txt` / `all_cn6.txt` / `all_cn46.txt`
+
+**根级分组文件**（validation CI 生成）：`all_46.txt` 为全部出口双栈（v4+v6）代理，`all_cn4.txt`/`all_cn6.txt`/`all_cn46.txt` 为大陆可达 × 对应家族；顺序沿用全量池（延迟升序），家族判定同国家目录分组（优先 `exit_family.json`，无记录回退行内 `-V4`/`-V6`/`-DS`，记录 `unknown` 不回落）。对应 `all_*_ltd.txt` 为按每国限量的速度降序版。v4/v6 分组复用既有 `all_ipv4.txt`/`all_ipv6.txt`，根级不重复生成。**CN 系分组（`cn*`/`all_cn*`）行内 ms 为大陆实测 RTT、速度为 `≈XMB/s` 大陆估算**（`common.cn_fastest_ms` 最快运营商视角优先，同 all_cn.txt 口径）。
+
+### `data/quality/history.jsonl`（每行一条）
+
+`ts`、`total`、`unique`、`countries`、`ports`、`sets`、`added`、`removed`。数据未变化时跳过，最多保留最近 1000 条。
+
+### `data/valid/history.jsonl`（每行一条）
+
+`ts`、`total`、`checked`、`alive`、`dead`。与上一条完全相同则跳过，最多 1000 条。
+
+### `data/quality/source_history.json`
+
+每次 download 运行向该文件**追加**一轮各上游源的 `unique` 数快照：`{"runs": [{"ts": <ISO-8601>, "counts": {<源标签>: 去重数}}]}`，保留最近 14 轮（`SOURCE_HISTORY_MAX`），内容不变不重写。供 `health_alert.check_sources` 检测上游源覆盖率骤降（相对近 8 轮中位数下降 > 55% 且历史规模 ≥ 500 触发告警）。
+
+### `data/quality/upstream_meta.json`
+
+上游 `all.json` 导出的逐 IP 元数据（keyed by 代理 IP），由 `download_proxies.py` 生成，供下游（如 exit-family 交叉验证）消费。每个值含 `clientIp`（该代理的真实出口 IP，Cloudflare 视角）、`family`（由 `clientIp` 派生，ipv4/ipv6）、`asn`、`asOrganization`、`country`、`city`、`region`、`continent`、`colo_iata`。使用旧版 zip 回退源时本文件不更新。
+
+### `data/quality/ip_sources.json`
+
+逐 IP 下载源归属（由 `download_proxies.py` 生成）。键为 `ip:port#CC`，值为来源标签：`"main"`（主源 zip.cm.edu.kg）、补充源按上游**来源**归并（IP-OPT-1 起：`wentao`/`list`/`ymyuuu`/`leilao_cfproxy`/`proxyip`/`wwuyi`/`wanwu`/`svip_cfip`；IP-OPT-6 起加 `afr`；IP-OPT-7 起加 `wangallen`/`farel`；IP-OPT-8 起摘除零独占的 `ipdb_api` 镜像；IP-OPT-9 起加 `cmliu`；同站多文件只记一个来源，同站重复不判 `multi`）、镜像注册域前缀标签（通用清单名如 `all.json` 会记为 `mirror-*/all` 消歧）、`"multi"`（多来源重叠）或 `"unknown"`。供 `analyze_sources.py` 消费。
+
+### `data/quality/source_quality.json`
+
+各下载源质量指标（由 `analyze_sources.py` 生成）。顶层含 `ts`（生成时间）、`total_proxies`（总代理数）、`total_alive`（存活数）、`sources`（逐源指标）。每个源含：`total`/`alive`/`survival_rate`（存活率）、`avg_latency`/`median_latency`（延迟 ms）、`avg_speed`/`median_speed`（速度 MB/s）、`avg_reputation`（信誉分 0-100）、`reputation_dist`（风险分布）、`china_reachable_count`/`china_reachable_rate`（大陆可达数；`china_reachable_rate` = 大陆可达数 ÷ 该源**存活数**，反映存活代理的大陆可用占比）、`family_dist`（出口家族分布）、`country_dist`/`port_dist`（国家/端口分布）。
+
+### `data/quality/deep_speed.json`
+
+深测结果（`deep_speed.py` 每周或手动触发，keyed）。顶层含 `generated`（`YYYY-MM-DDTHH:MM:SSZ` 生成时间，供时效判断，超 10 天过期）、`proxies`（逐键明细）与 `meta`（参数快照：`cc`/`source`/`limit`/`bytes_mb`/`streams`/`timeout`/`targets`）三个平级键。`proxies[key]` 的结构为 `{tls_ms: <TLS 建连耗时 ms>, <target>: {"agg_mbps": <该目标多流总吞吐 MB/s>, "streams_ok": <成功流数>, "streams_total": <并发流总数>, "samples": [<逐流 MB/s 或 null>]}, …}`——`tls_ms` 与各 target 平级置于顶层（最先测得）。消费方：`quality_check.build_reputation_map`（最优目标 `agg_mbps` 线性加成信誉分，封顶 +10，`read_fresh_deep_speed` 过期即弃）。
+### quality JSON 消费防御约定
+
+所有 quality 链 JSON 一律经 `common.read_json` 读取（解析失败或缺文件返回 `{}`；**合法非对象顶层**（数组/字符串/数字/布尔/null）也被规范化为 `{}`——一处防御覆盖全部 `.get("proxies", {}).items()` 消费点，避免 `None.get`/`str.get` 崩溃）。消费侧另加 entry 级 `isinstance(entry, dict)` 守卫（如 `annotate_classify` 的 `_build_china_sets`/`_build_family_map`/`_build_rep_map`/`_build_ip_type_map`、`uptime_map` 的 `isinstance(v, dict) and v.get("pct7") is not None` 过滤），形成顶层+条目双层防御。生产路径无消费真值依赖 list/str 顶层返回（下载链 `load_speed_keys` 局部 guard 保留为残余防御）。

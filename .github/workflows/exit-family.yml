@@ -1,0 +1,101 @@
+name: Exit family check
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Quality check"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: exit-family
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Actual exit IPv4/IPv6 family
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：不因触发者(quality-check)失败而跳过——本工作流从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），上游单次失败不应影响出口 IP 家族分离与标注
+          # （all_ipv4/all_ipv6/-V4/-V6/-DS），否则本次家族观测将缺席。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        if: steps.gate.outputs.skip != 'true'
+        run: python -m unittest discover -s tests -v
+
+      - name: Exit family check
+        id: exit
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/exit_family.py
+
+      - name: Annotate and classify
+        id: annotate
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/annotate_classify.py
+
+      - name: Build good lists
+        id: good
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/build_good.py
+
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。tests 步先于数据改动执行、抓不到改后状态，
+      # 此处对已落盘数据校验，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
+        run: >-
+          python -m unittest
+          tests.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      # 图表/统计由专职 stats 工作流在 "Exit family check" 完成后统一重建（单一写入者）
+
+      - name: Show summary
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          echo "IPv4 exit:"
+          wc -l data/valid/all_ipv4.txt 2>/dev/null || true
+          echo "IPv6 exit:"
+          wc -l data/valid/all_ipv6.txt 2>/dev/null || true
+          echo "Family distribution:"
+          jq -r '[.proxies[].family] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/quality/exit_family.json 2>/dev/null || true
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true' && steps.exit.outcome == 'success' && steps.annotate.outcome == 'success' && steps.good.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

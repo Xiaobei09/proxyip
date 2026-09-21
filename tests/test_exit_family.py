@@ -1,0 +1,489 @@
+"""Tests for exit_family.py pure functions."""
+
+import json
+import socket
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import exit_family as ef
+
+
+V6_IP = "2a0a:4cc0:80:2315:a4cc:d3ff:fe19:8f6f"
+V4_IP = "192.155.85.13"
+
+
+class TestParseTrace(unittest.TestCase):
+    def test_parses_trace(self):
+        body = b"fl=1\nip=1.2.3.4\nloc=US\ntls=TLSv1.3\n"
+        trace = ef.parse_trace(body)
+        self.assertEqual(trace["ip"], "1.2.3.4")
+        self.assertEqual(trace["loc"], "US")
+        self.assertEqual(trace["fl"], "1")
+
+    def test_empty(self):
+        self.assertEqual(ef.parse_trace(b""), {})
+
+
+class TestWriteLines(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp(prefix="ef_write_")) / "all_ipv6.txt"
+
+    def test_empty_unlinks_not_writes(self):
+        # 对应家族无代理 → 清空不落盘，不留 0 字节残留
+        self.path.write_text("1.1.1.1:443#US\n", encoding="utf-8")
+        ef.write_lines(self.path, [])
+        self.assertFalse(self.path.exists())
+
+    def test_missing_noop(self):
+        ef.write_lines(self.path, [])
+        self.assertFalse(self.path.exists())
+
+    def test_nonempty_writes(self):
+        ef.write_lines(self.path, ["1.1.1.1:443#US", "2.2.2.2:443#US"])
+        self.assertEqual(
+            self.path.read_text(encoding="utf-8"),
+            "1.1.1.1:443#US\n2.2.2.2:443#US\n",
+        )
+
+
+class TestClassify(unittest.TestCase):
+    def test_classify(self):
+        self.assertEqual(ef.classify_family("1.2.3.4", None), "ipv4")
+        self.assertEqual(ef.classify_family(None, V6_IP), "ipv6")
+        self.assertEqual(ef.classify_family("1.2.3.4", V6_IP), "dual")
+        self.assertEqual(ef.classify_family(None, None), "unknown")
+
+    def test_same_echo_not_dual(self):
+        """两次探测返回同一地址（固定上游/服务未区分家族）→ 按字面量归单栈。"""
+        self.assertEqual(ef.classify_family("1.2.3.4", "1.2.3.4"), "ipv4")
+        self.assertEqual(ef.classify_family(V6_IP, V6_IP), "ipv6")
+
+    def test_literal_over_domain_assumption(self):
+        """v4 域名探测意外返回 v6 字面量 → 仍按字面量计（不按域名假设）。"""
+        self.assertEqual(ef.classify_family(V6_IP, None), "ipv6")
+        self.assertEqual(ef.classify_family("1.2.3.4", V6_IP), "dual")
+
+
+class TestEvidence(unittest.TestCase):
+    def test_evidence_of(self):
+        self.assertEqual(ef.evidence_of("1.2.3.4", V6_IP), "cross")
+        self.assertEqual(ef.evidence_of("1.2.3.4", "1.2.3.4"), "single_path")
+        self.assertEqual(ef.evidence_of("1.2.3.4", None), "one_sided")
+        self.assertEqual(ef.evidence_of(None, None), "none")
+
+
+class TestAnnotateFamily(unittest.TestCase):
+    def test_replace_bucket(self):
+        line = "1.2.3.4:443#US-100ms-0.5MB/s-V6"
+        self.assertEqual(
+            ef.annotate_family(line, "ipv4"),
+            "1.2.3.4:443#US-100ms-0.5MB/s-V4",
+        )
+
+    def test_unknown_clears_stale_token(self):
+        """探测无结论（unknown）→ 移除旧家族 token，不得残留误导下游。"""
+        line = "1.2.3.4:443#US-100ms-0.5MB/s-V6"
+        out = ef.annotate_family(line, "unknown")
+        self.assertNotIn("-V6", out)
+        self.assertIn("-100ms", out)
+
+    def test_no_token_when_family_unknown(self):
+        out = ef.annotate_family("1.2.3.4:443#US-100ms-0.5MB/s", "unknown")
+        self.assertNotIn("-V4", out)
+        self.assertNotIn("-V6", out)
+
+
+class TestProbeTargets(unittest.TestCase):
+    def test_first_success_wins(self):
+        calls = []
+
+        def fake(ip, port, host, path, timeout, family=None):
+            calls.append(host)
+            return "9.9.9.9" if host == "first.example" else None
+
+        orig = ef._probe_one
+        ef._probe_one = fake
+        try:
+            lit, src = ef._probe_targets(
+                "1.1.1.1", 443,
+                [("first.example", "/"), ("second.example", "/")], 5)
+        finally:
+            ef._probe_one = orig
+        self.assertEqual((lit, src), ("9.9.9.9", "first.example"))
+        self.assertEqual(calls, ["first.example"])  # 命中即停，不浪费探测
+
+    def test_all_fail(self):
+        orig = ef._probe_one
+        ef._probe_one = lambda *a, **k: None
+        try:
+            self.assertEqual(ef._probe_targets("1.1.1.1", 443,
+                                               [("a.example", "/")], 5),
+                             (None, None))
+        finally:
+            ef._probe_one = orig
+
+
+class TestExtractExitIp(unittest.TestCase):
+    def test_trace_format(self):
+        self.assertEqual(ef._extract_exit_ip(b"fl=1\nip=1.2.3.4\n"), "1.2.3.4")
+
+    def test_plain_ip_v4(self):
+        self.assertEqual(ef._extract_exit_ip(V4_IP.encode() + b"\n"), V4_IP)
+
+    def test_plain_ip_v6(self):
+        self.assertEqual(ef._extract_exit_ip((V6_IP + "\n").encode()), V6_IP)
+
+    def test_garbage(self):
+        self.assertIsNone(ef._extract_exit_ip(b"<html>blocked</html>"))
+        self.assertIsNone(ef._extract_exit_ip(b""))
+
+    def test_bogon_rejected(self):
+        """私网/环回/CGNAT/fake-ip 段回显一律视为探测失败。"""
+        for bogon in (
+            b"192.168.1.1", b"10.0.0.7", b"172.16.0.9", b"127.0.0.1",
+            b"100.64.0.5", b"198.18.0.66", b"169.254.1.2",
+            b"ip=192.168.1.1\n", b"fe80::1\n", b"fc00::1234\n",
+        ):
+            self.assertIsNone(ef._extract_exit_ip(bogon), bogon)
+
+    def test_public_kept(self):
+        for ok in (b"8.8.8.8", b"2606:4700:4700::1111"):
+            self.assertIsNotNone(ef._extract_exit_ip(ok))
+
+
+class TestSharedExits(unittest.TestCase):
+    def test_shared_exit_counts(self):
+        results = {
+            "a": {"exit_v4": "1.1.1.1"},
+            "b": {"exit_v4": "1.1.1.1"},
+            "c": {"exit_v4": "2.2.2.2", "exit_v6": V6_IP},
+            "d": {"exit_v6": V6_IP},
+            "e": {},
+        }
+        counts = ef.shared_exit_counts(results)
+        self.assertEqual(counts["1.1.1.1"], 2)
+        self.assertEqual(counts[V6_IP], 2)
+        self.assertEqual(counts["2.2.2.2"], 1)  # 独占出口也入表，仅计 1
+
+    def test_single_family_targets(self):
+        self.assertEqual(ef.EXIT_V4_HOST, "ipv4.icanhazip.com")
+        self.assertEqual(ef.EXIT_V6_HOST, "ipv6.icanhazip.com")
+
+
+class TestTlsExit(unittest.TestCase):
+    def test_v6_exit(self):
+        with mock.patch.object(ef, "request_tls_sni", return_value=(200, {}, f"ip={V6_IP}\nloc=AT\n".encode())):
+            res = ef.tls_exit("1.2.3.4", "443", 10)
+        self.assertEqual(res["family"], "ipv6")
+        self.assertEqual(res["ip"], V6_IP)
+
+    def test_v4_exit(self):
+        with mock.patch.object(ef, "request_tls_sni", return_value=(200, {}, f"ip={V4_IP}\n".encode())):
+            self.assertEqual(ef.tls_exit("1.2.3.4", "443", 10)["family"], "ipv4")
+
+    def test_no_ip(self):
+        with mock.patch.object(ef, "request_tls_sni", return_value=(200, {}, b"fl=1\n")):
+            self.assertEqual(ef.tls_exit("1.2.3.4", "443", 10)["family"], "unknown")
+
+    def test_connection_fail(self):
+        with mock.patch.object(ef, "request_tls_sni", return_value=(None, {}, b"")):
+            self.assertEqual(ef.tls_exit("1.2.3.4", "443", 10)["family"], "unknown")
+
+
+class TestCheckOne(unittest.TestCase):
+    def test_tls_method_v6(self):
+        trace_v6 = f"ip={V6_IP}\nloc=AT\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (None, {}, b""),            # v4: icanhazip 失败
+            (None, {}, b""),            # v4: ipify 失败
+            (200, {}, trace_v6),        # v6: icanhazip 成功
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {"1.2.3.4:443#US": "tls"}, 10)
+        self.assertEqual(res["method"], "tls")
+        self.assertEqual(res["family"], "ipv6")
+        self.assertEqual(res["exit_v6"], V6_IP)
+        self.assertIsNone(res["exit_v4"])
+        self.assertEqual(res["evidence"], "one_sided")
+        self.assertIn("ts", res)
+
+    def test_tls_method_v4(self):
+        trace_v4 = f"ip={V4_IP}\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, trace_v4),        # v4: 首源成功
+            (None, {}, b""),            # v6: 两源均失败
+            (None, {}, b""),
+        ]):
+            item = ("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "ipv4")
+        self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["v4_src"], ef.V4_TARGETS[0][0])
+
+    def test_second_provider_used_when_first_bogon(self):
+        """首源回显私网地址（被过滤）→ 自动落到第二服务商。"""
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, b"10.0.0.1"),     # icanhazip 回显 fake-ip 段 → 视为失败
+            (200, {}, f"ip={V4_IP}\n".encode()),   # ipify 兜住
+            (None, {}, b""),
+            (None, {}, b""),
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["v4_src"], "api4.ipify.org")
+        self.assertEqual(res["family"], "ipv4")
+
+    def test_cross_provider_agreement_single_path(self):
+        """两家族不同服务商返回同一字面量（路由劫持特征）→ 单栈而非 dual。"""
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, V4_IP.encode()),          # icanhazip-v4 → A
+            (None, {}, b""),                    # icanhazip-v6 失败
+            (200, {}, V4_IP.encode()),          # ipify-v6 → 同一字面量
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "ipv4")       # 不虚标 dual
+        self.assertEqual(res["evidence"], "single_path")
+        self.assertNotEqual(res["v4_src"], res["v6_src"])  # 跨服务商一致
+
+    def test_dual_stack(self):
+        trace_v4 = f"ip={V4_IP}\n".encode()
+        trace_v6 = f"ip={V6_IP}\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (200, {}, trace_v4),
+            (200, {}, trace_v6),
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "dual")
+        self.assertEqual(res["evidence"], "cross")
+        self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["exit_v6"], V6_IP)
+
+    def test_fallback_generic(self):
+        trace_generic = f"ip={V4_IP}\n".encode()
+        with mock.patch.object(ef, "request_tls_sni", side_effect=[
+            (None, {}, b""), (None, {}, b""),   # v4 双源失败
+            (None, {}, b""), (None, {}, b""),   # v6 双源失败
+            (200, {}, trace_generic),           # generic fallback 成功
+        ]):
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            key, res = ef.check_one(item, {}, 10)
+        self.assertEqual(res["family"], "ipv4")
+        self.assertEqual(res["exit_v4"], V4_IP)
+        self.assertEqual(res["v4_src"], ef.TRACE_HOST)
+
+    def test_probe_targets_are_single_family(self):
+        """探测目标必须是固定家族回显服务，且不强制入口 socket 家族。"""
+        with mock.patch.object(
+            ef, "request_tls_sni",
+            side_effect=[(200, {}, V4_IP.encode())]
+                        + [(None, {}, b"")] * (len(ef.V4_TARGETS) - 1
+                                               + len(ef.V6_TARGETS)),
+        ) as m:
+            item = ("1.2.3.4:443#US", "1.2.3.4:443#US", "1.2.3.4", "443", "US")
+            ef.check_one(item, {}, 10)
+        calls = m.call_args_list
+        v4_hosts = {h for h, _ in ef.V4_TARGETS}
+        v6_hosts = {h for h, _ in ef.V6_TARGETS}
+        got = [c.args[2] for c in calls]
+        self.assertIn(got[0], v4_hosts)              # 从 v4 组开始
+        self.assertTrue(set(got) <= v4_hosts | v6_hosts)
+        self.assertTrue(v6_hosts & set(got))          # v6 组确实被尝试
+        for c in calls:
+            self.assertIsNone(c.args[5])  # 不强制入口家族
+
+
+class TestPinning(unittest.TestCase):
+    def test_verify_pinning_flags_violation(self):
+        """钉扎自检：v4 目标混入 AAAA 时应在返回结构中暴露。"""
+        def fake_getaddrinfo(host, port, family):
+            if family == socket.AF_INET:
+                return [(socket.AF_INET, None, None, "", ("203.0.113.1", 443))]
+            if host == "api4.ipify.org":  # 模拟 v4 源被加挂 AAAA（钉扎失效）
+                return [(socket.AF_INET6, None, None, "", ("2001:db8::1", 443))]
+            raise OSError("no record")
+
+        orig = ef.socket.getaddrinfo
+        ef.socket.getaddrinfo = fake_getaddrinfo
+        try:
+            out = ef.verify_pinning()
+        finally:
+            ef.socket.getaddrinfo = orig
+        self.assertEqual(out["ipv4.icanhazip.com"]["A"], ["203.0.113.1"])
+        self.assertIn("2001:db8::1", out["api4.ipify.org"]["AAAA"])
+
+
+class TestNotes(unittest.TestCase):
+    def test_has_family_note(self):
+        self.assertTrue(ef.has_family_note("1.2.3.4:80#US-1ms-CN-V4"))
+        self.assertTrue(ef.has_family_note("1.2.3.4:80#US-1ms-DS"))
+        self.assertFalse(ef.has_family_note("1.2.3.4:80#US-1ms-CN"))
+        self.assertFalse(ef.has_family_note("1.2.3.4:80#\U0001F1FA\U0001F1F8US-1ms"))
+
+    def test_all_line_note(self):
+        line = "9.9.9.9:80#ALL-120ms-0.44MB/s-V4"
+        self.assertEqual(ef._note(line), "-120ms-0.44MB/s-V4")
+        self.assertTrue(ef.has_family_note(line))
+        self.assertEqual(
+            ef.annotate_family("9.9.9.9:80#ALL-120ms", "ipv4"),
+            "9.9.9.9:80#ALL-120ms-V4",
+        )
+
+    def test_annotate_family(self):
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms", "ipv4"),
+                         "1.2.3.4:80#US-1ms-V4")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-V4", "ipv4"),
+                         "1.2.3.4:80#US-1ms-V4")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms", "dual"),
+                         "1.2.3.4:80#US-1ms-DS")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms", "unknown"),
+                         "1.2.3.4:80#US-1ms")
+
+    def test_annotate_family_authoritative_replaces(self):
+        """权威探测结果直接替换旧家族 token（互斥桶，绝不双标）。"""
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-V4", "ipv6"),
+                         "1.2.3.4:80#US-1ms-V6")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-DS", "ipv4"),
+                         "1.2.3.4:80#US-1ms-V4")
+        self.assertEqual(ef.annotate_family("1.2.3.4:80#US-1ms-V6-CN-88", "dual"),
+                         "1.2.3.4:80#US-1ms-DS-CN-88")
+
+
+class TestSplit(unittest.TestCase):
+    def setUp(self):
+        self.results = {
+            "1.1.1.1:80#US": {"line": "1.1.1.1:80#US-1ms", "family": "ipv4"},
+            "2.2.2.2:80#US": {"line": "2.2.2.2:80#US-2ms", "family": "ipv6"},
+            "3.3.3.3:80#US": {"line": "3.3.3.3:80#US-3ms", "family": "dual"},
+            "4.4.4.4:80#US": {"line": "4.4.4.4:80#US-4ms", "family": "unknown"},
+        }
+
+    def test_dual_in_both(self):
+        v4, v6 = ef.split_by_family(self.results)
+        self.assertEqual(len(v4), 2)
+        self.assertEqual(len(v6), 2)
+        self.assertIn("3.3.3.3:80#US-3ms-DS", v4)
+        self.assertIn("3.3.3.3:80#US-3ms-DS", v6)
+
+    def test_unknown_excluded(self):
+        v4, v6 = ef.split_by_family(self.results)
+        for lines in (v4, v6):
+            self.assertFalse(any("4.4.4.4" in l for l in lines))
+
+    def test_unknown_stale_token_not_leak_to_branches(self):
+        """unknown 行即使残留旧 -V6 也绝不出现在任何家族清单（R165/R166）。"""
+        with_family = dict(self.results)
+        with_family["4.4.4.4:80#US"] = {
+            "line": "4.4.4.4:80#US-4ms-V6",
+            "family": "unknown",
+        }
+        v4, v6 = ef.split_by_family(with_family)
+        for lines in (v4, v6):
+            self.assertFalse(any("4.4.4.4" in l for l in lines))
+
+    def test_annotated_output(self):
+        v4, _ = ef.split_by_family(self.results)
+        self.assertIn("1.1.1.1:80#US-1ms-V4", v4)
+
+
+class TestLoadSample(unittest.TestCase):
+    def _path(self, name):
+        return Path(tempfile.mkdtemp(prefix="ef_")) / name
+
+    def test_load_respects_limit(self):
+        path = self._path("exit_family_sample.txt")
+        path.write_text(
+            "1.1.1.1:80#US-1ms\n2.2.2.2:80#US-2ms\n3.3.3.3:80#US-3ms\n",
+            encoding="utf-8",
+        )
+        sample = ef.load_sample(path, limit=2)
+        self.assertEqual(len(sample), 2)
+        self.assertEqual(sample[0][1], "1.1.1.1:80#US")
+
+    def test_skips_bad_lines(self):
+        path = self._path("exit_family_sample_bad.txt")
+        path.write_text("garbage\n4.4.4.4:80#US-4ms\n", encoding="utf-8")
+        sample = ef.load_sample(path, limit=0)
+        self.assertEqual([s[1] for s in sample], ["4.4.4.4:80#US"])
+
+
+class TestUpstreamMeta(unittest.TestCase):
+    def setUp(self):
+        self._base = Path(tempfile.mkdtemp(prefix="efm_"))
+        self.meta_file = self._base / "upstream_meta_test.json"
+
+    def _write(self, data):
+        self.meta_file.write_text(json.dumps(data), encoding="utf-8")
+
+    def tearDown(self):
+        self.meta_file.unlink(missing_ok=True)
+        self._base.rmdir()
+
+    def test_missing_file_returns_empty(self):
+        self.meta_file.unlink(missing_ok=True)
+        self.assertEqual(ef.load_upstream_meta(self.meta_file), {})
+
+    def test_corrupt_file_returns_empty(self):
+        self.meta_file.write_text("{not json", encoding="utf-8")
+        self.assertEqual(ef.load_upstream_meta(self.meta_file), {})
+
+    def test_non_dict_returns_empty(self):
+        self.meta_file.write_text("[1,2]", encoding="utf-8")
+        self.assertEqual(ef.load_upstream_meta(self.meta_file), {})
+
+    def test_loads_map(self):
+        self._write({"1.1.1.1": {"clientIp": "2603:c020::1", "family": "ipv6"}})
+        data = ef.load_upstream_meta(self.meta_file)
+        self.assertEqual(data["1.1.1.1"]["family"], "ipv6")
+
+    def test_loads_wrapped_map(self):
+        self._write({"proxies": {"1.1.1.1": {"family": "ipv6"}}})
+        data = ef.load_upstream_meta(self.meta_file)
+        self.assertEqual(data["1.1.1.1"]["family"], "ipv6")
+
+
+class TestCrossCheck(unittest.TestCase):
+    def _res(self, ip, family):
+        return {"line": f"{ip}:443#US", "ip": ip, "family": family}
+
+    def test_match_and_mismatch(self):
+        upstream = {
+            "1.1.1.1": {"clientIp": "2603:c020::1", "family": "ipv6"},
+            "2.2.2.2": {"clientIp": "2.2.2.2", "family": "ipv4"},
+        }
+        results = {
+            "1.1.1.1:443#US": self._res("1.1.1.1", "ipv6"),
+            "2.2.2.2:443#US": self._res("2.2.2.2", "ipv6"),
+            "3.3.3.3:443#US": self._res("3.3.3.3", "ipv4"),
+        }
+        ef.cross_check(results, upstream)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], True)
+        self.assertEqual(results["1.1.1.1:443#US"]["upstream_client_ip"], "2603:c020::1")
+        self.assertIs(results["2.2.2.2:443#US"]["upstream_match"], False)
+        self.assertIs(results["3.3.3.3:443#US"]["upstream_absent"], True)
+        self.assertNotIn("upstream_match", results["3.3.3.3:443#US"])
+
+    def test_unknown_probe_skips_comparison(self):
+        upstream = {"1.1.1.1": {"clientIp": "2603:c020::1", "family": "ipv6"}}
+        results = {"1.1.1.1:443#US": self._res("1.1.1.1", "unknown")}
+        ef.cross_check(results, upstream)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], None)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_absent"], False)
+
+    def test_dual_probe_lenient_match(self):
+        """探测为 dual 双栈时，与上游单侧（v4 或 v6）均不算矛盾。"""
+        upstream = {"1.1.1.1": {"clientIp": "1.1.1.1", "family": "ipv4"}}
+        results = {"1.1.1.1:443#US": self._res("1.1.1.1", "dual")}
+        ef.cross_check(results, upstream)
+        self.assertIs(results["1.1.1.1:443#US"]["upstream_match"], True)
+
+
+if __name__ == "__main__":
+    unittest.main()

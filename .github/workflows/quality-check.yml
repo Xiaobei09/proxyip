@@ -1,0 +1,105 @@
+name: Quality check
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Update proxy list"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quality-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Streaming and exit IP quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ABUSEIPDB_KEY: ${{ secrets.ABUSEIPDB_KEY }}
+      IPQS_KEY: ${{ secrets.IPQS_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查：有无正在运行/排队的同 workflow run
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 2. 触发者成功检查
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+            if [ "$CONCLUSION" != "success" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Triggering run concluded: $CONCLUSION, skipping"
+              exit 0
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        if: steps.gate.outputs.skip != 'true'
+        run: python -m unittest discover -s tests -v
+
+      - name: Deep quality check
+        id: quality
+        if: steps.gate.outputs.skip != 'true'
+        timeout-minutes: 110
+        run: python scripts/quality_check.py --source data/valid/all.txt --time-budget 5400 --rep-cache-ttl 604800
+
+      - name: Rolling uptime
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/uptime.py
+
+      - name: Reorganize by exit country
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/reorg_country.py
+
+      - name: Annotate and classify
+        id: annotate
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/annotate_classify.py
+
+      # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
+
+      - name: Audit entry CC labels
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: python scripts/audit_entry_cc.py --timeout 20
+
+      # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
+
+      - name: Show summary
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          echo "Checked proxies:"
+          wc -l data/valid/all.txt
+          echo "IP type distribution:"
+          jq -r '.by_type // empty' data/quality/quality_meta.json 2>/dev/null || true
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true' && steps.quality.outcome == 'success' && steps.annotate.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): quality check + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

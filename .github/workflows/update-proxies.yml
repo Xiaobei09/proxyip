@@ -1,0 +1,66 @@
+name: Update proxy list
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+  # push 触发已移除：与 concurrency(cancel-in-progress) 组合时，密集提交会
+  # 连环取消在跑的重探测任务，造成长时间无成功渲染（曾 5h+ 断档）。
+  # 改为 schedule + 手动 dispatch；代码变更需尽快生效时手动触发一次。
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-proxies
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: Download and extract proxies
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Download and extract
+        id: download
+        run: python scripts/download_proxies.py
+
+      - name: Validate proxies
+        id: validate
+        run: python scripts/validate_proxies.py --time-budget 3600
+
+      - name: Show stats
+        run: |
+          echo "Files extracted:"
+          find data/raw -name '*.txt' | wc -l
+          echo "Country files:"
+          find data/download/countries -name '*.txt' | wc -l
+          echo "Port files:"
+          find data/download/ports -name '*.txt' | wc -l
+          echo "Unique IPs:"
+          wc -l data/download/all.txt
+          echo "Alive proxies:"
+          wc -l data/valid/all.txt
+          echo "History records:"
+          wc -l data/quality/history.jsonl
+          echo "Diff archives:"
+          ls data/diff/*.json 2>/dev/null | wc -l
+
+      - name: Commit changes
+        if: steps.download.outcome == 'success' && steps.validate.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

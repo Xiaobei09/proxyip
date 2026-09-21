@@ -1,0 +1,467 @@
+"""Tests for generate_stats.py helpers and chart builders."""
+
+import json
+import sys
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import generate_stats as gs
+
+NOW = datetime.now(timezone.utc)
+
+
+def _ago(hours: float) -> str:
+    return (NOW - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def svg_ok(svg: str) -> bool:
+    ET.fromstring(svg)
+    return True
+
+
+class TestTicks(unittest.TestCase):
+    def test_nice_ticks_from_zero(self):
+        self.assertEqual(gs.nice_ticks(7500), [0, 2000, 4000, 6000])
+        self.assertEqual(gs.nice_ticks(0), [0])
+
+    def test_fmt_tick(self):
+        self.assertEqual(gs.fmt_tick(2500), "2500")
+        self.assertEqual(gs.fmt_tick(98.8), "98.8")
+        self.assertEqual(gs.fmt_tick(99.0), "99")
+
+
+class TestTimeHelpers(unittest.TestCase):
+    def test_to_epoch(self):
+        self.assertEqual(gs.to_epoch("2026-08-12T00:00:00Z"), 1786492800)
+        self.assertIsNone(gs.to_epoch(""))
+        self.assertIsNone(gs.to_epoch("garbage"))
+
+    def test_load_history_skips_malformed_lines(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "history.jsonl"
+            p.write_text(
+                '{"ts": "2026-09-16T01:00:00Z", "unique": 1}\n'
+                '3\n'
+                '["not", "dict"]\n'
+                '"str"\n'
+                'not json\n'
+                '{"ts": "2026-09-16T02:00:00Z", "unique": 2}\n',
+                encoding="utf-8",
+            )
+            recs = gs.load_history(p)
+            # decode 失败与成功解析但非 dict 的 malformed 行都弃（R84）
+            self.assertEqual(len(recs), 2)
+            self.assertEqual(recs[1]["unique"], 2)
+
+    def test_fmt_ago(self):
+        self.assertEqual(gs.fmt_ago(35), "35s ago")
+        self.assertEqual(gs.fmt_ago(90), "1m ago")
+        self.assertEqual(gs.fmt_ago(5400), "1h 30m ago")
+        self.assertEqual(gs.fmt_ago(3600), "1h ago")
+        self.assertEqual(gs.fmt_ago(2 * 86400 + 3600), "2d ago")
+
+
+class TestBuilders(unittest.TestCase):
+    HISTORY = None
+    VALID_HISTORY = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.HISTORY = [
+            {"ts": _ago(2), "unique": 100, "total": 200, "countries": 5, "ports": 3, "sets": {}, "added": 10, "removed": 5},
+            {"ts": _ago(1), "unique": 110, "total": 210, "countries": 5, "ports": 3, "sets": {}, "added": 12, "removed": 2},
+        ]
+        cls.VALID_HISTORY = [
+            {"ts": _ago(1.5), "total": 200, "checked": 200, "alive": 195, "dead": 5},
+            {"ts": _ago(0.5), "total": 210, "checked": 210, "alive": 205, "dead": 5},
+        ]
+    META = {
+        "alive": 205,
+        "checked": 210,
+        "sets": {"all": 205, "europe": 90, "hot": 160, "asia": 50},
+        "per_country": {"US": 100, "JP": 60, "DE": 45},
+        "per_port": {"443": 120, "8443": 85},
+        "latency": {"avg_ms": 300.0, "median_ms": 280.0, "p90_ms": 500.0, "max_ms": 1000.0},
+        "latency_dist": {"0-100": 20, "100-200": 50, "500-1000": 30},
+        "speed": {"avg_mbps": 0.8, "median_mbps": 0.7, "p90_mbps": 1.5, "max_mbps": 5.0},
+        "speed_dist": {"0-0.5": 30, "0.5-1": 100, "1-2": 60, "2-5": 15},
+    }
+    CN_DATA = {
+        "proxies": {
+            "1.1.1.1:80#US": {"verdict": "reachable"},
+            "2.2.2.2:80#JP": {"verdict": "skipped"},
+            "3.3.3.3:80#DE": {"verdict": "reachable"},
+            "4.4.4.4:80#FR": {"verdict": "uncertain"},
+        }
+    }
+    FAMILY_DATA = {
+        "proxies": {
+            "1.1.1.1:80#US": {"family": "ipv4"},
+            "2.2.2.2:80#JP": {"family": "dual"},
+            "3.3.3.3:80#DE": {"family": "ipv6"},
+            "4.4.4.4:80#FR": {"family": "unknown"},
+        }
+    }
+    REP_DATA = {
+        "proxies": {
+            "1.1.1.1:80#US": {"score": 95, "sources": ["ipquery", "ffraud", "netcoffee"]},
+            "2.2.2.2:80#JP": {"score": 80, "sources": ["ipquery", "ffraud"]},
+            "3.3.3.3:80#DE": {"score": 80, "sources": ["ipquery", "ffraud", "netcoffee", "ncgy"]},
+            "4.4.4.4:80#FR": {"score": 50, "sources": ["ipquery", "ffraud", "ipdata"]},
+        }
+    }
+    SOURCE_STATS = {
+        "sources": {
+            "cm": {"total": 500, "unique": 300, "overlap": 200},
+            "sp": {"total": 400, "unique": 250, "overlap": 150},
+            "kr": {"total": 200, "unique": 150, "overlap": 50},
+        }
+    }
+    QUALITY_META = {
+        "by_type": {"DC": 50, "RES": 100, "MOB": 30, "PROXY": 25},
+    }
+
+    def test_all_charts_valid_svg(self):
+        builders = {
+            "chart_combo.svg": gs.build_combo(self.HISTORY, self.VALID_HISTORY),
+            "chart_country.svg": gs.build_country(self.META),
+            "chart_port.svg": gs.build_port(self.META),
+            "chart_churn.svg": gs.build_churn(self.HISTORY),
+            "chart_latency_speed.svg": gs.build_latency_speed(self.META),
+            "chart_sets.svg": gs.build_sets(self.META),
+            "chart_cn.svg": gs.build_cn(self.CN_DATA),
+            "chart_family.svg": gs.build_family(self.FAMILY_DATA),
+            "chart_source_avail.svg": gs.build_source_avail(self.REP_DATA),
+            "chart_rep.svg": gs.build_rep(self.REP_DATA),
+            "chart_source_stats.svg": gs.build_source_stats(self.SOURCE_STATS),
+        }
+        for name, svg in builders.items():
+            with self.subTest(name=name):
+                svg_ok(svg)
+
+    def test_empty_inputs_placeholders(self):
+        self.assertIn("暂无数据", gs.build_combo([], []))
+        self.assertIn("暂无延迟/速度", gs.build_latency_speed({}))
+        self.assertIn("暂无子集数据", gs.build_sets({}))
+        self.assertIn("暂无大陆可达性", gs.build_cn({}))
+        self.assertIn("暂无出口族数据", gs.build_family({}))
+        self.assertIn("暂无信誉分数据", gs.build_rep({}))
+        self.assertIn("暂无信誉源数据", gs.build_source_avail({}))
+        self.assertIn("暂无信誉源统计", gs.build_source_stats({}))
+        self.assertIn("暂无入口标签审计数据", gs.build_entry_audit({}))
+
+    def test_entry_audit_stale_marker(self):
+        """entry_audit 停摆（R58 前连冻 8 天型）在图表标题显式标注数据日期。"""
+        fresh = gs.build_entry_audit({
+            "generated_at": _ago(0.5),
+            "total": 1803, "summary": {"tag_match": 1500, "tag_mismatch": 303},
+        })
+        self.assertNotIn("停摆", fresh)
+        self.assertIn("303/1803", fresh)
+        legacy = gs.build_entry_audit({
+            "generated_at": "2026-09-08T04:41:33+00:00",
+            "total": 1803, "summary": {"tag_mismatch": 303},
+        }, stale_hours=1)
+        self.assertIn("停摆", legacy)
+        self.assertIn("2026-09-08", legacy)
+        self.assertIn("303/1803", legacy)
+        svg_ok(legacy)
+
+    def test_build_port_skips_non_numeric_keys(self):
+        svg = gs.build_port({"per_port": {"443": 120, "abc": 5, "": 3}})
+        svg_ok(svg)
+        self.assertIn("443", svg)
+        self.assertNotIn("abc", svg)
+
+    def test_chart_latency_speed_has_bars_and_labels(self):
+        svg = gs.build_latency_speed(self.META)
+        svg_ok(svg)
+        self.assertIn("0-100", svg)
+        self.assertIn("500-1000", svg)
+        self.assertIn("0-0.5", svg)
+        self.assertIn("2-5", svg)
+        self.assertGreaterEqual(svg.count("<rect"), 6)
+
+    def test_escapes_labels(self):
+        svg = gs.build_churn([{"ts": '2026-08-12T00:00:00Z&"<x>', "added": 1, "removed": 0}])
+        svg_ok(svg)
+
+    def test_empty_svg_escapes_text(self):
+        svg = gs.empty_svg(text='怪<文本>&"注入"')
+        svg_ok(svg)
+        self.assertNotIn("<文本>", svg)
+        self.assertIn("&lt;文本&gt;", svg)
+
+    def test_legend_shows_latest_value(self):
+        svg = gs.build_combo(self.HISTORY, self.VALID_HISTORY)
+        self.assertIn("去重 110", svg)
+        self.assertIn("存活率", svg)
+
+    def test_windowed_drops_records_outside_window(self):
+        recs = [
+            {"ts": (NOW - timedelta(days=31)).strftime("%Y-%m-%dT%H:%M:%SZ"), "unique": 1},
+            {"ts": (NOW - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), "unique": 2},
+        ]
+        out = gs._windowed(recs, 30)
+        self.assertEqual([r["unique"] for r in out], [2])
+
+    def test_windowed_unparseable_timestamps_fallback(self):
+        recs = [{"ts": "garbage", "unique": 9}, {"ts": "", "unique": 8}]
+        self.assertEqual(gs._windowed(recs, 30), recs)
+
+    def test_combo_titles_window(self):
+        self.assertIn("近 7 天", gs.build_combo(self.HISTORY, self.VALID_HISTORY))
+
+    def test_churn_titles_window(self):
+        self.assertIn("近 7 天", gs.build_churn(self.HISTORY))
+
+    def test_cn_chart_sorted_by_count(self):
+        svg = gs.build_cn(self.CN_DATA)
+        svg_ok(svg)
+        self.assertIn("可达", svg)
+        self.assertIn("uncertain", svg)
+
+    def test_cn_chart_carrier_view(self):
+        data = {
+            "proxies": {
+                "a:443#US": {"verdict": "reachable",
+                             "isp_ms": {"中国移动": 44.0, "中国电信": 88.0}},
+                "b:443#JP": {"verdict": "reachable",
+                             "isp_ms": {"中国移动": 60.0, "中国联通": 100.0}},
+                "c:443#DE": {"verdict": "blocked",
+                             "isp_ms": {"中国移动": 200.0}},
+            }
+        }
+        svg = gs.build_cn(data)
+        svg_ok(svg)
+        # 可达/覆盖 + min/med + 速度参考上限均入标签（三运营商分别计算）
+        self.assertIn("中国移动  可达 2/3", svg)
+        self.assertIn("44", svg)
+        self.assertIn("中国电信  可达 1/1", svg)
+        self.assertIn("MB/s", svg)
+
+    def test_cn_7d_window_and_series(self):
+        hist = [
+            {"ts": _ago(10), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 90}}},
+            {"ts": _ago(8), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 91}}},
+            {"ts": _ago(1), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 95}}},
+            {"ts": _ago(0.1), "cn_reachable": 100,
+             "cn_by_isp": {"中国移动": {"reachable": 96}}},
+        ]
+        svg = gs.build_cn_7d(hist)
+        svg_ok(svg)
+        self.assertIn("近 7 天", svg)
+        # 10 天与 8 天前的记录被窗口裁掉，趋势只含最近两天
+        self.assertIn("中国移动", svg)
+
+    def test_cn_7d_empty(self):
+        svg = gs.build_cn_7d([])
+        svg_ok(svg)
+        self.assertIn("暂无 7 天", svg)
+
+    def test_cn_7d_no_carrier_data_placeholder(self):
+        """窗口内有历史但 cn_by_isp 全空（cn01 未采到 per-ISP 读数）时，不得
+        绘三条全 0 序列冒充"三运营商各 0 可达"，应落占位提示。"""
+        hist = [
+            {"ts": _ago(1), "cn_reachable": 20873, "cn_by_isp": {}},
+            {"ts": _ago(0.1), "cn_reachable": 20873, "cn_by_isp": {}},
+        ]
+        svg = gs.build_cn_7d(hist)
+        svg_ok(svg)
+        self.assertIn("暂无分运营商历史", svg)
+        self.assertNotIn("中国移动", svg)
+
+    def test_collect_cn_summary_rules(self):
+        data = {
+            "ts": "2026-08-29T00:00:00Z",
+            "proxies": {
+                "1.2.3.4:443#US": {"verdict": "reachable", "level": "http"},
+                "5.6.7.8:443#US": {"verdict": "reachable", "level": "tcp"},
+                "9.9.9.9:443#US": {"verdict": "unreachable"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            vd = Path(td)
+            (vd / "all_cn.txt").write_text("x\n" * 3)
+            (vd / "all_cn_http.txt").write_text("x\n")
+            (vd / "all_cn_stable.txt").write_text("x\n")
+            # 池内只有 1.2.3.4 与 5.6.7.8：reachable 只计当前池仍存在的键
+            (vd / "all.txt").write_text(
+                "1.2.3.4:443#US-1ms-1MB/s-CN\n"
+                "5.6.7.8:443#US-2ms-2MB/s-CN\n",
+                encoding="utf-8",
+            )
+            s = gs.collect_cn_summary(data, vd)
+            self.assertEqual(s["reachable"], 2)      # 交池：1.2.3.4 + 5.6.7.8
+            self.assertEqual(s["http"], 1)           # served 文件行数
+            self.assertEqual(s["stable"], 1)
+            self.assertEqual(s["served"], 3)
+            self.assertEqual(s["ts"], data["ts"])
+        empty = gs.collect_cn_summary({}, Path(td_removed := "/nonexistent"))
+        self.assertEqual(empty["reachable"], 0)
+        self.assertEqual(empty["served"], 0)
+
+    def test_collect_cn_summary_excludes_pool_churned_keys(self):
+        """china.json reachable 含已离场键（池 churn/fallback 残留）时，
+        计数须与当前 all.txt 对齐，避免 badge 虚高。"""
+        data = {
+            "ts": "2026-08-29T00:00:00Z",
+            "proxies": {
+                "1.2.3.4:443#US": {"verdict": "reachable", "level": "http"},
+                "9.9.9.9:443#US": {"verdict": "reachable", "level": "tcp"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            vd = Path(td)
+            (vd / "all_cn.txt").write_text("1.2.3.4:443#US\n", encoding="utf-8")
+            (vd / "all.txt").write_text(
+                "1.2.3.4:443#US-1ms-1MB/s-CN\n", encoding="utf-8",
+            )
+            s = gs.collect_cn_summary(data, vd)
+            self.assertEqual(s["reachable"], 1)      # 9.9.9.9 已离池不计数
+            self.assertEqual(s["served"], 1)
+
+
+class TestMain(unittest.TestCase):
+    def test_end_to_end_writes_all_outputs(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            data_dir = base / "data"
+            (data_dir / "valid").mkdir(parents=True)
+            (data_dir / "quality").mkdir(parents=True)
+            (data_dir / "quality" / "history.jsonl").write_text(
+                "\n".join(json.dumps(r) for r in TestBuilders.HISTORY) + "\n"
+            )
+            (data_dir / "valid" / "history.jsonl").write_text(
+                "\n".join(json.dumps(r) for r in TestBuilders.VALID_HISTORY) + "\n"
+            )
+            (data_dir / "valid" / "meta.json").write_text(
+                json.dumps(TestBuilders.META)
+            )
+            (data_dir / "valid" / "all.txt").write_text(
+                "1.1.1.1:80#US-1ms-1MB/s-CN\n"
+                "3.3.3.3:80#DE-2ms-2MB/s-CN\n",
+                encoding="utf-8",
+            )
+            (data_dir / "quality" / "quality_meta.json").write_text(
+                json.dumps(TestBuilders.QUALITY_META)
+            )
+            (data_dir / "quality" / "china.json").write_text(
+                json.dumps(TestBuilders.CN_DATA)
+            )
+            (data_dir / "quality" / "exit_family.json").write_text(
+                json.dumps(TestBuilders.FAMILY_DATA)
+            )
+            (data_dir / "quality" / "reputation.json").write_text(
+                json.dumps(TestBuilders.REP_DATA)
+            )
+            (data_dir / "quality" / "source_stats.json").write_text(
+                json.dumps({})
+            )
+            out = base / "out"
+            rc = gs.main(["--data-dir", str(data_dir), "--out", str(out)])
+            self.assertEqual(rc, 0)
+            stats = json.loads((out / "stats.json").read_text())
+            self.assertEqual(stats["unique"], 110)
+            self.assertEqual(stats["alive"], 205)
+            self.assertEqual(stats["alive_rate"], 0.9762)
+            self.assertEqual(stats["family"],
+                             {"ipv4": 1, "ipv6": 1, "dual": 1, "unknown": 1})
+            self.assertEqual(stats["dual_stack"], 1)
+            self.assertIn("age_s", stats)
+            self.assertIn("updated_ago", stats)
+            self.assertIn("stale", stats)
+            self.assertEqual(stats["cn_reachable"], 2)
+            self.assertEqual(stats["cn_http"], 0)
+            self.assertEqual(stats["cn_stable"], 0)
+            self.assertEqual(stats["cn_served"], 0)
+            badge = json.loads((out / "badge.json").read_text())
+            self.assertEqual(badge["label"], "status")
+            self.assertEqual(badge["schemaVersion"], 1)
+            # R298：message 与 color 必须一致（fresh↔绿，stale/告警名↔红；
+            # 本轮生产验证徽章红绿语义属实，锁对应关系防渲染漂移）。
+            if badge["message"] == "fresh":
+                self.assertEqual(badge["color"], "brightgreen")
+            else:
+                self.assertEqual(badge["color"], "red")
+            for f in (
+                "chart_combo.svg", "chart_country.svg", "chart_port.svg",
+                "chart_churn.svg", "chart_latency_speed.svg",
+                "chart_sets.svg", "chart_cn.svg", "chart_family.svg",
+                "chart_source_avail.svg", "chart_rep.svg",
+                "chart_source_stats.svg",
+            ):
+                self.assertTrue((out / f).exists(), f)
+                svg_ok((out / f).read_text())
+
+    def test_stats_json_contract_keys(self):
+        # stats.json 字段契约（对齐 docs/data-spec.md:138）
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            data_dir = base / "data"
+            (data_dir / "quality").mkdir(parents=True)
+            (data_dir / "valid").mkdir(parents=True)
+            (data_dir / "valid" / "meta.json").write_text(
+                json.dumps({
+                    "ts": "2026-09-16T01:00:00Z", "total": 100,
+                    "alive": 50, "dead": 50, "by_method": {"tls": 50},
+                })
+            )
+            out = base / "out"
+            rc = gs.main(["--data-dir", str(data_dir), "--out", str(out)])
+            self.assertEqual(rc, 0)
+            stats = json.loads((out / "stats.json").read_text())
+            self.assertEqual(
+                set(stats),
+                {"age_s", "alive", "alive_checked", "alive_countries",
+                 "alive_history_records", "alive_rate", "alive_sets",
+                 "cn_http", "cn_reachable", "cn_served", "cn_stable",
+                 "cn_ts", "countries", "country_mismatch", "dual_stack",
+                 "family", "history_records", "ip_type", "latency",
+                 "latency_dist", "ports", "sets", "speed", "speed_dist",
+                 "stale", "total", "ts", "unique", "updated_ago",
+                 "updated_at"},
+                msg="stats.json 字段契约漂移（docs/data-spec.md:138）",
+            )
+
+    def test_missing_inputs_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            rc = gs.main(["--data-dir", td, "--out", td])
+            self.assertEqual(rc, 0)
+
+    def _badge_with_history_ts(self, hours: float) -> dict:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            data_dir = base / "data"
+            (data_dir / "quality").mkdir(parents=True)
+            (data_dir / "valid").mkdir(parents=True)
+            (data_dir / "quality" / "history.jsonl").write_text(
+                json.dumps({"ts": _ago(hours), "unique": 10, "total": 20,
+                            "sets": {}}) + "\n"
+            )
+            out = base / "out"
+            gs.main(["--data-dir", str(data_dir), "--out", str(out)])
+            return json.loads((out / "badge.json").read_text())
+
+    def test_badge_stale_when_old_history(self):
+        badge = self._badge_with_history_ts(4.0)   # > STALE_AFTER_S (3h)
+        self.assertEqual(badge["message"], "stale")
+        self.assertEqual(badge["color"], "red")
+
+    def test_badge_fresh_when_recent_history(self):
+        badge = self._badge_with_history_ts(0.2)
+        self.assertEqual(badge["message"], "fresh")
+        self.assertEqual(badge["color"], "brightgreen")
+
+
+if __name__ == "__main__":
+    unittest.main()

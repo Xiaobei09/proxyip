@@ -1,0 +1,136 @@
+name: China check
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 独立心跳：每小时一轮（与 update-proxies 的 :00 错开到 :11）。
+    # streak 依赖"连续多轮可达"，此前仅挂在 quality-check 成功之后，
+    # 任一上游失败或 IP 长期未变更都会冻结 stable 累积——故必须独立定时。
+    # 不再挂 workflow_run 链：实测 GitHub 在 cron 命中时若本工作流仍有
+    # in_progress run 就不会再起新 run（旧 run 安然跑完）；而 workflow_run
+    # 触发的新 run 会取消上一个 in_progress run（观测 3 次），导致
+    # probe 永远跑不完、china.json 冻结。纯 schedule 驱动即可。
+    - cron: "11 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Mainland-China reachability
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      CHINA_CHECK_API_KEY: ${{ secrets.CHINA_CHECK_API_KEY }}
+      TCPPING_CN_TOKEN: ${{ secrets.TCPPING_CN_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：本工作流纯 schedule 驱动（每小时 11 分自启，见上），无
+          # workflow_run 触发者，故不存在"触发者失败时跳过"的判定；从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），单次失败不冻结 CN 连通性追踪(streak)与后缀应用，
+          # 否则 IP 未变更期间 stable 永远无法累积。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        if: steps.gate.outputs.skip != 'true'
+        run: python -m unittest discover -s tests -v
+
+      - name: China reachability check
+        id: china
+        if: steps.gate.outputs.skip != 'true'
+        run: >-
+          python scripts/china_check.py
+          --source data/valid/all.txt --limit 0
+          --cn-limit cn30=800 --cn-concurrency cn30=20
+          --cn-limit cn31=400 --cn-concurrency cn31=20
+          --cn-limit cn32=200 --cn-concurrency cn32=8
+          --cn-limit cn33=200 --cn-concurrency cn33=6
+          --cn-limit cn07=1200 --cn-concurrency cn07=40
+          --cn-limit cn08=600 --cn-concurrency cn08=12
+          --cn-limit cn14=500 --cn-concurrency cn14=8
+          --cn-limit cn15=200 --cn-concurrency cn15=8
+          --cn-limit cn17=400 --cn-concurrency cn17=8
+          --cn-limit cn18=200 --cn-concurrency cn18=6
+          --cn-limit cn19=200 --cn-concurrency cn19=6
+          --cn-limit cn16=200 --cn-concurrency cn16=8
+          --cn-limit cn11=200 --cn-concurrency cn11=6
+          --cn-limit cn12=200 --cn-concurrency cn12=6
+          --cn-limit cn09=200 --cn-concurrency cn09=8
+          --cn-limit cn10=200 --cn-concurrency cn10=8
+          --cn-limit cn04=200 --cn-concurrency cn04=6
+          --cn-limit cn05=200 --cn-concurrency cn05=6
+          --cn-limit cn06=200 --cn-concurrency cn06=6
+          --cn-limit cn34=100 --cn-concurrency cn34=8
+          --cn-limit cn35=100 --cn-concurrency cn35=8
+          --cn-limit cn36=60 --cn-concurrency cn36=4
+          --cn-limit cn37=40 --cn-concurrency cn37=4
+          --cn-limit cn38=40 --cn-concurrency cn38=4
+          --cn-limit cn39=40 --cn-concurrency cn39=4
+          --cn-limit cn40=300 --cn-concurrency cn40=6
+          --cn-cache-ttl 21600
+
+      - name: Annotate and classify
+        id: annotate
+        if: steps.gate.outputs.skip != 'true'
+        run: python scripts/annotate_classify.py
+
+      # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
+
+      # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
+
+      # 提交前护栏：数据产出后再校验 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测速度），防止陈旧/空 cn_ms 重建把纯 -XMB/s 提交进仓库；
+      # 失败即中止，本 run 不提交（此前 tests 步先于数据改动执行，抓不到
+      # 改后状态）。
+      - name: Verify CN-view invariant
+        id: verify
+        if: steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: >-
+          python -m unittest
+          tests.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      - name: Show summary
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          echo "China-reachable proxies:"
+          wc -l data/valid/all_cn.txt 2>/dev/null || true
+          echo "Verdict distribution:"
+          jq -r '[.proxies[].verdict] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/quality/china.json 2>/dev/null || true
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true' && steps.china.outcome == 'success' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

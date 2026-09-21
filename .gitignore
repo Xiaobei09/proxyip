@@ -1,0 +1,19 @@
+data/
+__pycache__/
+*.pyc
+.venv/
+.local/
+AGENTS.md
+DEVELOPMENT.md
+
+# 密钥/凭据防御位：任何本地 .env 类文件一律不进版本库（CI 凭据走 secrets 注入，
+# 此处是额外保险层；当前仓库无凭据文件，纯防御）
+.env
+.env.*
+.envrc
+
+# opencode session files
+.opencode/
+
+# PCB 私有检查包 staging（独立私有版本库，不进公开 git；见 pcb/README 推送说明）
+pcb/

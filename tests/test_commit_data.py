@@ -1,0 +1,354 @@
+"""commit_data.sh 必须把 job 的删除产物也写进提交。
+
+``find -newer .jobstart`` 只按 mtime 找"改/增"，删掉的文件没有 mtime；
+若不从基线快照单独推算删除，pipeline（validate/quality/annotate）对
+countries/sets/ports 越界视图与 rep/verified 残留的清理永远进不了提交，
+死代视图会一直留在发布树。同时删除不得被 align_foreign 用 checkout -f
+救回，他人中途更新（外来漂移）仍须对齐 origin 而不是回滚。
+"""
+import re
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / ".github" / "scripts" / "commit_data.sh"
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+class TestCommitData(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.work = Path(self.tmp.name) / "work"
+        self.work.mkdir(parents=True, exist_ok=True)
+        self.origin = Path(self.tmp.name) / "origin.git"
+        _git(self.work, "init", "-b", "main")
+        _git(self.work, "config", "user.name", "t")
+        _git(self.work, "config", "user.email", "t@local")
+        _git(self.work, "config", "push.default", "simple")
+        _git(self.work, "init", "--bare", str(self.origin))
+        _git(self.work, "remote", "add", "origin", str(self.origin))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _initial_commit(self, files: dict[str, str]) -> None:
+        for rel, content in files.items():
+            p = self.work / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        _git(self.work, "add", "-A")
+        self.assertEqual(
+            _git(self.work, "commit", "-q", "-m", "init").returncode, 0
+        )
+        self.assertEqual(
+            _git(self.work, "push", "-u", "origin", "main").returncode, 0
+        )
+
+    def _run_job(
+        self, msg: str, marker_mtime: float = 1_577_836_800.0
+    ) -> subprocess.CompletedProcess:
+        """模拟一次 CI job：touch .jobstart（早于脚本写盘）后提交数据。"""
+        marker = self.work / ".jobstart"
+        marker.touch()
+        import os
+
+        os.utime(marker, (marker_mtime, marker_mtime))
+        return subprocess.run(
+            ["bash", str(SCRIPT), msg],
+            cwd=str(self.work),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+
+    def _head_has(self, rel: str) -> bool:
+        return (
+            _git(self.work, "cat-file", "-e", f"HEAD:{rel}").returncode == 0
+        )
+
+    def _head_content(self, rel: str) -> str:
+        return _git(self.work, "show", f"HEAD:{rel}").stdout
+
+    def test_deletion_is_committed_and_modification_kept(self):
+        self._initial_commit(
+            {
+                "data/valid/keep.txt": "keep-v0\n",
+                "data/valid/stale.txt": "stale-v0\n",
+            }
+        )
+        (self.work / "data/valid").joinpath("keep.txt").write_text(
+            "keep-v1\n", encoding="utf-8"
+        )
+        (self.work / "data/valid").joinpath("stale.txt").unlink()
+
+        proc = self._run_job("test job")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        self.assertEqual(
+            _git(self.work, "log", "-1", "--format=%s").stdout.strip(),
+            "test job",
+        )
+        self.assertEqual(self._head_content("data/valid/keep.txt"), "keep-v1\n")
+        self.assertFalse(
+            self._head_has("data/valid/stale.txt"),
+            "job 删除的文件必须进入提交（此前 find -newer 漏掉删除）",
+        )
+
+    def test_delete_only_job_still_commits(self):
+        self._initial_commit({"data/valid/gone.txt": "gone-v0\n"})
+        (self.work / "data/valid").joinpath("gone.txt").unlink()
+
+        proc = self._run_job("delete-only")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            _git(self.work, "log", "-1", "--format=%s").stdout.strip(),
+            "delete-only",
+        )
+        self.assertFalse(
+            self._head_has("data/valid/gone.txt"),
+            "纯删除 job 也必须产出提交",
+        )
+
+    def test_foreign_drift_is_restored_not_rolled_back(self):
+        initial = {
+            "data/valid/keep.txt": "keep-v0\n",
+            "data/quality/other.json": '{"v": 0}\n',
+        }
+        self._initial_commit(initial)
+        # job 改动 keep；other.json 是陈旧 checkout 副本（内容不同但 mtime 早
+        # 于 marker），必须对齐 origin 而非把新数据回滚成旧副本。
+        (self.work / "data/valid").joinpath("keep.txt").write_text(
+            "keep-v1\n", encoding="utf-8"
+        )
+        foreign = self.work / "data/quality" / "other.json"
+        foreign.write_text('{"v": 999}\n', encoding="utf-8")
+        import os
+
+        os.utime(foreign, (1_577_836_800.0, 1_577_836_800.0))
+
+        proc = self._run_job("drift")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            _git(self.work, "log", "-1", "--format=%s").stdout.strip(), "drift"
+        )
+        self.assertEqual(self._head_content("data/valid/keep.txt"), "keep-v1\n")
+        self.assertEqual(
+            self._head_content("data/quality/other.json"), '{"v": 0}\n'
+        )
+        self.assertEqual(
+            (self.work / "data/quality/other.json").read_text(encoding="utf-8"),
+            '{"v": 0}\n',
+            "外来漂移应 checkout -f 对齐 origin，不得保留陈旧副本",
+        )
+
+    def test_excl_paths_are_never_staged(self):
+        self._initial_commit(
+            {
+                "data/raw/gone.txt": "raw-v0\n",
+                "data/valid/keep.txt": "keep-v0\n",
+            }
+        )
+        (self.work / "data/raw").joinpath("gone.txt").unlink()
+        (self.work / "data/valid").joinpath("keep.txt").write_text(
+            "keep-v1\n", encoding="utf-8"
+        )
+
+        proc = self._run_job("excl")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            self._head_content("data/valid/keep.txt"), "keep-v1\n"
+        )
+        self.assertTrue(
+            self._head_has("data/raw/gone.txt"),
+            "data/raw 归档不在删除/新增追踪范围，HEAD 必须保留旧稿",
+        )
+
+
+class TestLoopCommitFormat(unittest.TestCase):
+    """R285：带 `[Rnnn]` 轮次标记的 HEAD 提交须为单一允许 type。
+
+    DEVELOPMENT.md 修正案：type 取 fix/feat/perf/docs/ci/chore/refactor/
+    test 其一（禁复合 type；历史 R273 `refactor+feat` 与 R281 `docs+test`
+    已记偏离，不追溯改写，只锁当下与未来）。机器人数据提交无标记，
+    自动跳过。R287：允许集从 DEVELOPMENT.md 实时解析（测试—文档互锁，
+    防两处二次漂移）。"""
+
+    def _allowed_types(self) -> set[str]:
+        doc = (ROOT / "DEVELOPMENT.md").read_text(encoding="utf-8")
+        found = set(re.findall(r"^- `([a-z]+)(?:\([^)]*\))?:", doc, re.M))
+        self.assertTrue(found, "DEVELOPMENT.md type 表解析为空")
+        return found
+
+    def test_head_loop_commit_single_type(self):
+        allowed = self._allowed_types()
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "-1", "--format=%s"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        subject = proc.stdout.strip()
+        if not re.search(r"\[R\d+\]", subject):
+            self.skipTest("HEAD 非轮次提交")
+        m = re.match(r"^([a-z]+)(\([^)]+\))?: .+ \[R\d+\]$", subject)
+        self.assertIsNotNone(m, f"轮次提交格式偏离: {subject}")
+        self.assertIn(
+            m.group(1), allowed,
+            f"type {m.group(1)} 不在 DEVELOPMENT.md 允许集 {sorted(allowed)}")
+
+
+class TestWorkflowTestGate(unittest.TestCase):
+    """R290：数据链工作流必须先过单测门禁，再进重型网络阶段。
+
+    R289 死锁复盘：红单测若排在数小时验证之后才暴露，将空烧 CI 配额
+    且延迟失败信号；现三链均把 Run tests 置于首个耗时步之前，此序
+    不得打乱（改 workflow 时常见失误：为“先干活”把测试后移）。"""
+
+    GATES = {
+        "update-proxies.yml": ("Run tests", "Download and extract"),
+        "quality-check.yml": ("Run tests", "Deep quality check"),
+        "china-check.yml": ("Run tests", "China reachability check"),
+    }
+
+    def test_run_tests_precedes_heavy_steps(self):
+        for wf, (gate, heavy) in self.GATES.items():
+            with self.subTest(workflow=wf):
+                text = (ROOT / ".github" / "workflows" / wf).read_text(
+                    encoding="utf-8")
+                names = re.findall(r"-\s*name:\s*(.+)", text)
+                self.assertIn(gate, names)
+                self.assertIn(heavy, names)
+                self.assertLess(
+                    names.index(gate), names.index(heavy),
+                    f"{wf}: {gate} 必须排在 {heavy} 之前")
+
+    def test_quality_chain_script_order(self):
+        """R312：quality 链脚本序（uptime→reorg→annotate）与 README
+        流程段一致；china 链 annotate 紧随检测步。防步骤重排致
+        标注基于过期分裂（先注解后重组即错）。"""
+        import re
+        q = (ROOT / ".github" / "workflows" / "quality-check.yml"
+             ).read_text(encoding="utf-8")
+        qnames = re.findall(r"-\s*name:\s*(.+)", q)
+        self.assertLess(
+            qnames.index("Rolling uptime"),
+            qnames.index("Reorganize by exit country"))
+        self.assertLess(
+            qnames.index("Reorganize by exit country"),
+            qnames.index("Annotate and classify"))
+        c = (ROOT / ".github" / "workflows" / "china-check.yml"
+             ).read_text(encoding="utf-8")
+        cnames = re.findall(r"-\s*name:\s*(.+)", c)
+        self.assertLess(
+            cnames.index("China reachability check"),
+            cnames.index("Annotate and classify"))
+
+
+class TestWorkflowPermissions(unittest.TestCase):
+    """R296：工作流权限最小集——全部只需 `contents: write`（提交数据）。
+
+    防改 workflow 时顺手放宽权限（如 packages/actions 写）。八个文件
+    逐一解析顶层 permissions 块，全等断言。"""
+
+    def test_permissions_minimal(self):
+        wf_dir = ROOT / ".github" / "workflows"
+        files = sorted(wf_dir.glob("*.yml"))
+        self.assertTrue(files, "workflows 目录为空，扫描器失效")
+        for wf in files:
+            with self.subTest(workflow=wf.name):
+                text = wf.read_text(encoding="utf-8")
+                m = re.search(
+                    r"^permissions:\s*\n((?:  \w+: \w+\n)+)",
+                    text, re.M)
+                self.assertIsNotNone(
+                    m, f"{wf.name} 缺顶层 permissions 块")
+                self.assertEqual(
+                    m.group(1), "  contents: write\n",
+                    f"{wf.name} 权限超出最小集")
+
+
+class TestWorkflowSchedules(unittest.TestCase):
+    """R307：定时心跳 cron 不得误删（改 cron 须明确任务授权）。
+
+    本轮观测 china 19:11/20:11/21:11 三 tick 调度侧跳过（工作流全
+    active，streak 6h 容差覆盖中）；若连 cron 定义本身丢失则心跳
+    永久停摆且无任何失败信号，锁四条 schedule。"""
+
+    SCHEDULES = {
+        "update-proxies.yml": "0 */2 * * *",
+        "china-check.yml": "11 * * * *",
+        "stats.yml": "40 */2 * * *",
+        "deep-speed.yml": "7 3 * * 6",
+    }
+
+    def test_schedule_triggers_present(self):
+        for wf, cron in self.SCHEDULES.items():
+            with self.subTest(workflow=wf):
+                text = (ROOT / ".github" / "workflows" / wf).read_text(
+                    encoding="utf-8")
+                self.assertIn(
+                    f'- cron: "{cron}"', text,
+                    f"{wf} 缺定时心跳 {cron}")
+
+
+class TestNoPycTracked(unittest.TestCase):
+    """R310：字节码不得入库（`__pycache__/`/`*.pyc` 仅本地产物）。
+
+    .gitignore 已覆盖；此锁防 `git add -f` 误操作或 ignore 被改坏。
+    无 git 环境则跳过。"""
+
+    def test_no_pycache_tracked(self):
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        bad = [l for l in proc.stdout.splitlines()
+               if l.endswith(".pyc") or "__pycache__" in l]
+        self.assertEqual(bad, [], f"字节码已入库：{bad[:5]}")
+
+
+class TestWorkflowConcurrency(unittest.TestCase):
+    """R308：并发策略锁——主更新优先抢占，下游保护在跑结果。
+
+    与 DEVELOPMENT.md「CI 并发策略」一致：update-proxies 为唯一
+    `cancel-in-progress: true`，其余七个均为 false（防改 workflow
+    时误开抢占致长任务被连环取消，或误关主更新致旧数据阻塞）。"""
+
+    def test_cancel_policy(self):
+        wf_dir = ROOT / ".github" / "workflows"
+        files = sorted(wf_dir.glob("*.yml"))
+        self.assertTrue(files, "workflows 目录为空，扫描器失效")
+        for wf in files:
+            with self.subTest(workflow=wf.name):
+                text = wf.read_text(encoding="utf-8")
+                m = re.search(
+                    r"^concurrency:\s*\n"
+                    r"\s*group:\s*(\S+)\s*\n"
+                    r"\s*cancel-in-progress:\s*(true|false)\s*\n",
+                    text, re.M)
+                self.assertIsNotNone(
+                    m, f"{wf.name} 缺 concurrency 块")
+                want = (wf.name == "update-proxies.yml")
+                self.assertEqual(
+                    m.group(2) == "true", want,
+                    f"{wf.name} cancel-in-progress 应为 {want}")
+
+
+if __name__ == "__main__":
+    unittest.main()
