@@ -95,7 +95,7 @@ python3 scripts/health_alert.py             # 7. 池健康告警（可选 webhoo
 
 | 需求 | 首选文件 | 说明 |
 |---|---|---|
-| 大陆日常使用（最稳） | `data/valid/all_cn_stable.txt` | 连续 ≥2 轮大陆可达，抗误判/churn |
+| 大陆日常使用（最稳） | `data/valid/all_cn_stable.txt` | 连续 ≥2 轮大陆可达，抗误判/churn（不满足时不生成） |
 | 大陆 + 应用层确认 | `data/valid/all_cn_http.txt` | 过滤"TCP 通但被干扰"；无应用层证据时不生成 |
 | 大陆全量 | `data/valid/all_cn.txt` | 全可达集，按大陆实测延迟升序 |
 | 综合最优 | `data/valid/all_good.txt` | CN 可达 + 信誉≥80 + 非高风险，CN 视图 |

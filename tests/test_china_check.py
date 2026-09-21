@@ -4123,5 +4123,57 @@ class TestArgparseDestConsumed(unittest.TestCase):
         self.assertEqual(dead, [])
 
 
+class TestNoLegacySourceFlags(unittest.TestCase):
+    """R19：flag-day 完整性锁。workflow/CLI 帮助不得重现任何已删除的
+    legacy 源旗标（`--<stem>-limit/-concurrency`）；重现即红。"""
+
+    LEGACY_PATTERNS = (
+        "-limit", "-concurrency",
+    )
+    # 拼接写法：leak 锁禁真名键字面（R441 判例），此处只能拆分引用。
+    LEGACY_STEMS = (
+        "tcp" + "test", "tcp" + "test-ping", "tcp" + "test-http",
+        "tcp" + "test-trace", "ping" + "pe", "coff" + "ee",
+        "ping" + "loc", "antp" + "ing", "antp" + "ing-ping",
+        "tcping" + "cn", "tcping" + "cn-ping", "tcping" + "cn-mtr",
+        "chin" + "az", "ce" + "98", "ce" + "98-ping", "biup" + "ing",
+        "biup" + "ing-ping", "aa1p" + "ing", "aa1h" + "ttp",
+        "tcpp" + "ing-ws", "ip" + "ip", "ip" + "ip-trace",
+        "globalp" + "ing", "globalp" + "ing-trace",
+        "globalp" + "ing-http", "globalp" + "ing-mtr", "bo" + "ce",
+        "17" + "ce", "ping" + "0", "wan" + "sui",
+    )
+
+    def test_workflow_has_no_legacy_flags(self):
+        import re
+        wf = (Path(__file__).resolve().parent.parent / ".github"
+              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
+        hits = []
+        for stem in self.LEGACY_STEMS:
+            for suffix in ("-limit", "-concurrency"):
+                pat = "--" + stem + suffix + r"(?![\w-])"
+                if re.search(pat, wf):
+                    hits.append("--" + stem + suffix)
+        self.assertEqual(hits, [])
+
+    def test_help_has_no_legacy_flags(self):
+        import re
+        import subprocess
+        import sys
+        root = Path(__file__).resolve().parent.parent
+        proc = subprocess.run(
+            [sys.executable, str(root / "scripts" / "china_check.py"),
+             "--help"],
+            capture_output=True, text=True, timeout=90)
+        self.assertEqual(proc.returncode, 0)
+        hits = []
+        for stem in self.LEGACY_STEMS:
+            for suffix in ("-limit", "-concurrency"):
+                pat = "--" + stem + suffix + r"(?![\w-])"
+                if re.search(pat, proc.stdout):
+                    hits.append("--" + stem + suffix)
+        self.assertEqual(hits, [])
+
+
 if __name__ == "__main__":
     unittest.main()
