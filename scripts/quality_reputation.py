@@ -67,14 +67,11 @@ RESPROXY_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
 TOR_EXITS_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
-FREEIPAPI_URL = "https://freeipapi.com/api/json/{ip}"
-FREEIPAPI_TIMEOUT = 10
 HACKMYIP_URL = "https://hackmyip.com/api/lookup?ip={ip}"
 HACKMYIP_TIMEOUT = 10
 IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
 IPLOCATION_TIMEOUT = 10
 IPLOCATION_CAP = 3000
-FREEIPAPI_CAP = 3000
 STOPFORUMSPAM_URL = "https://api.stopforumspam.org/api?ip={ip}&json"
 STOPFORUMSPAM_TIMEOUT = 10
 STOPFORUMSPAM_CAP = 3000
@@ -1463,26 +1460,16 @@ def psbl_lookup_sync(ip: str) -> dict | None:
                                      PSBL_LISTED_CODES)
 
 
-def freeipapi_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``freeipapi.com/api/json/{ip}``: isProxy flag + ASN/org."""
-    req = urllib.request.Request(
-        FREEIPAPI_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, FREEIPAPI_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict) or not data.get("ipAddress"):
-        return None
-    out = {"is_proxy": bool(data.get("isProxy"))}
-    asn = norm_asn(data.get("asn"))
-    if asn:
-        out["asn"] = asn
-    org = data.get("asnOrganization")
-    if isinstance(org, str) and org:
-        out["org"] = org
-    if not out["is_proxy"] and not asn:
-        return None
-    return out
+_REP_FREEIPAPI_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_free = _load_pcb_plugin("rep_freeipapi")
+    freeipapi_lookup_sync = _rep_free.freeipapi_lookup_sync
+    FREEIPAPI_CAP = _rep_free.CAP
+    _REP_FREEIPAPI_BUNDLE = True
+except Exception:
+    freeipapi_lookup_sync = None
+    FREEIPAPI_CAP = 3000
 
 
 def hackmyip_lookup_sync(ip: str) -> dict | None:
@@ -2926,7 +2913,7 @@ async def lookup_all_risk(
     if "ipwhois" in sources:
         w, d = pacing.get("ipwhois", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipwhois", ipwhois_lookup_sync, workers=w, delay=d))
-    if "freeipapi" in sources:
+    if "freeipapi" in sources and freeipapi_lookup_sync is not None:
         w, d = pacing.get("freeipapi", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "freeipapi", freeipapi_lookup_sync, cap=FREEIPAPI_CAP, workers=w, delay=d))

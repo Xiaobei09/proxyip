@@ -4115,27 +4115,6 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertTrue(0 < qr.FREEIPAPI_CAP <= 10000)
         self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
 
-    def test_freeipapi_lookup_parsing(self):
-        body = json.dumps({
-            "ipAddress": "1.2.3.4", "isProxy": False, "asn": 15169,
-            "asnOrganization": "Google LLC",
-        }).encode()
-        with unittest.mock.patch("urllib.request.urlopen") as m:
-            fake = unittest.mock.MagicMock()
-            fake.read.return_value = body
-            m.return_value.__enter__.return_value = fake
-            out = qr.freeipapi_lookup_sync("1.2.3.4")
-        self.assertEqual(out, {
-            "is_proxy": False, "asn": "AS15169", "org": "Google LLC"})
-
-    def test_freeipapi_lookup_no_signal(self):
-        body = json.dumps({"ipAddress": "1.2.3.4", "isProxy": False}).encode()
-        with unittest.mock.patch("urllib.request.urlopen") as m:
-            fake = unittest.mock.MagicMock()
-            fake.read.return_value = body
-            m.return_value.__enter__.return_value = fake
-            self.assertIsNone(qr.freeipapi_lookup_sync("1.2.3.4"))
-
     def test_iplocation_lookup_parsing(self):
         body = json.dumps({
             "ip": "1.2.3.4", "isp": "X Corp", "is_proxy": "Yes",
@@ -4499,6 +4478,9 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertIsNotNone(qr.scamalytics_lookup_sync)
         self.assertTrue(qr._REP_SCAMALYTICS_BUNDLE)
         self.assertEqual(qr.SCAMALYTICS_CAP, reg.CAP if hasattr(reg, "CAP") else 1500)
+        self.assertIsNotNone(qr.freeipapi_lookup_sync)
+        self.assertTrue(qr._REP_FREEIPAPI_BUNDLE)
+        self.assertEqual(qr.FREEIPAPI_CAP, 3000)
 
 
 if __name__ == "__main__":
