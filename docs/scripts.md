@@ -137,7 +137,7 @@
 | `tor_exit` | 5 | check.torproject.org 出口节点实时列表（免费），命中即投 `tor` 票 |
 | `spamhaus` | 4 | Spamhaus DROP + EDROP 端用户高风险网段静态表（免费，`<cidr> ; 描述`），命中即投 `listed` 票 |
 | `freeipapi` | 6 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`isProxy` 标志 -30，附 ASN/org |
-| `hackmyip` | 6 | `hackmyip.com/api/lookup?ip={ip}`，免 key；`data.privacy` 的 hosting/proxy/mobile 标志参与投票，附 ASN |
+| `hackmyip` | 6 | 免费 JSON 风险查询（抓取实现已迁 PCB）；hosting/proxy/mobile 标志参与投票，附 ASN |
 | `scamalytics` | 8 | 免费风险页抓取（抓取实现已迁 PCB）；分值 0-100 直扣，黑名单标记投 `listed` 票 |
 | `iplocation` | 3 | `api.iplocation.net/?ip={ip}`，免 key；`is_proxy` -30，附 isp。**R269 起退出默认源**（最低权重、proxy 维度被 hackmyip/freeipapi/scamalytics 覆盖），opt-in 可用 |
 | `stopforumspam` | 4 | `api.stopforumspam.org/api?ip={ip}&json`，免 key；`appears=1`（被举报的 HTTP 垃圾/滥用来源）投 `abuse` 票并 -50，`torexit=1` 额外投 `tor` 票；无记录返回空（负缓存） |

@@ -67,8 +67,6 @@ RESPROXY_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
 TOR_EXITS_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
-HACKMYIP_URL = "https://hackmyip.com/api/lookup?ip={ip}"
-HACKMYIP_TIMEOUT = 10
 IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
 IPLOCATION_TIMEOUT = 10
 IPLOCATION_CAP = 3000
@@ -1472,37 +1470,14 @@ except Exception:
     FREEIPAPI_CAP = 3000
 
 
-def hackmyip_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``hackmyip.com/api/lookup?ip={ip}``: hosting/proxy/mobile flags.
-
-    Returns ``{"is_hosting", "is_proxy", "is_mobile", "asn"}`` from the
-    ``data.privacy`` block; ``None`` when the payload is unusable.
-    """
-    req = urllib.request.Request(
-        HACKMYIP_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, HACKMYIP_TIMEOUT) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(payload, dict) or payload.get("success") is not True:
-        return None
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        return None
-    privacy = data.get("privacy")
-    privacy = privacy if isinstance(privacy, dict) else {}
-    out = {
-        "is_hosting": bool(privacy.get("hosting")),
-        "is_proxy": bool(privacy.get("proxy")),
-        "is_mobile": bool(privacy.get("mobile")),
-    }
-    network = data.get("network")
-    if isinstance(network, dict):
-        asn = norm_asn(network.get("asn"))
-        if asn:
-            out["asn"] = asn
-    return out
-
+_REP_HACKMYIP_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_hack = _load_pcb_plugin("rep_hackmyip")
+    hackmyip_lookup_sync = _rep_hack.hackmyip_lookup_sync
+    _REP_HACKMYIP_BUNDLE = True
+except Exception:
+    hackmyip_lookup_sync = None
 
 _REP_SCAMALYTICS_BUNDLE = False
 try:
@@ -2917,7 +2892,7 @@ async def lookup_all_risk(
         w, d = pacing.get("freeipapi", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "freeipapi", freeipapi_lookup_sync, cap=FREEIPAPI_CAP, workers=w, delay=d))
-    if "hackmyip" in sources:
+    if "hackmyip" in sources and hackmyip_lookup_sync is not None:
         w, d = pacing.get("hackmyip", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "hackmyip", hackmyip_lookup_sync, workers=w, delay=d))

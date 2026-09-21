@@ -2455,60 +2455,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["score"], 40)
         self.assertEqual(out["connection_type"], "Residential")
 
-    def test_hackmyip_lookup_parsing(self):
-        payload = (
-            b'{"success":true,"data":{"privacy":{"hosting":true,"proxy":false,'
-            b'"mobile":false},"network":{"asn":212194,"isp":"Yuusei LTD",'
-            b'"org":"Ipxo"}}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("hackmyip.com/api/lookup", req.full_url)
-            self.assertIn("1.2.3.4", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.hackmyip_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertTrue(out["is_hosting"])
-        self.assertFalse(out["is_proxy"])
-        self.assertFalse(out["is_mobile"])
-        self.assertEqual(out["asn"], "AS212194")
-
-    def test_hackmyip_lookup_bad_payload(self):
-        def fake_urlopen(req, timeout=0):
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return b'{"success":false,"error":"boom"}'
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.hackmyip_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertIsNone(out)
 
     def test_parse_abuser_score(self):
         self.assertEqual(qc.parse_abuser_score("0.0039 (Low)"), 0.0039)
@@ -4481,6 +4427,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertIsNotNone(qr.freeipapi_lookup_sync)
         self.assertTrue(qr._REP_FREEIPAPI_BUNDLE)
         self.assertEqual(qr.FREEIPAPI_CAP, 3000)
+        self.assertIsNotNone(qr.hackmyip_lookup_sync)
+        self.assertTrue(qr._REP_HACKMYIP_BUNDLE)
 
 
 if __name__ == "__main__":
