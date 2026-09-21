@@ -1924,7 +1924,7 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
             mock.patch.object(cc, "cn26_check", side_effect=self._boom),
             mock.patch.object(cc, "cn22_check", side_effect=self._boom),
             mock.patch.object(cc, "cn23_check", side_effect=self._boom),
-            # cn27 也走槽位；抛异常同样须被隔离（l2_check_host 已有守卫）
+            # cn27 也走槽位；抛异常同样须被隔离（l2_cn27 已有守卫）
             mock.patch.object(cc, "cn27_check", side_effect=self._boom),
             mock.patch.object(cc, "cn01_batch_run", return_value={}),
         ]

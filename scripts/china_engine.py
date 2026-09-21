@@ -126,8 +126,8 @@ except Exception:
     CN40_CODE = "cn40"
 
 try:
-    _tcpping = _load_pcb_plugin("cn41")
-    CN41_CODE = _tcpping.CODE
+    _cn41 = _load_pcb_plugin("cn41")
+    CN41_CODE = _cn41.CODE
 except Exception:
     CN41_CODE = "cn41"
 
@@ -222,7 +222,7 @@ else:
         CN35_CODE: CN35_MIN_RATIO,
     }
 # cn41（token 搭车相）失败不计入 multi_failed（旧行为原样保留：其 skipped/
-# fail 语义由 pingpe 相内部消化，不参与多节点失败联动）。
+# fail 语义由 cn40 相内部消化，不参与多节点失败联动）。
 _MULTI_FAILED = tuple(s for s in _MULTI_OK if s != CN41_CODE)
 _SINGLE_FAILED = _SINGLE_OK
 def merge_verdict(sources: dict) -> dict:
@@ -231,9 +231,9 @@ def merge_verdict(sources: dict) -> dict:
     - 确认证据至少一路强：≥1 个达标多节点源（threshold+≥5 节点）或
       ≥2 个单节点源（交叉）→ reachable；仅 1 个单节点源或弱多节点
       （无强多节点）→ uncertain（单点/弱证据不可靠）
-    - 多节点源（ping.pe / cn01 / cn02 / tcpping）单独确认 → reachable，
+    - 多节点源（cn40 / cn01 / cn02 / cn41）单独确认 → reachable，
       但**要求该源节点成功率达阈值**（cn01 系列按 ``ratio``≥0.5；
-      ping.pe/tcpping 内部已是多数/60% 规则，视作满足）；比率过低的单源
+      cn40/cn41 内部已是多数/60% 规则，视作满足）；比率过低的单源
       判定 → uncertain（单节点假阳性抑制）
     - 单节点源 ≥2 个失败 → unreachable（源集合见 single_failed 表）
     - 多节点源失败且所有单节点源也失败 → unreachable
@@ -274,7 +274,7 @@ def merge_verdict(sources: dict) -> dict:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
         ratio = sources[source].get("ratio")
         if ratio is None:
-            return True  # pingpe/tcpping 内部已实施多数/60% 规则
+            return True  # cn40/cn41 内部已实施多数/60% 规则
         if (sources[source].get("nodes") or 0) < MULTI_MIN_NODES:
             return False  # 残缺样本（限流/连接中断）不作强确认，防退化为单点假阳性
         return ratio >= _SOURCE_MIN_RATIO.get(source, DEFAULT_MIN_RATIO)

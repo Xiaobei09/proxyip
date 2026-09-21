@@ -61,8 +61,7 @@
   `cn17`（~163 TCP 节点 + CN-30 同通道 `cn18` ICMP、
   `cn19` MTR，SHA-256 PoW + ALTCHA 会话复用纯 Python，真实端口直连）。
 - 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
-- 2026-09 穷尽复核（CN-19/21/22）：cn42（API 404＋AliyunCaptcha）、ipip
-  （POST 405）、cn43（路由迁移）、cn44（Turnstile＋端点 404）、cn13
+- 2026-09 穷尽复核（CN-19/21/22）：cn42（API 404＋验证墙）、cn34 前身接口（POST 405）、cn43（路由迁移）、cn44（Turnstile＋端点 404）、cn13
   （TLS 无 SAN）、aizhan（AliyunCaptcha）、站长测速（captcha＋JS 内聚）、
   cn27.net（零 CN）、dnschecker（403）、pingtool（404 无 CN）、
   oioweb/uomg（TLS 坏）。CN-25/26/27 复核见 docs/logic.md（jk 同站第二协议/
@@ -70,7 +69,7 @@
 
 保守判定逻辑（merge_verdict）：
      多节点源（cn40/cn01/cn02/cn03/cn41/cn30/cn31/cn32/cn33/cn06/cn07/cn08/cn14/cn15/
-   cn17/cn18/cn19/cn16/cn11/cn12/cn09/cn10/aa1ping/aa1http/cn42/cn34/cn35/cn43/cn44/cn13）任一 ok 且成功率达标 → reachable；
+   cn17/cn18/cn19/cn16/cn11/cn12/cn09/cn10/cn04/cn05/cn42/cn34/cn35/cn43/cn44/cn13）任一 ok 且成功率达标 → reachable；
    单节点源（cn27/cn28/cn29/cn20/cn21/cn22/cn23/cn24/cn25/cn26/cn36/cn37/cn38/cn39）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
@@ -172,7 +171,7 @@ except Exception:
 WS_MAX_BUF = _WS_MAX_BUF
 del _WS_MAX_BUF
 
-# aa1 双通道（cn04/cn05）已迁入 PCB 插件 cn04：有 bundle 时取实现，
+# cn04/cn05 双通道已迁入 PCB 插件 cn04：有 bundle 时取实现，
 # 无 bundle 时对应源 fail-open（_run_raw_slots 写 error 行，不崩）。
 _CN04_BUNDLE = False
 try:
@@ -254,7 +253,7 @@ except Exception:
     CN28_CODE = "cn28"
     CN29_CODE = "cn29"
 
-# cn20-cn23（xxapi 北京 TCP / 枣庄 ICMP / 状态码 / 443 扫描，免 key JSON，
+# cn20-cn23（北京 TCP / 枣庄 ICMP / 状态码 / 443 扫描，免 key JSON，
 # 单节点源族）已迁入 PCB 插件 cn20（协议细节见 pcb/docs/cn20.md）。
 # 无 bundle 时 l2 循环写 fail-open（attr 为 None，except 兜底）。
 _CN20_BUNDLE = False
@@ -280,7 +279,7 @@ except Exception:
     CN23_CODE = "cn23"
 
 
-# cn24-cn26（jkapi 无铭 API：TC ping / ICMP ping / TLS 握手，免 key 双镜像，
+# cn24-cn26（TC ping / ICMP ping / TLS 握手，免 key 双镜像，
 # 宁波电信单节点源族）已迁入 PCB 插件 cn24（协议细节见 pcb/docs/cn24.md）。
 # 无 bundle 时卡死源（None），L2 循环跳过。
 _CN24_BUNDLE = False
@@ -302,9 +301,9 @@ except Exception:
     CN26_CODE = "cn26"
 
 
-# cn40 ping.pe —— 约 13 个大陆节点（antiflood + start_token 流程）已迁入
+# cn40 —— 约 13 个大陆节点（antiflood + start_token 流程）已迁入
 # PCB 插件 cn40（协议细节见 pcb/docs/cn40.md）。无 bundle 时
-# _run_pingpe_slots 写 fail-open。
+# _run_cn40_slots 写 fail-open。
 _CN40_BUNDLE = False
 try:
     _cn40 = _load_pcb_plugin("cn40")
@@ -319,7 +318,7 @@ from china_engine import (
     merge_verdict, CN01_CODE, CN02_CODE, CN03_CODE,
     CN04_CODE, CN05_CODE, _cn_isp_label,
 )  # 判定引擎（拆分单向依赖；cc.* 名字保持可用）
-# cn41 tcpping.cn —— 多运营商 TCPing，需站长签发的 token（缺则跳过）已迁入
+# cn41 —— 多运营商 TCPing，需站长签发的 token（缺则跳过）已迁入
 # PCB 插件 cn41（协议细节见 pcb/docs/cn41.md）。token 为运行期凭证，
 # 仍由公开 CLI 注入（--tcpping-token / TCPPING_CN_TOKEN env），本站不藏 key。
 _CN41_BUNDLE = False
@@ -332,10 +331,10 @@ except Exception:
     cn41_check = None
     CN41_CODE = "cn41"
 
-# cn30-cn33（tcptest.cn 多节点 REST：TCP/ICMP/HTTP/路由，免 key，~146
+# cn30-cn33（多节点 REST：TCP/ICMP/HTTP/路由，免 key，~146
 # 大陆节点取子集均衡采样）已迁入 PCB 插件 cn30（协议细节见
 # pcb/docs/cn30.md）。节点列表进程内缓存（插件内）；无 bundle 时
-# 三函数为 None → run_measurements 跳过节点拉取，_run_tcptest_slots
+# 三函数为 None → run_measurements 跳过节点拉取，_run_cn30_slots
 # 写 fail-open error 行。配置常量（NODES/CONCURRENCY/LIMIT_DEFAULT）
 # 由插件回绑，供 CLI 默认值与并发上界使用。
 _CN30_BUNDLE = False
@@ -368,7 +367,7 @@ except Exception:
 # 无 bundle 时该源 fail-open（_run_raw_slots 记 error 行）。
 
 # cn08 已迁入 PCB 插件 cn08：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
-# 协议细节见 pcb/docs/cn08.md），无 bundle 时 _run_pingloc_slots 写 fail-open。
+# 协议细节见 pcb/docs/cn08.md），无 bundle 时 _run_cn08_slots 写 fail-open。
 _CN08_BUNDLE = False
 try:
     _cn08 = _load_pcb_plugin("cn08")
@@ -437,7 +436,7 @@ except Exception:
     CN12_CODE = "cn12"
 
 # cn09/cn10 —— 免费大陆多节点 TCPing/Ping（纯 HTTP + SSE，零 key）：
-# 协议细节已迁 PCB（cn_biuping 插件 + pcb/docs/cn09.md）。
+# 协议细节已迁 PCB（cn09 插件 + pcb/docs/cn09.md）。
 # cn09/cn10 已迁入 PCB 插件 cn09：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
 # 壳页 CSRF → /probe_sse.php 事件流，协议细节见 pcb/docs/cn09.md），无 bundle
 # 时 _run_raw_slots 记 fail-open。
@@ -455,7 +454,7 @@ except Exception:
     CN09_CODE = "cn09"
     CN10_CODE = "cn10"
 
-# cn36-cn39（globalping 社区探针：ICMP/路由追踪/应用层/MTR，匿名免 key
+# cn36-cn39（社区探针：ICMP/路由追踪/应用层/MTR，匿名免 key
 # 单节点冗余票）已迁入 PCB 插件 cn36（协议细节见
 # pcb/docs/cn36.md）。无 bundle 时四函数为 None → _run_raw_slots
 # 写 fail-open error 行。四路匿名 250/h 配额；CI 配额 60/40/40/40 键@4
@@ -482,7 +481,7 @@ except Exception:
     CN38_CODE = "cn38"
     CN39_CODE = "cn39"
 
-# cn10 同站 ICMP 复用（CN-34）：cn10_check（pcb cn_biuping 插件）
+# cn10 同站 ICMP 复用（CN-34）：cn10_check（pcb cn10 插件）
 # 即 ping 模式（type=ping，level=icmp）。单列 cn10 源走
 # ICMP，与 TCP 同站同节点池（约 39 测量单元）、不同协议层（低增益-同站）。
 # ping 原生 ms 已实证（广东电信 7.578ms），但为与全部 ICMP 源一致仍剥离
@@ -493,14 +492,14 @@ except Exception:
 # 同形（ok/loss/latest/average）；level=icmp，不产 isp_ms。
 
 
-# —— 博采网拨测族（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
-# cn42/cn43/cn44 —— boce.com/17ce.com/ping0.cc 三源（多节点 TCPing，免 key，
+# —— 多节点 TCPing 复核族（cookie-session + CSRF token 反爬）：
+# cn42/cn43/cn44 三源（多节点 TCPing，免 key，
 # cookie-session+CSRF / HMAC token / header-token 反爬）已迁入 PCB 插件
 # cn_legacy_review（协议细节与休眠状态见 pcb/docs/cn42.md）。
 # 2026-09 复核：cn42 API 404＋AliyunCaptcha、cn43 /api.php 404 路由迁移、
 # cn44 Turnstile＋端点 404 —— 三源休眠，公开树禁绕过验证墙（须人复核解除）。
 
-# cn34/cn35（tools.ipip.net GET+SSE 多节点 TCPing/路由追踪，免 key，
+# cn34/cn35（GET+SSE 多节点 TCPing/路由追踪，免 key，
 # 原生三网 isp_ms）已迁入 PCB 插件 cn34（协议细节见 pcb/docs/cn34.md）。
 # 无 bundle 时两函数为 None → _run_raw_slots 写 fail-open error 行。
 # 常数（探测端点/采集窗/探针数）由插件持有；CI 配额 100/100 键@8 并发
@@ -573,7 +572,7 @@ def merge_isp_ms(entries: dict) -> None:
     """就地合并各源 ``isp_ms`` 到 per-key ``entry["isp_ms"]``（各运营商最小 RTT）。
 
     源结果只需带 ``isp_ms``（``{运营商: ms}``，cn01/cn30/cn11/cn09/
-    aa1ping/cn32 多节点源与 cn24 单节点（宁波电信，CN-39）提供，
+    cn04/cn32 多节点源与 cn24 单节点（宁波电信，CN-39）提供，
     其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
     per-ISP 读数的条目不写该字段，下游回退 ``cn_display_ms`` 单值口径。
     """
@@ -951,7 +950,7 @@ def annotate_cn_files(reachable_keys: set) -> None:
 
 # ------------------------------------------------------------ 主流程
 
-def _run_pingpe_slots(
+def _run_cn40_slots(
     candidates: list, entries: dict, timeout: float,
     cn41_token: str, concurrency: int,
 ) -> None:
@@ -987,7 +986,7 @@ def _run_pingpe_slots(
             fut.result()
 
 
-def _run_tcptest_slots(
+def _run_cn30_slots(
     candidates: list, entries: dict, timeout: float,
     node_uuids: list[str], concurrency: int,
     operators: dict | None = None,
@@ -1067,7 +1066,7 @@ def _run_ws_source_slots(
             fut.result()
 
 
-def _run_pingloc_slots(
+def _run_cn08_slots(
     candidates: list, entries: dict, timeout: float, concurrency: int
 ) -> None:
     """cn08 多节点复核：有 bundle 时走插件（纯 HTTP+SSE ICMP ping；
@@ -1299,7 +1298,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         if RateLimiter is not None else None
     _t0 = time.monotonic()
 
-    def l2_xxapi(item):
+    def l2_cn20(item):
         """免额单节点源（cn20 北京 TCP + cn21 枣庄 ICMP + cn22 状态码
         + cn23 443 扫描 + cn24 宁波电信 TCP + cn25 宁波电信 ICMP
         + cn26 宁波电信 TLS）全池扫描，先建立候选集。
@@ -1322,12 +1321,12 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         return key, out
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(l2_xxapi, item) for item in sample]
+        futures = [pool.submit(l2_cn20, item) for item in sample]
         for future in futures:
             key, sources = future.result()
             entries[key] = sources
 
-    def l2_check_host(item):
+    def l2_cn27(item):
         """稀缺配额源（cn27 呼和浩特单节点 ~250/h）二次确认。
 
         cn27 判 fail 时追加同节点 ICMP ping（cn28，共用限速器）：
@@ -1384,7 +1383,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             return True
 
         futures = [
-            pool.submit(l2_check_host, item)
+            pool.submit(l2_cn27, item)
             for item in sample
             if _needs_ch(entries.get(item[1], {}))
         ]
@@ -1514,7 +1513,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                        default=0)
         if limit is None or limit < 0:
             limit = len(cn30_candidates)
-        _run_tcptest_slots(
+        _run_cn30_slots(
             cn30_candidates[:limit],
             entries,
             args.timeout,
@@ -1536,7 +1535,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ]
             if ping_limit is None or ping_limit < 0:
                 ping_limit = len(ping_candidates)
-            _run_tcptest_slots(
+            _run_cn30_slots(
                 ping_candidates[:ping_limit],
                 entries,
                 args.timeout,
@@ -1562,7 +1561,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ]
             if http_limit is None or http_limit < 0:
                 http_limit = len(http_candidates)
-            _run_tcptest_slots(
+            _run_cn30_slots(
                 http_candidates[:http_limit],
                 entries,
                 args.timeout,
@@ -1588,7 +1587,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ]
             if trace_limit is None or trace_limit < 0:
                 trace_limit = len(trace_candidates)
-            _run_tcptest_slots(
+            _run_cn30_slots(
                 trace_candidates[:trace_limit],
                 entries,
                 args.timeout,
@@ -1654,7 +1653,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         cands = _pending_cands()
         if cn08_limit is None or cn08_limit < 0:
             cn08_limit = len(cands)
-        _run_pingloc_slots(
+        _run_cn08_slots(
             cands[:cn08_limit], entries, args.timeout,
             cn_opt(args, "cn08", "concurrency",
            default=8),
@@ -1713,7 +1712,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn17 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn18（CN-30）：同站 ICMP ping（tcpingcn_ping），主独立判 reachable；默认 0=跳过。
+    # cn18（CN-30）：同站 ICMP ping（cn18 通道），主独立判 reachable；默认 0=跳过。
     cn18_limit = cn_opt(args, "cn18", "limit",
                        default=0)
     if cn18_limit != 0:
@@ -1783,7 +1782,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn11 review: skipped (limit=0)", file=sys.stderr)
 
-    # ce98_ping（CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
+    # cn12（CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
     cn12_limit = cn_opt(args, "cn12", "limit",
                    default=0)
@@ -2034,7 +2033,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     cn40_candidates = [
         item for item in sample if needs_probe(entries, item[1])
     ]
-    _run_pingpe_slots(
+    _run_cn40_slots(
         cn40_candidates[: cn_opt(args, "cn40", "limit",
                                  default=0)],
         entries,
@@ -2300,8 +2299,8 @@ def main(argv=None) -> int:
         f"flappers: {flappers} cn-l2-ms: {cn_ms_covered}/{len(entries)}",
         file=sys.stderr,
     )
-    # per-key isp_ms（各运营商最小 RTT，来自 cn01/cn30/ce98/biuding/
-    # aa1ping/cn32 多节点源与 cn24 单节点 per-ISP 源）——
+    # per-key isp_ms（各运营商最小 RTT，来自 cn01/cn30/cn11/cn09/
+    # cn04/cn32 多节点源与 cn24 单节点 per-ISP 源）——
     # 必须在中国 check 写 china.json 之前合并进 entries，单一事实源。
     merge_isp_ms(entries)
     n_isp = sum(
@@ -2310,7 +2309,7 @@ def main(argv=None) -> int:
         and e["isp_ms"]
     )
     print(f"isp_ms coverage: {n_isp}/{len(entries)} entries "
-          f"(0 意味着 cn01 取节点被风控且 cn30/ce98/biuding 无出数 "
+          f"(0 意味着 cn01 取节点被风控且 cn30/cn11/cn09 无出数 "
           f"— 见 CN-17 审计)", file=sys.stderr)
     # 分运营商估算速度（CN-41）：由 isp_ms 同公式派生，只增 isp_speed 字段，
     # 展示消费留待逻辑优化轮。
