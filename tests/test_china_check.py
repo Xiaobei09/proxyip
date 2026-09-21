@@ -3572,6 +3572,26 @@ class TestCiEnabledSources(unittest.TestCase):
             flag = f"--cn-limit {code}={lim}"
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
+    def test_ci_command_dry_runs(self):
+        """R15：workflow china 步骤原样 dry-run（parser/workflow 漂移即红；
+        无网络无写盘；此前每轮手工验证，现锁进套件）。"""
+        import re
+        import shlex
+        import unittest.mock as mock
+        root = Path(__file__).resolve().parent.parent
+        wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
+            encoding="utf-8")
+        m = re.search(r"run: >-\n((?:[ ]{9,}.*\n?)+)", wf)
+        self.assertIsNotNone(m, "china 步骤 run 块丢失")
+        cmd = " ".join(l.strip() for l in m.group(1).splitlines()
+                       if l.strip())
+        argv = shlex.split(cmd)
+        self.assertEqual(argv[:2], ["python", "scripts/china_check.py"])
+        with mock.patch.object(
+                cc, "request_follow",
+                side_effect=AssertionError("dry-run must not touch net")):
+            self.assertEqual(cc.main(argv[2:] + ["--dry-run"]), 0)
+
     def test_ci_run_block_folds_to_single_command(self):
         """URGENT-CI：china-check.yml 的 `run: >-` 折叠块必须折成单条 shell
         命令——任一续行缩进多一格即成超缩进行，YAML 保留其换行，bash 把
