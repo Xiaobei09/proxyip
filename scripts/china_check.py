@@ -467,7 +467,7 @@ except Exception:
 # 单节点冗余票）已迁入 PCB 插件 cn_globalping（协议细节见
 # pcb/docs/globalping.md）。无 bundle 时四函数为 None → _run_raw_slots
 # 写 fail-open error 行。四路匿名 250/h 配额；CI 配额 60/40/40/40 键@4
-# 并发由 CI 行经 --<name>-limit 显式启用。
+# 并发由 CI 行经 --cn-limit CODE=N 显式启用。
 _GLOBALPING_BUNDLE = False
 try:
     _globalping = _load_pcb_plugin("cn_globalping")
@@ -512,7 +512,7 @@ except Exception:
 # 原生三网 isp_ms）已迁入 PCB 插件 cn_ipip（协议细节见 pcb/docs/ipip.md）。
 # 无 bundle 时两函数为 None → _run_raw_slots 写 fail-open error 行。
 # 常数（探测端点/采集窗/探针数）由插件持有；CI 配额 100/100 键@8 并发
-# 经 --<name>-limit 显式启用。
+# 经 --cn-limit CODE=N 显式启用。
 _IPIP_BUNDLE = False
 try:
     _ipip = _load_pcb_plugin("cn_ipip")
@@ -1489,7 +1489,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn30-33 多节点 TCP/ICMP/HTTP/路由 复核（免费 REST，节点列表进程内
     # 缓存于插件）：只投「当前尚未被判可达」的键，先于 cn40（贵）跑，
-    # 确认过的键会让位。--tcptest-limit -1 表示全池未定键全覆盖（uncertain/
+    # 确认过的键会让位。--cn-limit cn30=-1 表示全池未定键全覆盖（uncertain/
     # 错误健全部扫过，让每个键都有资格走向 reachable 或 unreachable 定论）。
     # --tcptest-ping-limit（CN-33）为 cn31 ICMP 通道（type=ping，无端口概念，
     # level=icmp，不产 isp_ms），跑在 TCP 相之后（只投 TCP 仍未定论者）。
@@ -1653,7 +1653,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # 新增四源多节点复核（全部无 key、大陆多节点）：cn08（HTTP+SSE）、
     # antping（JWT+WS）、cn17（PoW+WS 纯 TCP）、chinaz（token+WS 纯 ICMP）。
-    # 各自按 --<name>-limit 投递（默认 0=跳过，-1=全部未定键）；均为多节点源，
+    # 各自按 --cn-limit CODE=N 投递（默认 0=跳过，-1=全部未定键）；均为多节点源，
     # 达标即可独立判 reachable，整站失败也可与单节点源联动判 unreachable。
 
     pingloc_limit = cn_opt(args, "cn08", "limit",
@@ -2012,7 +2012,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # 新增四个多节点 TCP 复核源（全部大陆多节点、遵循各站反爬协议）：
     # cn42（cookie-session+CSRF）、cn43（token 签章）、
-    # cn44（header-token）、cn13（cookie-token+WS）。各自按 --<name>-limit
+    # cn44（header-token）、cn13（cookie-token+WS）。各自按 --cn-limit CODE=N
     # 投递（默认 0=跳过，-1=全部未定键）；达标即可独立判 reachable，整站失败
     # 也可与单节点源联动判 unreachable。
     # 注：cn34（CN-43 复活）已有上方专用相（含采集窗/配额注释），不再走此循环，
@@ -2206,10 +2206,10 @@ def main(argv=None) -> int:
     parser.add_argument("--cn-limit", action="append", default=[],
                         metavar="CODE=N",
                         help="按代号覆盖复核条数（可重复；如 --cn-limit cn30=800），优先于 "
-                        "legacy --<stem>-limit 与 PCB 注册表默认")
+                        "PCB 注册表默认")
     parser.add_argument("--cn-concurrency", action="append", default=[],
                         metavar="CODE=N",
-                        help="按代号覆盖并发数（可重复），优先于 legacy 并发旗标与注册表默认")
+                        help="按代号覆盖并发数（可重复），优先于注册表默认")
     parser.add_argument("--cn-nodes", action="append", default=[],
                         metavar="CODE=N",
                         help="按代号覆盖每键采样节点数（可重复），优先于 legacy 节点旗标")
