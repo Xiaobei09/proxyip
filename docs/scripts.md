@@ -138,7 +138,7 @@
 | `spamhaus` | 4 | Spamhaus DROP + EDROP 端用户高风险网段静态表（免费，`<cidr> ; 描述`），命中即投 `listed` 票 |
 | `freeipapi` | 6 | `freeipapi.com/api/json/{ip}`，免 key；`isProxy` 标志 -30，附 ASN/org |
 | `hackmyip` | 6 | `hackmyip.com/api/lookup?ip={ip}`，免 key；`data.privacy` 的 hosting/proxy/mobile 标志参与投票，附 ASN |
-| `scamalytics` | 8 | `scamalytics.com/ip/{ip}` 免费风险页；`Fraud Score` 0-100 直扣，`is_blacklisted_external` 投 `listed` 票 |
+| `scamalytics` | 8 | 免费风险页抓取（抓取实现已迁 PCB）；分值 0-100 直扣，黑名单标记投 `listed` 票 |
 | `iplocation` | 3 | `api.iplocation.net/?ip={ip}`，免 key；`is_proxy` -30，附 isp。**R269 起退出默认源**（最低权重、proxy 维度被 hackmyip/freeipapi/scamalytics 覆盖），opt-in 可用 |
 | `stopforumspam` | 4 | `api.stopforumspam.org/api?ip={ip}&json`，免 key；`appears=1`（被举报的 HTTP 垃圾/滥用来源）投 `abuse` 票并 -50，`torexit=1` 额外投 `tor` 票；无记录返回空（负缓存） |
 | `maltiverse` | 6 | `api.maltiverse.com/ip/{ip}`，免 key；`classification=malicious`/`suspicious` 投 `abuse` 票（-60/-35），`is_open_proxy`/`is_tor_node`/`is_vpn_node` 各投对应票（-25），`is_cnc`/`is_distributing_malware`/`is_iot_threat`/`is_known_scanner`/`is_mining_pool`/近 30 天黑名单命中投 `abuse` 票（-40）；**刻意忽略历史脏数据 `is_known_attacker` 与 `is_hosting`**；全空返回空（负缓存） |

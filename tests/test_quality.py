@@ -4136,27 +4136,6 @@ class TestNewReputationSources(unittest.TestCase):
             m.return_value.__enter__.return_value = fake
             self.assertIsNone(qr.freeipapi_lookup_sync("1.2.3.4"))
 
-    def test_scamalytics_lookup_parsing(self):
-        html = (
-            '<div class="score_container" style="width: 10px;">'
-            "Fraud Score: 12</div>"
-            '<pre>\n"ip":"1.1.1.1",\n"score":"12",\n"risk":"medium",\n'
-            '"is_blacklisted_external": false,\n...\n</pre>'
-        )
-        with unittest.mock.patch("urllib.request.urlopen") as m:
-            fake = unittest.mock.MagicMock()
-            fake.read.return_value = html.encode()
-            m.return_value.__enter__.return_value = fake
-            out = qr.scamalytics_lookup_sync("1.1.1.1")
-        self.assertEqual(out, {"score": 12, "is_blacklisted": False})
-
-    def test_scamalytics_lookup_missing_score(self):
-        with unittest.mock.patch("urllib.request.urlopen") as m:
-            fake = unittest.mock.MagicMock()
-            fake.read.return_value = b"<html>no score</html>"
-            m.return_value.__enter__.return_value = fake
-            self.assertIsNone(qr.scamalytics_lookup_sync("1.1.1.1"))
-
     def test_iplocation_lookup_parsing(self):
         body = json.dumps({
             "ip": "1.2.3.4", "isp": "X Corp", "is_proxy": "Yes",

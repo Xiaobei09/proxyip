@@ -71,9 +71,6 @@ FREEIPAPI_URL = "https://freeipapi.com/api/json/{ip}"
 FREEIPAPI_TIMEOUT = 10
 HACKMYIP_URL = "https://hackmyip.com/api/lookup?ip={ip}"
 HACKMYIP_TIMEOUT = 10
-SCAMALYTICS_URL = "https://scamalytics.com/ip/{ip}"
-SCAMALYTICS_TIMEOUT = 12
-SCAMALYTICS_CAP = 1500
 IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
 IPLOCATION_TIMEOUT = 10
 IPLOCATION_CAP = 3000
@@ -253,8 +250,6 @@ FIREHOL_SOCKSPROXY_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/socks_proxy_1d.ipset"
 )
-SCAMALYTICS_SCORE_RE = re.compile(r"Fraud Score:\s*(\d+)\b")
-SCAMALYTICS_BLACKLIST_RE = re.compile(r'"is_blacklisted_external"\s*:\s*(true|false)')
 STATIC_LIST_TIMEOUT = 15
 # 静态黑名单正文上限：ThreatFox json/recent、FireHOL netset 等可达数十 MB，
 # 远超通用 FETCH_BODY_MAX=16MiB。黑洞/截断即静默丢失整源信誉信号，
@@ -1522,24 +1517,16 @@ def hackmyip_lookup_sync(ip: str) -> dict | None:
     return out
 
 
-def scamalytics_lookup_sync(ip: str) -> dict | None:
-    """Scrape the free ``scamalytics.com/ip/{ip}`` risk page: ``Fraud Score``
-    (0-100) plus the ``is_blacklisted_external`` flag from the embedded API
-    preview JSON."""
-    req = urllib.request.Request(
-        SCAMALYTICS_URL.format(ip=ip),
-        headers={"User-Agent": UA},
-    )
-    with deadline_open(req, SCAMALYTICS_TIMEOUT) as resp:
-        html = resp.read().decode("utf-8", "replace")
-    m = SCAMALYTICS_SCORE_RE.search(html)
-    if not m:
-        return None
-    out = {"score": int(m.group(1))}
-    bl = SCAMALYTICS_BLACKLIST_RE.search(html)
-    if bl:
-        out["is_blacklisted"] = bl.group(1) == "true"
-    return out
+_REP_SCAMALYTICS_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_scam = _load_pcb_plugin("rep_scamalytics")
+    scamalytics_lookup_sync = _rep_scam.scamalytics_lookup_sync
+    SCAMALYTICS_CAP = _rep_scam.CAP
+    _REP_SCAMALYTICS_BUNDLE = True
+except Exception:
+    scamalytics_lookup_sync = None
+    SCAMALYTICS_CAP = 1500
 
 
 def iplocation_lookup_sync(ip: str) -> dict | None:
@@ -2957,7 +2944,7 @@ async def lookup_all_risk(
         api_tasks.append(cached_batch(
             "maltiverse", maltiverse_lookup_sync,
             cap=MALTIVERSE_CAP, workers=w, delay=d))
-    if "scamalytics" in sources:
+    if "scamalytics" in sources and scamalytics_lookup_sync is not None:
         w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "scamalytics", scamalytics_lookup_sync, cap=SCAMALYTICS_CAP, workers=w, delay=d))
