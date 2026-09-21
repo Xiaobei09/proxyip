@@ -323,14 +323,14 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 #### L3 多节点复核（有界并发小样本）
 
-按序接入多节点复核源补强，各源只投「当前尚未被 cn01/单节点源判可达」的键、按 `--<name>-limit` 有界，先免费/低鉴权源再复杂源：
+按序接入多节点复核源补强，各源只投「当前尚未被 cn01/单节点源判可达」的键、按 `--cn-limit CODE=N` 有界，先免费/低鉴权源再复杂源：
 
 - `cn30`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
 - `cn31`（CN-33）：同站 `type=ping`（裸 IP 目标，无端口概念），节点成功 = `success`＋`avg_ms>0`，`level=icmp`，不产 `isp_ms`；与 TCP 共用节点采样，跑在 TCP 相之后（只投仍未定论者），CI 400 键/20 并发
 - `cn32`（CN-35）：同站 `type=http`（`http://ip:port/`，明文打 TLS 端口收 CF 400 即完整往返，cn01 同口径），节点成功 = `success`＋`status>0`，`level=http`，ms 取 `connect_ms`，与 TCP 同口径产 `isp_ms`；跑在 ping 相之后（只投仍未定论者），CI 200 键/8 并发
 - `cn33`（CN-40）：同站 `type=traceroute`（裸 IP 目标，多跳轨迹），节点成功 = 后端判定 `success`（活体 98/100，拒测 0/100），`ms` 恒空（轨迹时长非 RTT，布尔见证），`level=icmp`，不产 `isp_ms`；跑在 http 相之后；mtr 型因 cost 高 375 倍不接入；CI 200 键/6 并发
 - `cn07`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
-- `cn08`（已迁 PCB，~12 大陆 ICMP 节点，纯 HTTP+SSE 零鉴权）、`cn14`（~155 节点，JWT+WS，TCP `ip:port`）、`cn15`（CN-28：cn14 同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`cn17`（~163 TCP 节点，SHA-256 PoW + ALTCHA 会话复用纯 Python 求解 + WS，真实端口直连；CN-30 起同通道 `cn18` ICMP 并行；CN-44 起同基建 `cn19` MTR 通道，约 139 节点末跳见证，不产 `ms`/`isp_ms`）、`cn16`（~53 ICMP 节点，服务端渲染 token + WS）、`cn11`（34 大陆省市节点 TCPing，socket.io）、`cn12`（CN-36：同站 continuous-ping，35 节点 socket.io，结果帧与 TCP 同形，`level=icmp`，不产 `isp_ms`；CI 200 键/6 并发）、`cn09`（约 39 ISP×节点 TCPing，HTTP+SSE 零鉴权）、`cn10`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`；CI 200 键/8 并发）、`cn04`（CN-27：28 城三网 TCPing，原生分 ISP；CI 以 200 键/6 并发启用）、`cn05`（CN-50：同站 HTTP 测速通道，应用层确认，`level=http`，活体 27/28 出数；仅 443 键可用；CI 以 200 键/6 并发启用）、`cn06`（CN-42：公开 WS 通道约 16 节点 TCPing，原生分三网，活体 16 节点出数；CI 以 200 键/6 并发启用）、`cn34`（CN-43 复活：tools.ipip.net 同路径 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网经 `_cn_isp_label` 聚合，活体 287 节点出数，死体 0 出数完美区分；SSE 单键约 90s 采集窗，CI 以 100 键/8 并发启用）＋`cn35`（CN-45：同站路由追踪，hop 行目标 IP 即见证，`level=icmp`，不产 `ms`/`isp_ms`，CI 以 100 键/8 并发启用）、`cn42`（休眠）、`cn43`（休眠）、`cn44`（休眠）、`cn13`：各含多大陆节点，默认 0（跳过），由 `--<name>-limit` 启用（cn13 已迁 PCB）
+- `cn08`（已迁 PCB，~12 大陆 ICMP 节点，纯 HTTP+SSE 零鉴权）、`cn14`（~155 节点，JWT+WS，TCP `ip:port`）、`cn15`（CN-28：cn14 同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`cn17`（~163 TCP 节点，SHA-256 PoW + ALTCHA 会话复用纯 Python 求解 + WS，真实端口直连；CN-30 起同通道 `cn18` ICMP 并行；CN-44 起同基建 `cn19` MTR 通道，约 139 节点末跳见证，不产 `ms`/`isp_ms`）、`cn16`（~53 ICMP 节点，服务端渲染 token + WS）、`cn11`（34 大陆省市节点 TCPing，socket.io）、`cn12`（CN-36：同站 continuous-ping，35 节点 socket.io，结果帧与 TCP 同形，`level=icmp`，不产 `isp_ms`；CI 200 键/6 并发）、`cn09`（约 39 ISP×节点 TCPing，HTTP+SSE 零鉴权）、`cn10`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`；CI 200 键/8 并发）、`cn04`（CN-27：28 城三网 TCPing，原生分 ISP；CI 以 200 键/6 并发启用）、`cn05`（CN-50：同站 HTTP 测速通道，应用层确认，`level=http`，活体 27/28 出数；仅 443 键可用；CI 以 200 键/6 并发启用）、`cn06`（CN-42：公开 WS 通道约 16 节点 TCPing，原生分三网，活体 16 节点出数；CI 以 200 键/6 并发启用）、`cn34`（CN-43 复活：tools.ipip.net 同路径 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网经 `_cn_isp_label` 聚合，活体 287 节点出数，死体 0 出数完美区分；SSE 单键约 90s 采集窗，CI 以 100 键/8 并发启用）＋`cn35`（CN-45：同站路由追踪，hop 行目标 IP 即见证，`level=icmp`，不产 `ms`/`isp_ms`，CI 以 100 键/8 并发启用）、`cn42`（休眠）、`cn43`（休眠）、`cn44`（休眠）、`cn13`：各含多大陆节点，默认 0（跳过），由 `--cn-limit CODE=N` 启用（cn13 已迁 PCB）
 - `cn40`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
 - `cn41`：多运营商 TCPing，token 由 CLI 注入（`--tcpping-token`/`TCPPING_CN_TOKEN` env），缺则自动跳过
 
