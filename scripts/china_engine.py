@@ -11,88 +11,88 @@ from checks_bundle import load_plugin as _load_pcb_plugin
 
 # 公开代号（与插件声明一致；无包环境数据口径不变；稳定公开标识）。
 try:
-    _itdog = _load_pcb_plugin("china_itdog")
-    CN01_CODE = _itdog.CODE_HTTP
-    CN02_CODE = _itdog.CODE_TCPING
-    CN03_CODE = _itdog.CODE_PING
+    _cn01 = _load_pcb_plugin("cn01")
+    CN01_CODE = _cn01.CODE_HTTP
+    CN02_CODE = _cn01.CODE_TCPING
+    CN03_CODE = _cn01.CODE_PING
 except Exception:
     CN01_CODE = "cn01"
     CN02_CODE = "cn02"
     CN03_CODE = "cn03"
 try:
-    _aa1 = _load_pcb_plugin("cn_aa1")
-    CN04_CODE = _aa1.CODE_PING
-    CN05_CODE = _aa1.CODE_HTTP
+    _cn04 = _load_pcb_plugin("cn04")
+    CN04_CODE = _cn04.CODE_PING
+    CN05_CODE = _cn04.CODE_HTTP
 except Exception:
     CN04_CODE = "cn04"
     CN05_CODE = "cn05"
 try:
-    _tcpping_ws = _load_pcb_plugin("cn06")
-    CN06_CODE = _tcpping_ws.CODE
+    _cn06 = _load_pcb_plugin("cn06")
+    CN06_CODE = _cn06.CODE
 except Exception:
     CN06_CODE = "cn06"
 try:
-    _coffee = _load_pcb_plugin("cn_coffee")
-    CN07_CODE = _coffee.CODE
+    _cn07 = _load_pcb_plugin("cn07")
+    CN07_CODE = _cn07.CODE
 except Exception:
     CN07_CODE = "cn07"
 try:
-    _pingloc = _load_pcb_plugin("cn_pingloc")
-    CN08_CODE = _pingloc.CODE
+    _cn08 = _load_pcb_plugin("cn08")
+    CN08_CODE = _cn08.CODE
 except Exception:
     CN08_CODE = "cn08"
 
 try:
-    _biuping = _load_pcb_plugin("cn_biuping")
-    CN09_CODE = _biuping.CODE_TCPING
-    CN10_CODE = _biuping.CODE_PING
+    _cn09 = _load_pcb_plugin("cn09")
+    CN09_CODE = _cn09.CODE_TCPING
+    CN10_CODE = _cn09.CODE_PING
 except Exception:
     CN09_CODE = "cn09"
     CN10_CODE = "cn10"
 
 try:
-    _ce98 = _load_pcb_plugin("cn_ce98")
-    CN11_CODE = _ce98.CODE
-    CN12_CODE = _ce98.CODE_PING
+    _cn11 = _load_pcb_plugin("cn11")
+    CN11_CODE = _cn11.CODE
+    CN12_CODE = _cn11.CODE_PING
 except Exception:
     CN11_CODE = "cn11"
     CN12_CODE = "cn12"
 
 try:
-    _wansui = _load_pcb_plugin("cn_wansui")
-    CN13_CODE = _wansui.CODE
+    _cn13 = _load_pcb_plugin("cn13")
+    CN13_CODE = _cn13.CODE
 except Exception:
     CN13_CODE = "cn13"
 
 try:
-    _antping = _load_pcb_plugin("cn_antping")
-    CN14_CODE = _antping.CODE
-    CN15_CODE = _antping.CODE_PING
+    _cn14 = _load_pcb_plugin("cn14")
+    CN14_CODE = _cn14.CODE
+    CN15_CODE = _cn14.CODE_PING
 except Exception:
     CN14_CODE = "cn14"
     CN15_CODE = "cn15"
 
 try:
-    _chinaz = _load_pcb_plugin("cn_chinaz")
-    CN16_CODE = _chinaz.CODE
+    _cn16 = _load_pcb_plugin("cn16")
+    CN16_CODE = _cn16.CODE
 except Exception:
     CN16_CODE = "cn16"
 
 try:
-    _tcpingcn = _load_pcb_plugin("cn_tcpingcn")
-    CN17_CODE = _tcpingcn.CODE
-    CN18_CODE = _tcpingcn.CODE_PING
-    CN19_CODE = _tcpingcn.CODE_MTR
+    _cn17 = _load_pcb_plugin("cn17")
+    CN17_CODE = _cn17.CODE
+    CN18_CODE = _cn17.CODE_PING
+    CN19_CODE = _cn17.CODE_MTR
 except Exception:
     CN17_CODE = "cn17"
     CN18_CODE = "cn18"
     CN19_CODE = "cn19"
 try:
-    _tcptest = _load_pcb_plugin("cn_tcptest")
-    CN30_CODE = _tcptest.CODE
-    CN31_CODE = _tcptest.CODE_PING
-    CN32_CODE = _tcptest.CODE_HTTP
-    CN33_CODE = _tcptest.CODE_TRACE
+    _cn30 = _load_pcb_plugin("cn30")
+    CN30_CODE = _cn30.CODE
+    CN31_CODE = _cn30.CODE_PING
+    CN32_CODE = _cn30.CODE_HTTP
+    CN33_CODE = _cn30.CODE_TRACE
 except Exception:
     CN30_CODE = "cn30"
     CN31_CODE = "cn31"
@@ -100,19 +100,19 @@ except Exception:
     CN33_CODE = "cn33"
 
 try:
-    _ipip = _load_pcb_plugin("cn_ipip")
-    CN34_CODE = _ipip.CODE
-    CN35_CODE = _ipip.CODE_TRACE
+    _cn34 = _load_pcb_plugin("cn34")
+    CN34_CODE = _cn34.CODE
+    CN35_CODE = _cn34.CODE_TRACE
 except Exception:
     CN34_CODE = "cn34"
     CN35_CODE = "cn35"
 
 try:
-    _globalping = _load_pcb_plugin("cn_globalping")
-    CN36_CODE = _globalping.CODE
-    CN37_CODE = _globalping.CODE_TRACE
-    CN38_CODE = _globalping.CODE_HTTP
-    CN39_CODE = _globalping.CODE_MTR
+    _cn36 = _load_pcb_plugin("cn36")
+    CN36_CODE = _cn36.CODE
+    CN37_CODE = _cn36.CODE_TRACE
+    CN38_CODE = _cn36.CODE_HTTP
+    CN39_CODE = _cn36.CODE_MTR
 except Exception:
     CN36_CODE = "cn36"
     CN37_CODE = "cn37"
@@ -120,22 +120,22 @@ except Exception:
     CN39_CODE = "cn39"
 
 try:
-    _pingpe = _load_pcb_plugin("cn_pingpe")
-    CN40_CODE = _pingpe.CODE
+    _cn40 = _load_pcb_plugin("cn40")
+    CN40_CODE = _cn40.CODE
 except Exception:
     CN40_CODE = "cn40"
 
 try:
-    _tcpping = _load_pcb_plugin("cn_tcpping")
+    _tcpping = _load_pcb_plugin("cn41")
     CN41_CODE = _tcpping.CODE
 except Exception:
     CN41_CODE = "cn41"
 
 try:
-    _legacy = _load_pcb_plugin("cn_legacy_review")
-    CN42_CODE = _legacy.CODE_BOCE
-    CN43_CODE = _legacy.CODE_17CE
-    CN44_CODE = _legacy.CODE_PING0
+    _cn42 = _load_pcb_plugin("cn42")
+    CN42_CODE = _cn42.CODE_BOCE
+    CN43_CODE = _cn42.CODE_17CE
+    CN44_CODE = _cn42.CODE_PING0
 except Exception:
     CN42_CODE = "cn42"
     CN43_CODE = "cn43"

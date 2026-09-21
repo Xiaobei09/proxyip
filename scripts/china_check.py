@@ -146,17 +146,17 @@ from checks_bundle import load_plugin as _load_pcb_plugin
 # cn01 系源整段跳过（fail-open；调参回退为历史公开值，仅用于 CLI 默认展示）。
 _CN01_BUNDLE = False
 try:
-    _itdog = _load_pcb_plugin("china_itdog")
-    CN01_BATCH_SIZE = _itdog.ITDOG_BATCH_SIZE
-    CN01_CONCURRENCY = _itdog.ITDOG_CONCURRENCY
-    CN01_NODES_PER_ISP = _itdog.ITDOG_NODES_PER_ISP
-    CN01_PACING = _itdog.ITDOG_PACING
-    CN03_NODES_PER_ISP = _itdog.ITDOG_PING_NODES_PER_ISP
-    CN03_PAGE_URL = _itdog.ITDOG_PING_URL
-    CN01_TASK_TIMEOUT = _itdog.ITDOG_TASK_TIMEOUT
-    CN02_NODES_PER_ISP = _itdog.ITDOG_TCPING_NODES_PER_ISP
-    CN02_PAGE_URL = _itdog.ITDOG_TCPING_URL
-    cn01_batch_run = _itdog.itdog_batch_run
+    _cn01 = _load_pcb_plugin("cn01")
+    CN01_BATCH_SIZE = _cn01.ITDOG_BATCH_SIZE
+    CN01_CONCURRENCY = _cn01.ITDOG_CONCURRENCY
+    CN01_NODES_PER_ISP = _cn01.ITDOG_NODES_PER_ISP
+    CN01_PACING = _cn01.ITDOG_PACING
+    CN03_NODES_PER_ISP = _cn01.ITDOG_PING_NODES_PER_ISP
+    CN03_PAGE_URL = _cn01.ITDOG_PING_URL
+    CN01_TASK_TIMEOUT = _cn01.ITDOG_TASK_TIMEOUT
+    CN02_NODES_PER_ISP = _cn01.ITDOG_TCPING_NODES_PER_ISP
+    CN02_PAGE_URL = _cn01.ITDOG_TCPING_URL
+    cn01_batch_run = _cn01.itdog_batch_run
     _CN01_BUNDLE = True
 except Exception:
     CN01_BATCH_SIZE = 5
@@ -172,13 +172,13 @@ except Exception:
 WS_MAX_BUF = _WS_MAX_BUF
 del _WS_MAX_BUF
 
-# aa1 双通道（cn04/cn05）已迁入 PCB 插件 cn_aa1：有 bundle 时取实现，
+# aa1 双通道（cn04/cn05）已迁入 PCB 插件 cn04：有 bundle 时取实现，
 # 无 bundle 时对应源 fail-open（_run_raw_slots 写 error 行，不崩）。
 _CN04_BUNDLE = False
 try:
-    _aa1 = _load_pcb_plugin("cn_aa1")
-    cn04_check = _aa1.aa1ping_check
-    cn05_check = _aa1.aa1http_check
+    _cn04 = _load_pcb_plugin("cn04")
+    cn04_check = _cn04.aa1ping_check
+    cn05_check = _cn04.aa1http_check
     _CN04_BUNDLE = True
 except Exception:
     cn04_check = None
@@ -186,22 +186,22 @@ except Exception:
 # cn06 已迁入 PCB 插件：有 bundle 时取实现，
 _CN06_BUNDLE = False
 try:
-    _tcpping_ws = _load_pcb_plugin("cn06")
-    cn06_check = _tcpping_ws.tcpping_ws_check
-    CN06_CODE = _tcpping_ws.CODE
+    _cn06 = _load_pcb_plugin("cn06")
+    cn06_check = _cn06.tcpping_ws_check
+    CN06_CODE = _cn06.CODE
     _CN06_BUNDLE = True
 except Exception:
     cn06_check = None
     CN06_CODE = "cn06"
 
-# cn07 已迁入 PCB 插件 cn_coffee：有 bundle 时取实现（内部含快速重试），
+# cn07 已迁入 PCB 插件 cn07：有 bundle 时取实现（内部含快速重试），
 # 无 bundle 时 fail-open（_run_raw_slots 写 error 行）。
 _CN07_BUNDLE = False
 try:
-    _coffee = _load_pcb_plugin("cn_coffee")
-    cn07_check = _coffee.coffee_check
-    CN07_CODE = _coffee.CODE
-    CN07_CONCURRENCY = _coffee.COFFEE_CONCURRENCY
+    _cn07 = _load_pcb_plugin("cn07")
+    cn07_check = _cn07.coffee_check
+    CN07_CODE = _cn07.CODE
+    CN07_CONCURRENCY = _cn07.COFFEE_CONCURRENCY
     _CN07_BUNDLE = True
 except Exception:
     cn07_check = None
@@ -225,8 +225,8 @@ POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
 
 # cn27-cn29（呼和浩特阿里云单节点三端点：应用层 TCP/ICMP/HTTPS，免 key，
-# 匿名限速 5/10s + 250/h）已迁入 PCB 插件 cn_checkhost（协议细节见
-# pcb/docs/cn28.md）。名额由 run_measurements 用公共数值常量构造共享
+# 匿名限速 5/10s + 250/h）已迁入 PCB 插件 cn27（协议细节见
+# pcb/docs/cn27.md）。名额由 run_measurements 用公共数值常量构造共享
 # 限速器；无 bundle 时三 check 为 None → 调用 TypeError → except → error
 # 行 fail-open。
 CN27_WINDOW_SEC = 10.0
@@ -234,15 +234,15 @@ CN27_PER_WINDOW = 5  # 匿名限速 5/10s
 CN27_HOUR_CAP = 250
 _CN27_BUNDLE = False
 try:
-    _checkhost = _load_pcb_plugin("cn_checkhost")
-    cn27_check = _checkhost.check_host_check
-    cn28_check = _checkhost.checkhost_ping_check
-    cn29_check = _checkhost.checkhost_http_check
-    RateLimiter = _checkhost.RateLimiter
-    RateLimited = _checkhost.RateLimited
-    CN27_CODE = _checkhost.CODE
-    CN28_CODE = _checkhost.CODE_PING
-    CN29_CODE = _checkhost.CODE_HTTP
+    _cn27 = _load_pcb_plugin("cn27")
+    cn27_check = _cn27.check_host_check
+    cn28_check = _cn27.checkhost_ping_check
+    cn29_check = _cn27.checkhost_http_check
+    RateLimiter = _cn27.RateLimiter
+    RateLimited = _cn27.RateLimited
+    CN27_CODE = _cn27.CODE
+    CN28_CODE = _cn27.CODE_PING
+    CN29_CODE = _cn27.CODE_HTTP
     _CN27_BUNDLE = True
 except Exception:
     cn27_check = None
@@ -255,19 +255,19 @@ except Exception:
     CN29_CODE = "cn29"
 
 # cn20-cn23（xxapi 北京 TCP / 枣庄 ICMP / 状态码 / 443 扫描，免 key JSON，
-# 单节点源族）已迁入 PCB 插件 cn_xxapi（协议细节见 pcb/docs/xxapi.md）。
+# 单节点源族）已迁入 PCB 插件 cn20（协议细节见 pcb/docs/cn20.md）。
 # 无 bundle 时 l2 循环写 fail-open（attr 为 None，except 兜底）。
 _CN20_BUNDLE = False
 try:
-    _xxapi = _load_pcb_plugin("cn_xxapi")
-    cn20_check = _xxapi.xxapi_check
-    cn21_check = _xxapi.xxping_check
-    cn22_check = _xxapi.xxstatus_check
-    cn23_check = _xxapi.xxscan_check
-    CN20_CODE = _xxapi.CODE
-    CN21_CODE = _xxapi.CODE_PING
-    CN22_CODE = _xxapi.CODE_STATUS
-    CN23_CODE = _xxapi.CODE_SCAN
+    _cn20 = _load_pcb_plugin("cn20")
+    cn20_check = _cn20.xxapi_check
+    cn21_check = _cn20.xxping_check
+    cn22_check = _cn20.xxstatus_check
+    cn23_check = _cn20.xxscan_check
+    CN20_CODE = _cn20.CODE
+    CN21_CODE = _cn20.CODE_PING
+    CN22_CODE = _cn20.CODE_STATUS
+    CN23_CODE = _cn20.CODE_SCAN
     _CN20_BUNDLE = True
 except Exception:
     cn20_check = None
@@ -281,17 +281,17 @@ except Exception:
 
 
 # cn24-cn26（jkapi 无铭 API：TC ping / ICMP ping / TLS 握手，免 key 双镜像，
-# 宁波电信单节点源族）已迁入 PCB 插件 cn_jkapi（协议细节见 pcb/docs/jkapi.md）。
+# 宁波电信单节点源族）已迁入 PCB 插件 cn24（协议细节见 pcb/docs/cn24.md）。
 # 无 bundle 时卡死源（None），L2 循环跳过。
 _CN24_BUNDLE = False
 try:
-    _jkapi = _load_pcb_plugin("cn_jkapi")
-    cn24_check = _jkapi.jkapi_check
-    cn25_check = _jkapi.jkping_check
-    cn26_check = _jkapi.jkssl_check
-    CN24_CODE = _jkapi.CODE
-    CN25_CODE = _jkapi.CODE_PING
-    CN26_CODE = _jkapi.CODE_SSL
+    _cn24 = _load_pcb_plugin("cn24")
+    cn24_check = _cn24.jkapi_check
+    cn25_check = _cn24.jkping_check
+    cn26_check = _cn24.jkssl_check
+    CN24_CODE = _cn24.CODE
+    CN25_CODE = _cn24.CODE_PING
+    CN26_CODE = _cn24.CODE_SSL
     _CN24_BUNDLE = True
 except Exception:
     cn24_check = None
@@ -303,13 +303,13 @@ except Exception:
 
 
 # cn40 ping.pe —— 约 13 个大陆节点（antiflood + start_token 流程）已迁入
-# PCB 插件 cn_pingpe（协议细节见 pcb/docs/pingpe.md）。无 bundle 时
+# PCB 插件 cn40（协议细节见 pcb/docs/cn40.md）。无 bundle 时
 # _run_pingpe_slots 写 fail-open。
 _CN40_BUNDLE = False
 try:
-    _pingpe = _load_pcb_plugin("cn_pingpe")
-    cn40_check = _pingpe.pingpe_check
-    CN40_CODE = _pingpe.CODE
+    _cn40 = _load_pcb_plugin("cn40")
+    cn40_check = _cn40.pingpe_check
+    CN40_CODE = _cn40.CODE
     _CN40_BUNDLE = True
 except Exception:
     cn40_check = None
@@ -320,37 +320,37 @@ from china_engine import (
     CN04_CODE, CN05_CODE, _cn_isp_label,
 )  # 判定引擎（拆分单向依赖；cc.* 名字保持可用）
 # cn41 tcpping.cn —— 多运营商 TCPing，需站长签发的 token（缺则跳过）已迁入
-# PCB 插件 cn_tcpping（协议细节见 pcb/docs/tcpping.md）。token 为运行期凭证，
+# PCB 插件 cn41（协议细节见 pcb/docs/cn41.md）。token 为运行期凭证，
 # 仍由公开 CLI 注入（--tcpping-token / TCPPING_CN_TOKEN env），本站不藏 key。
 _CN41_BUNDLE = False
 try:
-    _tcpping_p = _load_pcb_plugin("cn_tcpping")
-    cn41_check = _tcpping_p.tcpping_check
-    CN41_CODE = _tcpping_p.CODE
+    _cn41 = _load_pcb_plugin("cn41")
+    cn41_check = _cn41.tcpping_check
+    CN41_CODE = _cn41.CODE
     _CN41_BUNDLE = True
 except Exception:
     cn41_check = None
     CN41_CODE = "cn41"
 
 # cn30-cn33（tcptest.cn 多节点 REST：TCP/ICMP/HTTP/路由，免 key，~146
-# 大陆节点取子集均衡采样）已迁入 PCB 插件 cn_tcptest（协议细节见
-# pcb/docs/tcptest.md）。节点列表进程内缓存（插件内）；无 bundle 时
+# 大陆节点取子集均衡采样）已迁入 PCB 插件 cn30（协议细节见
+# pcb/docs/cn30.md）。节点列表进程内缓存（插件内）；无 bundle 时
 # 三函数为 None → run_measurements 跳过节点拉取，_run_tcptest_slots
 # 写 fail-open error 行。配置常量（NODES/CONCURRENCY/LIMIT_DEFAULT）
 # 由插件回绑，供 CLI 默认值与并发上界使用。
 _CN30_BUNDLE = False
 try:
-    _tcptest = _load_pcb_plugin("cn_tcptest")
-    cn30_fetch_nodes = _tcptest.tcptest_fetch_nodes
-    cn30_pick_nodes = _tcptest.tcptest_pick_nodes
-    cn30_check = _tcptest.tcptest_check
-    CN30_CODE = _tcptest.CODE
-    CN31_CODE = _tcptest.CODE_PING
-    CN32_CODE = _tcptest.CODE_HTTP
-    CN33_CODE = _tcptest.CODE_TRACE
-    CN30_NODES = _tcptest.NODES
-    CN30_CONCURRENCY = _tcptest.CONCURRENCY
-    CN30_LIMIT_DEFAULT = _tcptest.LIMIT_DEFAULT
+    _cn30 = _load_pcb_plugin("cn30")
+    cn30_fetch_nodes = _cn30.tcptest_fetch_nodes
+    cn30_pick_nodes = _cn30.tcptest_pick_nodes
+    cn30_check = _cn30.tcptest_check
+    CN30_CODE = _cn30.CODE
+    CN31_CODE = _cn30.CODE_PING
+    CN32_CODE = _cn30.CODE_HTTP
+    CN33_CODE = _cn30.CODE_TRACE
+    CN30_NODES = _cn30.NODES
+    CN30_CONCURRENCY = _cn30.CONCURRENCY
+    CN30_LIMIT_DEFAULT = _cn30.LIMIT_DEFAULT
     _CN30_BUNDLE = True
 except Exception:
     cn30_fetch_nodes = None
@@ -367,24 +367,24 @@ except Exception:
 # cn07（大陆多节点 ICMP，REST+轮询）协议细节已迁入 PCB 插件；
 # 无 bundle 时该源 fail-open（_run_raw_slots 记 error 行）。
 
-# cn08 已迁入 PCB 插件 cn_pingloc：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
-# 协议细节见 pcb/docs/pingloc.md），无 bundle 时 _run_pingloc_slots 写 fail-open。
+# cn08 已迁入 PCB 插件 cn08：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
+# 协议细节见 pcb/docs/cn08.md），无 bundle 时 _run_pingloc_slots 写 fail-open。
 _CN08_BUNDLE = False
 try:
-    _pingloc = _load_pcb_plugin("cn_pingloc")
-    cn08_check = _pingloc.pingloc_check
-    CN08_CODE = _pingloc.CODE
+    _cn08 = _load_pcb_plugin("cn08")
+    cn08_check = _cn08.pingloc_check
+    CN08_CODE = _cn08.CODE
     _CN08_BUNDLE = True
 except Exception:
     cn08_check = None
     CN08_CODE = "cn08"
 
 try:
-    _antping = _load_pcb_plugin("cn_antping")
-    cn14_check = _antping.antping_check
-    cn15_check = _antping.antping_ping_check
-    CN14_CODE = _antping.CODE
-    CN15_CODE = _antping.CODE_PING
+    _cn14 = _load_pcb_plugin("cn14")
+    cn14_check = _cn14.antping_check
+    cn15_check = _cn14.antping_ping_check
+    CN14_CODE = _cn14.CODE
+    CN15_CODE = _cn14.CODE_PING
 except Exception:
     cn14_check = None
     cn15_check = None
@@ -392,25 +392,25 @@ except Exception:
     CN15_CODE = "cn15"
 
 try:
-    _chinaz = _load_pcb_plugin("cn_chinaz")
-    cn16_check = _chinaz.chinaz_check
-    CN16_CODE = _chinaz.CODE
+    _cn16 = _load_pcb_plugin("cn16")
+    cn16_check = _cn16.chinaz_check
+    CN16_CODE = _cn16.CODE
 except Exception:
     cn16_check = None
     CN16_CODE = "cn16"
 
 # cn17/cn18/cn19（单键多节点 TCP 探测/同站 ICMP/同站 MTR）已迁入
-# PCB 插件 cn_tcpingcn（ALTCHA 会话 + SHA-256 PoW + WS 共享；协议细节见
-# pcb/docs/tcpingcn.md）。无 bundle 时 _run_ws_source_slots 写 fail-open。
+# PCB 插件 cn17（ALTCHA 会话 + SHA-256 PoW + WS 共享；协议细节见
+# pcb/docs/cn17.md）。无 bundle 时 _run_ws_source_slots 写 fail-open。
 _CN17_BUNDLE = False
 try:
-    _tcpingcn = _load_pcb_plugin("cn_tcpingcn")
-    cn17_check = _tcpingcn.tcpingcn_check
-    cn18_check = _tcpingcn.tcpingcn_ping_check
-    cn19_check = _tcpingcn.tcpingcn_mtr_check
-    CN17_CODE = _tcpingcn.CODE
-    CN18_CODE = _tcpingcn.CODE_PING
-    CN19_CODE = _tcpingcn.CODE_MTR
+    _cn17 = _load_pcb_plugin("cn17")
+    cn17_check = _cn17.tcpingcn_check
+    cn18_check = _cn17.tcpingcn_ping_check
+    cn19_check = _cn17.tcpingcn_mtr_check
+    CN17_CODE = _cn17.CODE
+    CN18_CODE = _cn17.CODE_PING
+    CN19_CODE = _cn17.CODE_MTR
     _CN17_BUNDLE = True
 except Exception:
     cn17_check = None
@@ -420,15 +420,15 @@ except Exception:
     CN18_CODE = "cn18"
     CN19_CODE = "cn19"
 # cn11 —— 免费大陆多节点持续 TCPing（socket.io v4 over WebSocket，零 key）：
-# cn11/cn12 已迁入 PCB 插件 cn_ce98（socket.io-WS 多节点 TCPing/ICMP，零 key；
-# 协议细节见 pcb/docs/ce98.md）。无 bundle 时 _run_raw_slots 记 fail-open。
+# cn11/cn12 已迁入 PCB 插件 cn11（socket.io-WS 多节点 TCPing/ICMP，零 key；
+# 协议细节见 pcb/docs/cn11.md）。无 bundle 时 _run_raw_slots 记 fail-open。
 _CN11_BUNDLE = False
 try:
-    _ce98 = _load_pcb_plugin("cn_ce98")
-    cn11_check = _ce98.ce98_check
-    cn12_check = _ce98.ce98_ping_check
-    CN11_CODE = _ce98.CODE
-    CN12_CODE = _ce98.CODE_PING
+    _cn11 = _load_pcb_plugin("cn11")
+    cn11_check = _cn11.ce98_check
+    cn12_check = _cn11.ce98_ping_check
+    CN11_CODE = _cn11.CODE
+    CN12_CODE = _cn11.CODE_PING
     _CN11_BUNDLE = True
 except Exception:
     cn11_check = None
@@ -437,17 +437,17 @@ except Exception:
     CN12_CODE = "cn12"
 
 # cn09/cn10 —— 免费大陆多节点 TCPing/Ping（纯 HTTP + SSE，零 key）：
-# 协议细节已迁 PCB（cn_biuping 插件 + pcb/docs/biuping.md）。
-# cn09/cn10 已迁入 PCB 插件 cn_biuping：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
-# 壳页 CSRF → /probe_sse.php 事件流，协议细节见 pcb/docs/biuping.md），无 bundle
+# 协议细节已迁 PCB（cn_biuping 插件 + pcb/docs/cn09.md）。
+# cn09/cn10 已迁入 PCB 插件 cn09：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
+# 壳页 CSRF → /probe_sse.php 事件流，协议细节见 pcb/docs/cn09.md），无 bundle
 # 时 _run_raw_slots 记 fail-open。
 _CN09_BUNDLE = False
 try:
-    _biuping = _load_pcb_plugin("cn_biuping")
-    cn09_check = _biuping.biuping_check
-    cn10_check = _biuping.biuping_ping_check
-    CN09_CODE = _biuping.CODE_TCPING
-    CN10_CODE = _biuping.CODE_PING
+    _cn09 = _load_pcb_plugin("cn09")
+    cn09_check = _cn09.biuping_check
+    cn10_check = _cn09.biuping_ping_check
+    CN09_CODE = _cn09.CODE_TCPING
+    CN10_CODE = _cn09.CODE_PING
     _CN09_BUNDLE = True
 except Exception:
     cn09_check = None
@@ -456,21 +456,21 @@ except Exception:
     CN10_CODE = "cn10"
 
 # cn36-cn39（globalping 社区探针：ICMP/路由追踪/应用层/MTR，匿名免 key
-# 单节点冗余票）已迁入 PCB 插件 cn_globalping（协议细节见
-# pcb/docs/globalping.md）。无 bundle 时四函数为 None → _run_raw_slots
+# 单节点冗余票）已迁入 PCB 插件 cn36（协议细节见
+# pcb/docs/cn36.md）。无 bundle 时四函数为 None → _run_raw_slots
 # 写 fail-open error 行。四路匿名 250/h 配额；CI 配额 60/40/40/40 键@4
 # 并发由 CI 行经 --cn-limit CODE=N 显式启用。
 _CN36_BUNDLE = False
 try:
-    _globalping = _load_pcb_plugin("cn_globalping")
-    cn36_check = _globalping.globalping_check
-    cn37_check = _globalping.globalping_trace_check
-    cn38_check = _globalping.globalping_http_check
-    cn39_check = _globalping.globalping_mtr_check
-    CN36_CODE = _globalping.CODE
-    CN37_CODE = _globalping.CODE_TRACE
-    CN38_CODE = _globalping.CODE_HTTP
-    CN39_CODE = _globalping.CODE_MTR
+    _cn36 = _load_pcb_plugin("cn36")
+    cn36_check = _cn36.globalping_check
+    cn37_check = _cn36.globalping_trace_check
+    cn38_check = _cn36.globalping_http_check
+    cn39_check = _cn36.globalping_mtr_check
+    CN36_CODE = _cn36.CODE
+    CN37_CODE = _cn36.CODE_TRACE
+    CN38_CODE = _cn36.CODE_HTTP
+    CN39_CODE = _cn36.CODE_MTR
     _CN36_BUNDLE = True
 except Exception:
     cn36_check = None
@@ -488,7 +488,7 @@ except Exception:
 # ping 原生 ms 已实证（广东电信 7.578ms），但为与全部 ICMP 源一致仍剥离
 # isp_ms（防 1~8ms 进展示；多节点 ICMP 源同口径）。
 
-# cn12 同站 ICMP 复用（CN-36，见 pcb 插件 cn_ce98（ICMP 通道））：35 节点（电信 11/
+# cn12 同站 ICMP 复用（CN-36，见 pcb 插件 cn11（ICMP 通道））：35 节点（电信 11/
 # 移动 10/联通 8/多线 4/港澳台 1/海外 1，原生 isp 字段），结果帧与 TCP
 # 同形（ok/loss/latest/average）；level=icmp，不产 isp_ms。
 
@@ -496,22 +496,22 @@ except Exception:
 # —— 博采网拨测族（HTTP 多节点 TCPing，cookie-session + CSRF token 反爬）：
 # cn42/cn43/cn44 —— boce.com/17ce.com/ping0.cc 三源（多节点 TCPing，免 key，
 # cookie-session+CSRF / HMAC token / header-token 反爬）已迁入 PCB 插件
-# cn_legacy_review（协议细节与休眠状态见 pcb/docs/legacy_review.md）。
+# cn_legacy_review（协议细节与休眠状态见 pcb/docs/cn42.md）。
 # 2026-09 复核：cn42 API 404＋AliyunCaptcha、cn43 /api.php 404 路由迁移、
 # cn44 Turnstile＋端点 404 —— 三源休眠，公开树禁绕过验证墙（须人复核解除）。
 
 # cn34/cn35（tools.ipip.net GET+SSE 多节点 TCPing/路由追踪，免 key，
-# 原生三网 isp_ms）已迁入 PCB 插件 cn_ipip（协议细节见 pcb/docs/ipip.md）。
+# 原生三网 isp_ms）已迁入 PCB 插件 cn34（协议细节见 pcb/docs/cn34.md）。
 # 无 bundle 时两函数为 None → _run_raw_slots 写 fail-open error 行。
 # 常数（探测端点/采集窗/探针数）由插件持有；CI 配额 100/100 键@8 并发
 # 经 --cn-limit CODE=N 显式启用。
 _CN34_BUNDLE = False
 try:
-    _ipip = _load_pcb_plugin("cn_ipip")
-    cn34_check = _ipip.ipip_check
-    cn35_check = _ipip.ipip_trace_check
-    CN34_CODE = _ipip.CODE
-    CN35_CODE = _ipip.CODE_TRACE
+    _cn34 = _load_pcb_plugin("cn34")
+    cn34_check = _cn34.ipip_check
+    cn35_check = _cn34.ipip_trace_check
+    CN34_CODE = _cn34.CODE
+    CN35_CODE = _cn34.CODE_TRACE
     _CN34_BUNDLE = True
 except Exception:
     cn34_check = None
@@ -521,13 +521,13 @@ except Exception:
 
 _LEGACY_REVIEW_BUNDLE = False
 try:
-    _legacy = _load_pcb_plugin("cn_legacy_review")
-    cn42_check = _legacy.boce_check
-    cn43_check = _legacy.seventeen_check
-    cn44_check = _legacy.ping0_check
-    CN42_CODE = _legacy.CODE_BOCE
-    CN43_CODE = _legacy.CODE_17CE
-    CN44_CODE = _legacy.CODE_PING0
+    _cn42 = _load_pcb_plugin("cn42")
+    cn42_check = _cn42.boce_check
+    cn43_check = _cn42.seventeen_check
+    cn44_check = _cn42.ping0_check
+    CN42_CODE = _cn42.CODE_BOCE
+    CN43_CODE = _cn42.CODE_17CE
+    CN44_CODE = _cn42.CODE_PING0
     _LEGACY_REVIEW_BUNDLE = True
 except Exception:
     cn42_check = None
@@ -537,13 +537,13 @@ except Exception:
     CN43_CODE = "cn43"
     CN44_CODE = "cn44"
 
-# cn13 已迁入 PCB 插件 cn_wansui（cookie token + WS 推送 TCPing，休眠态；
-# 协议细节见 pcb/docs/wansui.md）。无 bundle 时 _run_raw_slots 记 fail-open。
+# cn13 已迁入 PCB 插件 cn13（cookie token + WS 推送 TCPing，休眠态；
+# 协议细节见 pcb/docs/cn13.md）。无 bundle 时 _run_raw_slots 记 fail-open。
 _CN13_BUNDLE = False
 try:
-    _wansui = _load_pcb_plugin("cn_wansui")
-    cn13_check = _wansui.wansui_check
-    CN13_CODE = _wansui.CODE
+    _cn13 = _load_pcb_plugin("cn13")
+    cn13_check = _cn13.wansui_check
+    CN13_CODE = _cn13.CODE
     _CN13_BUNDLE = True
 except Exception:
     cn13_check = None

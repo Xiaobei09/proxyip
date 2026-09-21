@@ -2208,7 +2208,7 @@ class TestAntpingPingSource(unittest.TestCase):
 
 class TestGlobalpingSource(unittest.TestCase):
     """CN-46：Globalping 北京探针 ICMP（公开侧只留合并判定与默认 opt-in；
-    协议细节见 pcb/tests/test_cn_globalping.py）。"""
+    协议细节见 pcb/tests/test_cn36.py）。"""
 
     def test_single_vote_wiring(self):
         """单节点票：与 cn22（xxapi）交叉即 reachable；孤证 uncertain；双 fail 定罪。"""
