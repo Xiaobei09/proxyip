@@ -78,6 +78,61 @@ class TestNoPlaintextSecrets(unittest.TestCase):
         )
 
 
+class TestDynamicImportSurface(unittest.TestCase):
+    """R8：动态导入与 sys.path 必须收敛到 bundle loader（防第三方
+    经字符串导入/外部路径绕过静态 import 审计）。"""
+
+    def test_dynamic_imports_only_in_bundle_loader(self):
+        offenders: list[str] = []
+        for py in SCRIPTS.glob("*.py"):
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                func = node.func if isinstance(node, ast.Call) else None
+                is_dyn = (
+                    isinstance(func, ast.Name)
+                    and func.id == "__import__"
+                ) or (
+                    isinstance(func, ast.Attribute)
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "importlib"
+                )
+                if not is_dyn:
+                    continue
+                if not (py.name == "checks_bundle.py"):
+                    offenders.append(f"{py.name}:{node.lineno} 动态导入")
+        self.assertEqual(offenders, [],
+                         "动态导入只能出现在 checks_bundle.py loader:\n"
+                         + "\n".join(offenders))
+
+    def test_syspath_no_absolute_external_literals(self):
+        offenders: list[str] = []
+        for py in SCRIPTS.glob("*.py"):
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Attribute)
+                    and isinstance(node.func.value.value, ast.Name)
+                    and node.func.value.value.id == "sys"
+                    and node.func.value.attr == "path"
+                    and node.func.attr in ("insert", "append")
+                ):
+                    continue
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(
+                        arg.value, str
+                    ):
+                        v = arg.value
+                        if v.startswith(("/", "~")) or (
+                            len(v) > 2 and v[1] == ":"
+                        ):
+                            offenders.append(f"{py.name}:{node.lineno} {v!r}")
+        self.assertEqual(offenders, [],
+                         "sys.path 禁止硬编码外部绝对路径:\n"
+                         + "\n".join(offenders))
+
+
 CORE_FUNCS = ("write_text_if_changed",)
 
 
