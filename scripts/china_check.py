@@ -144,69 +144,69 @@ from checks_bundle import load_plugin as _load_pcb_plugin
 
 # 批量通道（cn01 系）协议细节已迁入私有包（PCB）：有 bundle 时从插件取，无 bundle 时
 # cn01 系源整段跳过（fail-open；调参回退为历史公开值，仅用于 CLI 默认展示）。
-_ITDOG_BUNDLE = False
+_CN01_BUNDLE = False
 try:
     _itdog = _load_pcb_plugin("china_itdog")
-    ITDOG_BATCH_SIZE = _itdog.ITDOG_BATCH_SIZE
-    ITDOG_CONCURRENCY = _itdog.ITDOG_CONCURRENCY
-    ITDOG_NODES_PER_ISP = _itdog.ITDOG_NODES_PER_ISP
-    ITDOG_PACING = _itdog.ITDOG_PACING
+    CN01_BATCH_SIZE = _itdog.ITDOG_BATCH_SIZE
+    CN01_CONCURRENCY = _itdog.ITDOG_CONCURRENCY
+    CN01_NODES_PER_ISP = _itdog.ITDOG_NODES_PER_ISP
+    CN01_PACING = _itdog.ITDOG_PACING
     ITDOG_PING_NODES_PER_ISP = _itdog.ITDOG_PING_NODES_PER_ISP
-    ITDOG_PING_URL = _itdog.ITDOG_PING_URL
-    ITDOG_TASK_TIMEOUT = _itdog.ITDOG_TASK_TIMEOUT
-    ITDOG_TCPING_NODES_PER_ISP = _itdog.ITDOG_TCPING_NODES_PER_ISP
-    ITDOG_TCPING_URL = _itdog.ITDOG_TCPING_URL
-    itdog_batch_run = _itdog.itdog_batch_run
-    _ITDOG_BUNDLE = True
+    CN03_PAGE_URL = _itdog.ITDOG_PING_URL
+    CN01_TASK_TIMEOUT = _itdog.ITDOG_TASK_TIMEOUT
+    CN02_NODES_PER_ISP = _itdog.ITDOG_TCPING_NODES_PER_ISP
+    CN02_PAGE_URL = _itdog.ITDOG_TCPING_URL
+    cn01_batch_run = _itdog.itdog_batch_run
+    _CN01_BUNDLE = True
 except Exception:
-    ITDOG_BATCH_SIZE = 5
-    ITDOG_CONCURRENCY = 8
-    ITDOG_NODES_PER_ISP = 8
-    ITDOG_PACING = 0.5
+    CN01_BATCH_SIZE = 5
+    CN01_CONCURRENCY = 8
+    CN01_NODES_PER_ISP = 8
+    CN01_PACING = 0.5
     ITDOG_PING_NODES_PER_ISP = 8
-    ITDOG_PING_URL = None
-    ITDOG_TASK_TIMEOUT = 45.0
-    ITDOG_TCPING_NODES_PER_ISP = 8
-    ITDOG_TCPING_URL = None
-    itdog_batch_run = None
+    CN03_PAGE_URL = None
+    CN01_TASK_TIMEOUT = 45.0
+    CN02_NODES_PER_ISP = 8
+    CN02_PAGE_URL = None
+    cn01_batch_run = None
 WS_MAX_BUF = _WS_MAX_BUF
 del _WS_MAX_BUF
 
 # aa1 双通道（cn04/cn05）已迁入 PCB 插件 cn_aa1：有 bundle 时取实现，
 # 无 bundle 时对应源 fail-open（_run_raw_slots 写 error 行，不崩）。
-_AA1_BUNDLE = False
+_CN04_BUNDLE = False
 try:
     _aa1 = _load_pcb_plugin("cn_aa1")
-    aa1ping_check = _aa1.aa1ping_check
-    aa1http_check = _aa1.aa1http_check
-    _AA1_BUNDLE = True
+    cn04_check = _aa1.aa1ping_check
+    cn05_check = _aa1.aa1http_check
+    _CN04_BUNDLE = True
 except Exception:
-    aa1ping_check = None
-    aa1http_check = None
+    cn04_check = None
+    cn05_check = None
 # cn06 已迁入 PCB 插件：有 bundle 时取实现，
-_TCPPING_WS_BUNDLE = False
+_CN06_BUNDLE = False
 try:
     _tcpping_ws = _load_pcb_plugin("cn06")
-    tcpping_ws_check = _tcpping_ws.tcppping_ws_check
-    TCPPING_WS_CODE = _tcpping_ws.CODE
-    _TCPPING_WS_BUNDLE = True
+    cn06_check = _tcpping_ws.tcpping_ws_check
+    CN06_CODE = _tcpping_ws.CODE
+    _CN06_BUNDLE = True
 except Exception:
-    tcpping_ws_check = None
-    TCPPING_WS_CODE = "cn06"
+    cn06_check = None
+    CN06_CODE = "cn06"
 
 # cn07 已迁入 PCB 插件 cn_coffee：有 bundle 时取实现（内部含快速重试），
 # 无 bundle 时 fail-open（_run_raw_slots 写 error 行）。
-_COFFEE_BUNDLE = False
+_CN07_BUNDLE = False
 try:
     _coffee = _load_pcb_plugin("cn_coffee")
-    coffee_check = _coffee.coffee_check
-    COFFEE_CODE = _coffee.CODE
-    COFFEE_CONCURRENCY = _coffee.COFFEE_CONCURRENCY
-    _COFFEE_BUNDLE = True
+    cn07_check = _coffee.coffee_check
+    CN07_CODE = _coffee.CODE
+    CN07_CONCURRENCY = _coffee.COFFEE_CONCURRENCY
+    _CN07_BUNDLE = True
 except Exception:
-    coffee_check = None
-    COFFEE_CODE = "cn07"
-    COFFEE_CONCURRENCY = 24
+    cn07_check = None
+    CN07_CODE = "cn07"
+    CN07_CONCURRENCY = 24
 
 def _err(e: Exception) -> str:
     """异常类型名（不带 ``str(e)``：URLError 的 str 含完整 URL 与 token）。"""
@@ -216,9 +216,9 @@ def _err(e: Exception) -> str:
 FALLBACK_SOURCE = DEFAULT_SOURCE
 
 LIMIT_DEFAULT = 250
-PINGPE_LIMIT_DEFAULT = 300
-PINGPE_CONCURRENCY = 6  # cn40 L3 有界并发（每键端到端 ~20-40s，串行太慢）
-PINGPE_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
+CN40_LIMIT_DEFAULT = 300
+CN40_CONCURRENCY = 6  # cn40 L3 有界并发（每键端到端 ~20-40s，串行太慢）
+CN40_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
 WORKERS_DEFAULT = 56  # L2 免额单节点源并发（基准 1000 键：48w≈108s / 64w≈86s / 无 429；取中保守）
 TIMEOUT_DEFAULT = 10
 POLL_DEADLINE = 75.0
@@ -229,116 +229,108 @@ POLL_INTERVAL = 3.0
 # pcb/docs/cn28.md）。名额由 run_measurements 用公共数值常量构造共享
 # 限速器；无 bundle 时三 check 为 None → 调用 TypeError → except → error
 # 行 fail-open。
-CH_WINDOW_SEC = 10.0
-CH_PER_WINDOW = 5  # 匿名限速 5/10s
-CH_HOUR_CAP = 250
-_CHECKHOST_BUNDLE = False
+CN27_WINDOW_SEC = 10.0
+CN27_PER_WINDOW = 5  # 匿名限速 5/10s
+CN27_HOUR_CAP = 250
+_CN27_BUNDLE = False
 try:
     _checkhost = _load_pcb_plugin("cn_checkhost")
-    check_host_check = _checkhost.check_host_check
-    checkhost_ping_check = _checkhost.checkhost_ping_check
-    checkhost_http_check = _checkhost.checkhost_http_check
+    cn27_check = _checkhost.check_host_check
+    cn28_check = _checkhost.checkhost_ping_check
+    cn29_check = _checkhost.checkhost_http_check
     RateLimiter = _checkhost.RateLimiter
     RateLimited = _checkhost.RateLimited
-    CHECK_HOST_CODE = _checkhost.CODE
-    CHECKHOST_PING_CODE = _checkhost.CODE_PING
-    CHECKHOST_HTTP_CODE = _checkhost.CODE_HTTP
-    _CHECKHOST_BUNDLE = True
+    CN27_CODE = _checkhost.CODE
+    CN28_CODE = _checkhost.CODE_PING
+    CN29_CODE = _checkhost.CODE_HTTP
+    _CN27_BUNDLE = True
 except Exception:
-    check_host_check = None
-    checkhost_ping_check = None
-    checkhost_http_check = None
+    cn27_check = None
+    cn28_check = None
+    cn29_check = None
     RateLimiter = None
     RateLimited = None
-    CHECK_HOST_CODE = "cn27"
-    CHECKHOST_PING_CODE = "cn28"
-    CHECKHOST_HTTP_CODE = "cn29"
+    CN27_CODE = "cn27"
+    CN28_CODE = "cn28"
+    CN29_CODE = "cn29"
 
 # cn20-cn23（xxapi 北京 TCP / 枣庄 ICMP / 状态码 / 443 扫描，免 key JSON，
 # 单节点源族）已迁入 PCB 插件 cn_xxapi（协议细节见 pcb/docs/xxapi.md）。
 # 无 bundle 时 l2 循环写 fail-open（attr 为 None，except 兜底）。
-_XXAPI_BUNDLE = False
+_CN20_BUNDLE = False
 try:
     _xxapi = _load_pcb_plugin("cn_xxapi")
-    xxapi_check = _xxapi.xxapi_check
-    xxping_check = _xxapi.xxping_check
-    xxstatus_check = _xxapi.xxstatus_check
-    xxscan_check = _xxapi.xxscan_check
-    XXAPI_CODE = _xxapi.CODE
-    XXPING_CODE = _xxapi.CODE_PING
-    XXSTATUS_CODE = _xxapi.CODE_STATUS
-    XXSCAN_CODE = _xxapi.CODE_SCAN
-    _XXAPI_BUNDLE = True
+    cn20_check = _xxapi.xxapi_check
+    cn21_check = _xxapi.xxping_check
+    cn22_check = _xxapi.xxstatus_check
+    cn23_check = _xxapi.xxscan_check
+    CN20_CODE = _xxapi.CODE
+    CN21_CODE = _xxapi.CODE_PING
+    CN22_CODE = _xxapi.CODE_STATUS
+    CN23_CODE = _xxapi.CODE_SCAN
+    _CN20_BUNDLE = True
 except Exception:
-    xxapi_check = None
-    xxping_check = None
-    xxstatus_check = None
-    xxscan_check = None
-    XXAPI_CODE = "cn20"
-    XXPING_CODE = "cn21"
-    XXSTATUS_CODE = "cn22"
-    XXSCAN_CODE = "cn23"
+    cn20_check = None
+    cn21_check = None
+    cn22_check = None
+    cn23_check = None
+    CN20_CODE = "cn20"
+    CN21_CODE = "cn21"
+    CN22_CODE = "cn22"
+    CN23_CODE = "cn23"
 
 
 # cn24-cn26（jkapi 无铭 API：TC ping / ICMP ping / TLS 握手，免 key 双镜像，
 # 宁波电信单节点源族）已迁入 PCB 插件 cn_jkapi（协议细节见 pcb/docs/jkapi.md）。
 # 无 bundle 时卡死源（None），L2 循环跳过。
-_JKAPI_BUNDLE = False
+_CN24_BUNDLE = False
 try:
     _jkapi = _load_pcb_plugin("cn_jkapi")
-    jkapi_check = _jkapi.jkapi_check
-    jkping_check = _jkapi.jkping_check
-    jkssl_check = _jkapi.jkssl_check
-    JKAPI_CODE = _jkapi.CODE
-    JKPING_CODE = _jkapi.CODE_PING
-    JKSSL_CODE = _jkapi.CODE_SSL
-    _JKAPI_BUNDLE = True
+    cn24_check = _jkapi.jkapi_check
+    cn25_check = _jkapi.jkping_check
+    cn26_check = _jkapi.jkssl_check
+    CN24_CODE = _jkapi.CODE
+    CN25_CODE = _jkapi.CODE_PING
+    CN26_CODE = _jkapi.CODE_SSL
+    _CN24_BUNDLE = True
 except Exception:
-    jkapi_check = None
-    jkping_check = None
-    jkssl_check = None
-    JKAPI_CODE = "cn24"
-    JKPING_CODE = "cn25"
-    JKSSL_CODE = "cn26"
+    cn24_check = None
+    cn25_check = None
+    cn26_check = None
+    CN24_CODE = "cn24"
+    CN25_CODE = "cn25"
+    CN26_CODE = "cn26"
 
 
 # cn40 ping.pe —— 约 13 个大陆节点（antiflood + start_token 流程）已迁入
 # PCB 插件 cn_pingpe（协议细节见 pcb/docs/pingpe.md）。无 bundle 时
 # _run_pingpe_slots 写 fail-open。
-_PINGPE_BUNDLE = False
+_CN40_BUNDLE = False
 try:
     _pingpe = _load_pcb_plugin("cn_pingpe")
-    pingpe_check = _pingpe.pingpe_check
-    parse_pingpe_page = _pingpe.parse_pingpe_page
-    parse_pingpe_results = _pingpe.parse_pingpe_results
-    pingpe_verdict = _pingpe.pingpe_verdict
-    PINGPE_CODE = _pingpe.CODE
-    _PINGPE_BUNDLE = True
+    cn40_check = _pingpe.pingpe_check
+    CN40_CODE = _pingpe.CODE
+    _CN40_BUNDLE = True
 except Exception:
-    pingpe_check = None
-    parse_pingpe_page = None
-    parse_pingpe_results = None
-    pingpe_verdict = None
-    PINGPE_CODE = "cn40"
+    cn40_check = None
+    CN40_CODE = "cn40"
 from china_engine import (
-    ITDOG_MIN_RATIO, MULTI_MIN_NODES, _SOURCE_MIN_RATIO,
-    merge_verdict, ITDOG_CODE_HTTP, ITDOG_CODE_TCPING, ITDOG_CODE_PING,
-    AA1_CODE_PING, AA1_CODE_HTTP, _cn_isp_label,
+    DEFAULT_MIN_RATIO, MULTI_MIN_NODES, _SOURCE_MIN_RATIO,
+    merge_verdict, CN01_CODE, CN02_CODE, CN03_CODE,
+    CN04_CODE, CN05_CODE, _cn_isp_label,
 )  # 判定引擎（拆分单向依赖；cc.* 名字保持可用）
 # cn41 tcpping.cn —— 多运营商 TCPing，需站长签发的 token（缺则跳过）已迁入
 # PCB 插件 cn_tcpping（协议细节见 pcb/docs/tcpping.md）。token 为运行期凭证，
 # 仍由公开 CLI 注入（--tcpping-token / TCPPING_CN_TOKEN env），本站不藏 key。
-_TCPPING_BUNDLE = False
+_CN41_BUNDLE = False
 try:
     _tcpping_p = _load_pcb_plugin("cn_tcpping")
-    parse_tcpping = _tcpping_p.parse_tcpping
-    tcpping_check = _tcpping_p.tcpping_check
-    TCPPING_CODE = _tcpping_p.CODE
-    _TCPPING_BUNDLE = True
+    cn41_check = _tcpping_p.tcpping_check
+    CN41_CODE = _tcpping_p.CODE
+    _CN41_BUNDLE = True
 except Exception:
-    parse_tcpping = None
-    tcpping_check = None
-    TCPPING_CODE = "cn41"
+    cn41_check = None
+    CN41_CODE = "cn41"
 
 # cn30-cn33（tcptest.cn 多节点 REST：TCP/ICMP/HTTP/路由，免 key，~146
 # 大陆节点取子集均衡采样）已迁入 PCB 插件 cn_tcptest（协议细节见
@@ -346,157 +338,157 @@ except Exception:
 # 三函数为 None → run_measurements 跳过节点拉取，_run_tcptest_slots
 # 写 fail-open error 行。配置常量（NODES/CONCURRENCY/LIMIT_DEFAULT）
 # 由插件回绑，供 CLI 默认值与并发上界使用。
-_TCPTEST_BUNDLE = False
+_CN30_BUNDLE = False
 try:
     _tcptest = _load_pcb_plugin("cn_tcptest")
-    tcptest_fetch_nodes = _tcptest.tcptest_fetch_nodes
-    tcptest_pick_nodes = _tcptest.tcptest_pick_nodes
-    tcptest_check = _tcptest.tcptest_check
-    TCPTEST_CODE = _tcptest.CODE
-    TCPTEST_PING_CODE = _tcptest.CODE_PING
-    TCPTEST_HTTP_CODE = _tcptest.CODE_HTTP
-    TCPTEST_TRACE_CODE = _tcptest.CODE_TRACE
-    TCPTEST_NODES = _tcptest.NODES
-    TCPTEST_CONCURRENCY = _tcptest.CONCURRENCY
-    TCPTEST_LIMIT_DEFAULT = _tcptest.LIMIT_DEFAULT
-    _TCPTEST_BUNDLE = True
+    cn30_fetch_nodes = _tcptest.tcptest_fetch_nodes
+    cn30_pick_nodes = _tcptest.tcptest_pick_nodes
+    cn30_check = _tcptest.tcptest_check
+    CN30_CODE = _tcptest.CODE
+    CN31_CODE = _tcptest.CODE_PING
+    CN32_CODE = _tcptest.CODE_HTTP
+    CN33_CODE = _tcptest.CODE_TRACE
+    CN30_NODES = _tcptest.NODES
+    CN30_CONCURRENCY = _tcptest.CONCURRENCY
+    CN30_LIMIT_DEFAULT = _tcptest.LIMIT_DEFAULT
+    _CN30_BUNDLE = True
 except Exception:
-    tcptest_fetch_nodes = None
-    tcptest_pick_nodes = None
-    tcptest_check = None
-    TCPTEST_CODE = "cn30"
-    TCPTEST_PING_CODE = "cn31"
-    TCPTEST_HTTP_CODE = "cn32"
-    TCPTEST_TRACE_CODE = "cn33"
-    TCPTEST_NODES = 10
-    TCPTEST_CONCURRENCY = 8
-    TCPTEST_LIMIT_DEFAULT = 150
+    cn30_fetch_nodes = None
+    cn30_pick_nodes = None
+    cn30_check = None
+    CN30_CODE = "cn30"
+    CN31_CODE = "cn31"
+    CN32_CODE = "cn32"
+    CN33_CODE = "cn33"
+    CN30_NODES = 10
+    CN30_CONCURRENCY = 8
+    CN30_LIMIT_DEFAULT = 150
 
 # cn07（大陆多节点 ICMP，REST+轮询）协议细节已迁入 PCB 插件；
 # 无 bundle 时该源 fail-open（_run_raw_slots 记 error 行）。
 
 # cn08 已迁入 PCB 插件 cn_pingloc：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
 # 协议细节见 pcb/docs/pingloc.md），无 bundle 时 _run_pingloc_slots 写 fail-open。
-_PINGLOC_BUNDLE = False
+_CN08_BUNDLE = False
 try:
     _pingloc = _load_pcb_plugin("cn_pingloc")
-    pingloc_check = _pingloc.pingloc_check
-    PINGLOC_CODE = _pingloc.CODE
-    _PINGLOC_BUNDLE = True
+    cn08_check = _pingloc.pingloc_check
+    CN08_CODE = _pingloc.CODE
+    _CN08_BUNDLE = True
 except Exception:
-    pingloc_check = None
-    PINGLOC_CODE = "cn08"
+    cn08_check = None
+    CN08_CODE = "cn08"
 
 try:
     _antping = _load_pcb_plugin("cn_antping")
-    antping_check = _antping.antping_check
-    antping_ping_check = _antping.antping_ping_check
-    ANTPING_CODE = _antping.CODE
-    ANTPING_PING_CODE = _antping.CODE_PING
+    cn14_check = _antping.antping_check
+    cn15_check = _antping.antping_ping_check
+    CN14_CODE = _antping.CODE
+    CN15_CODE = _antping.CODE_PING
 except Exception:
-    antping_check = None
-    antping_ping_check = None
-    ANTPING_CODE = "cn14"
-    ANTPING_PING_CODE = "cn15"
+    cn14_check = None
+    cn15_check = None
+    CN14_CODE = "cn14"
+    CN15_CODE = "cn15"
 
 try:
     _chinaz = _load_pcb_plugin("cn_chinaz")
-    chinaz_check = _chinaz.chinaz_check
-    CHINAZ_CODE = _chinaz.CODE
+    cn16_check = _chinaz.chinaz_check
+    CN16_CODE = _chinaz.CODE
 except Exception:
-    chinaz_check = None
-    CHINAZ_CODE = "cn16"
+    cn16_check = None
+    CN16_CODE = "cn16"
 
 # cn17/cn18/cn19（单键多节点 TCP 探测/同站 ICMP/同站 MTR）已迁入
 # PCB 插件 cn_tcpingcn（ALTCHA 会话 + SHA-256 PoW + WS 共享；协议细节见
 # pcb/docs/tcpingcn.md）。无 bundle 时 _run_ws_source_slots 写 fail-open。
-_TCPINGCN_BUNDLE = False
+_CN17_BUNDLE = False
 try:
     _tcpingcn = _load_pcb_plugin("cn_tcpingcn")
-    tcpingcn_check = _tcpingcn.tcpingcn_check
-    tcpingcn_ping_check = _tcpingcn.tcpingcn_ping_check
-    tcpingcn_mtr_check = _tcpingcn.tcpingcn_mtr_check
-    TCPINGCN_CODE = _tcpingcn.CODE
-    TCPINGCN_PING_CODE = _tcpingcn.CODE_PING
-    TCPINGCN_MTR_CODE = _tcpingcn.CODE_MTR
-    _TCPINGCN_BUNDLE = True
+    cn17_check = _tcpingcn.tcpingcn_check
+    cn18_check = _tcpingcn.tcpingcn_ping_check
+    cn19_check = _tcpingcn.tcpingcn_mtr_check
+    CN17_CODE = _tcpingcn.CODE
+    CN18_CODE = _tcpingcn.CODE_PING
+    CN19_CODE = _tcpingcn.CODE_MTR
+    _CN17_BUNDLE = True
 except Exception:
-    tcpingcn_check = None
-    tcpingcn_ping_check = None
-    tcpingcn_mtr_check = None
-    TCPINGCN_CODE = "cn17"
-    TCPINGCN_PING_CODE = "cn18"
-    TCPINGCN_MTR_CODE = "cn19"
+    cn17_check = None
+    cn18_check = None
+    cn19_check = None
+    CN17_CODE = "cn17"
+    CN18_CODE = "cn18"
+    CN19_CODE = "cn19"
 # cn11 —— 免费大陆多节点持续 TCPing（socket.io v4 over WebSocket，零 key）：
 # cn11/cn12 已迁入 PCB 插件 cn_ce98（socket.io-WS 多节点 TCPing/ICMP，零 key；
 # 协议细节见 pcb/docs/ce98.md）。无 bundle 时 _run_raw_slots 记 fail-open。
-_CE98_BUNDLE = False
+_CN11_BUNDLE = False
 try:
     _ce98 = _load_pcb_plugin("cn_ce98")
-    ce98_check = _ce98.ce98_check
-    ce98_ping_check = _ce98.ce98_ping_check
-    CE98_CODE = _ce98.CODE
-    CE98_PING_CODE = _ce98.CODE_PING
-    _CE98_BUNDLE = True
+    cn11_check = _ce98.ce98_check
+    cn12_check = _ce98.ce98_ping_check
+    CN11_CODE = _ce98.CODE
+    CN12_CODE = _ce98.CODE_PING
+    _CN11_BUNDLE = True
 except Exception:
-    ce98_check = None
-    ce98_ping_check = None
-    CE98_CODE = "cn11"
-    CE98_PING_CODE = "cn12"
+    cn11_check = None
+    cn12_check = None
+    CN11_CODE = "cn11"
+    CN12_CODE = "cn12"
 
 # cn09/cn10 —— 免费大陆多节点 TCPing/Ping（纯 HTTP + SSE，零 key）：
 # 协议细节已迁 PCB（cn_biuping 插件 + pcb/docs/biuping.md）。
 # cn09/cn10 已迁入 PCB 插件 cn_biuping：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
 # 壳页 CSRF → /probe_sse.php 事件流，协议细节见 pcb/docs/biuping.md），无 bundle
 # 时 _run_raw_slots 记 fail-open。
-_BIUPING_BUNDLE = False
+_CN09_BUNDLE = False
 try:
     _biuping = _load_pcb_plugin("cn_biuping")
-    biuping_check = _biuping.biuping_check
-    biuping_ping_check = _biuping.biuping_ping_check
-    BIUPING_CODE_TCPING = _biuping.CODE_TCPING
-    BIUPING_CODE_PING = _biuping.CODE_PING
-    _BIUPING_BUNDLE = True
+    cn09_check = _biuping.biuping_check
+    cn10_check = _biuping.biuping_ping_check
+    CN09_CODE = _biuping.CODE_TCPING
+    CN10_CODE = _biuping.CODE_PING
+    _CN09_BUNDLE = True
 except Exception:
-    biuping_check = None
-    biuping_ping_check = None
-    BIUPING_CODE_TCPING = "cn09"
-    BIUPING_CODE_PING = "cn10"
+    cn09_check = None
+    cn10_check = None
+    CN09_CODE = "cn09"
+    CN10_CODE = "cn10"
 
 # cn36-cn39（globalping 社区探针：ICMP/路由追踪/应用层/MTR，匿名免 key
 # 单节点冗余票）已迁入 PCB 插件 cn_globalping（协议细节见
 # pcb/docs/globalping.md）。无 bundle 时四函数为 None → _run_raw_slots
 # 写 fail-open error 行。四路匿名 250/h 配额；CI 配额 60/40/40/40 键@4
 # 并发由 CI 行经 --cn-limit CODE=N 显式启用。
-_GLOBALPING_BUNDLE = False
+_CN36_BUNDLE = False
 try:
     _globalping = _load_pcb_plugin("cn_globalping")
-    globalping_check = _globalping.globalping_check
-    globalping_trace_check = _globalping.globalping_trace_check
-    globalping_http_check = _globalping.globalping_http_check
-    globalping_mtr_check = _globalping.globalping_mtr_check
-    GLOBALPING_CODE = _globalping.CODE
-    GLOBALPING_TRACE_CODE = _globalping.CODE_TRACE
-    GLOBALPING_HTTP_CODE = _globalping.CODE_HTTP
-    GLOBALPING_MTR_CODE = _globalping.CODE_MTR
-    _GLOBALPING_BUNDLE = True
+    cn36_check = _globalping.globalping_check
+    cn37_check = _globalping.globalping_trace_check
+    cn38_check = _globalping.globalping_http_check
+    cn39_check = _globalping.globalping_mtr_check
+    CN36_CODE = _globalping.CODE
+    CN37_CODE = _globalping.CODE_TRACE
+    CN38_CODE = _globalping.CODE_HTTP
+    CN39_CODE = _globalping.CODE_MTR
+    _CN36_BUNDLE = True
 except Exception:
-    globalping_check = None
-    globalping_trace_check = None
-    globalping_http_check = None
-    globalping_mtr_check = None
-    GLOBALPING_CODE = "cn36"
-    GLOBALPING_TRACE_CODE = "cn37"
-    GLOBALPING_HTTP_CODE = "cn38"
-    GLOBALPING_MTR_CODE = "cn39"
+    cn36_check = None
+    cn37_check = None
+    cn38_check = None
+    cn39_check = None
+    CN36_CODE = "cn36"
+    CN37_CODE = "cn37"
+    CN38_CODE = "cn38"
+    CN39_CODE = "cn39"
 
-# cn10 同站 ICMP 复用（CN-34）：biuping_ping_check（pcb cn_biuping 插件）
+# cn10 同站 ICMP 复用（CN-34）：cn10_check（pcb cn_biuping 插件）
 # 即 ping 模式（type=ping，level=icmp）。单列 cn10 源走
 # ICMP，与 TCP 同站同节点池（约 39 测量单元）、不同协议层（低增益-同站）。
 # ping 原生 ms 已实证（广东电信 7.578ms），但为与全部 ICMP 源一致仍剥离
 # isp_ms（防 1~8ms 进展示；多节点 ICMP 源同口径）。
 
-# cn12 同站 ICMP 复用（CN-36，见 pcb cn_ce98.ce98_ping_check）：35 节点（电信 11/
+# cn12 同站 ICMP 复用（CN-36，见 pcb 插件 cn_ce98（ICMP 通道））：35 节点（电信 11/
 # 移动 10/联通 8/多线 4/港澳台 1/海外 1，原生 isp 字段），结果帧与 TCP
 # 同形（ok/loss/latest/average）；level=icmp，不产 isp_ms。
 
@@ -513,51 +505,51 @@ except Exception:
 # 无 bundle 时两函数为 None → _run_raw_slots 写 fail-open error 行。
 # 常数（探测端点/采集窗/探针数）由插件持有；CI 配额 100/100 键@8 并发
 # 经 --cn-limit CODE=N 显式启用。
-_IPIP_BUNDLE = False
+_CN34_BUNDLE = False
 try:
     _ipip = _load_pcb_plugin("cn_ipip")
-    ipip_check = _ipip.ipip_check
-    ipip_trace_check = _ipip.ipip_trace_check
-    IPIP_CODE = _ipip.CODE
-    IPIP_TRACE_CODE = _ipip.CODE_TRACE
-    _IPIP_BUNDLE = True
+    cn34_check = _ipip.ipip_check
+    cn35_check = _ipip.ipip_trace_check
+    CN34_CODE = _ipip.CODE
+    CN35_CODE = _ipip.CODE_TRACE
+    _CN34_BUNDLE = True
 except Exception:
-    ipip_check = None
-    ipip_trace_check = None
-    IPIP_CODE = "cn34"
-    IPIP_TRACE_CODE = "cn35"
+    cn34_check = None
+    cn35_check = None
+    CN34_CODE = "cn34"
+    CN35_CODE = "cn35"
 
 _LEGACY_REVIEW_BUNDLE = False
 try:
     _legacy = _load_pcb_plugin("cn_legacy_review")
-    boce_check = _legacy.boce_check
-    seventeen_check = _legacy.seventeen_check
-    ping0_check = _legacy.ping0_check
-    BOCE_CODE = _legacy.CODE_BOCE
-    SEVENTEEN_CODE = _legacy.CODE_17CE
-    PING0_CODE = _legacy.CODE_PING0
+    cn42_check = _legacy.boce_check
+    cn43_check = _legacy.seventeen_check
+    cn44_check = _legacy.ping0_check
+    CN42_CODE = _legacy.CODE_BOCE
+    CN43_CODE = _legacy.CODE_17CE
+    CN44_CODE = _legacy.CODE_PING0
     _LEGACY_REVIEW_BUNDLE = True
 except Exception:
-    boce_check = None
-    seventeen_check = None
-    ping0_check = None
-    BOCE_CODE = "cn42"
-    SEVENTEEN_CODE = "cn43"
-    PING0_CODE = "cn44"
+    cn42_check = None
+    cn43_check = None
+    cn44_check = None
+    CN42_CODE = "cn42"
+    CN43_CODE = "cn43"
+    CN44_CODE = "cn44"
 
 # cn13 已迁入 PCB 插件 cn_wansui（cookie token + WS 推送 TCPing，休眠态；
 # 协议细节见 pcb/docs/wansui.md）。无 bundle 时 _run_raw_slots 记 fail-open。
-_WANSUI_BUNDLE = False
+_CN13_BUNDLE = False
 try:
     _wansui = _load_pcb_plugin("cn_wansui")
-    wansui_check = _wansui.wansui_check
-    WANSUI_CODE = _wansui.CODE
-    _WANSUI_BUNDLE = True
+    cn13_check = _wansui.wansui_check
+    CN13_CODE = _wansui.CODE
+    _CN13_BUNDLE = True
 except Exception:
-    wansui_check = None
-    WANSUI_CODE = "cn13"
+    cn13_check = None
+    CN13_CODE = "cn13"
 
-# itdog.cn —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × ITDOG_NODES_PER_ISP
+# itdog.cn —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × CN01_NODES_PER_ISP
 # 节点（默认 8 → 24），需走 WebSocket 收结果，任务级另出 per-ISP 最小 RTT）
 
 CN_TOKEN = "CN"
@@ -961,33 +953,33 @@ def annotate_cn_files(reachable_keys: set) -> None:
 
 def _run_pingpe_slots(
     candidates: list, entries: dict, timeout: float,
-    tcpping_token: str, concurrency: int,
+    cn41_token: str, concurrency: int,
 ) -> None:
     """L3 cn40 多节点复核：串行→有界并发。每键端到端 ~20-40s（AJAX 启动
     + 轮询），串行 40 键 ≈ 26min；并发受控后同槽位耗时 ~7min，覆盖翻倍而
-    不增加对上游的访问总量。并发数默认 `PINGPE_CONCURRENCY`。"""
+    不增加对上游的访问总量。并发数默认 `CN40_CONCURRENCY`。"""
 
     def work(item) -> None:
         _, key, ip, port, _ = item
         try:
-            # 只看函数占位（loader 全有全无，与 _PINGPE_BUNDLE 同步；
-            # 不读 flag，使单测 mock pingpe_check 时与有无 bundle 无关）。
-            if pingpe_check is None:
-                entries.setdefault(key, {})[PINGPE_CODE] = _bundle_missing(PINGPE_CODE)
+            # 只看函数占位（loader 全有全无，与 _CN40_BUNDLE 同步；
+            # 不读 flag，使单测 mock cn40_check 时与有无 bundle 无关）。
+            if cn40_check is None:
+                entries.setdefault(key, {})[CN40_CODE] = _bundle_missing(CN40_CODE)
             else:
-                entries[key][PINGPE_CODE] = pingpe_check(ip, port, timeout)
-            if tcpping_check is None:
-                if tcpping_token:
-                    entries.setdefault(key, {})[TCPPING_CODE] = _bundle_missing(TCPPING_CODE)
+                entries[key][CN40_CODE] = cn40_check(ip, port, timeout)
+            if cn41_check is None:
+                if cn41_token:
+                    entries.setdefault(key, {})[CN41_CODE] = _bundle_missing(CN41_CODE)
             else:
-                tcpping = tcpping_check(ip, port, tcpping_token, timeout)
-                if tcpping["status"] != "skipped":
-                    entries[key][TCPPING_CODE] = tcpping
+                cn41_res = cn41_check(ip, port, cn41_token, timeout)
+                if cn41_res["status"] != "skipped":
+                    entries[key][CN41_CODE] = cn41_res
         except Exception as exc:
             logging.debug("cn40 failed for %s: %s", key, _err(exc))
-            entries.setdefault(key, {})[PINGPE_CODE] = {
+            entries.setdefault(key, {})[CN40_CODE] = {
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
-        time.sleep(PINGPE_SLOT_GAP)
+        time.sleep(CN40_SLOT_GAP)
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         futures = [pool.submit(work, item) for item in candidates]
@@ -999,11 +991,11 @@ def _run_tcptest_slots(
     candidates: list, entries: dict, timeout: float,
     node_uuids: list[str], concurrency: int,
     operators: dict | None = None,
-    probe_type: str = "tcping", source: str = TCPTEST_CODE,
+    probe_type: str = "tcping", source: str = CN30_CODE,
 ) -> None:
     """cn30-cn33 多节点复核（免费 REST，端到端 ~2-6s/键）。节点列表
     进程内缓存（插件内），只取一次；每键在 concurrency 有界并发下建任务
-    并轮询结果。``operators``（``{uuid: 运营商}``）透传给 ``tcptest_check``
+    并轮询结果。``operators``（``{uuid: 运营商}``）透传给 ``cn30_check``
     产出 per-ISP ``isp_ms``（仅 TCP/HTTP；ping/trace 按口径不产出）。
     ``probe_type``/``source`` 选择 TCP（cn30）或 ICMP（cn31，CN-33）/
     HTTP（cn32，CN-35）/路由（cn33，CN-40）通道与落键。无 bundle 时
@@ -1011,14 +1003,14 @@ def _run_tcptest_slots(
 
     def work(item) -> None:
         _, key, ip, port, _ = item
-        # 只看函数占位是否为 None（loader 全有全无，与 _TCPTEST_BUNDLE
-        # 同步；此处不读 flag，使单测 mock tcptest_check 时与有无
+        # 只看函数占位是否为 None（loader 全有全无，与 _CN30_BUNDLE
+        # 同步；此处不读 flag，使单测 mock cn30_check 时与有无
         # bundle 无关——CI 无 PCB 包时亦可验证通道派发）。
-        if tcptest_check is None:
+        if cn30_check is None:
             entries.setdefault(key, {})[source] = _bundle_missing(source)
             return
         try:
-            entries[key][source] = tcptest_check(
+            entries[key][source] = cn30_check(
                 ip, port, timeout, node_uuids, operators,
                 probe_type=probe_type)
         except Exception as exc:
@@ -1040,24 +1032,24 @@ def _run_ws_source_slots(
 
     每个源按 ``candidates`` 前段投递；只写 ``entries[key][source]``。"""
     fn = {
-        ANTPING_CODE: lambda ip, port: (
-            antping_check(ip, port, timeout)
-            if antping_check else _bundle_missing(ANTPING_CODE)),
-        ANTPING_PING_CODE: lambda ip, port: (
-            antping_ping_check(ip, port, timeout)
-            if antping_ping_check else _bundle_missing(ANTPING_PING_CODE)),
-        TCPINGCN_CODE: lambda ip, port: (
-            tcpingcn_check(ip, port, timeout)
-            if tcpingcn_check else _bundle_missing(TCPINGCN_CODE)),
-        TCPINGCN_PING_CODE: lambda ip, port: (
-            tcpingcn_ping_check(ip, port, timeout)
-            if tcpingcn_ping_check else _bundle_missing(TCPINGCN_PING_CODE)),
-        TCPINGCN_MTR_CODE: lambda ip, port: (
-            tcpingcn_mtr_check(ip, port, timeout)
-            if tcpingcn_mtr_check else _bundle_missing(TCPINGCN_MTR_CODE)),
-        CHINAZ_CODE: lambda ip, port: (
-            chinaz_check(ip, "", timeout)
-            if chinaz_check else _bundle_missing(CHINAZ_CODE)),
+        CN14_CODE: lambda ip, port: (
+            cn14_check(ip, port, timeout)
+            if cn14_check else _bundle_missing(CN14_CODE)),
+        CN15_CODE: lambda ip, port: (
+            cn15_check(ip, port, timeout)
+            if cn15_check else _bundle_missing(CN15_CODE)),
+        CN17_CODE: lambda ip, port: (
+            cn17_check(ip, port, timeout)
+            if cn17_check else _bundle_missing(CN17_CODE)),
+        CN18_CODE: lambda ip, port: (
+            cn18_check(ip, port, timeout)
+            if cn18_check else _bundle_missing(CN18_CODE)),
+        CN19_CODE: lambda ip, port: (
+            cn19_check(ip, port, timeout)
+            if cn19_check else _bundle_missing(CN19_CODE)),
+        CN16_CODE: lambda ip, port: (
+            cn16_check(ip, "", timeout)
+            if cn16_check else _bundle_missing(CN16_CODE)),
     }[source]
 
     def work(item) -> None:
@@ -1085,14 +1077,14 @@ def _run_pingloc_slots(
     def work(item) -> None:
         _, key, ip, _, _ = item
         # 只看函数占位（loader 全有全无；不读 flag，使单测与有无 bundle 无关）。
-        if pingloc_check is None:
-            entries.setdefault(key, {})[PINGLOC_CODE] = _bundle_missing(PINGLOC_CODE)
+        if cn08_check is None:
+            entries.setdefault(key, {})[CN08_CODE] = _bundle_missing(CN08_CODE)
             return
         try:
-            entries[key][PINGLOC_CODE] = pingloc_check(ip, timeout, method="ping")
+            entries[key][CN08_CODE] = cn08_check(ip, timeout, method="ping")
         except Exception as exc:
-            logging.debug("pingloc failed for %s: %s", key, _err(exc))
-            entries.setdefault(key, {})[PINGLOC_CODE] = {
+            logging.debug("cn08 failed for %s: %s", key, _err(exc))
+            entries.setdefault(key, {})[CN08_CODE] = {
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
@@ -1115,63 +1107,63 @@ def _run_raw_slots(
     （cn11 socket.io-WS / cn09 等 HTTP-SSE / cn04 纯 WS），只写 ``entries[key][source]``。
     插件缺失时记 error 行（fail-open）。"""
     fn = {
-        CE98_CODE: lambda ip, port: (
-            ce98_check(ip, port, timeout) if ce98_check
-            else _bundle_missing(CE98_CODE)),
-        CE98_PING_CODE: lambda ip, port: (
-            ce98_ping_check(ip, port, timeout) if ce98_ping_check
-            else _bundle_missing(CE98_PING_CODE)),
-        BIUPING_CODE_TCPING: lambda ip, port: (
-            biuping_check(ip, port, timeout) if biuping_check
-            else _bundle_missing(BIUPING_CODE_TCPING)),
-        BIUPING_CODE_PING: lambda ip, port: (
-            biuping_ping_check(ip, port, timeout) if biuping_ping_check
-            else _bundle_missing(BIUPING_CODE_PING)),
-        AA1_CODE_PING: lambda ip, port: (
-            aa1ping_check(ip, port, timeout) if aa1ping_check
-            else _bundle_missing(AA1_CODE_PING)),
-        AA1_CODE_HTTP: lambda ip, port: (
-            aa1http_check(ip, port, timeout) if aa1http_check
-            else _bundle_missing(AA1_CODE_HTTP)),
-        TCPPING_WS_CODE: lambda ip, port: (
-            tcpping_ws_check(ip, port, timeout) if tcpping_ws_check
-            else _bundle_missing(TCPPING_WS_CODE)),
-        COFFEE_CODE: lambda ip, port: (
-            coffee_check(ip, timeout) if coffee_check
-            else _bundle_missing(COFFEE_CODE)),
-        IPIP_TRACE_CODE: lambda ip, port: (
-            ipip_trace_check(ip, port, timeout) if ipip_trace_check
-            else _bundle_missing(IPIP_TRACE_CODE)),
-        GLOBALPING_CODE: lambda ip, port: (
-            globalping_check(ip, port, timeout) if globalping_check
-            else _bundle_missing(GLOBALPING_CODE)),
-        GLOBALPING_TRACE_CODE: lambda ip, port: (
-            globalping_trace_check(ip, port, timeout)
-            if globalping_trace_check
-            else _bundle_missing(GLOBALPING_TRACE_CODE)),
-        GLOBALPING_HTTP_CODE: lambda ip, port: (
-            globalping_http_check(ip, port, timeout)
-            if globalping_http_check
-            else _bundle_missing(GLOBALPING_HTTP_CODE)),
-        GLOBALPING_MTR_CODE: lambda ip, port: (
-            globalping_mtr_check(ip, port, timeout)
-            if globalping_mtr_check
-            else _bundle_missing(GLOBALPING_MTR_CODE)),
-        BOCE_CODE: lambda ip, port: (
-            boce_check(ip, port, timeout) if boce_check
-            else _bundle_missing(BOCE_CODE)),
-        IPIP_CODE: lambda ip, port: (
-            ipip_check(ip, port, timeout) if ipip_check
-            else _bundle_missing(IPIP_CODE)),
-        SEVENTEEN_CODE: lambda ip, port: (
-            seventeen_check(ip, port, timeout) if seventeen_check
-            else _bundle_missing(SEVENTEEN_CODE)),
-        PING0_CODE: lambda ip, port: (
-            ping0_check(ip, port, timeout) if ping0_check
-            else _bundle_missing(PING0_CODE)),
-        WANSUI_CODE: lambda ip, port: (
-            wansui_check(ip, port, timeout) if wansui_check
-            else _bundle_missing(WANSUI_CODE)),
+        CN11_CODE: lambda ip, port: (
+            cn11_check(ip, port, timeout) if cn11_check
+            else _bundle_missing(CN11_CODE)),
+        CN12_CODE: lambda ip, port: (
+            cn12_check(ip, port, timeout) if cn12_check
+            else _bundle_missing(CN12_CODE)),
+        CN09_CODE: lambda ip, port: (
+            cn09_check(ip, port, timeout) if cn09_check
+            else _bundle_missing(CN09_CODE)),
+        CN10_CODE: lambda ip, port: (
+            cn10_check(ip, port, timeout) if cn10_check
+            else _bundle_missing(CN10_CODE)),
+        CN04_CODE: lambda ip, port: (
+            cn04_check(ip, port, timeout) if cn04_check
+            else _bundle_missing(CN04_CODE)),
+        CN05_CODE: lambda ip, port: (
+            cn05_check(ip, port, timeout) if cn05_check
+            else _bundle_missing(CN05_CODE)),
+        CN06_CODE: lambda ip, port: (
+            cn06_check(ip, port, timeout) if cn06_check
+            else _bundle_missing(CN06_CODE)),
+        CN07_CODE: lambda ip, port: (
+            cn07_check(ip, timeout) if cn07_check
+            else _bundle_missing(CN07_CODE)),
+        CN35_CODE: lambda ip, port: (
+            cn35_check(ip, port, timeout) if cn35_check
+            else _bundle_missing(CN35_CODE)),
+        CN36_CODE: lambda ip, port: (
+            cn36_check(ip, port, timeout) if cn36_check
+            else _bundle_missing(CN36_CODE)),
+        CN37_CODE: lambda ip, port: (
+            cn37_check(ip, port, timeout)
+            if cn37_check
+            else _bundle_missing(CN37_CODE)),
+        CN38_CODE: lambda ip, port: (
+            cn38_check(ip, port, timeout)
+            if cn38_check
+            else _bundle_missing(CN38_CODE)),
+        CN39_CODE: lambda ip, port: (
+            cn39_check(ip, port, timeout)
+            if cn39_check
+            else _bundle_missing(CN39_CODE)),
+        CN42_CODE: lambda ip, port: (
+            cn42_check(ip, port, timeout) if cn42_check
+            else _bundle_missing(CN42_CODE)),
+        CN34_CODE: lambda ip, port: (
+            cn34_check(ip, port, timeout) if cn34_check
+            else _bundle_missing(CN34_CODE)),
+        CN43_CODE: lambda ip, port: (
+            cn43_check(ip, port, timeout) if cn43_check
+            else _bundle_missing(CN43_CODE)),
+        CN44_CODE: lambda ip, port: (
+            cn44_check(ip, port, timeout) if cn44_check
+            else _bundle_missing(CN44_CODE)),
+        CN13_CODE: lambda ip, port: (
+            cn13_check(ip, port, timeout) if cn13_check
+            else _bundle_missing(CN13_CODE)),
     }[source]
 
     def work(item) -> None:
@@ -1303,7 +1295,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     """L2 分两段并发（小小API 全池免额候选 → cn27 稀缺配额只投决策键）、cn01
     批量、L3 串行复核；返回 (entries, reachable_keys, uncertain_keys)。"""
     entries: dict = {}
-    ch_limiter = RateLimiter(CH_WINDOW_SEC, CH_PER_WINDOW, CH_HOUR_CAP) \
+    cn27_limiter = RateLimiter(CN27_WINDOW_SEC, CN27_PER_WINDOW, CN27_HOUR_CAP) \
         if RateLimiter is not None else None
     _t0 = time.monotonic()
 
@@ -1317,10 +1309,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         实测各源均无 429），保键级数据一致性仍用逐键七源落盘。"""
         _, key, ip, port, _ = item
         out = {}
-        for name, fn in ((XXAPI_CODE, xxapi_check), (XXPING_CODE, xxping_check),
-                         (XXSTATUS_CODE, xxstatus_check), (XXSCAN_CODE, xxscan_check),
-                         (JKAPI_CODE, jkapi_check), (JKPING_CODE, jkping_check),
-                         (JKSSL_CODE, jkssl_check)):
+        for name, fn in ((CN20_CODE, cn20_check), (CN21_CODE, cn21_check),
+                         (CN22_CODE, cn22_check), (CN23_CODE, cn23_check),
+                         (CN24_CODE, cn24_check), (CN25_CODE, cn25_check),
+                         (CN26_CODE, cn26_check)):
             try:
                 out[name] = fn(ip, port, args.timeout)
             except Exception as exc:
@@ -1346,45 +1338,45 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         """
         _, key, ip, port, _ = item
         try:
-            tcp = check_host_check(ip, port, ch_limiter, args.timeout, args.api_key)
+            tcp = cn27_check(ip, port, cn27_limiter, args.timeout, args.api_key)
         except Exception as exc:
             logging.debug("l2 cn27 failed for %s: %s", key, _err(exc))
             tcp = {"status": "error", "ok": False, "ms": None, "error": _err(exc)}
-        out = {CHECK_HOST_CODE: tcp}
+        out = {CN27_CODE: tcp}
         if tcp.get("status") == "fail":
             try:
-                out[CHECKHOST_PING_CODE] = checkhost_ping_check(
-                    ip, ch_limiter, args.timeout, args.api_key)
+                out[CN28_CODE] = cn28_check(
+                    ip, cn27_limiter, args.timeout, args.api_key)
             except Exception as exc:
                 logging.debug("l2 cn28 failed for %s: %s", key, _err(exc))
-                out[CHECKHOST_PING_CODE] = {
+                out[CN28_CODE] = {
                     "status": "error", "ok": False, "ms": None,
                     "error": _err(exc), "level": None}
         elif tcp.get("ok"):
             entry = entries.get(key) or {}
             free_ok = sum(
-                1 for n in (XXAPI_CODE, XXPING_CODE, JKAPI_CODE, JKPING_CODE)
+                1 for n in (CN20_CODE, CN21_CODE, CN24_CODE, CN25_CODE)
                 if (entry.get(n) or {}).get("status") == "ok")
             if free_ok == 0:
                 try:
-                    out[CHECKHOST_HTTP_CODE] = checkhost_http_check(
-                        ip, port, ch_limiter, args.timeout, args.api_key)
+                    out[CN29_CODE] = cn29_check(
+                        ip, port, cn27_limiter, args.timeout, args.api_key)
                 except Exception as exc:
                     logging.debug("l2 cn29 failed for %s: %s",
                                   key, _err(exc))
-                    out[CHECKHOST_HTTP_CODE] = {
+                    out[CN29_CODE] = {
                         "status": "error", "ok": False, "ms": None,
                         "error": _err(exc), "level": None}
         return key, out
-    # cn27 配额有限（CH_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
+    # cn27 配额有限（CN27_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
     # - 免额七源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
     # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         def _needs_ch(entry: dict) -> bool:
             free = [entry.get(n) or {}
-                    for n in (XXAPI_CODE, XXPING_CODE, XXSTATUS_CODE, XXSCAN_CODE,
-                              JKAPI_CODE, JKPING_CODE, JKSSL_CODE)]
+                    for n in (CN20_CODE, CN21_CODE, CN22_CODE, CN23_CODE,
+                              CN24_CODE, CN25_CODE, CN26_CODE)]
             if sum(1 for r in free if r.get("status") == "ok") >= 2:
                 return False
             if any(r.get("status") == "fail" for r in free):
@@ -1404,17 +1396,17 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         file=sys.stderr,
     )
 
-    if not args.skip_itdog and not _ITDOG_BUNDLE:
+    if not args.skip_itdog and not _CN01_BUNDLE:
         print("pcb bundle missing: batch-source phases skipped",
               file=sys.stderr)
-    if not args.skip_itdog and _ITDOG_BUNDLE:
+    if not args.skip_itdog and _CN01_BUNDLE:
         # 批量通道代价高（批任务端到端慢），只投仍未定论的键；已由
         # 双免额单节点源定论的键（≥2 ok / ≥2 fail）跳过其复核。
         # 无 PCB 时整段跳过（fail-open，公开 CI/无包环境不触批量通道）。
         _itdog_cands = [item for item in sample if needs_probe(entries, item[1])]
         try:
-            for key, res in itdog_batch_run(_itdog_cands, args).items():
-                entries.setdefault(key, {})[ITDOG_CODE_HTTP] = res
+            for key, res in cn01_batch_run(_itdog_cands, args).items():
+                entries.setdefault(key, {})[CN01_CODE] = res
         except Exception as exc:
             logging.debug("cn01 batch failed: %s", _err(exc))
             print(f"cn01 batch failed (skipped): {_err(exc)}", file=sys.stderr)
@@ -1422,7 +1414,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         if not getattr(args, "skip_itdog_tcping", False):
             pending = [
                 item for item in _itdog_cands
-                if entries.get(item[1], {}).get(ITDOG_CODE_HTTP, {}).get("status")
+                if entries.get(item[1], {}).get(CN01_CODE, {}).get("status")
                 in ("error", "rate_limited")
             ]
             # 若主通道连节点列表都没取到（上游被墙/验证码墙的整站性失败），
@@ -1431,7 +1423,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             # 且要求至少出现过 1 次 ok（全 fail 也是被投毒站点的特征——真活的
             # 大陆可达键不可能整批 0 ok，全 fail 时同站的 tcping 一样是死路）。
             node_fetch_ok = any(
-                entries.get(key, {}).get(ITDOG_CODE_HTTP, {}).get("status") == "ok"
+                entries.get(key, {}).get(CN01_CODE, {}).get("status") == "ok"
                 for _, key, _, _, _ in _itdog_cands
             ) if _itdog_cands else False
             if pending and node_fetch_ok:
@@ -1440,15 +1432,15 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     file=sys.stderr,
                 )
                 try:
-                    for key, res in itdog_batch_run(
+                    for key, res in cn01_batch_run(
                         pending,
                         args,
-                        page_url=ITDOG_TCPING_URL,
+                        page_url=CN02_PAGE_URL,
                         nodes_per_isp=cn_opt(args, "cn02", "nodes",
                              default=0)
-                        or ITDOG_TCPING_NODES_PER_ISP,
+                        or CN02_NODES_PER_ISP,
                     ).items():
-                        entries.setdefault(key, {})[ITDOG_CODE_TCPING] = res
+                        entries.setdefault(key, {})[CN02_CODE] = res
                 except Exception as exc:
                     logging.debug("cn02 fallback failed: %s", _err(exc))
                     print(f"cn02 fallback failed (skipped): {_err(exc)}",
@@ -1460,7 +1452,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         # 不投（fail 是端口层实测结论，不用 ICMP 主机存活翻案，保守）。
         ping_pending = [
             item for item in _itdog_cands
-            if entries.get(item[1], {}).get(ITDOG_CODE_HTTP, {}).get("status")
+            if entries.get(item[1], {}).get(CN01_CODE, {}).get("status")
             in ("error", "rate_limited")
         ]
         if ping_pending and node_fetch_ok:
@@ -1469,13 +1461,13 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 file=sys.stderr,
             )
             try:
-                for key, res in itdog_batch_run(
+                for key, res in cn01_batch_run(
                     ping_pending,
                     args,
-                    page_url=ITDOG_PING_URL,
+                    page_url=CN03_PAGE_URL,
                     nodes_per_isp=ITDOG_PING_NODES_PER_ISP,
                 ).items():
-                    entries.setdefault(key, {})[ITDOG_CODE_PING] = (
+                    entries.setdefault(key, {})[CN03_CODE] = (
                         _batch_ping_normalize(res)
                     )
             except Exception as exc:
@@ -1493,10 +1485,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 错误健全部扫过，让每个键都有资格走向 reachable 或 unreachable 定论）。
     # --tcptest-ping-limit（CN-33）为 cn31 ICMP 通道（type=ping，无端口概念，
     # level=icmp，不产 isp_ms），跑在 TCP 相之后（只投 TCP 仍未定论者）。
-    tcptest_nodes = []
-    tcptest_uuids = []
-    tcptest_operators: dict | None = None
-    if tcptest_fetch_nodes is not None and tcptest_pick_nodes is not None and (
+    cn30_nodes = []
+    cn30_uuids = []
+    cn30_operators: dict | None = None
+    if cn30_fetch_nodes is not None and cn30_pick_nodes is not None and (
             cn_opt(args, "cn30", "limit",
                    default=0) != 0 or cn_opt(
             args, "cn31", "limit",
@@ -1505,35 +1497,35 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             default=0) != 0 or cn_opt(
             args, "cn33", "limit",
             default=0) != 0):
-        tcptest_nodes = tcptest_fetch_nodes(min(args.timeout, 20))
-        tcptest_uuids = tcptest_pick_nodes(
-            tcptest_nodes, cn_opt(args, "cn30", "nodes",
-                                  default=TCPTEST_NODES)
+        cn30_nodes = cn30_fetch_nodes(min(args.timeout, 20))
+        cn30_uuids = cn30_pick_nodes(
+            cn30_nodes, cn_opt(args, "cn30", "nodes",
+                                  default=CN30_NODES)
         )
-        tcptest_operators = {
-            n.get("uuid"): n.get("operator") for n in tcptest_nodes
+        cn30_operators = {
+            n.get("uuid"): n.get("operator") for n in cn30_nodes
             if isinstance(n, dict) and n.get("uuid")
         }
-    if tcptest_uuids:
-        tcptest_candidates = [
+    if cn30_uuids:
+        cn30_candidates = [
             item for item in sample if needs_probe(entries, item[1])
         ]
         limit = cn_opt(args, "cn30", "limit",
                        default=0)
         if limit is None or limit < 0:
-            limit = len(tcptest_candidates)
+            limit = len(cn30_candidates)
         _run_tcptest_slots(
-            tcptest_candidates[:limit],
+            cn30_candidates[:limit],
             entries,
             args.timeout,
-            tcptest_uuids,
+            cn30_uuids,
             cn_opt(args, "cn30", "concurrency",
-                   default=TCPTEST_CONCURRENCY),
-            tcptest_operators,
+                   default=CN30_CONCURRENCY),
+            cn30_operators,
         )
         print(
-            f"{TCPTEST_CODE} review: {time.monotonic() - _t0:.1f}s "
-            f"({len(tcptest_candidates)} targets, {len(tcptest_uuids)} nodes)",
+            f"{CN30_CODE} review: {time.monotonic() - _t0:.1f}s "
+            f"({len(cn30_candidates)} targets, {len(cn30_uuids)} nodes)",
             file=sys.stderr,
         )
         ping_limit = cn_opt(args, "cn31", "limit",
@@ -1548,20 +1540,20 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 ping_candidates[:ping_limit],
                 entries,
                 args.timeout,
-                tcptest_uuids,
+                cn30_uuids,
                 cn_opt(args, "cn31", "concurrency",
-                       default=TCPTEST_CONCURRENCY),
-                tcptest_operators,
+                       default=CN30_CONCURRENCY),
+                cn30_operators,
                 probe_type="ping",
-                source=TCPTEST_PING_CODE,
+                source=CN31_CODE,
             )
             print(
-                f"{TCPTEST_PING_CODE} review: {time.monotonic() - _t0:.1f}s "
+                f"{CN31_CODE} review: {time.monotonic() - _t0:.1f}s "
                 f"({len(ping_candidates)} targets)",
                 file=sys.stderr,
             )
         else:
-            print(f"{TCPTEST_PING_CODE} review: skipped (limit=0)", file=sys.stderr)
+            print(f"{CN31_CODE} review: skipped (limit=0)", file=sys.stderr)
         http_limit = cn_opt(args, "cn32", "limit",
                             default=0)
         if http_limit != 0:
@@ -1574,20 +1566,20 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 http_candidates[:http_limit],
                 entries,
                 args.timeout,
-                tcptest_uuids,
+                cn30_uuids,
                 cn_opt(args, "cn32", "concurrency",
-                       default=TCPTEST_CONCURRENCY),
-                tcptest_operators,
+                       default=CN30_CONCURRENCY),
+                cn30_operators,
                 probe_type="http",
-                source=TCPTEST_HTTP_CODE,
+                source=CN32_CODE,
             )
             print(
-                f"{TCPTEST_HTTP_CODE} review: {time.monotonic() - _t0:.1f}s "
+                f"{CN32_CODE} review: {time.monotonic() - _t0:.1f}s "
                 f"({len(http_candidates)} targets)",
                 file=sys.stderr,
             )
         else:
-            print(f"{TCPTEST_HTTP_CODE} review: skipped (limit=0)", file=sys.stderr)
+            print(f"{CN32_CODE} review: skipped (limit=0)", file=sys.stderr)
         trace_limit = cn_opt(args, "cn33", "limit",
                              default=0)
         if trace_limit != 0:
@@ -1600,47 +1592,47 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 trace_candidates[:trace_limit],
                 entries,
                 args.timeout,
-                tcptest_uuids,
+                cn30_uuids,
                 cn_opt(args, "cn33", "concurrency",
-                       default=TCPTEST_CONCURRENCY),
-                tcptest_operators,
+                       default=CN30_CONCURRENCY),
+                cn30_operators,
                 probe_type="traceroute",
-                source=TCPTEST_TRACE_CODE,
+                source=CN33_CODE,
             )
             print(
-                f"{TCPTEST_TRACE_CODE} review: {time.monotonic() - _t0:.1f}s "
+                f"{CN33_CODE} review: {time.monotonic() - _t0:.1f}s "
                 f"({len(trace_candidates)} targets)",
                 file=sys.stderr,
             )
         else:
-            print(f"{TCPTEST_TRACE_CODE} review: skipped (limit=0)", file=sys.stderr)
+            print(f"{CN33_CODE} review: skipped (limit=0)", file=sys.stderr)
     else:
         print(
-            f"{TCPTEST_CODE} review: skipped (no nodes or limit=0)",
+            f"{CN30_CODE} review: skipped (no nodes or limit=0)",
             file=sys.stderr,
         )
 
     # cn07 大陆多节点 ICMP 复核（免费、空闲量大）：全池未定键横扫，
     # 为主机存活提供独立多节点证据（端口层以 cn30/cn01 等 TCP 源为准）。
-    coffee_limit = cn_opt(args, "cn07", "limit",
+    cn07_limit = cn_opt(args, "cn07", "limit",
                 default=0)
-    if coffee_limit != 0:
-        coffee_candidates = [
+    if cn07_limit != 0:
+        cn07_candidates = [
             item for item in sample if needs_probe(entries, item[1])
         ]
-        if coffee_limit is None or coffee_limit < 0:
-            coffee_limit = len(coffee_candidates)
+        if cn07_limit is None or cn07_limit < 0:
+            cn07_limit = len(cn07_candidates)
         _run_raw_slots(
-            coffee_candidates[:coffee_limit],
+            cn07_candidates[:cn07_limit],
             entries,
             args.timeout,
-            COFFEE_CODE,
+            CN07_CODE,
             cn_opt(args, "cn07", "concurrency",
-           default=COFFEE_CONCURRENCY),
+           default=CN07_CONCURRENCY),
         )
         print(
             f"cn07 review: {time.monotonic() - _t0:.1f}s "
-            f"({len(coffee_candidates)} targets)",
+            f"({len(cn07_candidates)} targets)",
             file=sys.stderr,
         )
     else:
@@ -1656,202 +1648,202 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 各自按 --cn-limit CODE=N 投递（默认 0=跳过，-1=全部未定键）；均为多节点源，
     # 达标即可独立判 reachable，整站失败也可与单节点源联动判 unreachable。
 
-    pingloc_limit = cn_opt(args, "cn08", "limit",
+    cn08_limit = cn_opt(args, "cn08", "limit",
                  default=0)
-    if pingloc_limit != 0:
+    if cn08_limit != 0:
         cands = _pending_cands()
-        if pingloc_limit is None or pingloc_limit < 0:
-            pingloc_limit = len(cands)
+        if cn08_limit is None or cn08_limit < 0:
+            cn08_limit = len(cands)
         _run_pingloc_slots(
-            cands[:pingloc_limit], entries, args.timeout,
+            cands[:cn08_limit], entries, args.timeout,
             cn_opt(args, "cn08", "concurrency",
            default=8),
         )
-        print(f"pingloc review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn08 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("pingloc review: skipped (limit=0)", file=sys.stderr)
+        print("cn08 review: skipped (limit=0)", file=sys.stderr)
 
-    antping_limit = cn_opt(args, "cn14", "limit",
+    cn14_limit = cn_opt(args, "cn14", "limit",
                  default=0)
-    if antping_limit != 0:
+    if cn14_limit != 0:
         cands = _pending_cands()
-        if antping_limit is None or antping_limit < 0:
-            antping_limit = len(cands)
+        if cn14_limit is None or cn14_limit < 0:
+            cn14_limit = len(cands)
         _run_ws_source_slots(
-            cands[:antping_limit], entries, args.timeout, ANTPING_CODE,
+            cands[:cn14_limit], entries, args.timeout, CN14_CODE,
             cn_opt(args, "cn14", "concurrency",
            default=8),
         )
-        print(f"antping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn14 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("antping review: skipped (limit=0)", file=sys.stderr)
+        print("cn14 review: skipped (limit=0)", file=sys.stderr)
 
     # antping_ping（CN-28）：同站 ICMP，主独立判 reachable；默认 0=跳过。
-    antping_ping_limit = cn_opt(args, "cn15", "limit",
+    cn15_limit = cn_opt(args, "cn15", "limit",
                       default=0)
-    if antping_ping_limit != 0:
+    if cn15_limit != 0:
         cands = _pending_cands()
-        if antping_ping_limit is None or antping_ping_limit < 0:
-            antping_ping_limit = len(cands)
+        if cn15_limit is None or cn15_limit < 0:
+            cn15_limit = len(cands)
         _run_ws_source_slots(
-            cands[:antping_ping_limit], entries, args.timeout, ANTPING_PING_CODE,
+            cands[:cn15_limit], entries, args.timeout, CN15_CODE,
             cn_opt(args, "cn15", "concurrency",
            default=8),
         )
-        print(f"antping_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn15 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("antping_ping review: skipped (limit=0)", file=sys.stderr)
+        print("cn15 review: skipped (limit=0)", file=sys.stderr)
 
-    tcpingcn_limit = cn_opt(args, "cn17", "limit",
+    cn17_limit = cn_opt(args, "cn17", "limit",
                   default=0)
-    if tcpingcn_limit != 0:
+    if cn17_limit != 0:
         cands = _pending_cands()
-        if tcpingcn_limit is None or tcpingcn_limit < 0:
-            tcpingcn_limit = len(cands)
+        if cn17_limit is None or cn17_limit < 0:
+            cn17_limit = len(cands)
         _run_ws_source_slots(
-            cands[:tcpingcn_limit], entries, args.timeout, TCPINGCN_CODE,
+            cands[:cn17_limit], entries, args.timeout, CN17_CODE,
             cn_opt(args, "cn17", "concurrency",
            default=6),
         )
-        print(f"tcpingcn review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn17 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("tcpingcn review: skipped (limit=0)", file=sys.stderr)
+        print("cn17 review: skipped (limit=0)", file=sys.stderr)
 
     # cn18（CN-30）：同站 ICMP ping（tcpingcn_ping），主独立判 reachable；默认 0=跳过。
-    tcpingcn_ping_limit = cn_opt(args, "cn18", "limit",
+    cn18_limit = cn_opt(args, "cn18", "limit",
                        default=0)
-    if tcpingcn_ping_limit != 0:
+    if cn18_limit != 0:
         cands = _pending_cands()
-        if tcpingcn_ping_limit is None or tcpingcn_ping_limit < 0:
-            tcpingcn_ping_limit = len(cands)
+        if cn18_limit is None or cn18_limit < 0:
+            cn18_limit = len(cands)
         _run_ws_source_slots(
-            cands[:tcpingcn_ping_limit], entries, args.timeout, TCPINGCN_PING_CODE,
+            cands[:cn18_limit], entries, args.timeout, CN18_CODE,
             cn_opt(args, "cn18", "concurrency",
            default=6),
         )
-        print(f"tcpingcn_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn18 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("tcpingcn_ping review: skipped (limit=0)", file=sys.stderr)
+        print("cn18 review: skipped (limit=0)", file=sys.stderr)
 
     # cn19（CN-44）：同站 MTR（约 139 节点，末跳达目标即见证），
     # 主独立判 reachable；默认 0=跳过，-1=全部未定键。
-    tcpingcn_mtr_limit = cn_opt(args, "cn19", "limit",
+    cn19_limit = cn_opt(args, "cn19", "limit",
                       default=0)
-    if tcpingcn_mtr_limit != 0:
+    if cn19_limit != 0:
         cands = _pending_cands()
-        if tcpingcn_mtr_limit is None or tcpingcn_mtr_limit < 0:
-            tcpingcn_mtr_limit = len(cands)
+        if cn19_limit is None or cn19_limit < 0:
+            cn19_limit = len(cands)
         _run_ws_source_slots(
-            cands[:tcpingcn_mtr_limit], entries, args.timeout, TCPINGCN_MTR_CODE,
+            cands[:cn19_limit], entries, args.timeout, CN19_CODE,
             cn_opt(args, "cn19", "concurrency",
            default=6),
         )
-        print(f"tcpingcn_mtr review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn19 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("tcpingcn_mtr review: skipped (limit=0)", file=sys.stderr)
+        print("cn19 review: skipped (limit=0)", file=sys.stderr)
 
-    chinaz_limit = cn_opt(args, "cn16", "limit",
+    cn16_limit = cn_opt(args, "cn16", "limit",
                 default=0)
-    if chinaz_limit != 0:
+    if cn16_limit != 0:
         cands = _pending_cands()
-        if chinaz_limit is None or chinaz_limit < 0:
-            chinaz_limit = len(cands)
+        if cn16_limit is None or cn16_limit < 0:
+            cn16_limit = len(cands)
         _run_ws_source_slots(
-            cands[:chinaz_limit], entries, args.timeout, CHINAZ_CODE,
+            cands[:cn16_limit], entries, args.timeout, CN16_CODE,
             cn_opt(args, "cn16", "concurrency",
            default=6),
         )
-        print(f"chinaz review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn16 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("chinaz review: skipped (limit=0)", file=sys.stderr)
+        print("cn16 review: skipped (limit=0)", file=sys.stderr)
 
     # 新增多节点 TCP 复核源：cn11（socket.io-WS，34 大陆节点）、cn09
     # （HTTP-SSE，节点数动态，实测 ~39 测量单元）。均已实测出数、零 key；达标即可独立判 reachable，
     # 整站失败也可与单节点源联动判 unreachable。默认 0=跳过，-1=全部未定键。
-    ce98_limit = cn_opt(args, "cn11", "limit",
+    cn11_limit = cn_opt(args, "cn11", "limit",
               default=0)
-    if ce98_limit != 0:
+    if cn11_limit != 0:
         cands = _pending_cands()
-        if ce98_limit is None or ce98_limit < 0:
-            ce98_limit = len(cands)
+        if cn11_limit is None or cn11_limit < 0:
+            cn11_limit = len(cands)
         _run_raw_slots(
-            cands[:ce98_limit], entries, args.timeout, CE98_CODE,
+            cands[:cn11_limit], entries, args.timeout, CN11_CODE,
             cn_opt(args, "cn11", "concurrency",
            default=6),
         )
-        print(f"ce98 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn11 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("ce98 review: skipped (limit=0)", file=sys.stderr)
+        print("cn11 review: skipped (limit=0)", file=sys.stderr)
 
     # ce98_ping（CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
-    ce98_ping_limit = cn_opt(args, "cn12", "limit",
+    cn12_limit = cn_opt(args, "cn12", "limit",
                    default=0)
-    if ce98_ping_limit != 0:
+    if cn12_limit != 0:
         cands = _pending_cands()
-        if ce98_ping_limit is None or ce98_ping_limit < 0:
-            ce98_ping_limit = len(cands)
+        if cn12_limit is None or cn12_limit < 0:
+            cn12_limit = len(cands)
         _run_raw_slots(
-            cands[:ce98_ping_limit], entries, args.timeout, CE98_PING_CODE,
+            cands[:cn12_limit], entries, args.timeout, CN12_CODE,
             cn_opt(args, "cn12", "concurrency",
            default=6),
         )
-        print(f"ce98_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn12 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("ce98_ping review: skipped (limit=0)", file=sys.stderr)
+        print("cn12 review: skipped (limit=0)", file=sys.stderr)
 
-    biuping_limit = cn_opt(args, "cn09", "limit",
+    cn09_limit = cn_opt(args, "cn09", "limit",
                  default=0)
-    if biuping_limit != 0:
+    if cn09_limit != 0:
         cands = _pending_cands()
-        if biuping_limit is None or biuping_limit < 0:
-            biuping_limit = len(cands)
+        if cn09_limit is None or cn09_limit < 0:
+            cn09_limit = len(cands)
         _run_raw_slots(
-            cands[:biuping_limit], entries, args.timeout, BIUPING_CODE_TCPING,
+            cands[:cn09_limit], entries, args.timeout, CN09_CODE,
             cn_opt(args, "cn09", "concurrency",
            default=8),
         )
-        print(f"biuping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn09 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("biuping review: skipped (limit=0)", file=sys.stderr)
+        print("cn09 review: skipped (limit=0)", file=sys.stderr)
 
     # biuping_ping（CN-34）：同站 ICMP，主独立判 reachable；默认 0=跳过。
-    biuping_ping_limit = cn_opt(args, "cn10", "limit",
+    cn10_limit = cn_opt(args, "cn10", "limit",
                       default=0)
-    if biuping_ping_limit != 0:
+    if cn10_limit != 0:
         cands = _pending_cands()
-        if biuping_ping_limit is None or biuping_ping_limit < 0:
-            biuping_ping_limit = len(cands)
+        if cn10_limit is None or cn10_limit < 0:
+            cn10_limit = len(cands)
         _run_raw_slots(
-            cands[:biuping_ping_limit], entries, args.timeout, BIUPING_CODE_PING,
+            cands[:cn10_limit], entries, args.timeout, CN10_CODE,
             cn_opt(args, "cn10", "concurrency",
            default=8),
         )
-        print(f"biuping_ping review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"cn10 review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print("biuping_ping review: skipped (limit=0)", file=sys.stderr)
+        print("cn10 review: skipped (limit=0)", file=sys.stderr)
 
     # cn04（CN-27）：独立运营商 28 城三网 TCPing（纯 WS，零 key）。
     # 达标即可独立判 reachable；默认 0=跳过，-1=全部未定键。
-    aa1ping_limit = cn_opt(args, "cn04", "limit",
+    cn04_limit = cn_opt(args, "cn04", "limit",
                  default=0)
-    if aa1ping_limit != 0:
+    if cn04_limit != 0:
         cands = _pending_cands()
-        if aa1ping_limit is None or aa1ping_limit < 0:
-            aa1ping_limit = len(cands)
+        if cn04_limit is None or cn04_limit < 0:
+            cn04_limit = len(cands)
         _run_raw_slots(
-            cands[:aa1ping_limit], entries, args.timeout, AA1_CODE_PING,
+            cands[:cn04_limit], entries, args.timeout, CN04_CODE,
             cn_opt(args, "cn04", "concurrency",
            default=6),
         )
@@ -1862,14 +1854,14 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
 
     # cn05（CN-50）：同站 HTTP 测速通道（28 城三网，
     # 原生 operator isp_ms）。仅 443 键可用；默认 0=跳过，-1=全部未定键。
-    aa1http_limit = cn_opt(args, "cn05", "limit",
+    cn05_limit = cn_opt(args, "cn05", "limit",
                  default=0)
-    if aa1http_limit != 0:
+    if cn05_limit != 0:
         cands = [item for item in _pending_cands() if item[3] == "443"]
-        if aa1http_limit is None or aa1http_limit < 0:
-            aa1http_limit = len(cands)
+        if cn05_limit is None or cn05_limit < 0:
+            cn05_limit = len(cands)
         _run_raw_slots(
-            cands[:aa1http_limit], entries, args.timeout, AA1_CODE_HTTP,
+            cands[:cn05_limit], entries, args.timeout, CN05_CODE,
             cn_opt(args, "cn05", "concurrency",
            default=6),
         )
@@ -1881,14 +1873,14 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # cn06（CN-42）：公开 WS 通道，约 16 节点 TCPing
     #（纯 WS，零 key，原生三网 isp_ms）。达标即可独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
-    tcpping_ws_limit = cn_opt(args, "cn06", "limit",
+    cn06_limit = cn_opt(args, "cn06", "limit",
                     default=0)
-    if tcpping_ws_limit != 0:
+    if cn06_limit != 0:
         cands = _pending_cands()
-        if tcpping_ws_limit is None or tcpping_ws_limit < 0:
-            tcpping_ws_limit = len(cands)
+        if cn06_limit is None or cn06_limit < 0:
+            cn06_limit = len(cands)
         _run_raw_slots(
-            cands[:tcpping_ws_limit], entries, args.timeout, TCPPING_WS_CODE,
+            cands[:cn06_limit], entries, args.timeout, CN06_CODE,
             cn_opt(args, "cn06", "concurrency",
            default=6),
         )
@@ -1900,115 +1892,115 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # cn34（CN-43 复活）：多节点 TCPing（GET+SSE，约 287 节点，
     # 原生三网 isp_ms）。SSE 单键约 90s 采集窗，CI 配额 100 键/8 并发
     # （约 20min）；默认 0=跳过，-1=全部未定键。
-    ipip_limit = cn_opt(args, "cn34", "limit",
+    cn34_limit = cn_opt(args, "cn34", "limit",
               default=0)
-    if ipip_limit != 0:
+    if cn34_limit != 0:
         cands = _pending_cands()
-        if ipip_limit is None or ipip_limit < 0:
-            ipip_limit = len(cands)
+        if cn34_limit is None or cn34_limit < 0:
+            cn34_limit = len(cands)
         _run_raw_slots(
-            cands[:ipip_limit], entries, args.timeout, IPIP_CODE,
+            cands[:cn34_limit], entries, args.timeout, CN34_CODE,
             cn_opt(args, "cn34", "concurrency",
            default=6),
         )
-        print(f"{IPIP_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"{CN34_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print(f"{IPIP_CODE} review: skipped (limit=0)", file=sys.stderr)
+        print(f"{CN34_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # cn35（CN-45）：同站路由追踪（GET+SSE，约 57 节点，hop 行目标 IP
     # 即见证）。SSE 单键约 80s 采集窗，CI 配额 100 键/8 并发（约 17min）；
     # 默认 0=跳过，-1=全部未定键。
-    ipip_trace_limit = cn_opt(args, "cn35", "limit",
+    cn35_limit = cn_opt(args, "cn35", "limit",
                     default=0)
-    if ipip_trace_limit != 0:
+    if cn35_limit != 0:
         cands = _pending_cands()
-        if ipip_trace_limit is None or ipip_trace_limit < 0:
-            ipip_trace_limit = len(cands)
+        if cn35_limit is None or cn35_limit < 0:
+            cn35_limit = len(cands)
         _run_raw_slots(
-            cands[:ipip_trace_limit], entries, args.timeout, IPIP_TRACE_CODE,
+            cands[:cn35_limit], entries, args.timeout, CN35_CODE,
             cn_opt(args, "cn35", "concurrency",
            default=6),
         )
-        print(f"{IPIP_TRACE_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"{CN35_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print(f"{IPIP_TRACE_CODE} review: skipped (limit=0)", file=sys.stderr)
+        print(f"{CN35_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # cn36（CN-46）：社区探针北京节点 ICMP（匿名 250/h 配额）。
     # 单键约 30s，CI 配额 60 键/4 并发（约 8min）；默认 0=跳过，-1=全部未定键。
-    globalping_limit = cn_opt(args, "cn36", "limit",
+    cn36_limit = cn_opt(args, "cn36", "limit",
                     default=0)
-    if globalping_limit != 0:
+    if cn36_limit != 0:
         cands = _pending_cands()
-        if globalping_limit is None or globalping_limit < 0:
-            globalping_limit = len(cands)
+        if cn36_limit is None or cn36_limit < 0:
+            cn36_limit = len(cands)
         _run_raw_slots(
-            cands[:globalping_limit], entries, args.timeout, GLOBALPING_CODE,
+            cands[:cn36_limit], entries, args.timeout, CN36_CODE,
             cn_opt(args, "cn36", "concurrency",
            default=4),
         )
-        print(f"{GLOBALPING_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"{CN36_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print(f"{GLOBALPING_CODE} review: skipped (limit=0)", file=sys.stderr)
+        print(f"{CN36_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # cn37（CN-47）：同 API 路由追踪（末跳达目标即见证）。
     # 单键约 100s，CI 配额 40 键/4 并发（约 17min）；默认 0=跳过，-1=全部未定键。
-    globalping_trace_limit = cn_opt(args, "cn37", "limit",
+    cn37_limit = cn_opt(args, "cn37", "limit",
                           default=0)
-    if globalping_trace_limit != 0:
+    if cn37_limit != 0:
         cands = _pending_cands()
-        if globalping_trace_limit is None or globalping_trace_limit < 0:
-            globalping_trace_limit = len(cands)
+        if cn37_limit is None or cn37_limit < 0:
+            cn37_limit = len(cands)
         _run_raw_slots(
-            cands[:globalping_trace_limit], entries, args.timeout,
-            GLOBALPING_TRACE_CODE,
+            cands[:cn37_limit], entries, args.timeout,
+            CN37_CODE,
             cn_opt(args, "cn37", "concurrency",
            default=4),
         )
-        print(f"{GLOBALPING_TRACE_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"{CN37_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print(f"{GLOBALPING_TRACE_CODE} review: skipped (limit=0)", file=sys.stderr)
+        print(f"{CN37_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # cn38（CN-48）：同 API 应用层确认（明文打 TLS 端口，服务端状态码
     # 即完整往返）。单键约 30s，CI 配额 40 键/4 并发；默认 0=跳过，-1=全部未定键。
-    globalping_http_limit = cn_opt(args, "cn38", "limit",
+    cn38_limit = cn_opt(args, "cn38", "limit",
                          default=0)
-    if globalping_http_limit != 0:
+    if cn38_limit != 0:
         cands = _pending_cands()
-        if globalping_http_limit is None or globalping_http_limit < 0:
-            globalping_http_limit = len(cands)
+        if cn38_limit is None or cn38_limit < 0:
+            cn38_limit = len(cands)
         _run_raw_slots(
-            cands[:globalping_http_limit], entries, args.timeout,
-            GLOBALPING_HTTP_CODE,
+            cands[:cn38_limit], entries, args.timeout,
+            CN38_CODE,
             cn_opt(args, "cn38", "concurrency",
            default=4),
         )
-        print(f"{GLOBALPING_HTTP_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"{CN38_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print(f"{GLOBALPING_HTTP_CODE} review: skipped (limit=0)", file=sys.stderr)
+        print(f"{CN38_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # cn39（CN-49）：同 API MTR（末跳达目标即见证）。
     # 单键约 100s，CI 配额 40 键/4 并发（约 17min）；默认 0=跳过，-1=全部未定键。
-    globalping_mtr_limit = cn_opt(args, "cn39", "limit",
+    cn39_limit = cn_opt(args, "cn39", "limit",
                         default=0)
-    if globalping_mtr_limit != 0:
+    if cn39_limit != 0:
         cands = _pending_cands()
-        if globalping_mtr_limit is None or globalping_mtr_limit < 0:
-            globalping_mtr_limit = len(cands)
+        if cn39_limit is None or cn39_limit < 0:
+            cn39_limit = len(cands)
         _run_raw_slots(
-            cands[:globalping_mtr_limit], entries, args.timeout,
-            GLOBALPING_MTR_CODE,
+            cands[:cn39_limit], entries, args.timeout,
+            CN39_CODE,
             cn_opt(args, "cn39", "concurrency",
            default=4),
         )
-        print(f"{GLOBALPING_MTR_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+        print(f"{CN39_CODE} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
               file=sys.stderr)
     else:
-        print(f"{GLOBALPING_MTR_CODE} review: skipped (limit=0)", file=sys.stderr)
+        print(f"{CN39_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # 新增四个多节点 TCP 复核源（全部大陆多节点、遵循各站反爬协议）：
     # cn42（cookie-session+CSRF）、cn43（token 签章）、
@@ -2017,8 +2009,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 也可与单节点源联动判 unreachable。
     # 注：cn34（CN-43 复活）已有上方专用相（含采集窗/配额注释），不再走此循环，
     # 防 limit≠0 时双跑。
-    for src, check_name in ((BOCE_CODE, "bo" + "ce"), (SEVENTEEN_CODE, "17" + "ce"),
-                            (PING0_CODE, "ping" + "0"), (WANSUI_CODE, "wan" + "sui")):
+    for src, check_name in ((CN42_CODE, "bo" + "ce"), (CN43_CODE, "17" + "ce"),
+                            (CN44_CODE, "ping" + "0"), (CN13_CODE, "wan" + "sui")):
         limit = cn_opt(args, src, "limit",
                      default=0)
         if limit != 0:
@@ -2030,26 +2022,26 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                 cn_opt(args, src, "concurrency",
              default=6),
             )
-            print(f"{check_name} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
+            print(f"{src} review: {time.monotonic() - _t0:.1f}s ({len(cands)} targets)",
                   file=sys.stderr)
         else:
-            print(f"{check_name} review: skipped (limit=0)", file=sys.stderr)
+            print(f"{src} review: skipped (limit=0)", file=sys.stderr)
 
     # cn40 多节点复核（串行、贵）只投「当前尚未被 cn01/单节点源确认可达」
     # 的键：已由 cn01 多点达标判 reachable 的不再浪费名额，把有限槽位让给
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
     # 优先给它派活能最大化「翻正」概率。顺序仍保持 sample 优先级排序。
-    pingpe_candidates = [
+    cn40_candidates = [
         item for item in sample if needs_probe(entries, item[1])
     ]
     _run_pingpe_slots(
-        pingpe_candidates[: cn_opt(args, "cn40", "limit",
+        cn40_candidates[: cn_opt(args, "cn40", "limit",
                                  default=0)],
         entries,
         args.timeout,
         getattr(args, "tcpping_token", ""),
         cn_opt(args, "cn40", "concurrency",
-             default=PINGPE_CONCURRENCY),
+             default=CN40_CONCURRENCY),
     )
     print(
         f"cn40 review: {time.monotonic() - _t0:.1f}s",
@@ -2170,8 +2162,6 @@ def main(argv=None) -> int:
                         help=f"输入清单（默认 {REP_RANK_FILE.name}，缺失回退 all_ltd.txt）")
     parser.add_argument("--limit", type=int, default=LIMIT_DEFAULT,
                         help=f"按信誉降序采样条数（0=全部；默认 {LIMIT_DEFAULT}）")
-    parser.add_argument("--17ce-token", default="",
-                        help="cn43 token/cookie（可选；默认从壳页提取）")
     parser.add_argument("--workers", type=int, default=WORKERS_DEFAULT,
                         help=f"L2 并发上限（默认 {WORKERS_DEFAULT}）")
     parser.add_argument("-t", "--timeout", type=float, default=TIMEOUT_DEFAULT,
@@ -2180,22 +2170,20 @@ def main(argv=None) -> int:
                         help="cn27 站 API key（默认读 CHINA_CHECK_API_KEY，可选）")
     parser.add_argument("--tcpping-token", default="",
                         help="cn41 复核 token（默认读 TCPPING_CN_TOKEN env，缺则跳过）")
-    parser.add_argument("--itdog-nodes", type=int, default=ITDOG_NODES_PER_ISP,
-                        help=f"批量通道每大陆运营商取 N 节点（跨省等距采样；默认 {ITDOG_NODES_PER_ISP} → 共 {ITDOG_NODES_PER_ISP * 3}）")
-    parser.add_argument("--itdog-batch-size", type=int, default=ITDOG_BATCH_SIZE,
-                        help=f"批量通道每任务目标数（上限 {ITDOG_BATCH_SIZE}；默认 {ITDOG_BATCH_SIZE}）")
-    parser.add_argument("--itdog-concurrency", type=int, default=ITDOG_CONCURRENCY,
-                        help=f"批量通道并发任务数（默认 {ITDOG_CONCURRENCY}）")
-    parser.add_argument("--itdog-pacing", type=float, default=ITDOG_PACING,
-                        help=f"批量通道任务启动最小间隔秒（默认 {ITDOG_PACING}）")
-    parser.add_argument("--itdog-timeout", type=float, default=ITDOG_TASK_TIMEOUT,
-                        help=f"批量通道单任务收结果上限秒（默认 {ITDOG_TASK_TIMEOUT}）")
+    parser.add_argument("--itdog-nodes", type=int, default=CN01_NODES_PER_ISP,
+                        help=f"批量通道每大陆运营商取 N 节点（跨省等距采样；默认 {CN01_NODES_PER_ISP} → 共 {CN01_NODES_PER_ISP * 3}）")
+    parser.add_argument("--itdog-batch-size", type=int, default=CN01_BATCH_SIZE,
+                        help=f"批量通道每任务目标数（上限 {CN01_BATCH_SIZE}；默认 {CN01_BATCH_SIZE}）")
+    parser.add_argument("--itdog-concurrency", type=int, default=CN01_CONCURRENCY,
+                        help=f"批量通道并发任务数（默认 {CN01_CONCURRENCY}）")
+    parser.add_argument("--itdog-pacing", type=float, default=CN01_PACING,
+                        help=f"批量通道任务启动最小间隔秒（默认 {CN01_PACING}）")
+    parser.add_argument("--itdog-timeout", type=float, default=CN01_TASK_TIMEOUT,
+                        help=f"批量通道单任务收结果上限秒（默认 {CN01_TASK_TIMEOUT}）")
     parser.add_argument("--skip-itdog", action="store_true",
                         help="跳过批量通道探活 cn01（快速冒烟用）")
     parser.add_argument("--skip-itdog-tcping", action="store_true",
                         help="跳过 cn02 补测（cn01 失败时的大节点池降级）")
-    parser.add_argument("--itdog-tcping-nodes", type=int, default=ITDOG_TCPING_NODES_PER_ISP,
-                        help=f"cn02 通道每运营商取 N 节点（默认 {ITDOG_TCPING_NODES_PER_ISP} → 共 {ITDOG_TCPING_NODES_PER_ISP * 3}）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只输出计划，不做任何网络请求与写盘")
     parser.add_argument("--cn-latency-cap", type=float, default=CN_LATENCY_CAP_MS,
@@ -2216,9 +2204,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     api_key = args.api_key or os_environ("CHINA_CHECK_API_KEY")
-    tcpping_token = args.tcpping_token or os_environ("TCPPING_CN_TOKEN")
+    cn41_token = args.tcpping_token or os_environ("TCPPING_CN_TOKEN")
     args.api_key = api_key
-    args.tcpping_token = tcpping_token
+    args.tcpping_token = cn41_token
     # generic 按代号覆盖归一化为 dict（run_measurements 经 cn_opt 读取；
     # 单测直调 run_measurements 的 SimpleNamespace 无此三属性即视为空覆盖）。
     args.cn_limit = parse_cn_kv(args.cn_limit)

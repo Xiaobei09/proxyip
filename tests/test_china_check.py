@@ -36,8 +36,8 @@ class TestCheckhostHttpMergeVerdict(unittest.TestCase):
 
     def test_second_confirm_reachable_http(self):
         sources = {
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 90},
-            cc.CHECKHOST_HTTP_CODE: {"status": "ok", "ok": True, "ms": 39,
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 90},
+            cc.CN29_CODE: {"status": "ok", "ok": True, "ms": 39,
                                "level": "http"},
         }
         merged = cc.merge_verdict(sources)
@@ -45,15 +45,15 @@ class TestCheckhostHttpMergeVerdict(unittest.TestCase):
         self.assertEqual(merged["level"], "http")
 
     def test_http_alone_uncertain(self):
-        sources = {cc.CHECKHOST_HTTP_CODE: {
+        sources = {cc.CN29_CODE: {
             "status": "ok", "ok": True, "ms": 39, "level": "http"}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_http_fail_harmless(self):
         """http-fail 伴 TCP-ok 仍 uncertain（不定罪，fail 分析在 ok 之后）。"""
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 100},
-            cc.CHECKHOST_HTTP_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 100},
+            cc.CN29_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
@@ -77,35 +77,35 @@ class TestCheckhostHttpWiring(unittest.TestCase):
 
     def _l2(self, tcp):
         return [
-            mock.patch.object(cc, "xxapi_check",
+            mock.patch.object(cc, "cn20_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "xxping_check",
+            mock.patch.object(cc, "cn21_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "jkapi_check",
+            mock.patch.object(cc, "cn24_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "jkping_check",
+            mock.patch.object(cc, "cn25_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "jkssl_check",
+            mock.patch.object(cc, "cn26_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "xxstatus_check",
+            mock.patch.object(cc, "cn22_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "xxscan_check",
+            mock.patch.object(cc, "cn23_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "check_host_check", return_value=tcp),
+            mock.patch.object(cc, "cn27_check", return_value=tcp),
         ]
 
     def test_http_hunts_second_confirm(self):
         tcp = {"status": "ok", "ok": True, "ms": 100}
         http = {"status": "ok", "ok": True, "ms": 39, "level": "http"}
         mocks = self._l2(tcp)
-        with mock.patch.object(cc, "checkhost_http_check",
+        with mock.patch.object(cc, "cn29_check",
                                return_value=http) as mh:
             for p in mocks:
                 p.start()
@@ -117,7 +117,7 @@ class TestCheckhostHttpWiring(unittest.TestCase):
                     p.stop()
         self.assertEqual(mh.call_count, 1)
         srcs = entries["9.9.9.9:443#US"]["sources"]
-        self.assertEqual(srcs[cc.CHECKHOST_HTTP_CODE]["level"], "http")
+        self.assertEqual(srcs[cc.CN29_CODE]["level"], "http")
         # TCP-ok + http-ok → 双确认 reachable（uncertain 翻正）
         self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "reachable")
         self.assertIn("9.9.9.9:443#US", reachable)
@@ -127,9 +127,9 @@ class TestCheckhostHttpWiring(unittest.TestCase):
         tcp = {"status": "ok", "ok": True, "ms": 100}
         mocks = self._l2(tcp)
         mocks[0] = mock.patch.object(
-            cc, "xxapi_check",
+            cc, "cn20_check",
             return_value={"status": "ok", "ok": True, "ms": 90})
-        with mock.patch.object(cc, "checkhost_http_check",
+        with mock.patch.object(cc, "cn29_check",
                                side_effect=AssertionError("must not run")):
             for p in mocks:
                 p.start()
@@ -139,7 +139,7 @@ class TestCheckhostHttpWiring(unittest.TestCase):
             finally:
                 for p in mocks:
                     p.stop()
-        self.assertNotIn(cc.CHECKHOST_HTTP_CODE,
+        self.assertNotIn(cc.CN29_CODE,
                          entries["9.9.9.9:443#US"]["sources"])
 
 
@@ -149,9 +149,9 @@ class TestCheckhostPingMergeVerdict(unittest.TestCase):
     def test_tcp_fail_plus_ping_ok_uncertain(self):
         """TCP 双 fail 原判 unreachable；ping 证主机存活 → 回退 uncertain。"""
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.CHECKHOST_PING_CODE: {"status": "ok", "ok": True, "ms": 13,
+            cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN28_CODE: {"status": "ok", "ok": True, "ms": 13,
                                "level": "icmp"},
         }
         merged = cc.merge_verdict(sources)
@@ -161,22 +161,22 @@ class TestCheckhostPingMergeVerdict(unittest.TestCase):
     def test_dual_fail_unreachable(self):
         """同节点 TCP+ICMP 双 fail → 置信定罪。"""
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.CHECKHOST_PING_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN28_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_ping_ok_plus_single_ok_reachable(self):
         sources = {
-            cc.CHECKHOST_PING_CODE: {"status": "ok", "ok": True, "ms": 13,
+            cc.CN28_CODE: {"status": "ok", "ok": True, "ms": 13,
                                "level": "icmp"},
-            cc.JKAPI_CODE: {"status": "ok", "ok": True, "ms": 11},
+            cc.CN24_CODE: {"status": "ok", "ok": True, "ms": 11},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_ping_alone_ok_uncertain(self):
-        sources = {cc.CHECKHOST_PING_CODE: {
+        sources = {cc.CN28_CODE: {
             "status": "ok", "ok": True, "ms": 13, "level": "icmp"}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
@@ -200,31 +200,31 @@ class TestCheckhostPingWiring(unittest.TestCase):
 
     def _l2(self, tcp, ping_ret=None):
         mocks = [
-            mock.patch.object(cc, "xxapi_check",
+            mock.patch.object(cc, "cn20_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "xxping_check",
+            mock.patch.object(cc, "cn21_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "jkapi_check",
+            mock.patch.object(cc, "cn24_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "jkping_check",
+            mock.patch.object(cc, "cn25_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "jkssl_check",
+            mock.patch.object(cc, "cn26_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "xxstatus_check",
+            mock.patch.object(cc, "cn22_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "xxscan_check",
+            mock.patch.object(cc, "cn23_check",
                               return_value={"status": "error", "ok": False,
                                             "ms": None, "error": "x"}),
-            mock.patch.object(cc, "check_host_check", return_value=tcp),
+            mock.patch.object(cc, "cn27_check", return_value=tcp),
         ]
         if ping_ret is not None:
-            mocks.append(mock.patch.object(cc, "checkhost_ping_check",
+            mocks.append(mock.patch.object(cc, "cn28_check",
                                            return_value=ping_ret))
         return mocks
 
@@ -232,7 +232,7 @@ class TestCheckhostPingWiring(unittest.TestCase):
         tcp = {"status": "fail", "ok": False, "ms": None, "error": ""}
         ping = {"status": "ok", "ok": True, "ms": 13, "level": "icmp"}
         mocks = self._l2(tcp)
-        with mock.patch.object(cc, "checkhost_ping_check",
+        with mock.patch.object(cc, "cn28_check",
                                return_value=ping) as mp:
             for p in mocks:
                 p.start()
@@ -244,14 +244,14 @@ class TestCheckhostPingWiring(unittest.TestCase):
                     p.stop()
         self.assertEqual(mp.call_count, 1)
         srcs = entries["9.9.9.9:443#US"]["sources"]
-        self.assertEqual(srcs[cc.CHECKHOST_PING_CODE]["ms"], 13)
+        self.assertEqual(srcs[cc.CN28_CODE]["ms"], 13)
         # TCP-fail + ping-ok + 全 error → uncertain（不误判死）
         self.assertEqual(entries["9.9.9.9:443#US"]["verdict"], "uncertain")
 
     def test_ping_skipped_on_tcp_ok(self):
         tcp = {"status": "ok", "ok": True, "ms": 100}
         mocks = self._l2(tcp)
-        with mock.patch.object(cc, "checkhost_ping_check",
+        with mock.patch.object(cc, "cn28_check",
                                side_effect=AssertionError("must not run")):
             for p in mocks:
                 p.start()
@@ -261,44 +261,44 @@ class TestCheckhostPingWiring(unittest.TestCase):
             finally:
                 for p in mocks:
                     p.stop()
-        self.assertNotIn(cc.CHECKHOST_PING_CODE,
+        self.assertNotIn(cc.CN28_CODE,
                          entries["9.9.9.9:443#US"]["sources"])
 
 
 class TestXxpingMergeVerdict(unittest.TestCase):
     """CN-29：cn21 并入单节点交叉，与其余四源同权。"""
 
-    def test_xxping_jkping_double_ok_reachable(self):
+    def test_cn21_cn25_double_ok_reachable(self):
         """跨运营商双 ICMP（枣庄＋宁波）双 ok → reachable。"""
         sources = {
-            cc.XXPING_CODE: {"status": "ok", "ok": True, "ms": 42.1,
+            cc.CN21_CODE: {"status": "ok", "ok": True, "ms": 42.1,
                        "level": "icmp"},
-            cc.JKPING_CODE: {"status": "ok", "ok": True, "ms": 12.7,
+            cc.CN25_CODE: {"status": "ok", "ok": True, "ms": 12.7,
                        "level": "icmp"},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["level"], "icmp")
 
-    def test_xxping_alone_ok_uncertain(self):
-        sources = {cc.XXPING_CODE: {"status": "ok", "ok": True, "ms": 42.1,
+    def test_cn21_alone_ok_uncertain(self):
+        sources = {cc.CN21_CODE: {"status": "ok", "ok": True, "ms": 42.1,
                               "level": "icmp"}}
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "uncertain")
         self.assertEqual(merged["level"], "icmp")
 
-    def test_xxping_fail_plus_xxapi_fail_unreachable(self):
+    def test_cn21_fail_plus_cn20_fail_unreachable(self):
         """同运营商双视角（北京 TCP＋枣庄 ICMP）双 fail → unreachable。"""
         sources = {
-            cc.XXPING_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN21_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
-    def test_xxping_fail_alone_uncertain(self):
+    def test_cn21_fail_alone_uncertain(self):
         sources = {
-            cc.XXPING_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN21_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
@@ -308,23 +308,23 @@ class TestJksslMergeVerdict(unittest.TestCase):
 
     def test_double_ok_reachable(self):
         sources = {
-            cc.JKSSL_CODE: {"status": "ok", "ok": True, "ms": None,
+            cc.CN26_CODE: {"status": "ok", "ok": True, "ms": None,
                       "level": "tcp"},
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 43},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 43},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["ms"], 43.0)
 
     def test_alone_ok_uncertain(self):
-        sources = {cc.JKSSL_CODE: {"status": "ok", "ok": True, "ms": None,
+        sources = {cc.CN26_CODE: {"status": "ok", "ok": True, "ms": None,
                              "level": "tcp"}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_double_fail_unreachable(self):
         sources = {
-            cc.JKSSL_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.JKAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN26_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN24_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -334,9 +334,9 @@ class TestXxstatusMergeVerdict(unittest.TestCase):
 
     def test_double_ok_reachable_http(self):
         sources = {
-            cc.XXSTATUS_CODE: {"status": "ok", "ok": True, "ms": None,
+            cc.CN22_CODE: {"status": "ok", "ok": True, "ms": None,
                          "level": "http"},
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 43},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 43},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
@@ -344,14 +344,14 @@ class TestXxstatusMergeVerdict(unittest.TestCase):
         self.assertEqual(merged["ms"], 43.0)
 
     def test_alone_ok_uncertain(self):
-        sources = {cc.XXSTATUS_CODE: {"status": "ok", "ok": True, "ms": None,
+        sources = {cc.CN22_CODE: {"status": "ok", "ok": True, "ms": None,
                                 "level": "http"}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_double_fail_unreachable(self):
         sources = {
-            cc.XXSTATUS_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.JKAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN22_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN24_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -361,29 +361,29 @@ class TestXxscanMergeVerdict(unittest.TestCase):
 
     def test_double_ok_reachable(self):
         sources = {
-            cc.XXSCAN_CODE: {"status": "ok", "ok": True, "ms": None,
+            cc.CN23_CODE: {"status": "ok", "ok": True, "ms": None,
                        "level": "tcp"},
-            cc.JKAPI_CODE: {"status": "ok", "ok": True, "ms": 11},
+            cc.CN24_CODE: {"status": "ok", "ok": True, "ms": 11},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["ms"], 11.0)
 
     def test_alone_ok_uncertain(self):
-        sources = {cc.XXSCAN_CODE: {"status": "ok", "ok": True, "ms": None,
+        sources = {cc.CN23_CODE: {"status": "ok", "ok": True, "ms": None,
                               "level": "tcp"}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_skipped_ignored(self):
         """skipped 源不参与判定（全 skipped → skipped，不误判）。"""
-        sources = {cc.XXSCAN_CODE: {"status": "skipped", "ok": False, "ms": None,
+        sources = {cc.CN23_CODE: {"status": "skipped", "ok": False, "ms": None,
                               "error": "port not scanned"}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
 
     def test_double_fail_unreachable(self):
         sources = {
-            cc.XXSCAN_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN23_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -393,9 +393,9 @@ class TestJkapiIspMerge(unittest.TestCase):
     def test_merge_isp_ms_picks_cn24(self):
         """merge 入口级汇聚收单节点电信读数（与多节点源同表）。"""
         entries = {"k": {"sources": {
-            cc.JKAPI_CODE: {"status": "ok", "ok": True, "ms": 11.0,
+            cc.CN24_CODE: {"status": "ok", "ok": True, "ms": 11.0,
                       "isp_ms": {"中国电信": 11.0}},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }}}
         cc.merge_isp_ms(entries)
         self.assertEqual(entries["k"]["isp_ms"], {"中国电信": 11.0})
@@ -404,8 +404,8 @@ class TestJkapiIspMerge(unittest.TestCase):
 class TestMergeVerdict(unittest.TestCase):
     def test_any_ok_reachable(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 180},
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 120},
+            cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 180},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 120},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
@@ -413,69 +413,69 @@ class TestMergeVerdict(unittest.TestCase):
 
     def test_single_ok_uncertain(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 180},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 180},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "uncertain")
 
     def test_both_l2_fail_unreachable(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
-    def test_xxapi_jkapi_double_ok_reachable(self):
+    def test_cn20_cn24_double_ok_reachable(self):
         """两只免额单节点源（cn20+jjkapi）双 ok → reachable，无需 cn27。"""
         sources = {
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 43},
-            cc.JKAPI_CODE: {"status": "ok", "ok": True, "ms": 11},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 43},
+            cc.CN24_CODE: {"status": "ok", "ok": True, "ms": 11},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["ms"], 11.0)
 
-    def test_xxapi_jkapi_both_fail_unreachable(self):
+    def test_cn20_cn24_both_fail_unreachable(self):
         sources = {
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.JKAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN24_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
-    def test_xxapi_jkapi_error_skipped(self):
+    def test_cn20_cn24_error_skipped(self):
         sources = {
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
-            cc.JKAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN24_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
 
-    def test_pingpe_fail_plus_l2_fail(self):
+    def test_cn40_fail_plus_l2_fail(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 90},
-            cc.PINGPE_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 90},
+            cc.CN40_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_single_fail_uncertain(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_all_error_skipped(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "error", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
 
     def test_heuristic_only_uncertain(self):
         sources = {
-            cc.CHECK_HOST_CODE: {"status": "error", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "skipped")
@@ -504,8 +504,8 @@ class TestMergeVerdict(unittest.TestCase):
         sources = {
             "cn01": {"status": "ok", "ok": True, "ms": 200,
                       "ok_nodes": 1, "nodes": 18, "ratio": 0.056},
-            cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 150},
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 130},
+            cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 150},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 130},
         }
         # cn01 弱 + cn27/cn20 双确认 → 仍走单节点交叉线
         self.assertEqual(
@@ -516,15 +516,15 @@ class TestMergeVerdict(unittest.TestCase):
         sources = {
             "cn01": {"status": "ok", "ok": True, "ms": 200,
                       "ok_nodes": 1, "nodes": 18, "ratio": 0.056},
-            cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 150},
+            cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 150},
         }
         self.assertEqual(
             cc.merge_verdict(sources)["verdict"], "uncertain")
 
-    def test_tcptest_good_ratio_reachable(self):
+    def test_cn30_good_ratio_reachable(self):
         """cn30（多节点 TCP）成功率高 → 单源独立判 reachable。"""
         sources = {
-            cc.TCPTEST_CODE: {"status": "ok", "ok": True, "ms": 60,
+            cc.CN30_CODE: {"status": "ok", "ok": True, "ms": 60,
                         "level": "tcp", "ok_nodes": 8, "nodes": 10,
                         "ratio": 0.8},
         }
@@ -533,25 +533,25 @@ class TestMergeVerdict(unittest.TestCase):
         self.assertEqual(
             cc.merge_verdict(sources)["level"], "tcp")
 
-    def test_tcptest_weak_ratio_uncertain(self):
+    def test_cn30_weak_ratio_uncertain(self):
         """cn30 仅少数节点可达（ratio 低）→ 不得单源定论。"""
         sources = {
-            cc.TCPTEST_CODE: {"status": "ok", "ok": True, "ms": 200,
+            cc.CN30_CODE: {"status": "ok", "ok": True, "ms": 200,
                         "level": "tcp", "ok_nodes": 1, "nodes": 10,
                         "ratio": 0.1},
-            cc.CHECK_HOST_CODE: {"status": "error", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(
             cc.merge_verdict(sources)["verdict"], "uncertain")
 
-    def test_tcptest_fail_plus_l2_fail_unreachable(self):
+    def test_cn30_fail_plus_l2_fail_unreachable(self):
         """cn30 全节点失败 + cn27/cn20 失败 → unreachable。"""
         sources = {
-            cc.TCPTEST_CODE: {"status": "fail", "ok": False, "ms": None,
+            cc.CN30_CODE: {"status": "fail", "ok": False, "ms": None,
                         "ok_nodes": 0, "nodes": 10, "ratio": 0.0},
-            cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(
             cc.merge_verdict(sources)["verdict"], "unreachable")
@@ -559,23 +559,23 @@ class TestMergeVerdict(unittest.TestCase):
     def test_new_multi_sources_strong_reachable(self):
         """新增四源（cn08/cn14/cn17/cn16）达标 → 独立判 reachable。"""
         for idx, (name, src) in enumerate([
-            (cc.PINGLOC_CODE, {"status": "ok", "ok": True, "ms": 30, "level": "tcp",
+            (cc.CN08_CODE, {"status": "ok", "ok": True, "ms": 30, "level": "tcp",
                                "ok_nodes": 12, "nodes": 12, "ratio": 1.0}),
-            (cc.ANTPING_CODE, {"status": "ok", "ok": True, "ms": 20, "level": "tcp",
+            (cc.CN14_CODE, {"status": "ok", "ok": True, "ms": 20, "level": "tcp",
                          "ok_nodes": 150, "nodes": 160, "ratio": 0.94}),
-            (cc.TCPINGCN_CODE, {"status": "ok", "ok": True, "ms": 15, "level": "tcp",
+            (cc.CN17_CODE, {"status": "ok", "ok": True, "ms": 15, "level": "tcp",
                           "ok_nodes": 150, "nodes": 160, "ratio": 0.94}),
-            (cc.CHINAZ_CODE, {"status": "ok", "ok": True, "ms": 40, "level": "icmp",
+            (cc.CN16_CODE, {"status": "ok", "ok": True, "ms": 40, "level": "icmp",
                         "ok_nodes": 45, "nodes": 50, "ratio": 0.90}),
         ]):
             self.assertEqual(
                 cc.merge_verdict({name: src})["verdict"],
                 "reachable", msg=f"{name} strong → reachable")
 
-    def test_chinaz_degenerate_sample_not_strong(self):
+    def test_cn16_degenerate_sample_not_strong(self):
         """多节点源残片样本（<MULTI_MIN_NODES 节点）不得当强确认。"""
         sources = {
-            cc.CHINAZ_CODE: {"status": "ok", "ok": True, "ms": 40, "level": "icmp",
+            cc.CN16_CODE: {"status": "ok", "ok": True, "ms": 40, "level": "icmp",
                        "ok_nodes": 1, "nodes": 1, "ratio": 1.0},
         }
         self.assertEqual(
@@ -585,10 +585,10 @@ class TestMergeVerdict(unittest.TestCase):
         """仅 ICMP 主机存活源（cn07/cn16）确认时，level 如实标 icmp，
         不冒充 tcp（all_cn_http 消费方以此区分传输层证据）。"""
         sources = {
-            cc.CHINAZ_CODE: {"status": "ok", "ok": True, "ms": 40,
+            cc.CN16_CODE: {"status": "ok", "ok": True, "ms": 40,
                        "ok_nodes": 45, "nodes": 50, "ratio": 0.9,
                        "level": "icmp"},
-            cc.COFFEE_CODE: {"status": "ok", "ok": True, "ms": 35,
+            cc.CN07_CODE: {"status": "ok", "ok": True, "ms": 35,
                        "ok_nodes": 20, "nodes": 30, "ratio": 0.8,
                        "level": "icmp"},
         }
@@ -596,7 +596,7 @@ class TestMergeVerdict(unittest.TestCase):
         self.assertEqual(mv["verdict"], "reachable")
         self.assertEqual(mv["level"], "icmp")
         # 混入 TCP 源 → 保守回落 tcp
-        sources[cc.TCPTEST_CODE] = {"status": "ok", "ok": True, "ms": 30,
+        sources[cc.CN30_CODE] = {"status": "ok", "ok": True, "ms": 30,
                            "ok_nodes": 12, "nodes": 12, "ratio": 1.0,
                            "level": "tcp"}
         self.assertEqual(cc.merge_verdict(sources)["level"], "tcp")
@@ -604,16 +604,16 @@ class TestMergeVerdict(unittest.TestCase):
     def test_new_multi_fail_combos_unreachable(self):
         """新源多节点失败 + 单节点失败 → unreachable；两大节点失败也 → unreachable。"""
         cases = [
-            {cc.TCPINGCN_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+            {cc.CN17_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                           "nodes": 160, "ratio": 0.0},
-             cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None}},
-            {cc.ANTPING_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+             cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None}},
+            {cc.CN14_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                          "nodes": 160, "ratio": 0.0},
-             cc.CHINAZ_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+             cc.CN16_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                         "nodes": 50, "ratio": 0.0}},
-            {cc.PINGLOC_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+            {cc.CN08_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                                "nodes": 12, "ratio": 0.0},
-             cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None}},
+             cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None}},
         ]
         for sources in cases:
             self.assertEqual(
@@ -621,7 +621,7 @@ class TestMergeVerdict(unittest.TestCase):
 
     def test_five_new_multi_sources_strong_reachable(self):
         """新增五源（boce/ipip/17ce/ping0/cn13）达标 → 独立判 reachable。"""
-        for name in (cc.BOCE_CODE, cc.IPIP_CODE, cc.SEVENTEEN_CODE, cc.PING0_CODE, cc.WANSUI_CODE):
+        for name in (cc.CN42_CODE, cc.CN34_CODE, cc.CN43_CODE, cc.CN44_CODE, cc.CN13_CODE):
             src = {"status": "ok", "ok": True, "ms": 50, "level": "tcp",
                    "ok_nodes": 9, "nodes": 10, "ratio": 0.9}
             self.assertEqual(
@@ -630,7 +630,7 @@ class TestMergeVerdict(unittest.TestCase):
 
     def test_five_new_multi_sources_weak_uncertain(self):
         """新源弱确认（ok 但比率<阈值 或 残片）→ uncertain 不误判 reachable。"""
-        for name in (cc.BOCE_CODE, cc.IPIP_CODE, cc.SEVENTEEN_CODE, cc.PING0_CODE, cc.WANSUI_CODE):
+        for name in (cc.CN42_CODE, cc.CN34_CODE, cc.CN43_CODE, cc.CN44_CODE, cc.CN13_CODE):
             weak = {"status": "ok", "ok": True, "ms": 50, "level": "tcp",
                     "ok_nodes": 1, "nodes": 10, "ratio": 0.1}
             self.assertEqual(
@@ -640,10 +640,10 @@ class TestMergeVerdict(unittest.TestCase):
     def test_per_source_ratio_threshold_wired(self):
         """各多节点源成功率阈值常量必须真正接线（此前 cn11/cn09/boce/
         ipip/17ce/ping0/cn13 的 *_MIN_RATIO 定义了却未接入 strong_valid，
-        调高任意常量都会被静默回退到 ITDOG_MIN_RATIO）。"""
+        调高任意常量都会被静默回退到 DEFAULT_MIN_RATIO）。"""
         src = {"status": "ok", "ok": True, "ms": 60, "level": "tcp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
-        for name in (cc.CE98_CODE, cc.BIUPING_CODE_TCPING, cc.BOCE_CODE, cc.IPIP_CODE, cc.SEVENTEEN_CODE, cc.PING0_CODE, cc.WANSUI_CODE):
+        for name in (cc.CN11_CODE, cc.CN09_CODE, cc.CN42_CODE, cc.CN34_CODE, cc.CN43_CODE, cc.CN44_CODE, cc.CN13_CODE):
             self.assertEqual(
                 cc.merge_verdict({name: dict(src)})["verdict"],
                 "reachable", msg=f"{name} ratio 0.7 ≥ 默认阈值 → reachable")
@@ -660,48 +660,48 @@ class TestMergeVerdict(unittest.TestCase):
     def test_five_new_multi_fail_combos_unreachable(self):
         """新源多节点失败 + 单节点失败 → unreachable；两大节点失败 → unreachable。"""
         cases = [
-            {cc.BOCE_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+            {cc.CN42_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                        "nodes": 10, "ratio": 0.0},
-             cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None}},
-            {cc.IPIP_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+             cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None}},
+            {cc.CN34_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                       "nodes": 10, "ratio": 0.0},
-             cc.SEVENTEEN_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+             cc.CN43_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                       "nodes": 10, "ratio": 0.0}},
-            {cc.PING0_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+            {cc.CN44_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                         "nodes": 10, "ratio": 0.0},
-             cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None}},
-            {cc.WANSUI_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+             cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None}},
+            {cc.CN13_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                         "nodes": 10, "ratio": 0.0},
-             cc.IPIP_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
+             cc.CN34_CODE: {"status": "fail", "ok": False, "ms": None, "ok_nodes": 0,
                       "nodes": 10, "ratio": 0.0}},
         ]
         for sources in cases:
             self.assertEqual(
                 cc.merge_verdict(sources)["verdict"], "unreachable")
 
-    def test_ipip_trace_merge_and_threshold_wired(self):
+    def test_cn35_merge_and_threshold_wired(self):
         strong = {"status": "ok", "ok": True, "ms": None, "level": "icmp",
                   "ok_nodes": 40, "nodes": 50, "ratio": 0.8}
         self.assertEqual(cc.merge_verdict(
-            {cc.IPIP_TRACE_CODE: strong})["verdict"], "reachable")
+            {cc.CN35_CODE: strong})["verdict"], "reachable")
         weak = dict(strong, ok_nodes=1, nodes=50, ratio=0.02)
         self.assertEqual(cc.merge_verdict(
-            {cc.IPIP_TRACE_CODE: weak})["verdict"], "uncertain")
-        old = cc._SOURCE_MIN_RATIO[cc.IPIP_TRACE_CODE]
-        cc._SOURCE_MIN_RATIO[cc.IPIP_TRACE_CODE] = 0.9
+            {cc.CN35_CODE: weak})["verdict"], "uncertain")
+        old = cc._SOURCE_MIN_RATIO[cc.CN35_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN35_CODE] = 0.9
         try:
             self.assertEqual(cc.merge_verdict(
-                {cc.IPIP_TRACE_CODE: dict(strong)})["verdict"], "uncertain")
+                {cc.CN35_CODE: dict(strong)})["verdict"], "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.IPIP_TRACE_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN35_CODE] = old
 
-    def test_ipip_trace_cli_default_stays_opt_in(self):
+    def test_cn35_cli_default_stays_opt_in(self):
         """CN-45：ipip-trace 本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn35")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn35")["concurrency"], 6)
 
-    def test_ipip_not_double_scheduled(self):
+    def test_cn34_not_double_scheduled(self):
         """CN-43 遗留 bug 回归：ipip 专用相之外，五源通用循环不得再跑 ipip
         （limit≠0 时双跑双写）。"""
         import re
@@ -714,7 +714,7 @@ class TestMergeVerdict(unittest.TestCase):
 
     def test_cn07_strong_reachable(self):
         sources = {
-            cc.COFFEE_CODE: {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
+            cc.CN07_CODE: {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
                              "ok_nodes": 15, "nodes": 18, "ratio": 0.83},
         }
         self.assertEqual(
@@ -722,7 +722,7 @@ class TestMergeVerdict(unittest.TestCase):
 
     def test_cn07_degenerate_not_strong(self):
         sources = {
-            cc.COFFEE_CODE: {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
+            cc.CN07_CODE: {"status": "ok", "ok": True, "ms": 5, "level": "icmp",
                              "ok_nodes": 1, "nodes": 18, "ratio": 0.056},
         }
         self.assertEqual(
@@ -733,49 +733,49 @@ class TestJkpingMergeVerdict(unittest.TestCase):
     """CN-25：cn25 并入单节点交叉（single_ok/single_failed），与
     cn27/cn20/cn24 同权（任 2 ok → reachable，任 2 fail → unreachable）。"""
 
-    def test_xxapi_jkping_double_ok_reachable(self):
+    def test_cn20_cn25_double_ok_reachable(self):
         sources = {
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 43},
-            cc.JKPING_CODE: {"status": "ok", "ok": True, "ms": 12.7, "level": "icmp"},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 43},
+            cc.CN25_CODE: {"status": "ok", "ok": True, "ms": 12.7, "level": "icmp"},
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["ms"], 12.7)
 
-    def test_jkapi_jkping_double_ok_reachable(self):
+    def test_cn24_cn25_double_ok_reachable(self):
         """同站双协议（TCP+ICMP）双 ok → reachable（主机+端口双层确认）。"""
         sources = {
-            cc.JKAPI_CODE: {"status": "ok", "ok": True, "ms": 11},
-            cc.JKPING_CODE: {"status": "ok", "ok": True, "ms": 12.7, "level": "icmp"},
+            cc.CN24_CODE: {"status": "ok", "ok": True, "ms": 11},
+            cc.CN25_CODE: {"status": "ok", "ok": True, "ms": 12.7, "level": "icmp"},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
 
-    def test_jkping_alone_ok_uncertain(self):
-        sources = {cc.JKPING_CODE: {"status": "ok", "ok": True, "ms": 12.7,
+    def test_cn25_alone_ok_uncertain(self):
+        sources = {cc.CN25_CODE: {"status": "ok", "ok": True, "ms": 12.7,
                               "level": "icmp"}}
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "uncertain")
         self.assertEqual(merged["level"], "icmp")  # 纯 ICMP 证据如实标注，不冒充 tcp
 
-    def test_jkping_fail_plus_xxapi_fail_unreachable(self):
+    def test_cn25_fail_plus_cn20_fail_unreachable(self):
         sources = {
-            cc.JKPING_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN25_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
-    def test_jkping_fail_alone_uncertain(self):
+    def test_cn25_fail_alone_uncertain(self):
         sources = {
-            cc.JKPING_CODE: {"status": "fail", "ok": False, "ms": None},
-            cc.XXAPI_CODE: {"status": "error", "ok": False, "ms": None},
+            cc.CN25_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "error", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
-    def test_jkping_tcp_mix_level_tcp(self):
+    def test_cn25_tcp_mix_level_tcp(self):
         """ICMP + TCP 混证 → level 回落 tcp（与 cn16/cn30 混证同规则）。"""
         sources = {
-            cc.JKPING_CODE: {"status": "ok", "ok": True, "ms": 12.7, "level": "icmp"},
-            cc.TCPTEST_CODE: {"status": "ok", "ok": True, "ms": 60,
+            cc.CN25_CODE: {"status": "ok", "ok": True, "ms": 12.7, "level": "icmp"},
+            cc.CN30_CODE: {"status": "ok", "ok": True, "ms": 60,
                         "ok_nodes": 8, "nodes": 10, "ratio": 0.8,
                         "level": "tcp"},
         }
@@ -819,7 +819,7 @@ class TestCn01PingSource(unittest.TestCase):
         sources = {
             "cn03": {"status": "fail", "ok": False, "ms": None,
                            "ok_nodes": 0, "nodes": 24, "ratio": 0.0},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -951,31 +951,31 @@ class TestAnnotations(unittest.TestCase):
         cases = {
             # cn14 1ms vs cn20 234ms → 取 234（大陆视角）
             "1.1.1.1:443#US": {"ms": 1, "sources": {
-                cc.XXAPI_CODE: {"status": "ok", "ms": 234.0},
-                cc.ANTPING_CODE: {"status": "ok", "ms": 1}}},
+                cc.CN20_CODE: {"status": "ok", "ms": 234.0},
+                cc.CN14_CODE: {"status": "ok", "ms": 1}}},
             # cn20 35 / cn24 80 → 取 35（多大陆源取最小）
             "2.2.2.2:443#US": {"sources": {
-                cc.XXAPI_CODE: {"status": "ok", "ms": 35.0},
-                cc.JKAPI_CODE: {"status": "ok", "ms": 80.0}}},
+                cc.CN20_CODE: {"status": "ok", "ms": 35.0},
+                cc.CN24_CODE: {"status": "ok", "ms": 80.0}}},
             # 无大陆探测，回退合并 ms
             "3.3.3.3:443#US": {"ms": 42, "sources": {
-                cc.TCPTEST_CODE: {"status": "ok", "ms": 42}}},
+                cc.CN30_CODE: {"status": "ok", "ms": 42}}},
             # 无 sources 老条目：用 entry ms
             "4.4.4.4:443#US": {"ms": 88},
             # 噪声且无 valid ms → None（不展示伪造值）
-            "5.5.5.5:443#US": {"ms": 0, "sources": {cc.ANTPING_CODE: {"status": "ok", "ms": 1}}},
+            "5.5.5.5:443#US": {"ms": 0, "sources": {cc.CN14_CODE: {"status": "ok", "ms": 1}}},
             # merged ms 被 1ms 污染，但 cn30 有 88ms 可信读数 → 取 88
             "6.6.6.6:443#US": {"ms": 1, "sources": {
-                cc.ANTPING_CODE: {"status": "ok", "ms": 1},
-                cc.TCPTEST_CODE: {"status": "ok", "ms": 88.0}}},
+                cc.CN14_CODE: {"status": "ok", "ms": 1},
+                cc.CN30_CODE: {"status": "ok", "ms": 88.0}}},
             # 唯一 ok 为 cn16（纯 ICMP）且给 2ms 假象 → 不得冒充大陆延迟；
             # entry 合并 ms 亦被 2ms 污染 → None（宁缺勿假）
             "7.7.7.7:443#US": {"ms": 2, "sources": {
-                cc.CHINAZ_CODE: {"status": "ok", "ms": 2.0}}},
+                cc.CN16_CODE: {"status": "ok", "ms": 2.0}}},
             # cn16 假象 + cn30 真实 174ms → 取 174（非 2）
             "8.8.8.8:443#US": {"sources": {
-                cc.CHINAZ_CODE: {"status": "ok", "ms": 2.0},
-                cc.TCPTEST_CODE: {"status": "ok", "ms": 174.8}}},
+                cc.CN16_CODE: {"status": "ok", "ms": 2.0},
+                cc.CN30_CODE: {"status": "ok", "ms": 174.8}}},
         }
         got = {k: common.cn_display_ms(v) for k, v in cases.items()}
         self.assertEqual(got, {
@@ -996,21 +996,21 @@ class TestAnnotations(unittest.TestCase):
         cases = {
             # cn01 三网：电信 45 / 联通 88 / 移动 120 → 取 45（最快运营商）
             "a:443#US": {"sources": {
-                cc.XXAPI_CODE: {"status": "ok", "ms": 60.0},
+                cc.CN20_CODE: {"status": "ok", "ms": 60.0},
                 "cn01": {"status": "ok", "ms": 45.0}},
                 "isp_ms": {"中国电信": 45.0, "中国联通": 88.0, "中国移动": 120.0}},
             # 无 per-ISP 数据 → 回退 cn_display_ms（可信探测）
             "b:443#US": {"sources": {
-                cc.XXAPI_CODE: {"status": "ok", "ms": 70.0},
-                cc.JKAPI_CODE: {"status": "ok", "ms": 90.0}}},
+                cc.CN20_CODE: {"status": "ok", "ms": 70.0},
+                cc.CN24_CODE: {"status": "ok", "ms": 90.0}}},
             # isp_ms 全部 ≤2ms（噪声）→ 剔除后回退
-            "c:443#US": {"sources": {cc.XXAPI_CODE: {"status": "ok", "ms": 35.0}},
+            "c:443#US": {"sources": {cc.CN20_CODE: {"status": "ok", "ms": 35.0}},
                          "isp_ms": {"中国电信": 1.0, "中国移动": 2.0}},
             # 仅一个运营商有值 → 取该值
-            "d:443#US": {"sources": {cc.XXAPI_CODE: {"status": "ok", "ms": 40.0}},
+            "d:443#US": {"sources": {cc.CN20_CODE: {"status": "ok", "ms": 40.0}},
                          "isp_ms": {"中国联通": 88.0}},
             # 无任何读数 → None
-            "e:443#US": {"sources": {cc.ANTPING_CODE: {"status": "ok", "ms": 1.0}}},
+            "e:443#US": {"sources": {cc.CN14_CODE: {"status": "ok", "ms": 1.0}}},
         }
         got = {k: common.cn_fastest_ms(v) for k, v in cases.items()}
         self.assertEqual(got, {
@@ -1054,12 +1054,12 @@ class TestAnnotations(unittest.TestCase):
         )
         entries = {
             "167.88.160.144:8443#US": {"verdict": "reachable", "sources": {
-                cc.XXAPI_CODE: {"status": "ok", "ms": 234.0},
-                cc.ANTPING_CODE: {"status": "ok", "ms": 1}}},
+                cc.CN20_CODE: {"status": "ok", "ms": 234.0},
+                cc.CN14_CODE: {"status": "ok", "ms": 1}}},
             "8.8.8.8:443#DE": {"verdict": "reachable", "sources": {
-                cc.XXAPI_CODE: {"status": "ok", "ms": 35.0}}},
+                cc.CN20_CODE: {"status": "ok", "ms": 35.0}}},
             "2.2.2.2:443#US": {"verdict": "reachable", "ms": 42, "sources": {
-                cc.TCPTEST_CODE: {"status": "ok", "ms": 42}}},
+                cc.CN30_CODE: {"status": "ok", "ms": 42}}},
         }
         all_keys = set(entries)
         cn_ms = {k: common.cn_display_ms(e) for k, e in entries.items()
@@ -1163,13 +1163,13 @@ class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):
         item = ("1.2.3.4:2087#US", "1.2.3.4:2087#US", "1.2.3.4", "2087", "US")
         entry = cc.build_entry(item, {
-            cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 100},
-            cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 80},
+            cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 100},
+            cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 80},
         })
         self.assertEqual(entry["verdict"], "reachable")
         self.assertEqual(entry["ip"], "1.2.3.4")
         self.assertIn("ts", entry)
-        self.assertEqual(entry["sources"][cc.CHECK_HOST_CODE]["ms"], 100)
+        self.assertEqual(entry["sources"][cc.CN27_CODE]["ms"], 100)
 
 
 class TestWsReadContract(unittest.TestCase):
@@ -1212,8 +1212,8 @@ class TestMergeIspMs(unittest.TestCase):
         entries = {
             "a:443#US": {"sources": {
                 "cn01": {"isp_ms": {"中国电信": 45.0, "中国联通": 88.0}},
-                cc.XXAPI_CODE: {"ms": 60.0},
-                cc.TCPTEST_CODE: {"isp_ms": {"中国电信": 55.0}},
+                cc.CN20_CODE: {"ms": 60.0},
+                cc.CN30_CODE: {"isp_ms": {"中国电信": 55.0}},
             }},
         }
         cc.merge_isp_ms(entries)
@@ -1232,9 +1232,9 @@ class TestMergeIspMs(unittest.TestCase):
         entries = {
             "a:443#US": {"sources": {
                 "cn01": {"isp_ms": {"中国电信": 45.0, "中国联通": 88.0}},
-                cc.TCPTEST_CODE: {"isp_ms": {"中国电信": 20.0, "中国移动": 50.0}},
-                cc.CE98_CODE: {"isp_ms": {"中国联通": 9.0}},
-                cc.BIUPING_CODE_TCPING: {"isp_ms": {"中国移动": 60.0}},
+                cc.CN30_CODE: {"isp_ms": {"中国电信": 20.0, "中国移动": 50.0}},
+                cc.CN11_CODE: {"isp_ms": {"中国联通": 9.0}},
+                cc.CN09_CODE: {"isp_ms": {"中国移动": 60.0}},
             }},
         }
         cc.merge_isp_ms(entries)
@@ -1274,24 +1274,24 @@ class TestCn01MergeVerdict(unittest.TestCase):
         return {"status": status, "ok": status == "ok", "ms": 12 if status == "ok" else None}
 
     def test_cn01_ok_reachable(self):
-        sources = {"cn01": self._s("ok"), cc.CHECK_HOST_CODE: self._s("error")}
+        sources = {"cn01": self._s("ok"), cc.CN27_CODE: self._s("error")}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_cn01_fail_alone_uncertain(self):
-        sources = {"cn01": self._s("fail"), cc.CHECK_HOST_CODE: self._s("error")}
+        sources = {"cn01": self._s("fail"), cc.CN27_CODE: self._s("error")}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_cn01_fail_plus_checkhost_fail(self):
-        sources = {"cn01": self._s("fail"), cc.CHECK_HOST_CODE: self._s("fail")}
+        sources = {"cn01": self._s("fail"), cc.CN27_CODE: self._s("fail")}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
-    def test_pingpe_fail_plus_itdog_fail(self):
-        sources = {cc.PINGPE_CODE: self._s("fail"), "cn01": self._s("fail")}
+    def test_cn40_fail_plus_cn01_fail(self):
+        sources = {cc.CN40_CODE: self._s("fail"), "cn01": self._s("fail")}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_cn01_rate_limited_neutral(self):
         sources = {"cn01": {"status": "rate_limited", "ok": False, "ms": None},
-                   cc.CHECK_HOST_CODE: {"status": "error", "ok": False, "ms": None}}
+                   cc.CN27_CODE: {"status": "error", "ok": False, "ms": None}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "skipped")
 
 
@@ -1303,7 +1303,7 @@ class TestMergeVerdictLevel(unittest.TestCase):
     def test_http_level_propagates(self):
         sources = {
             "cn01": self._src("ok", "http"),
-            cc.CHECK_HOST_CODE: self._src("error"),
+            cc.CN27_CODE: self._src("error"),
         }
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "reachable")
@@ -1314,7 +1314,7 @@ class TestMergeVerdictLevel(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["level"], "tcp")
 
     def test_no_ok_sources_level_none(self):
-        sources = {cc.CHECK_HOST_CODE: self._src("fail"), cc.XXAPI_CODE: self._src("fail")}
+        sources = {cc.CN27_CODE: self._src("fail"), cc.CN20_CODE: self._src("fail")}
         merged = cc.merge_verdict(sources)
         self.assertEqual(merged["verdict"], "unreachable")
         self.assertIsNone(merged["level"])
@@ -1337,7 +1337,7 @@ class TestMergeVerdictLevel(unittest.TestCase):
     def test_cn01_tcping_fail_plus_single_fail_unreachable(self):
         sources = {
             "cn02": self._src("fail"),
-            cc.CHECK_HOST_CODE: self._src("fail"),
+            cc.CN27_CODE: self._src("fail"),
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -1582,7 +1582,7 @@ class TestScarceQuotaAllocation(unittest.TestCase):
             api_key="",
         )
 
-    def test_check_host_skipped_when_pair_confirmed(self):
+    def test_cn27_skipped_when_pair_confirmed(self):
         """cn20+cn24 双免额单节点已 double-ok → 稀配额 cn27 直接让位。"""
         import unittest.mock as mock
 
@@ -1591,31 +1591,31 @@ class TestScarceQuotaAllocation(unittest.TestCase):
             ("2.2.2.2:80#US", "2.2.2.2:80#US", "2.2.2.2", "80", "US"),
         ]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "ok", "ok": True, "ms": float(port)}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
         def fake_jkapi(ip, port, timeout):
             return {"status": "ok", "ok": True, "ms": float(port)}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check", side_effect=fake_jkapi), \
-                mock.patch.object(cc, "jkping_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -1623,37 +1623,37 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(set(reachable), {"1.1.1.1:80#US", "2.2.2.2:80#US"})
 
-    def test_check_host_skipped_when_pair_failed(self):
+    def test_cn27_skipped_when_pair_failed(self):
         """cn20+cn24 双 fail → 已判 unreachable，同样不再浪费稀配额。"""
         import unittest.mock as mock
 
         items = [("3.3.3.3:80#US", "3.3.3.3:80#US", "3.3.3.3", "80", "US")]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "fail", "ok": False, "ms": None, "error": ""}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
         def fake_jkapi(ip, port, timeout):
             return {"status": "fail", "ok": False, "ms": None, "error": ""}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check", side_effect=fake_jkapi), \
-                mock.patch.object(cc, "jkping_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, _, _ = cc.run_measurements(items, self._args())
@@ -1661,37 +1661,37 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(entries["3.3.3.3:80#US"]["verdict"], "unreachable")
 
-    def test_check_host_probes_single_ok_for_second_confirm(self):
+    def test_cn27_probes_single_ok_for_second_confirm(self):
         """恰好 1 只免额单节点 ok → cn27 补足到双确认即翻正。"""
         import unittest.mock as mock
 
         items = [("4.4.4.4:80#US", "4.4.4.4:80#US", "4.4.4.4", "80", "US")]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "ok", "ok": True, "ms": float(port)}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
         def fake_jkapi(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "http 500"}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check", side_effect=fake_jkapi), \
-                mock.patch.object(cc, "jkping_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -1699,37 +1699,37 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual([c.args[0] for c in mch.call_args_list], ["4.4.4.4"])
         self.assertEqual(set(reachable), {"4.4.4.4:80#US"})
 
-    def test_jkping_second_confirm_skips_check_host(self):
+    def test_cn25_second_confirm_skips_cn27(self):
         """CN-25：免额三源中任 2 ok 即双确认——cn20 error + cn24 ok +
         cn25 ok → 稀配额 cn27 直接让位（配额门控按计数泛化）。"""
         import unittest.mock as mock
 
         items = [("6.6.6.6:80#US", "6.6.6.6:80#US", "6.6.6.6", "80", "US")]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "http 500"}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check",
                                     return_value={"status": "ok", "ok": True,
                                                   "ms": 11.0}), \
-                mock.patch.object(cc, "jkping_check",
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "ok", "ok": True,
                                                 "ms": 12.7, "level": "icmp"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -1737,37 +1737,37 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(set(reachable), {"6.6.6.6:80#US"})
 
-    def test_xxping_second_confirm_skips_check_host(self):
+    def test_cn21_second_confirm_skips_cn27(self):
         """CN-29：免额四源中任 2 ok 即双确认——cn24 ok + cn21 ok
         （余者 error）→ 稀配额 cn27 直接让位。"""
         import unittest.mock as mock
 
         items = [("7.7.7.7:80#US", "7.7.7.7:80#US", "7.7.7.7", "80", "US")]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "http 500"}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check",
                                     return_value={"status": "ok", "ok": True,
                                                   "ms": 11.0}), \
-                mock.patch.object(cc, "jkping_check",
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "ok", "ok": True,
                                                 "ms": 42.1, "level": "icmp"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -1775,37 +1775,37 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(set(reachable), {"7.7.7.7:80#US"})
 
-    def test_xxscan_second_confirm_skips_check_host(self):
+    def test_xxscan_second_confirm_skips_cn27(self):
         """CN-39：免额七源中任 2 ok 即双确认——cn20 ok + cn23 ok
         （余者 error）→ 稀配额 cn27 直接让位。"""
         import unittest.mock as mock
 
         items = [("8.8.4.4:80#US", "8.8.4.4:80#US", "8.8.4.4", "80", "US")]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "ok", "ok": True, "ms": 43.0}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check",
                                     return_value={"status": "error", "ok": False,
                                                   "ms": None, "error": "x"}), \
-                mock.patch.object(cc, "jkping_check",
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "x"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "x"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "x"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "x"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "ok", "ok": True,
                                                 "ms": None, "level": "tcp"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -1813,41 +1813,41 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(set(reachable), {"8.8.4.4:80#US"})
 
-    def test_xxapi_error_still_gets_second_opinion(self):
+    def test_cn20_error_still_gets_second_opinion(self):
         import unittest.mock as mock
 
         items = [("9.9.9.9:443#US", "9.9.9.9:443#US", "9.9.9.9", "443", "US")]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "http 500"}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 5.0}
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), mock.patch.object(
-            cc, "check_host_check", side_effect=fake_check_host
-        ) as mch, mock.patch.object(cc, "jkapi_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
+            cc, "cn27_check", side_effect=fake_cn27
+        ) as mch, mock.patch.object(cc, "cn24_check",
                                     return_value={"status": "error", "ok": False,
                                                   "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "jkping_check",
+                mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxping_check",
+                mock.patch.object(cc, "cn21_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "jkssl_check",
+                mock.patch.object(cc, "cn26_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxstatus_check",
+                mock.patch.object(cc, "cn22_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "xxscan_check",
+                mock.patch.object(cc, "cn23_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "checkhost_http_check",
+                mock.patch.object(cc, "cn29_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
-                mock.patch.object(cc, "checkhost_ping_check",
+                mock.patch.object(cc, "cn28_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
@@ -1871,7 +1871,7 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
             workers=4,
             timeout=5,
             api_key="",
-            tcpping_token="",
+            cn41_token="",
             
             
             
@@ -1902,31 +1902,31 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
 
         item = self._item(1)
         patches = [
-            mock.patch.object(cc, "tcptest_fetch_nodes",
+            mock.patch.object(cc, "cn30_fetch_nodes",
                               return_value=[{"uuid": "u1", "operator": "ct",
                                              "enabled": True,
                                              "runtime_state": "online"}]),
-            mock.patch.object(cc, "tcptest_pick_nodes",
+            mock.patch.object(cc, "cn30_pick_nodes",
                               side_effect=lambda nodes, count: ["u1", "u2"]),
-            mock.patch.object(cc, "tcptest_check", side_effect=self._boom),
-            mock.patch.object(cc, "coffee_check", side_effect=self._boom),
-            mock.patch.object(cc, "pingloc_check", side_effect=self._boom),
-            mock.patch.object(cc, "antping_check", side_effect=self._boom),
-            mock.patch.object(cc, "tcpingcn_check", side_effect=self._boom),
-            mock.patch.object(cc, "chinaz_check", side_effect=self._boom),
-            mock.patch.object(cc, "pingpe_check", side_effect=self._boom),
-            mock.patch.object(cc, "tcpping_check", side_effect=self._boom),
-            mock.patch.object(cc, "xxapi_check",
+            mock.patch.object(cc, "cn30_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn07_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn08_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn14_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn17_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn16_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn40_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn41_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn20_check",
                               return_value={"status": "ok", "ok": True, "ms": 1.0}),
-            mock.patch.object(cc, "jkapi_check", side_effect=self._boom),
-            mock.patch.object(cc, "jkping_check", side_effect=self._boom),
-            mock.patch.object(cc, "xxping_check", side_effect=self._boom),
-            mock.patch.object(cc, "jkssl_check", side_effect=self._boom),
-            mock.patch.object(cc, "xxstatus_check", side_effect=self._boom),
-            mock.patch.object(cc, "xxscan_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn24_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn25_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn21_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn26_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn22_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn23_check", side_effect=self._boom),
             # cn27 也走槽位；抛异常同样须被隔离（l2_check_host 已有守卫）
-            mock.patch.object(cc, "check_host_check", side_effect=self._boom),
-            mock.patch.object(cc, "itdog_batch_run", return_value={}),
+            mock.patch.object(cc, "cn27_check", side_effect=self._boom),
+            mock.patch.object(cc, "cn01_batch_run", return_value={}),
         ]
         for p in patches:
             p.start()
@@ -1936,15 +1936,15 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
             for p in patches:
                 p.stop()
         srcs = entries[item[1]]["sources"]
-        for name in (cc.TCPTEST_CODE, cc.COFFEE_CODE, cc.PINGLOC_CODE, cc.ANTPING_CODE, cc.TCPINGCN_CODE,
-                     cc.CHINAZ_CODE, cc.PINGPE_CODE, cc.CHECK_HOST_CODE, cc.JKPING_CODE, cc.XXPING_CODE,
-                     cc.JKSSL_CODE, cc.XXSTATUS_CODE, cc.XXSCAN_CODE):
+        for name in (cc.CN30_CODE, cc.CN07_CODE, cc.CN08_CODE, cc.CN14_CODE, cc.CN17_CODE,
+                     cc.CN16_CODE, cc.CN40_CODE, cc.CN27_CODE, cc.CN25_CODE, cc.CN21_CODE,
+                     cc.CN26_CODE, cc.CN22_CODE, cc.CN23_CODE):
             self.assertEqual(srcs[name]["status"], "error")
         # 全部错误 → 不误判（skipped/uncertain），且流程未中断
         self.assertIn(entries[item[1]]["verdict"], ("uncertain", "skipped"))
 
 
-@unittest.skipUnless(cc._ITDOG_BUNDLE, "needs PCB itdog bundle")
+@unittest.skipUnless(cc._CN01_BUNDLE, "needs PCB cn01 bundle")
 class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
     """cn01 批量代价高：只投仍未定论的键；双免额已定论（≥2 ok / ≥2 fail）
     的键不得再进 cn01 复核，且 batch_tcping 兜底按节点拉取状态触发。
@@ -1961,13 +1961,12 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
             workers=4,
             timeout=5,
             api_key="",
-            tcpping_token="",
+            cn41_token="",
             itdog_nodes=2,
             itdog_batch_size=5,
             itdog_concurrency=2,
             itdog_pacing=0.0,
             itdog_timeout=10,
-            itdog_tcping_nodes=2,
         )
 
     def test_cn01_sees_only_undecided_keys(self):
@@ -1986,33 +1985,33 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
                 return {"status": "ok", "ok": True, "ms": 1.0}
             return {"status": "error", "ok": False, "ms": None, "error": "x"}
 
-        with mock.patch.object(cc, "xxapi_check",
+        with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "ok", "ok": True, "ms": 1.0}), \
-              mock.patch.object(cc, "jkapi_check", side_effect=fake_jkapi), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "jkssl_check",
+              mock.patch.object(cc, "cn26_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "xxstatus_check",
+              mock.patch.object(cc, "cn22_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "xxscan_check",
+              mock.patch.object(cc, "cn23_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "q"}), \
-              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_cn01):
+              mock.patch.object(cc, "cn01_batch_run", side_effect=fake_cn01):
             cc.run_measurements([decided, pending], self._args())
 
         self.assertEqual(seen.get("keys"), ["10.3.0.1:80#US"])
 
-    def test_tcping_fallback_skipped_when_itdog_fully_down(self):
+    def test_cn02_fallback_skipped_when_cn01_fully_down(self):
         """cn01 整站失败（全 error 或被投毒全 fail）时不得空转 batch_tcping 兜底；
         已定论键（无 cn01 记录）不得被误算作「节点拉取成功」。"""
         import unittest.mock as mock
@@ -2027,23 +2026,23 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
                               "ms": None, "error": "no itdog nodes"}
                         for _, key, _, _, _ in sample}
 
-            with mock.patch.object(cc, "xxapi_check",
+            with mock.patch.object(cc, "cn20_check",
                                    return_value={"status": "ok", "ok": True, "ms": 1.0}), \
-                  mock.patch.object(cc, "jkapi_check",
+                  mock.patch.object(cc, "cn24_check",
                                     return_value={"status": "error", "ok": False,
                                                   "ms": None, "error": "x"}), \
-                  mock.patch.object(cc, "jkping_check",
+                  mock.patch.object(cc, "cn25_check",
                                     return_value={"status": "error", "ok": False,
                                                   "ms": None, "error": "x"}), \
-                  mock.patch.object(cc, "check_host_check",
+                  mock.patch.object(cc, "cn27_check",
                                     return_value={"status": "error", "ok": False,
                                                   "ms": None, "error": "q"}), \
-                  mock.patch.object(cc, "itdog_batch_run", side_effect=fake_cn01) as mib:
+                  mock.patch.object(cc, "cn01_batch_run", side_effect=fake_cn01) as mib:
                 cc.run_measurements([decided, stuck], self._args())
 
             self.assertEqual(len(mib.call_args_list), 1)  # 只有一次 batch_http，无 tcping 兜底
 
-    def test_tcping_fallback_runs_when_nodes_fetched(self):
+    def test_cn02_fallback_runs_when_nodes_fetched(self):
         """cn01 节点拉取成功（部分 ok）且部分键 error → 走 batch_tcping 兜底。"""
         import unittest.mock as mock
 
@@ -2058,42 +2057,42 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
                             {"status": "error", "ok": False, "ms": None, "error": "rl"})
             return out
 
-        with mock.patch.object(cc, "xxapi_check",
+        with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "ok", "ok": True, "ms": 1.0}), \
-              mock.patch.object(cc, "jkapi_check",
+              mock.patch.object(cc, "cn24_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "jkssl_check",
+              mock.patch.object(cc, "cn26_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "xxstatus_check",
+              mock.patch.object(cc, "cn22_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "xxscan_check",
+              mock.patch.object(cc, "cn23_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "q"}), \
-              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_cn01) as mib:
+              mock.patch.object(cc, "cn01_batch_run", side_effect=fake_cn01) as mib:
             entries, _, _ = cc.run_measurements([a, b], self._args())
 
         calls = [c for c in mib.call_args_list]
         # batch_http + batch_tcping 兜底 + batch_ping 兜底（CN-26 新增）
         self.assertEqual(len(calls), 3)
         page_urls = [c.kwargs.get("page_url") for c in calls]
-        self.assertIn(cc.ITDOG_TCPING_URL, page_urls)
-        self.assertIn(cc.ITDOG_PING_URL, page_urls)
-        fallback = next(c for c in calls if c.kwargs.get("page_url") == cc.ITDOG_TCPING_URL)
+        self.assertIn(cc.CN02_PAGE_URL, page_urls)
+        self.assertIn(cc.CN03_PAGE_URL, page_urls)
+        fallback = next(c for c in calls if c.kwargs.get("page_url") == cc.CN02_PAGE_URL)
         self.assertEqual([key for _, key, _, _, _ in fallback.args[0]],
                          ["10.7.0.1:80#US"])
-        ping_call = next(c for c in calls if c.kwargs.get("page_url") == cc.ITDOG_PING_URL)
+        ping_call = next(c for c in calls if c.kwargs.get("page_url") == cc.CN03_PAGE_URL)
         self.assertEqual([key for _, key, _, _, _ in ping_call.args[0]],
                          ["10.7.0.1:80#US"])
         # ping 结果归一落地：level=icmp、无 isp_ms
@@ -2105,7 +2104,7 @@ class TestBiupingPingSource(unittest.TestCase):
     """CN-34：cn10（同站 ICMP，复用 port="" 分支）。"""
 
     def test_strong_reachable(self):
-        sources = {cc.BIUPING_CODE_PING: {
+        sources = {cc.CN10_CODE: {
             "status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
             "ok_nodes": 39, "nodes": 39, "ratio": 1.0}}
         merged = cc.merge_verdict(sources)
@@ -2113,16 +2112,16 @@ class TestBiupingPingSource(unittest.TestCase):
         self.assertEqual(merged["level"], "icmp")
 
     def test_weak_ratio_uncertain(self):
-        sources = {cc.BIUPING_CODE_PING: {
+        sources = {cc.CN10_CODE: {
             "status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
             "ok_nodes": 1, "nodes": 39, "ratio": 0.026}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_fail_plus_single_fail_unreachable(self):
         sources = {
-            cc.BIUPING_CODE_PING: {"status": "fail", "ok": False, "ms": None,
+            cc.CN10_CODE: {"status": "fail", "ok": False, "ms": None,
                              "ok_nodes": 0, "nodes": 39, "ratio": 0.0},
-            cc.JKAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN24_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -2130,35 +2129,35 @@ class TestBiupingPingSource(unittest.TestCase):
         src = {"status": "ok", "ok": True, "ms": 7.5, "level": "icmp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
         self.assertEqual(
-            cc.merge_verdict({cc.BIUPING_CODE_PING: dict(src)})["verdict"],
+            cc.merge_verdict({cc.CN10_CODE: dict(src)})["verdict"],
             "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.BIUPING_CODE_PING]
-        cc._SOURCE_MIN_RATIO[cc.BIUPING_CODE_PING] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN10_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN10_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.BIUPING_CODE_PING: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN10_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.BIUPING_CODE_PING] = old
+            cc._SOURCE_MIN_RATIO[cc.CN10_CODE] = old
 
     def test_raw_slot_dispatch(self):
         cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
         with mock.patch.object(
-                cc, "biuping_ping_check",
+                cc, "cn10_check",
                 return_value={"status": "ok", "ok": True}) as m:
-            cc._run_raw_slots(cands, entries, 5, cc.BIUPING_CODE_PING, 2)
+            cc._run_raw_slots(cands, entries, 5, cc.CN10_CODE, 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
         self.assertEqual(
-            entries["1.2.3.4:443#US"][cc.BIUPING_CODE_PING]["status"], "ok")
+            entries["1.2.3.4:443#US"][cc.CN10_CODE]["status"], "ok")
 
 
 class TestAntpingPingSource(unittest.TestCase):
     """CN-28：antping_ping（同站 ICMP，复用 code=3 分支）。"""
 
     def test_strong_reachable(self):
-        sources = {cc.ANTPING_PING_CODE: {
+        sources = {cc.CN15_CODE: {
             "status": "ok", "ok": True, "ms": 1, "level": "icmp",
             "ok_nodes": 178, "nodes": 179, "ratio": 0.994}}
         merged = cc.merge_verdict(sources)
@@ -2166,32 +2165,32 @@ class TestAntpingPingSource(unittest.TestCase):
         self.assertEqual(merged["level"], "icmp")
 
     def test_weak_ratio_uncertain(self):
-        sources = {cc.ANTPING_PING_CODE: {
+        sources = {cc.CN15_CODE: {
             "status": "ok", "ok": True, "ms": 1, "level": "icmp",
             "ok_nodes": 1, "nodes": 179, "ratio": 0.006}}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
     def test_fail_plus_single_fail_unreachable(self):
         sources = {
-            cc.ANTPING_PING_CODE: {"status": "fail", "ok": False, "ms": None,
+            cc.CN15_CODE: {"status": "fail", "ok": False, "ms": None,
                              "ok_nodes": 0, "nodes": 186, "ratio": 0.0},
-            cc.JKAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN24_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_ratio_threshold_wired(self):
         src = {"status": "ok", "ok": True, "ms": 1, "level": "icmp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
-        self.assertEqual(cc.merge_verdict({cc.ANTPING_PING_CODE: dict(src)})["verdict"],
+        self.assertEqual(cc.merge_verdict({cc.CN15_CODE: dict(src)})["verdict"],
                          "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.ANTPING_PING_CODE]
-        cc._SOURCE_MIN_RATIO[cc.ANTPING_PING_CODE] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN15_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN15_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.ANTPING_PING_CODE: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN15_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.ANTPING_PING_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN15_CODE] = old
 
     def test_ws_slot_dispatch(self):
         """通用 WS slot 须能派发 antping_ping 且只写本源键。"""
@@ -2199,12 +2198,12 @@ class TestAntpingPingSource(unittest.TestCase):
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
         with mock.patch.object(
-                cc, "antping_ping_check",
+                cc, "cn15_check",
                 return_value={"status": "ok", "ok": True}) as m:
-            cc._run_ws_source_slots(cands, entries, 5, cc.ANTPING_PING_CODE, 2)
+            cc._run_ws_source_slots(cands, entries, 5, cc.CN15_CODE, 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
         self.assertEqual(
-            entries["1.2.3.4:443#US"][cc.ANTPING_PING_CODE]["status"], "ok")
+            entries["1.2.3.4:443#US"][cc.CN15_CODE]["status"], "ok")
 
 
 class TestGlobalpingSource(unittest.TestCase):
@@ -2216,15 +2215,15 @@ class TestGlobalpingSource(unittest.TestCase):
         ok = {"status": "ok", "ok": True, "ms": 5.7, "level": "icmp"}
         xx = {"status": "ok", "ok": True, "ms": 60.0}
         self.assertEqual(
-            cc.merge_verdict({cc.GLOBALPING_CODE: ok, cc.XXAPI_CODE: xx})["verdict"],
+            cc.merge_verdict({cc.CN36_CODE: ok, cc.CN20_CODE: xx})["verdict"],
             "reachable")
         self.assertEqual(
-            cc.merge_verdict({cc.GLOBALPING_CODE: dict(ok)})["verdict"],
+            cc.merge_verdict({cc.CN36_CODE: dict(ok)})["verdict"],
             "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None}
         self.assertEqual(
-            cc.merge_verdict({cc.GLOBALPING_CODE: dict(fail),
-                              cc.XXAPI_CODE: dict(fail)})["verdict"],
+            cc.merge_verdict({cc.CN36_CODE: dict(fail),
+                              cc.CN20_CODE: dict(fail)})["verdict"],
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
@@ -2242,16 +2241,16 @@ class TestGlobalpingTraceSource(unittest.TestCase):
         xx = {"status": "ok", "ok": True, "ms": 60.0}
         self.assertEqual(
             cc.merge_verdict(
-                {cc.GLOBALPING_TRACE_CODE: ok, cc.XXAPI_CODE: xx})["verdict"],
+                {cc.CN37_CODE: ok, cc.CN20_CODE: xx})["verdict"],
             "reachable")
         self.assertEqual(
             cc.merge_verdict(
-                {cc.GLOBALPING_TRACE_CODE: dict(ok)})["verdict"],
+                {cc.CN37_CODE: dict(ok)})["verdict"],
             "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None}
         self.assertEqual(
-            cc.merge_verdict({cc.GLOBALPING_TRACE_CODE: dict(fail),
-                              cc.XXAPI_CODE: dict(fail)})["verdict"],
+            cc.merge_verdict({cc.CN37_CODE: dict(fail),
+                              cc.CN20_CODE: dict(fail)})["verdict"],
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
@@ -2269,16 +2268,16 @@ class TestGlobalpingHttpSource(unittest.TestCase):
         xx = {"status": "ok", "ok": True, "ms": 60.0}
         self.assertEqual(
             cc.merge_verdict(
-                {cc.GLOBALPING_HTTP_CODE: ok, cc.XXAPI_CODE: xx})["verdict"],
+                {cc.CN38_CODE: ok, cc.CN20_CODE: xx})["verdict"],
             "reachable")
         self.assertEqual(
             cc.merge_verdict(
-                {cc.GLOBALPING_HTTP_CODE: dict(ok)})["verdict"],
+                {cc.CN38_CODE: dict(ok)})["verdict"],
             "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None}
         self.assertEqual(
-            cc.merge_verdict({cc.GLOBALPING_HTTP_CODE: dict(fail),
-                              cc.XXAPI_CODE: dict(fail)})["verdict"],
+            cc.merge_verdict({cc.CN38_CODE: dict(fail),
+                              cc.CN20_CODE: dict(fail)})["verdict"],
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
@@ -2296,16 +2295,16 @@ class TestGlobalpingMtrSource(unittest.TestCase):
         xx = {"status": "ok", "ok": True, "ms": 60.0}
         self.assertEqual(
             cc.merge_verdict(
-                {cc.GLOBALPING_MTR_CODE: ok, cc.XXAPI_CODE: xx})["verdict"],
+                {cc.CN39_CODE: ok, cc.CN20_CODE: xx})["verdict"],
             "reachable")
         self.assertEqual(
             cc.merge_verdict(
-                {cc.GLOBALPING_MTR_CODE: dict(ok)})["verdict"],
+                {cc.CN39_CODE: dict(ok)})["verdict"],
             "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None}
         self.assertEqual(
-            cc.merge_verdict({cc.GLOBALPING_MTR_CODE: dict(fail),
-                              cc.XXAPI_CODE: dict(fail)})["verdict"],
+            cc.merge_verdict({cc.CN39_CODE: dict(fail),
+                              cc.CN20_CODE: dict(fail)})["verdict"],
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
@@ -2321,33 +2320,33 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
     def test_merge_strong_weak_fail(self):
         strong = {"status": "ok", "ok": True, "ms": 15.8, "level": "http",
                   "ok_nodes": 8, "nodes": 10, "ratio": 0.8}
-        merged = cc.merge_verdict({cc.TCPTEST_HTTP_CODE: strong})
+        merged = cc.merge_verdict({cc.CN32_CODE: strong})
         self.assertEqual(merged["verdict"], "reachable")
         self.assertEqual(merged["level"], "http")
         weak = dict(strong, ok_nodes=1, nodes=10, ratio=0.1)
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_HTTP_CODE: weak})["verdict"], "uncertain")
+            {cc.CN32_CODE: weak})["verdict"], "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None,
                 "ok_nodes": 0, "nodes": 10, "ratio": 0.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_HTTP_CODE: fail,
-             cc.XXAPI_CODE: {"status": "fail", "ok": False,
+            {cc.CN32_CODE: fail,
+             cc.CN20_CODE: {"status": "fail", "ok": False,
                        "ms": None}})["verdict"], "unreachable")
 
     def test_ratio_threshold_wired(self):
         src = {"status": "ok", "ok": True, "ms": 15.8, "level": "http",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
         self.assertEqual(
-            cc.merge_verdict({cc.TCPTEST_HTTP_CODE: dict(src)})["verdict"],
+            cc.merge_verdict({cc.CN32_CODE: dict(src)})["verdict"],
             "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.TCPTEST_HTTP_CODE]
-        cc._SOURCE_MIN_RATIO[cc.TCPTEST_HTTP_CODE] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN32_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN32_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.TCPTEST_HTTP_CODE: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN32_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.TCPTEST_HTTP_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN32_CODE] = old
 
     def test_phase_runs_http_only(self):
         """TCP/ping 0 ＋ http 1 → 只跑 http 通道。"""
@@ -2355,7 +2354,7 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn10": 0, "cn11": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 0, "cn32": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn10": 2, "cn30": 2, "cn31": 2, "cn32": 2}, cn_nodes={"cn30": 2}, 
             skip_itdog=True, skip_itdog_tcping=True, 
-            workers=4, timeout=5, api_key="", tcpping_token="",
+            workers=4, timeout=5, api_key="", cn41_token="",
               
              
              
@@ -2379,34 +2378,34 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
         def fake_l2(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "x"}
 
-        with mock.patch.object(cc, "tcptest_fetch_nodes",
+        with mock.patch.object(cc, "cn30_fetch_nodes",
                                return_value=[{"uuid": "u1", "operator": "ct",
                                               "enabled": True,
                                               "runtime_state": "online"}]), \
-              mock.patch.object(cc, "tcptest_pick_nodes",
+              mock.patch.object(cc, "cn30_pick_nodes",
                                 side_effect=lambda nodes, count: ["u1", "u2"]), \
-              mock.patch.object(cc, "tcptest_check", side_effect=fake_check), \
-              mock.patch.object(cc, "xxapi_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxping_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkapi_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkssl_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxstatus_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxscan_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn30_check", side_effect=fake_check), \
+              mock.patch.object(cc, "cn20_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn21_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn24_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn25_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn26_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn22_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn23_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "checkhost_ping_check",
+              mock.patch.object(cc, "cn28_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "checkhost_http_check",
+              mock.patch.object(cc, "cn29_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}):
             entries, reachable, _ = cc.run_measurements([item], args)
         self.assertEqual(seen_types, ["http"])
-        self.assertIn(cc.TCPTEST_HTTP_CODE, entries["10.9.9.9:443#US"]["sources"])
-        self.assertNotIn(cc.TCPTEST_CODE, entries["10.9.9.9:443#US"]["sources"])
-        self.assertNotIn(cc.TCPTEST_PING_CODE, entries["10.9.9.9:443#US"]["sources"])
+        self.assertIn(cc.CN32_CODE, entries["10.9.9.9:443#US"]["sources"])
+        self.assertNotIn(cc.CN30_CODE, entries["10.9.9.9:443#US"]["sources"])
+        self.assertNotIn(cc.CN31_CODE, entries["10.9.9.9:443#US"]["sources"])
         self.assertIn("10.9.9.9:443#US", reachable)
 
 
@@ -2417,33 +2416,33 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
         strong = {"status": "ok", "ok": True, "ms": 15.0, "level": "icmp",
                   "ok_nodes": 8, "nodes": 10, "ratio": 0.8}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_PING_CODE: strong})["verdict"], "reachable")
+            {cc.CN31_CODE: strong})["verdict"], "reachable")
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_PING_CODE: strong})["level"], "icmp")
+            {cc.CN31_CODE: strong})["level"], "icmp")
         weak = dict(strong, ok_nodes=1, nodes=10, ratio=0.1)
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_PING_CODE: weak})["verdict"], "uncertain")
+            {cc.CN31_CODE: weak})["verdict"], "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None,
                 "ok_nodes": 0, "nodes": 10, "ratio": 0.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_PING_CODE: fail,
-             cc.XXAPI_CODE: {"status": "fail", "ok": False,
+            {cc.CN31_CODE: fail,
+             cc.CN20_CODE: {"status": "fail", "ok": False,
                        "ms": None}})["verdict"], "unreachable")
 
     def test_ratio_threshold_wired(self):
         src = {"status": "ok", "ok": True, "ms": 15.0, "level": "icmp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
         self.assertEqual(
-            cc.merge_verdict({cc.TCPTEST_PING_CODE: dict(src)})["verdict"],
+            cc.merge_verdict({cc.CN31_CODE: dict(src)})["verdict"],
             "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.TCPTEST_PING_CODE]
-        cc._SOURCE_MIN_RATIO[cc.TCPTEST_PING_CODE] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN31_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN31_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.TCPTEST_PING_CODE: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN31_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.TCPTEST_PING_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN31_CODE] = old
 
     def test_phase_runs_on_ping_limit_only(self):
         """TCP 0 ＋ ping 1 → 只跑 ping（节点复用同一采样）。"""
@@ -2451,7 +2450,7 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn11": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn30": 2, "cn31": 2}, cn_nodes={"cn30": 2}, 
             skip_itdog=True, skip_itdog_tcping=True, 
-            workers=4, timeout=5, api_key="", tcpping_token="",
+            workers=4, timeout=5, api_key="", cn41_token="",
               
              
               
@@ -2473,33 +2472,33 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
         def fake_l2(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "x"}
 
-        with mock.patch.object(cc, "tcptest_fetch_nodes",
+        with mock.patch.object(cc, "cn30_fetch_nodes",
                                return_value=[{"uuid": "u1", "operator": "ct",
                                               "enabled": True,
                                               "runtime_state": "online"}]), \
-              mock.patch.object(cc, "tcptest_pick_nodes",
+              mock.patch.object(cc, "cn30_pick_nodes",
                                 side_effect=lambda nodes, count: ["u1", "u2"]), \
-              mock.patch.object(cc, "tcptest_check", side_effect=fake_check), \
-              mock.patch.object(cc, "xxapi_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxping_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkapi_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkssl_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxstatus_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxscan_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn30_check", side_effect=fake_check), \
+              mock.patch.object(cc, "cn20_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn21_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn24_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn25_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn26_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn22_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn23_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "checkhost_ping_check",
+              mock.patch.object(cc, "cn28_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "checkhost_http_check",
+              mock.patch.object(cc, "cn29_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}):
             entries, reachable, _ = cc.run_measurements([item], args)
         self.assertEqual(seen_types, ["ping"])
-        self.assertIn(cc.TCPTEST_PING_CODE, entries["10.9.9.9:443#US"]["sources"])
-        self.assertNotIn(cc.TCPTEST_CODE, entries["10.9.9.9:443#US"]["sources"])
+        self.assertIn(cc.CN31_CODE, entries["10.9.9.9:443#US"]["sources"])
+        self.assertNotIn(cc.CN30_CODE, entries["10.9.9.9:443#US"]["sources"])
         self.assertIn("10.9.9.9:443#US", reachable)
 
 
@@ -2510,40 +2509,40 @@ class TestTcptestTraceMergeVerdict(unittest.TestCase):
         strong = {"status": "ok", "ok": True, "ms": None, "level": "icmp",
                   "ok_nodes": 100, "nodes": 158, "ratio": 0.63}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_TRACE_CODE: strong})["verdict"], "reachable")
+            {cc.CN33_CODE: strong})["verdict"], "reachable")
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_TRACE_CODE: strong})["level"], "icmp")
+            {cc.CN33_CODE: strong})["level"], "icmp")
         weak = dict(strong, ok_nodes=1, nodes=158, ratio=0.006)
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_TRACE_CODE: weak})["verdict"], "uncertain")
+            {cc.CN33_CODE: weak})["verdict"], "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None,
                 "ok_nodes": 0, "nodes": 158, "ratio": 0.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPTEST_TRACE_CODE: fail,
-             cc.XXAPI_CODE: {"status": "fail", "ok": False,
+            {cc.CN33_CODE: fail,
+             cc.CN20_CODE: {"status": "fail", "ok": False,
                        "ms": None}})["verdict"], "unreachable")
 
     def test_ratio_threshold_wired(self):
         src = {"status": "ok", "ok": True, "ms": None, "level": "icmp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
         self.assertEqual(
-            cc.merge_verdict({cc.TCPTEST_TRACE_CODE: dict(src)})["verdict"],
+            cc.merge_verdict({cc.CN33_CODE: dict(src)})["verdict"],
             "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.TCPTEST_TRACE_CODE]
-        cc._SOURCE_MIN_RATIO[cc.TCPTEST_TRACE_CODE] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN33_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN33_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.TCPTEST_TRACE_CODE: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN33_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.TCPTEST_TRACE_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN33_CODE] = old
 
         """TCP/ping/http 0 ＋ trace 1 → 只跑 trace 通道。"""
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn10": 0, "cn11": 0, "cn12": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 0, "cn32": 0, "cn33": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn10": 2, "cn12": 2, "cn30": 2, "cn31": 2, "cn32": 2, "cn33": 2}, cn_nodes={"cn30": 2}, 
             skip_itdog=True, skip_itdog_tcping=True, 
-            workers=4, timeout=5, api_key="", tcpping_token="",
+            workers=4, timeout=5, api_key="", cn41_token="",
               
              
              
@@ -2569,33 +2568,33 @@ class TestTcptestTraceMergeVerdict(unittest.TestCase):
         def fake_l2(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "x"}
 
-        with mock.patch.object(cc, "tcptest_fetch_nodes",
+        with mock.patch.object(cc, "cn30_fetch_nodes",
                                return_value=[{"uuid": "u1", "operator": "ct",
                                               "enabled": True,
                                               "runtime_state": "online"}]), \
-              mock.patch.object(cc, "tcptest_pick_nodes",
+              mock.patch.object(cc, "cn30_pick_nodes",
                                 side_effect=lambda nodes, count: ["u1", "u2"]), \
-              mock.patch.object(cc, "tcptest_check", side_effect=fake_check), \
-              mock.patch.object(cc, "xxapi_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxping_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxstatus_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "xxscan_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkapi_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkping_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "jkssl_check", side_effect=fake_l2), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn30_check", side_effect=fake_check), \
+              mock.patch.object(cc, "cn20_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn21_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn22_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn23_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn24_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn25_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn26_check", side_effect=fake_l2), \
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "checkhost_ping_check",
+              mock.patch.object(cc, "cn28_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
-              mock.patch.object(cc, "checkhost_http_check",
+              mock.patch.object(cc, "cn29_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}):
             entries, reachable, _ = cc.run_measurements([item], args)
         self.assertEqual(seen_types, ["traceroute"])
-        self.assertIn(cc.TCPTEST_TRACE_CODE, entries["10.9.9.9:443#US"]["sources"])
-        for other in (cc.TCPTEST_CODE, cc.TCPTEST_PING_CODE, cc.TCPTEST_HTTP_CODE):
+        self.assertIn(cc.CN33_CODE, entries["10.9.9.9:443#US"]["sources"])
+        for other in (cc.CN30_CODE, cc.CN31_CODE, cc.CN32_CODE):
             self.assertNotIn(other, entries["10.9.9.9:443#US"]["sources"])
         self.assertIn("10.9.9.9:443#US", reachable)
 
@@ -2614,7 +2613,7 @@ class TestCn06MergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(
             {"cn06": weak})["verdict"], "uncertain")
         old = cc._SOURCE_MIN_RATIO["cn06"]
-        self.assertEqual(old, cc.ITDOG_MIN_RATIO)
+        self.assertEqual(old, cc.DEFAULT_MIN_RATIO)
         cc._SOURCE_MIN_RATIO["cn06"] = 0.9
         try:
             self.assertEqual(cc.merge_verdict(
@@ -2652,7 +2651,7 @@ class TestCn04MergeVerdict(unittest.TestCase):
         sources = {
             "cn04": {"status": "fail", "ok": False, "ms": None,
                         "ok_nodes": 0, "nodes": 28, "ratio": 0.0},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+            cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -2672,7 +2671,7 @@ class TestCn04MergeVerdict(unittest.TestCase):
             cc._SOURCE_MIN_RATIO["cn04"] = old
 
 
-@unittest.skipUnless(cc._ITDOG_BUNDLE, "needs PCB itdog bundle")
+@unittest.skipUnless(cc._CN01_BUNDLE, "needs PCB cn01 bundle")
 class TestCn01PingFallbackGuard(unittest.TestCase):
     """CN-26：batch_ping 只补 error/rate_limited 键；TCP 实测 fail 的键
     不用 ICMP 主机存活翻案（保守）；整站失败时不空转。"""
@@ -2687,7 +2686,7 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
             workers=4,
             timeout=5,
             api_key="",
-            tcpping_token="",
+            cn41_token="",
         )
 
     def _item(self, ip):
@@ -2700,37 +2699,37 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
         items = [self._item("10.9.0.1")]
 
         def fake_cn01(sample, args, page_url=None, **kw):
-            if page_url == cc.ITDOG_PING_URL:
+            if page_url == cc.CN03_PAGE_URL:
                 raise AssertionError("ping must not run for fail keys")
             return {key: {"status": "fail", "ok": False, "ms": None,
                           "error": "unreachable"}
                     for _, key, _, _, _ in sample}
 
-        with mock.patch.object(cc, "xxapi_check",
+        with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "error", "ok": False,
                                              "ms": None, "error": ""}), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkapi_check",
+              mock.patch.object(cc, "cn24_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkssl_check",
+              mock.patch.object(cc, "cn26_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxstatus_check",
+              mock.patch.object(cc, "cn22_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxscan_check",
+              mock.patch.object(cc, "cn23_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_cn01):
+              mock.patch.object(cc, "cn01_batch_run", side_effect=fake_cn01):
             entries, _, _ = cc.run_measurements(items, self._args())
 
         self.assertNotIn("cn03", entries["10.9.0.1:80#US"]["sources"])
@@ -2742,7 +2741,7 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
         items = [self._item("10.10.0.1"), self._item("10.10.0.2")]
 
         def fake_cn01(sample, args, page_url=None, **kw):
-            if page_url == cc.ITDOG_PING_URL:
+            if page_url == cc.CN03_PAGE_URL:
                 return {key: {"status": "ok", "ok": True, "ms": 22.0,
                               "level": "tcp", "ok_nodes": 20, "nodes": 24,
                               "ratio": 0.83, "isp_ms": {"中国电信": 5.0}}
@@ -2760,31 +2759,31 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
                                 "error": "rl"}
             return out
 
-        with mock.patch.object(cc, "xxapi_check",
+        with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "error", "ok": False,
                                              "ms": None, "error": ""}), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkapi_check",
+              mock.patch.object(cc, "cn24_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkssl_check",
+              mock.patch.object(cc, "cn26_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxstatus_check",
+              mock.patch.object(cc, "cn22_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxscan_check",
+              mock.patch.object(cc, "cn23_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_cn01):
+              mock.patch.object(cc, "cn01_batch_run", side_effect=fake_cn01):
             entries, reachable, _ = cc.run_measurements(items, self._args())
 
         ping_res = entries["10.10.0.2:80#US"]["sources"]["cn03"]
@@ -2806,10 +2805,10 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
             workers=4,
             timeout=5,
             api_key="",
-            tcpping_token="",
+            cn41_token="",
         )
 
-    def test_pingpe_skips_already_reachable(self):
+    def test_cn40_skips_already_reachable(self):
         import unittest.mock as mock
 
         items = [
@@ -2817,12 +2816,12 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
             ("2.2.2.2:80#US", "2.2.2.2:80#US", "2.2.2.2", "80", "US"),
         ]
 
-        def fake_xxapi(ip, port, timeout):
+        def fake_cn20(ip, port, timeout):
             if ip == "2.2.2.2":
                 return {"status": "fail", "ok": False, "ms": None, "error": ""}
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        def fake_check_host(ip, port, limiter, timeout, api_key):
+        def fake_cn27(ip, port, limiter, timeout, api_key):
             if ip == "2.2.2.2":
                 return {"status": "fail", "ok": False, "ms": None, "error": ""}
             return {"status": "ok", "ok": True, "ms": 1.0}
@@ -2836,26 +2835,26 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
                 },
             }
 
-        with mock.patch.object(cc, "xxapi_check", side_effect=fake_xxapi), \
-              mock.patch.object(cc, "check_host_check", side_effect=fake_check_host), \
-              mock.patch.object(cc, "jkapi_check",
+        with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), \
+              mock.patch.object(cc, "cn27_check", side_effect=fake_cn27), \
+              mock.patch.object(cc, "cn24_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "http 500"}), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "http 500"}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "http 500"}), \
-              mock.patch.object(cc, "checkhost_ping_check",
+              mock.patch.object(cc, "cn28_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "http 500"}), \
-              mock.patch.object(cc, "itdog_batch_run", side_effect=fake_cn01), \
-             mock.patch.object(cc, "pingpe_check",
+              mock.patch.object(cc, "cn01_batch_run", side_effect=fake_cn01), \
+             mock.patch.object(cc, "cn40_check",
                                return_value={
                                    "status": "ok", "ok": True, "ms": 20.0,
                                    "reported": 13, "ok_nodes": 8}) as mpp, \
-             mock.patch.object(cc, "tcpping_check",
+             mock.patch.object(cc, "cn41_check",
                                return_value={"status": "skipped"}):
             entries, reachable, _ = cc.run_measurements(items, self._args())
 
@@ -2878,7 +2877,7 @@ class TestPingpeConcurrency(unittest.TestCase):
             workers=4,
             timeout=5,
             api_key="",
-            tcpping_token="",
+            cn41_token="",
         )
 
     def test_concurrent_slots_finish_fast(self):
@@ -2891,41 +2890,41 @@ class TestPingpeConcurrency(unittest.TestCase):
             for i in range(1, 7)
         ]
 
-        def slow_pingpe(ip, port, timeout):
+        def slow_cn40(ip, port, timeout):
             time.sleep(0.2)
             return {"status": "ok", "ok": True, "ms": 1.0,
                     "reported": 13, "ok_nodes": 8}
 
-        with mock.patch.object(cc, "xxapi_check",
+        with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "ok", "ok": True,
                                              "ms": 1.0}), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "fail", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkapi_check",
+              mock.patch.object(cc, "cn24_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkssl_check",
+              mock.patch.object(cc, "cn26_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxstatus_check",
+              mock.patch.object(cc, "cn22_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxscan_check",
+              mock.patch.object(cc, "cn23_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "checkhost_ping_check",
+              mock.patch.object(cc, "cn28_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "PINGPE_SLOT_GAP", 0.01), \
-             mock.patch.object(cc, "pingpe_check", side_effect=slow_pingpe), \
-             mock.patch.object(cc, "tcpping_check",
+              mock.patch.object(cc, "CN40_SLOT_GAP", 0.01), \
+             mock.patch.object(cc, "cn40_check", side_effect=slow_cn40), \
+             mock.patch.object(cc, "cn41_check",
                                return_value={"status": "skipped"}):
             t0 = time.monotonic()
             entries, _, _ = cc.run_measurements(items, self._args())
@@ -2935,12 +2934,12 @@ class TestPingpeConcurrency(unittest.TestCase):
         # 串行 1.2s），又给重载 CI 调度抖动留足缓冲，避免时序断言偶发 flaky。
         self.assertLess(dt, 1.0)
         self.assertEqual(
-            [v["sources"][cc.PINGPE_CODE]["ok"] for v in entries.values()].count(True), 6)
+            [v["sources"][cc.CN40_CODE]["ok"] for v in entries.values()].count(True), 6)
         self.assertEqual(
             [v["verdict"] for v in entries.values()].count("reachable"), 6)
 
 
-@unittest.skipUnless(cc._ITDOG_BUNDLE, "needs PCB itdog bundle")
+@unittest.skipUnless(cc._CN01_BUNDLE, "needs PCB cn01 bundle")
 class TestCn01TcpingFallbackGuard(unittest.TestCase):
     """主通道节点获取失败（整站被墙/验证码墙）时，同一上游的 tcping
     兜底必然同样拿不到节点，应跳过而非再空转一轮。"""
@@ -2955,7 +2954,7 @@ class TestCn01TcpingFallbackGuard(unittest.TestCase):
             workers=4,
             timeout=5,
             api_key="",
-            tcpping_token="",
+            cn41_token="",
         )
 
     def test_fallback_skipped_when_main_nodes_failed(self):
@@ -2973,31 +2972,31 @@ class TestCn01TcpingFallbackGuard(unittest.TestCase):
                 for item in sample
             }
 
-        with mock.patch.object(cc, "xxapi_check",
+        with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "error", "ok": False,
                                              "ms": None, "error": ""}), \
-              mock.patch.object(cc, "check_host_check",
+              mock.patch.object(cc, "cn27_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkapi_check",
+              mock.patch.object(cc, "cn24_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkping_check",
+              mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxping_check",
+              mock.patch.object(cc, "cn21_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "jkssl_check",
+              mock.patch.object(cc, "cn26_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxstatus_check",
+              mock.patch.object(cc, "cn22_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "xxscan_check",
+              mock.patch.object(cc, "cn23_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": ""}), \
-              mock.patch.object(cc, "itdog_batch_run", side_effect=failed_nodes) as mib:
+              mock.patch.object(cc, "cn01_batch_run", side_effect=failed_nodes) as mib:
             cc.run_measurements(items, self._args())
 
         # 主通道一次 + 兜底应零次（节点连取都失败的整站性故障不白跑第二轮）
@@ -3019,7 +3018,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
                 prev = self._prev("a:443#US")
                 entries = {"a:443#US": {
                     "verdict": "uncertain",
-                    "sources": {cc.CHECK_HOST_CODE: {"status": fault}},
+                    "sources": {cc.CN27_CODE: {"status": fault}},
                 }}
                 reachable = set()
                 fb = cc.compute_fallback_merge(entries, prev, reachable)
@@ -3031,8 +3030,8 @@ class TestComputeFallbackMerge(unittest.TestCase):
         # 上轮可达、本轮 uncertain 且无失败源 → 合并回 reachable + fallback, streak 保留(当轮已标 0)
         prev = self._prev("a:443#US", "b:443#US", "c:443#US")
         entries = {
-            "a:443#US": {"verdict": "uncertain", "sources": {cc.XXAPI_CODE: {"status": "error"}}},
-            "b:443#US": {"verdict": "uncertain", "sources": {cc.XXAPI_CODE: {"status": "fail"}}},
+            "a:443#US": {"verdict": "uncertain", "sources": {cc.CN20_CODE: {"status": "error"}}},
+            "b:443#US": {"verdict": "uncertain", "sources": {cc.CN20_CODE: {"status": "fail"}}},
             "c:443#US": {"verdict": "reachable", "sources": {}},  # 本轮已确证
         }
         reachable = {"c:443#US"}
@@ -3046,7 +3045,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
 
     def test_unsampled_copy_streak_zero(self):
         # 本轮完全未采样 → 复制并入，fallback=true 且 streak 清零
-        prev = {"a:443#US": {"verdict": "reachable", "streak": 4, "sources": {cc.XXAPI_CODE: {"status": "ok"}}}}
+        prev = {"a:443#US": {"verdict": "reachable", "streak": 4, "sources": {cc.CN20_CODE: {"status": "ok"}}}}
         entries = {}
         reachable = set()
         fb = cc.compute_fallback_merge(entries, prev, reachable)
@@ -3055,7 +3054,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(entries["a:443#US"]["verdict"], "reachable")
         self.assertTrue(entries["a:443#US"]["fallback"])
         self.assertEqual(entries["a:443#US"]["streak"], 0)  # 未复测不虚报连续
-        self.assertEqual(entries["a:443#US"]["sources"], {cc.XXAPI_CODE: {"status": "ok"}})
+        self.assertEqual(entries["a:443#US"]["sources"], {cc.CN20_CODE: {"status": "ok"}})
 
     def test_noreachable_prev_not_merged(self):
         prev = {"a:443#US": {"verdict": "offline", "streak": 5}}
@@ -3079,7 +3078,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
         prev = self._prev("a:443#US")
         entries = {"a:443#US": {
             "verdict": "skipped",
-            "sources": {cc.XXAPI_CODE: {"status": "error"},
+            "sources": {cc.CN20_CODE: {"status": "error"},
                         "cn02": {"status": "error"}},
             "streak": 1,
         }}
@@ -3105,7 +3104,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
         }
         entries = {"a:443#US": {
             "verdict": "uncertain",
-            "sources": {cc.XXAPI_CODE: {"status": "error"}, "cn01": {"status": "error"}},
+            "sources": {cc.CN20_CODE: {"status": "error"}, "cn01": {"status": "error"}},
         }}
         reachable = set()
         fb = cc.compute_fallback_merge(entries, prev, reachable)
@@ -3136,43 +3135,43 @@ class TestCe98PingSource(unittest.TestCase):
         strong = {"status": "ok", "ok": True, "ms": 3.4, "level": "icmp",
                   "ok_nodes": 35, "nodes": 35, "ratio": 1.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.CE98_PING_CODE: strong})["verdict"], "reachable")
+            {cc.CN12_CODE: strong})["verdict"], "reachable")
         weak = dict(strong, ok_nodes=1, nodes=35, ratio=0.029)
         self.assertEqual(cc.merge_verdict(
-            {cc.CE98_PING_CODE: weak})["verdict"], "uncertain")
+            {cc.CN12_CODE: weak})["verdict"], "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None,
                 "ok_nodes": 0, "nodes": 35, "ratio": 0.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.CE98_PING_CODE: fail,
-             cc.XXAPI_CODE: {"status": "fail", "ok": False,
+            {cc.CN12_CODE: fail,
+             cc.CN20_CODE: {"status": "fail", "ok": False,
                        "ms": None}})["verdict"], "unreachable")
 
     def test_ratio_threshold_wired(self):
         src = {"status": "ok", "ok": True, "ms": 5.0, "level": "icmp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
         self.assertEqual(
-            cc.merge_verdict({cc.CE98_PING_CODE: dict(src)})["verdict"],
+            cc.merge_verdict({cc.CN12_CODE: dict(src)})["verdict"],
             "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.CE98_PING_CODE]
-        cc._SOURCE_MIN_RATIO[cc.CE98_PING_CODE] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN12_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN12_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.CE98_PING_CODE: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN12_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.CE98_PING_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN12_CODE] = old
 
     def test_raw_slot_dispatch(self):
         cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
         with mock.patch.object(
-                cc, "ce98_ping_check",
+                cc, "cn12_check",
                 return_value={"status": "ok", "ok": True}) as m:
-            cc._run_raw_slots(cands, entries, 5, cc.CE98_PING_CODE, 2)
+            cc._run_raw_slots(cands, entries, 5, cc.CN12_CODE, 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
         self.assertEqual(
-            entries["1.2.3.4:443#US"][cc.CE98_PING_CODE]["status"], "ok")
+            entries["1.2.3.4:443#US"][cc.CN12_CODE]["status"], "ok")
 
 
 class TestNewMultiSourcesMergeVerdict(unittest.TestCase):
@@ -3182,27 +3181,27 @@ class TestNewMultiSourcesMergeVerdict(unittest.TestCase):
         return {"status": "ok", "ok": True, "ms": 30, "level": "tcp",
                 "ok_nodes": ok_nodes, "nodes": nodes, "ratio": ratio}
 
-    def test_ce98_strong_reachable(self):
-        sources = {cc.CE98_CODE: self._ok(35, 35, 1.0)}
+    def test_cn11_strong_reachable(self):
+        sources = {cc.CN11_CODE: self._ok(35, 35, 1.0)}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
 
-    def test_ce98_degenerate_not_strong(self):
-        sources = {cc.CE98_CODE: self._ok(1, 35, 0.029)}
+    def test_cn11_degenerate_not_strong(self):
+        sources = {cc.CN11_CODE: self._ok(1, 35, 0.029)}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
-    def test_biuping_strong_reachable(self):
-        sources = {cc.BIUPING_CODE_TCPING: self._ok(39, 39, 1.0)}
+    def test_cn09_strong_reachable(self):
+        sources = {cc.CN09_CODE: self._ok(39, 39, 1.0)}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "reachable")
 
     def test_multi_failed_with_single_unreachable(self):
         """cn11+cn09 都 fail 且 2 单节点源 fail → unreachable。"""
         sources = {
-            cc.CE98_CODE: {"status": "fail", "ok": False, "ok_nodes": 0,
+            cc.CN11_CODE: {"status": "fail", "ok": False, "ok_nodes": 0,
                      "nodes": 35, "ratio": 0.0},
-            cc.BIUPING_CODE_TCPING: {"status": "fail", "ok": False, "ok_nodes": 0,
+            cc.CN09_CODE: {"status": "fail", "ok": False, "ok_nodes": 0,
                         "nodes": 39, "ratio": 0.0},
-            cc.XXAPI_CODE: {"status": "fail", "ok": False},
-            cc.JKAPI_CODE: {"status": "fail", "ok": False},
+            cc.CN20_CODE: {"status": "fail", "ok": False},
+            cc.CN24_CODE: {"status": "fail", "ok": False},
         }
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -3246,43 +3245,43 @@ class TestTcpingcnPingSource(unittest.TestCase):
         strong = {"status": "ok", "ok": True, "ms": 22.0, "level": "icmp",
                   "ok_nodes": 100, "nodes": 160, "ratio": 0.625}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPINGCN_PING_CODE: strong})["verdict"], "reachable")
+            {cc.CN18_CODE: strong})["verdict"], "reachable")
         weak = dict(strong, ok_nodes=1, nodes=160, ratio=0.006)
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPINGCN_PING_CODE: weak})["verdict"], "uncertain")
+            {cc.CN18_CODE: weak})["verdict"], "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None,
                 "ok_nodes": 0, "nodes": 160, "ratio": 0.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPINGCN_PING_CODE: fail,
-             cc.XXAPI_CODE: {"status": "fail", "ok": False,
+            {cc.CN18_CODE: fail,
+             cc.CN20_CODE: {"status": "fail", "ok": False,
                        "ms": None}})["verdict"], "unreachable")
 
     def test_ratio_threshold_wired(self):
         src = {"status": "ok", "ok": True, "ms": 20.0, "level": "icmp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
         self.assertEqual(
-            cc.merge_verdict({cc.TCPINGCN_PING_CODE: dict(src)})["verdict"],
+            cc.merge_verdict({cc.CN18_CODE: dict(src)})["verdict"],
             "reachable")
-        old = cc._SOURCE_MIN_RATIO[cc.TCPINGCN_PING_CODE]
-        cc._SOURCE_MIN_RATIO[cc.TCPINGCN_PING_CODE] = 0.75
+        old = cc._SOURCE_MIN_RATIO[cc.CN18_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN18_CODE] = 0.75
         try:
             self.assertEqual(
-                cc.merge_verdict({cc.TCPINGCN_PING_CODE: dict(src)})["verdict"],
+                cc.merge_verdict({cc.CN18_CODE: dict(src)})["verdict"],
                 "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.TCPINGCN_PING_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN18_CODE] = old
 
     def test_ws_slot_dispatch(self):
         cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
         with mock.patch.object(
-                cc, "tcpingcn_ping_check",
+                cc, "cn18_check",
                 return_value={"status": "ok", "ok": True}) as m:
-            cc._run_ws_source_slots(cands, entries, 5, cc.TCPINGCN_PING_CODE, 2)
+            cc._run_ws_source_slots(cands, entries, 5, cc.CN18_CODE, 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
         self.assertEqual(
-            entries["1.2.3.4:443#US"][cc.TCPINGCN_PING_CODE]["status"], "ok")
+            entries["1.2.3.4:443#US"][cc.CN18_CODE]["status"], "ok")
 
 
 class TestTcpingcnMtrSource(unittest.TestCase):
@@ -3292,35 +3291,35 @@ class TestTcpingcnMtrSource(unittest.TestCase):
         strong = {"status": "ok", "ok": True, "ms": None, "level": "icmp",
                   "ok_nodes": 100, "nodes": 139, "ratio": 0.72}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPINGCN_MTR_CODE: strong})["verdict"], "reachable")
+            {cc.CN19_CODE: strong})["verdict"], "reachable")
         weak = dict(strong, ok_nodes=1, nodes=139, ratio=0.007)
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPINGCN_MTR_CODE: weak})["verdict"], "uncertain")
+            {cc.CN19_CODE: weak})["verdict"], "uncertain")
         fail = {"status": "fail", "ok": False, "ms": None,
                 "ok_nodes": 0, "nodes": 139, "ratio": 0.0}
         self.assertEqual(cc.merge_verdict(
-            {cc.TCPINGCN_MTR_CODE: fail,
-             cc.XXAPI_CODE: {"status": "fail", "ok": False,
+            {cc.CN19_CODE: fail,
+             cc.CN20_CODE: {"status": "fail", "ok": False,
                        "ms": None}})["verdict"], "unreachable")
-        old = cc._SOURCE_MIN_RATIO[cc.TCPINGCN_MTR_CODE]
-        cc._SOURCE_MIN_RATIO[cc.TCPINGCN_MTR_CODE] = 0.8
+        old = cc._SOURCE_MIN_RATIO[cc.CN19_CODE]
+        cc._SOURCE_MIN_RATIO[cc.CN19_CODE] = 0.8
         try:
             self.assertEqual(cc.merge_verdict(
-                {cc.TCPINGCN_MTR_CODE: dict(strong)})["verdict"], "uncertain")
+                {cc.CN19_CODE: dict(strong)})["verdict"], "uncertain")
         finally:
-            cc._SOURCE_MIN_RATIO[cc.TCPINGCN_MTR_CODE] = old
+            cc._SOURCE_MIN_RATIO[cc.CN19_CODE] = old
 
     def test_ws_slot_dispatch(self):
         cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
         with mock.patch.object(
-                cc, "tcpingcn_mtr_check",
+                cc, "cn19_check",
                 return_value={"status": "ok", "ok": True}) as m:
-            cc._run_ws_source_slots(cands, entries, 5, cc.TCPINGCN_MTR_CODE, 2)
+            cc._run_ws_source_slots(cands, entries, 5, cc.CN19_CODE, 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
         self.assertEqual(
-            entries["1.2.3.4:443#US"][cc.TCPINGCN_MTR_CODE]["status"], "ok")
+            entries["1.2.3.4:443#US"][cc.CN19_CODE]["status"], "ok")
 
     def test_cli_default_stays_opt_in(self):
         """CN-44：tcpingcn-mtr 本地默认 opt-in（0/6），只在 CI 显式启用。"""
@@ -3336,8 +3335,8 @@ class TestNeedsProbe(unittest.TestCase):
     def test_two_single_node_ok_stops(self):
         entries = {
             "1.1.1.1:80#US": {
-                cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 100, "level": "http"},
-                cc.XXAPI_CODE: {"status": "ok", "ok": True, "ms": 120, "level": "http"},
+                cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 100, "level": "http"},
+                cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 120, "level": "http"},
             }
         }
         self.assertFalse(cc.needs_probe(entries, "1.1.1.1:80#US"))
@@ -3345,8 +3344,8 @@ class TestNeedsProbe(unittest.TestCase):
     def test_two_single_node_fail_stops(self):
         entries = {
             "1.1.1.1:80#US": {
-                cc.CHECK_HOST_CODE: {"status": "fail", "ok": False, "ms": None},
-                cc.XXAPI_CODE: {"status": "fail", "ok": False, "ms": None},
+                cc.CN27_CODE: {"status": "fail", "ok": False, "ms": None},
+                cc.CN20_CODE: {"status": "fail", "ok": False, "ms": None},
             }
         }
         self.assertFalse(cc.needs_probe(entries, "1.1.1.1:80#US"))
@@ -3354,7 +3353,7 @@ class TestNeedsProbe(unittest.TestCase):
     def test_single_node_ok_uncertain_keeps(self):
         entries = {
             "1.1.1.1:80#US": {
-                cc.CHECK_HOST_CODE: {"status": "ok", "ok": True, "ms": 100, "level": "http"}
+                cc.CN27_CODE: {"status": "ok", "ok": True, "ms": 100, "level": "http"}
             }
         }
         self.assertTrue(cc.needs_probe(entries, "1.1.1.1:80#US"))
@@ -3362,7 +3361,7 @@ class TestNeedsProbe(unittest.TestCase):
     def test_error_only_keeps(self):
         entries = {
             "1.1.1.1:80#US": {
-                cc.JKAPI_CODE: {"status": "error", "ok": False, "ms": None, "error": "x"}
+                cc.CN24_CODE: {"status": "error", "ok": False, "ms": None, "error": "x"}
             }
         }
         self.assertTrue(cc.needs_probe(entries, "1.1.1.1:80#US"))
@@ -3434,13 +3433,13 @@ class TestCiEnabledSources(unittest.TestCase):
     `--cn-limit cn11=200 --cn-concurrency cn11=6`（chinaz 同级预算）；
     注册表默认仍 0（本地按需显式启用）。"""
 
-    def test_ci_enables_ce98(self):
+    def test_ci_enables_cn11(self):
         wf = (Path(__file__).resolve().parent.parent / ".github"
               / "workflows" / "china-check.yml").read_text(encoding="utf-8")
         self.assertIn("--cn-limit cn11=200", wf)
         self.assertIn("--cn-concurrency cn11=6", wf)
 
-    def test_ci_enables_biuping(self):
+    def test_ci_enables_cn09(self):
         """CN-02：cn09 毕业（约 39 ISP×节点，活体 21 单元出数）
         与 cn11 同级预算；CLI 默认仍 0。"""
         wf = (Path(__file__).resolve().parent.parent / ".github"
@@ -3448,7 +3447,7 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertIn("--cn-limit cn09=200", wf)
         self.assertIn("--cn-concurrency cn09=8", wf)
 
-    def test_ping0_stays_disabled_for_captcha(self):
+    def test_cn44_stays_disabled_for_captcha(self):
         """CN-03：cn44 源有 captcha 墙（活体实证），启用即须绕过
         反爬——合规禁区。CI 不得启用；若对方撤销验证墙，本锁须由人
         复核后同步解除（改测试即改决策）。"""
@@ -3459,7 +3458,7 @@ class TestCiEnabledSources(unittest.TestCase):
             re.search(r"--cn-limit cn44=([1-9]\d*)", wf),
             "cn44 在 captcha 墙移除前不得进 CI")
 
-    def test_ce98_cli_default_stays_opt_in(self):
+    def test_cn11_cli_default_stays_opt_in(self):
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn09")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn09")["concurrency"], 8)
@@ -3487,51 +3486,51 @@ class TestCiEnabledSources(unittest.TestCase):
                 re.compile(re.escape(f"{name}（{limit} 键/{conc} 并发")),
                 f"README 链与 CI 配额不一致：{name}")
 
-    def test_aa1ping_cli_default_stays_opt_in(self):
+    def test_cn04_cli_default_stays_opt_in(self):
         """CN-27：aa1ping 本地默认 opt-in（0/6），只在 CI 显式启用；
         与 cn11/biuding 毕业路径一致。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn04")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn04")["concurrency"], 6)
 
-    def test_aa1http_cli_default_stays_opt_in(self):
+    def test_cn05_cli_default_stays_opt_in(self):
         """CN-50：aa1http 本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn05")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn05")["concurrency"], 6)
 
-    def test_antping_ping_cli_default_stays_opt_in(self):
+    def test_cn15_cli_default_stays_opt_in(self):
         """CN-28：antping-ping 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn15")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn15")["concurrency"], 8)
 
-    def test_tcptest_ping_cli_default_stays_opt_in(self):
+    def test_cn31_cli_default_stays_opt_in(self):
         """CN-33：tcptest-ping 本地默认 opt-in（0/8，与 TCP 同并发），
         只在 CI 显式启用（400/20）。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn31")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn31")["concurrency"], 8)
 
-    def test_tcptest_http_cli_default_stays_opt_in(self):
+    def test_cn32_cli_default_stays_opt_in(self):
         """CN-35：tcptest-http 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn32")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn32")["concurrency"], 8)
 
-    def test_tcptest_trace_cli_default_stays_opt_in(self):
+    def test_cn33_cli_default_stays_opt_in(self):
         """CN-40：tcptest-trace 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn33")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn33")["concurrency"], 8)
 
-    def test_biuping_ping_cli_default_stays_opt_in(self):
+    def test_cn10_cli_default_stays_opt_in(self):
         """CN-34：cn10 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn10")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn10")["concurrency"], 8)
 
-    def test_ce98_ping_cli_default_stays_opt_in(self):
+    def test_cn12_cli_default_stays_opt_in(self):
         """CN-36：ce98-ping 本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn12")["limit_default"], 0)
@@ -3587,7 +3586,7 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(len(stripped), len(set(stripped)), "CI run 块有重复行")
         self.assertTrue(stripped[0].startswith("python scripts/china_check.py"))
 
-    def test_tcpingcn_limit_restored_after_altcha(self):
+    def test_cn17_limit_restored_after_altcha(self):
         """CN-30：cn17 ALTCHA 打通后复活——CI 配额恢复 400，
         同通道 ping 200 并行（停烧锁已解除，复活验证见本轮活体）。"""
         import re
@@ -3624,20 +3623,20 @@ class TestCiEnabledSources(unittest.TestCase):
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
         with mock.patch.object(
-                cc, "ce98_check",
+                cc, "cn11_check",
                 return_value={"status": "ok", "ok": True}) as m:
-            cc._run_raw_slots(cands, entries, 5, cc.CE98_CODE, 2)
+            cc._run_raw_slots(cands, entries, 5, cc.CN11_CODE, 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
-        self.assertEqual(entries["1.2.3.4:443#US"][cc.CE98_CODE]["status"], "ok")
+        self.assertEqual(entries["1.2.3.4:443#US"][cc.CN11_CODE]["status"], "ok")
         with mock.patch.object(
-                cc, "biuping_check",
+                cc, "cn09_check",
                 side_effect=RuntimeError("boom")):
-            cc._run_raw_slots(cands, entries, 5, cc.BIUPING_CODE_TCPING, 2)
-        err = entries["1.2.3.4:443#US"][cc.BIUPING_CODE_TCPING]
+            cc._run_raw_slots(cands, entries, 5, cc.CN09_CODE, 2)
+        err = entries["1.2.3.4:443#US"][cc.CN09_CODE]
         self.assertEqual(err["status"], "error")
         self.assertEqual(err["error"], "RuntimeError")
         with mock.patch.object(
-                cc, "aa1ping_check",
+                cc, "cn04_check",
                 return_value={"status": "ok", "ok": True}) as m:
             cc._run_raw_slots(cands, entries, 5, "cn04", 2)
             m.assert_called_once_with("1.2.3.4", "443", 5)
@@ -3815,7 +3814,7 @@ class TestEngineRegistryTables(unittest.TestCase):
         reg = self._reg()
         expect = {e["code"]: (e["min_ratio_value"]
                               if e.get("min_ratio_value") is not None
-                              else ce.ITDOG_MIN_RATIO)
+                              else ce.DEFAULT_MIN_RATIO)
                   for e in reg.SOURCES if e.get("min_ratio")}
         self.assertEqual(ce._SOURCE_MIN_RATIO, expect)
         self.assertEqual(ce._SOURCE_MIN_RATIO["cn16"], 0.4)
@@ -3849,28 +3848,28 @@ class TestRegistryDocsTable(unittest.TestCase):
 
 
 class TestNoStaleProtocolDefs(unittest.TestCase):
-    """R455：loader 回绑名不得被模块内协议定义遮蔽（R442 tcpping_check
+    """R455：loader 回绑名不得被模块内协议定义遮蔽（R442 cn41_check
     重复定义复发：有 token 即 NameError，空 token 恰好行为一致而潜伏）；
     协议常量（*_URL）亦不得残留。纯 AST，CI 无包可跑。"""
 
-    STALE_DEFS = ("tcpping_check", "parse_tcpping", "pingpe_check",
+    STALE_DEFS = ("cn41_check", "cn41_parse", "cn40_check",
                   "parse_pingpe_page", "parse_pingpe_results",
-                  "pingpe_verdict", "boce_check", "seventeen_check",
-                  "ping0_check", "ipip_check", "ipip_trace_check",
-                  "tcptest_check", "tcptest_fetch_nodes",
-                  "tcptest_pick_nodes", "coffee_check", "pingloc_check",
-                  "antping_check", "antping_ping_check", "chinaz_check",
-                  "tcpingcn_check", "tcpingcn_ping_check",
-                  "tcpingcn_mtr_check", "ce98_check", "ce98_ping_check",
-                  "biuping_check", "biuping_ping_check", "aa1ping_check",
-                  "aa1http_check", "check_host_check",
-                  "checkhost_ping_check", "checkhost_http_check",
-                  "xxapi_check", "xxping_check", "xxstatus_check",
-                  "xxscan_check", "jkapi_check", "jkping_check",
-                  "jkssl_check", "globalping_check",
-                  "globalping_trace_check", "globalping_http_check",
-                  "globalping_mtr_check", "wansui_check",
-                  "itdog_batch_run")
+                  "pingpe_verdict", "cn42_check", "cn43_check",
+                  "cn44_check", "cn34_check", "cn35_check",
+                  "cn30_check", "cn30_fetch_nodes",
+                  "cn30_pick_nodes", "cn07_check", "cn08_check",
+                  "cn14_check", "cn15_check", "cn16_check",
+                  "cn17_check", "cn18_check",
+                  "cn19_check", "cn11_check", "cn12_check",
+                  "cn09_check", "cn10_check", "cn04_check",
+                  "cn05_check", "cn27_check",
+                  "cn28_check", "cn29_check",
+                  "cn20_check", "cn21_check", "cn22_check",
+                  "cn23_check", "cn24_check", "cn25_check",
+                  "cn26_check", "cn36_check",
+                  "cn37_check", "cn38_check",
+                  "cn39_check", "cn13_check",
+                  "cn01_batch_run")
     STALE_CONSTS = ("TCPPING_URL", "PINGPE_URL", "BOCE_URL",
                     "SEVENTEEN_URL", "PING0_URL", "IPIP_URL")
 
@@ -3889,8 +3888,29 @@ class TestNoStaleProtocolDefs(unittest.TestCase):
         self.assertEqual(bad_consts, [], f"残留协议常量：{bad_consts}")
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestLoaderBindingsLive(unittest.TestCase):
+    """loader 回绑必须全部成功（有包时）：插件属性名漂移/拼写回归
+    即整族静默 fail-open（R459：cn06 三 p 拼写自 R425 潜伏；R3 曾误删
+    RHS 把全族打熄）。无包跳过（fail-open 本就是该态正确行为）。"""
+
+    FLAGS = ("_CN01_BUNDLE", "_CN04_BUNDLE", "_CN06_BUNDLE",
+             "_CN07_BUNDLE", "_CN08_BUNDLE", "_CN27_BUNDLE",
+             "_CN20_BUNDLE", "_CN24_BUNDLE", "_CN40_BUNDLE",
+             "_CN41_BUNDLE", "_CN30_BUNDLE", "_CN17_BUNDLE",
+             "_CN11_BUNDLE", "_CN09_BUNDLE", "_CN36_BUNDLE",
+             "_CN34_BUNDLE", "_CN13_BUNDLE", "_LEGACY_REVIEW_BUNDLE")
+
+    def test_all_bundle_flags_true_with_pcb(self):
+        _registry_sources(self)
+        for f in self.FLAGS:
+            self.assertTrue(getattr(cc, f, False), f)
+
+    def test_key_bindings_not_none_with_pcb(self):
+        _registry_sources(self)
+        for name in ("cn01_batch_run", "cn30_check", "cn40_check",
+                     "cn07_check", "cn42_check", "cn20_check",
+                     "cn27_check"):
+            self.assertIsNotNone(getattr(cc, name, None), name)
 
 
 if __name__ == "__main__":

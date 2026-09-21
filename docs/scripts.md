@@ -290,7 +290,6 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all_rep.txt` |
 | `--limit` | 按信誉降序采样条数（0=全部） | 250 |
-| `--17ce-token` | cn43 token/cookie（可选，默认从壳页提取） | 空 |
 | `--workers` | L2 并发上限 | 56 |
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | cn27 站 key（读 `CHINA_CHECK_API_KEY`） | 空 |
@@ -300,7 +299,6 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--itdog-concurrency` | cn01 并发任务数 | 8 |
 | `--itdog-pacing` | cn01 两次任务启动最小间隔（秒） | 0.5 |
 | `--itdog-timeout` | cn01 单任务收结果上限（秒） | 45 |
-| `--itdog-tcping-nodes` | cn02 大节点池每运营商取节点数（×3） | 6 |
 | `--skip-itdog` | 跳过 cn01 批量探测 | 关 |
 | `--skip-itdog-tcping` | 跳过 cn02 大节点池补测 | 关 |
 | `--dry-run` | 只输出计划，不发请求不写盘 | 关 |

@@ -12,165 +12,165 @@ from checks_bundle import load_plugin as _load_pcb_plugin
 # 公开代号（与插件声明一致；无包环境数据口径不变；稳定公开标识）。
 try:
     _itdog = _load_pcb_plugin("china_itdog")
-    ITDOG_CODE_HTTP = _itdog.CODE_HTTP
-    ITDOG_CODE_TCPING = _itdog.CODE_TCPING
-    ITDOG_CODE_PING = _itdog.CODE_PING
+    CN01_CODE = _itdog.CODE_HTTP
+    CN02_CODE = _itdog.CODE_TCPING
+    CN03_CODE = _itdog.CODE_PING
 except Exception:
-    ITDOG_CODE_HTTP = "cn01"
-    ITDOG_CODE_TCPING = "cn02"
-    ITDOG_CODE_PING = "cn03"
+    CN01_CODE = "cn01"
+    CN02_CODE = "cn02"
+    CN03_CODE = "cn03"
 try:
     _aa1 = _load_pcb_plugin("cn_aa1")
-    AA1_CODE_PING = _aa1.CODE_PING
-    AA1_CODE_HTTP = _aa1.CODE_HTTP
+    CN04_CODE = _aa1.CODE_PING
+    CN05_CODE = _aa1.CODE_HTTP
 except Exception:
-    AA1_CODE_PING = "cn04"
-    AA1_CODE_HTTP = "cn05"
+    CN04_CODE = "cn04"
+    CN05_CODE = "cn05"
 try:
     _tcpping_ws = _load_pcb_plugin("cn06")
-    TCPPING_WS_CODE = _tcpping_ws.CODE
+    CN06_CODE = _tcpping_ws.CODE
 except Exception:
-    TCPPING_WS_CODE = "cn06"
+    CN06_CODE = "cn06"
 try:
     _coffee = _load_pcb_plugin("cn_coffee")
-    COFFEE_CODE = _coffee.CODE
+    CN07_CODE = _coffee.CODE
 except Exception:
-    COFFEE_CODE = "cn07"
+    CN07_CODE = "cn07"
 try:
     _pingloc = _load_pcb_plugin("cn_pingloc")
-    PINGLOC_CODE = _pingloc.CODE
+    CN08_CODE = _pingloc.CODE
 except Exception:
-    PINGLOC_CODE = "cn08"
+    CN08_CODE = "cn08"
 
 try:
     _biuping = _load_pcb_plugin("cn_biuping")
-    BIUPING_CODE_TCPING = _biuping.CODE_TCPING
-    BIUPING_CODE_PING = _biuping.CODE_PING
+    CN09_CODE = _biuping.CODE_TCPING
+    CN10_CODE = _biuping.CODE_PING
 except Exception:
-    BIUPING_CODE_TCPING = "cn09"
-    BIUPING_CODE_PING = "cn10"
+    CN09_CODE = "cn09"
+    CN10_CODE = "cn10"
 
 try:
     _ce98 = _load_pcb_plugin("cn_ce98")
-    CE98_CODE = _ce98.CODE
-    CE98_PING_CODE = _ce98.CODE_PING
+    CN11_CODE = _ce98.CODE
+    CN12_CODE = _ce98.CODE_PING
 except Exception:
-    CE98_CODE = "cn11"
-    CE98_PING_CODE = "cn12"
+    CN11_CODE = "cn11"
+    CN12_CODE = "cn12"
 
 try:
     _wansui = _load_pcb_plugin("cn_wansui")
-    WANSUI_CODE = _wansui.CODE
+    CN13_CODE = _wansui.CODE
 except Exception:
-    WANSUI_CODE = "cn13"
+    CN13_CODE = "cn13"
 
 try:
     _antping = _load_pcb_plugin("cn_antping")
-    ANTPING_CODE = _antping.CODE
-    ANTPING_PING_CODE = _antping.CODE_PING
+    CN14_CODE = _antping.CODE
+    CN15_CODE = _antping.CODE_PING
 except Exception:
-    ANTPING_CODE = "cn14"
-    ANTPING_PING_CODE = "cn15"
+    CN14_CODE = "cn14"
+    CN15_CODE = "cn15"
 
 try:
     _chinaz = _load_pcb_plugin("cn_chinaz")
-    CHINAZ_CODE = _chinaz.CODE
+    CN16_CODE = _chinaz.CODE
 except Exception:
-    CHINAZ_CODE = "cn16"
+    CN16_CODE = "cn16"
 
 try:
     _tcpingcn = _load_pcb_plugin("cn_tcpingcn")
-    TCPINGCN_CODE = _tcpingcn.CODE
-    TCPINGCN_PING_CODE = _tcpingcn.CODE_PING
-    TCPINGCN_MTR_CODE = _tcpingcn.CODE_MTR
+    CN17_CODE = _tcpingcn.CODE
+    CN18_CODE = _tcpingcn.CODE_PING
+    CN19_CODE = _tcpingcn.CODE_MTR
 except Exception:
-    TCPINGCN_CODE = "cn17"
-    TCPINGCN_PING_CODE = "cn18"
-    TCPINGCN_MTR_CODE = "cn19"
+    CN17_CODE = "cn17"
+    CN18_CODE = "cn18"
+    CN19_CODE = "cn19"
 try:
     _tcptest = _load_pcb_plugin("cn_tcptest")
-    TCPTEST_CODE = _tcptest.CODE
-    TCPTEST_PING_CODE = _tcptest.CODE_PING
-    TCPTEST_HTTP_CODE = _tcptest.CODE_HTTP
-    TCPTEST_TRACE_CODE = _tcptest.CODE_TRACE
+    CN30_CODE = _tcptest.CODE
+    CN31_CODE = _tcptest.CODE_PING
+    CN32_CODE = _tcptest.CODE_HTTP
+    CN33_CODE = _tcptest.CODE_TRACE
 except Exception:
-    TCPTEST_CODE = "cn30"
-    TCPTEST_PING_CODE = "cn31"
-    TCPTEST_HTTP_CODE = "cn32"
-    TCPTEST_TRACE_CODE = "cn33"
+    CN30_CODE = "cn30"
+    CN31_CODE = "cn31"
+    CN32_CODE = "cn32"
+    CN33_CODE = "cn33"
 
 try:
     _ipip = _load_pcb_plugin("cn_ipip")
-    IPIP_CODE = _ipip.CODE
-    IPIP_TRACE_CODE = _ipip.CODE_TRACE
+    CN34_CODE = _ipip.CODE
+    CN35_CODE = _ipip.CODE_TRACE
 except Exception:
-    IPIP_CODE = "cn34"
-    IPIP_TRACE_CODE = "cn35"
+    CN34_CODE = "cn34"
+    CN35_CODE = "cn35"
 
 try:
     _globalping = _load_pcb_plugin("cn_globalping")
-    GLOBALPING_CODE = _globalping.CODE
-    GLOBALPING_TRACE_CODE = _globalping.CODE_TRACE
-    GLOBALPING_HTTP_CODE = _globalping.CODE_HTTP
-    GLOBALPING_MTR_CODE = _globalping.CODE_MTR
+    CN36_CODE = _globalping.CODE
+    CN37_CODE = _globalping.CODE_TRACE
+    CN38_CODE = _globalping.CODE_HTTP
+    CN39_CODE = _globalping.CODE_MTR
 except Exception:
-    GLOBALPING_CODE = "cn36"
-    GLOBALPING_TRACE_CODE = "cn37"
-    GLOBALPING_HTTP_CODE = "cn38"
-    GLOBALPING_MTR_CODE = "cn39"
+    CN36_CODE = "cn36"
+    CN37_CODE = "cn37"
+    CN38_CODE = "cn38"
+    CN39_CODE = "cn39"
 
 try:
     _pingpe = _load_pcb_plugin("cn_pingpe")
-    PINGPE_CODE = _pingpe.CODE
+    CN40_CODE = _pingpe.CODE
 except Exception:
-    PINGPE_CODE = "cn40"
+    CN40_CODE = "cn40"
 
 try:
     _tcpping = _load_pcb_plugin("cn_tcpping")
-    TCPPING_CODE = _tcpping.CODE
+    CN41_CODE = _tcpping.CODE
 except Exception:
-    TCPPING_CODE = "cn41"
+    CN41_CODE = "cn41"
 
 try:
     _legacy = _load_pcb_plugin("cn_legacy_review")
-    BOCE_CODE = _legacy.CODE_BOCE
-    SEVENTEEN_CODE = _legacy.CODE_17CE
-    PING0_CODE = _legacy.CODE_PING0
+    CN42_CODE = _legacy.CODE_BOCE
+    CN43_CODE = _legacy.CODE_17CE
+    CN44_CODE = _legacy.CODE_PING0
 except Exception:
-    BOCE_CODE = "cn42"
-    SEVENTEEN_CODE = "cn43"
-    PING0_CODE = "cn44"
+    CN42_CODE = "cn42"
+    CN43_CODE = "cn43"
+    CN44_CODE = "cn44"
 
-ITDOG_MIN_RATIO = 0.5   # itdog 系列单源确认所需的最小节点成功率（防单节点假阳性）
+DEFAULT_MIN_RATIO = 0.5   # itdog 系列单源确认所需的最小节点成功率（防单节点假阳性）
 MULTI_MIN_NODES = 5  # 多节点源至少报告 5 个节点才可作强确认（防限流残缺样本退化）
-COFFEE_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节点 ICMP 优势）
-CHINAZ_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
-CE98_MIN_RATIO = ITDOG_MIN_RATIO  # 三网多节点，≥50% 大陆节点 TCP 可达即判可达
-BIUPING_MIN_RATIO = ITDOG_MIN_RATIO
-BOCE_MIN_RATIO = ITDOG_MIN_RATIO
-IPIP_MIN_RATIO = ITDOG_MIN_RATIO
-SEVENTEEN_MIN_RATIO = ITDOG_MIN_RATIO
-PING0_MIN_RATIO = ITDOG_MIN_RATIO
-WANSUI_MIN_RATIO = ITDOG_MIN_RATIO
-AA1PING_MIN_RATIO = ITDOG_MIN_RATIO
-AA1HTTP_MIN_RATIO = ITDOG_MIN_RATIO
-ANTPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
-TCPINGCN_PING_MIN_RATIO = ITDOG_MIN_RATIO
-BIUPING_PING_MIN_RATIO = ITDOG_MIN_RATIO
-CE98_PING_MIN_RATIO = ITDOG_MIN_RATIO
-TCPPING_WS_MIN_RATIO = ITDOG_MIN_RATIO
-TCPINGCN_MTR_MIN_RATIO = ITDOG_MIN_RATIO
-IPIP_TRACE_MIN_RATIO = ITDOG_MIN_RATIO
+CN07_MIN_RATIO = 0.5  # 节点成功率达 50% 即可单独判可达（多节点 ICMP 优势）
+CN16_MIN_RATIO = 0.4  # 51~53 节点可能个别缺席，放宽阈值
+CN11_MIN_RATIO = DEFAULT_MIN_RATIO  # 三网多节点，≥50% 大陆节点 TCP 可达即判可达
+CN09_MIN_RATIO = DEFAULT_MIN_RATIO
+CN42_MIN_RATIO = DEFAULT_MIN_RATIO
+CN34_MIN_RATIO = DEFAULT_MIN_RATIO
+CN43_MIN_RATIO = DEFAULT_MIN_RATIO
+CN44_MIN_RATIO = DEFAULT_MIN_RATIO
+CN13_MIN_RATIO = DEFAULT_MIN_RATIO
+CN04_MIN_RATIO = DEFAULT_MIN_RATIO
+CN05_MIN_RATIO = DEFAULT_MIN_RATIO
+CN15_MIN_RATIO = DEFAULT_MIN_RATIO
+CN18_MIN_RATIO = DEFAULT_MIN_RATIO
+CN10_MIN_RATIO = DEFAULT_MIN_RATIO
+CN12_MIN_RATIO = DEFAULT_MIN_RATIO
+CN06_MIN_RATIO = DEFAULT_MIN_RATIO
+CN19_MIN_RATIO = DEFAULT_MIN_RATIO
+CN35_MIN_RATIO = DEFAULT_MIN_RATIO
 # 各多节点源可独立判 reachable 的最小节点成功率（strong_valid 的单一入口）。
 # 原实现只特判多节点 ICMP 源/cn16，cn11/cn09/cn42/cn34/cn43/cn44/cn13 的
-# 阈值常量定义了却从未被读取——调高任意一个都会被静默回退到 ITDOG_MIN_RATIO。
+# 阈值常量定义了却从未被读取——调高任意一个都会被静默回退到 DEFAULT_MIN_RATIO。
 # 这里统一接线，让每源的阈值真正生效；改动某个常量即按比例收紧/放宽该源。
 def _build_verdict_tables():
     """判定表（代号运行时件）：PCB 注册表驱动；无包回 None 用 legacy 静态表。
 
     返回 (multi_codes, single_codes, min_ratio_map)。min_ratio_map 只含
-    注册表标 min_ratio 的代号（值为专属数值或 ITDOG_MIN_RATIO），余者
-    strong_valid 回退 ITDOG_MIN_RATIO（与旧行为一致）。
+    注册表标 min_ratio 的代号（值为专属数值或 DEFAULT_MIN_RATIO），余者
+    strong_valid 回退 DEFAULT_MIN_RATIO（与旧行为一致）。
     """
     try:
         reg = _load_pcb_plugin("_sources")
@@ -182,7 +182,7 @@ def _build_verdict_tables():
                    if e.get("verdict") == "single")
     ratios = {e["code"]: (e["min_ratio_value"]
                           if e.get("min_ratio_value") is not None
-                          else ITDOG_MIN_RATIO)
+                          else DEFAULT_MIN_RATIO)
               for e in reg.SOURCES if e.get("min_ratio")}
     return multi, single, ratios
 
@@ -194,36 +194,36 @@ if _REG_TABLES is not None:
     _SOURCE_MIN_RATIO = _REG_TABLES[2]
 else:
     _MULTI_OK = (
-        PINGPE_CODE, ITDOG_CODE_HTTP, TCPPING_CODE, ITDOG_CODE_TCPING, ITDOG_CODE_PING, TCPTEST_CODE, TCPTEST_PING_CODE, TCPTEST_HTTP_CODE, TCPTEST_TRACE_CODE, TCPPING_WS_CODE, COFFEE_CODE, PINGLOC_CODE, ANTPING_CODE, ANTPING_PING_CODE, TCPINGCN_CODE, TCPINGCN_PING_CODE, TCPINGCN_MTR_CODE, CHINAZ_CODE, CE98_CODE, CE98_PING_CODE, BIUPING_CODE_TCPING, BIUPING_CODE_PING, AA1_CODE_PING, AA1_CODE_HTTP,
-        BOCE_CODE, IPIP_CODE, IPIP_TRACE_CODE, SEVENTEEN_CODE, PING0_CODE, WANSUI_CODE)
-    _SINGLE_OK = ("cn27", "cn28", "cn29", "cn20", "cn21", "cn22", "cn23", "cn24", "cn25", "cn26", GLOBALPING_CODE, GLOBALPING_TRACE_CODE, GLOBALPING_HTTP_CODE, GLOBALPING_MTR_CODE)
+        CN40_CODE, CN01_CODE, CN41_CODE, CN02_CODE, CN03_CODE, CN30_CODE, CN31_CODE, CN32_CODE, CN33_CODE, CN06_CODE, CN07_CODE, CN08_CODE, CN14_CODE, CN15_CODE, CN17_CODE, CN18_CODE, CN19_CODE, CN16_CODE, CN11_CODE, CN12_CODE, CN09_CODE, CN10_CODE, CN04_CODE, CN05_CODE,
+        CN42_CODE, CN34_CODE, CN35_CODE, CN43_CODE, CN44_CODE, CN13_CODE)
+    _SINGLE_OK = ("cn27", "cn28", "cn29", "cn20", "cn21", "cn22", "cn23", "cn24", "cn25", "cn26", CN36_CODE, CN37_CODE, CN38_CODE, CN39_CODE)
     _SOURCE_MIN_RATIO = {
-        COFFEE_CODE: COFFEE_MIN_RATIO,
-        CHINAZ_CODE: CHINAZ_MIN_RATIO,
-        CE98_CODE: CE98_MIN_RATIO,
-        BIUPING_CODE_TCPING: BIUPING_MIN_RATIO,
-        BOCE_CODE: BOCE_MIN_RATIO,
-        IPIP_CODE: IPIP_MIN_RATIO,
-        SEVENTEEN_CODE: SEVENTEEN_MIN_RATIO,
-        PING0_CODE: PING0_MIN_RATIO,
-        WANSUI_CODE: WANSUI_MIN_RATIO,
-        AA1_CODE_PING: AA1PING_MIN_RATIO,
-        AA1_CODE_HTTP: AA1HTTP_MIN_RATIO,
-        ANTPING_PING_CODE: ANTPING_PING_MIN_RATIO,
-        TCPINGCN_PING_CODE: TCPINGCN_PING_MIN_RATIO,
-        TCPTEST_CODE: ITDOG_MIN_RATIO,
-        TCPTEST_PING_CODE: ITDOG_MIN_RATIO,
-        TCPTEST_HTTP_CODE: ITDOG_MIN_RATIO,
-        TCPTEST_TRACE_CODE: ITDOG_MIN_RATIO,
-        BIUPING_CODE_PING: BIUPING_PING_MIN_RATIO,
-        CE98_PING_CODE: CE98_PING_MIN_RATIO,
-        TCPPING_WS_CODE: TCPPING_WS_MIN_RATIO,
-        TCPINGCN_MTR_CODE: TCPINGCN_MTR_MIN_RATIO,
-        IPIP_TRACE_CODE: IPIP_TRACE_MIN_RATIO,
+        CN07_CODE: CN07_MIN_RATIO,
+        CN16_CODE: CN16_MIN_RATIO,
+        CN11_CODE: CN11_MIN_RATIO,
+        CN09_CODE: CN09_MIN_RATIO,
+        CN42_CODE: CN42_MIN_RATIO,
+        CN34_CODE: CN34_MIN_RATIO,
+        CN43_CODE: CN43_MIN_RATIO,
+        CN44_CODE: CN44_MIN_RATIO,
+        CN13_CODE: CN13_MIN_RATIO,
+        CN04_CODE: CN04_MIN_RATIO,
+        CN05_CODE: CN05_MIN_RATIO,
+        CN15_CODE: CN15_MIN_RATIO,
+        CN18_CODE: CN18_MIN_RATIO,
+        CN30_CODE: DEFAULT_MIN_RATIO,
+        CN31_CODE: DEFAULT_MIN_RATIO,
+        CN32_CODE: DEFAULT_MIN_RATIO,
+        CN33_CODE: DEFAULT_MIN_RATIO,
+        CN10_CODE: CN10_MIN_RATIO,
+        CN12_CODE: CN12_MIN_RATIO,
+        CN06_CODE: CN06_MIN_RATIO,
+        CN19_CODE: CN19_MIN_RATIO,
+        CN35_CODE: CN35_MIN_RATIO,
     }
 # cn41（token 搭车相）失败不计入 multi_failed（旧行为原样保留：其 skipped/
 # fail 语义由 pingpe 相内部消化，不参与多节点失败联动）。
-_MULTI_FAILED = tuple(s for s in _MULTI_OK if s != TCPPING_CODE)
+_MULTI_FAILED = tuple(s for s in _MULTI_OK if s != CN41_CODE)
 _SINGLE_FAILED = _SINGLE_OK
 def merge_verdict(sources: dict) -> dict:
     """跨源合成大陆可达性判定。
@@ -244,7 +244,7 @@ def merge_verdict(sources: dict) -> dict:
     - ``level``：证据分级——任一成功源给出应用层（HTTP）确认 → "http"，
       仅传输层（TCP）确认 → "tcp"，无成功源 → None
 
-    比率字段约定：``ratio`` 存在且 < ``ITDOG_MIN_RATIO`` 视为"弱确认"，
+    比率字段约定：``ratio`` 存在且 < ``DEFAULT_MIN_RATIO`` 视为"弱确认"，
     不独立支撑 reachable；缺失（如单节点源）按 1.0 处理。
     """
     ok_sources = [name for name, r in sources.items() if r.get("ok")]
@@ -277,7 +277,7 @@ def merge_verdict(sources: dict) -> dict:
             return True  # pingpe/tcpping 内部已实施多数/60% 规则
         if (sources[source].get("nodes") or 0) < MULTI_MIN_NODES:
             return False  # 残缺样本（限流/连接中断）不作强确认，防退化为单点假阳性
-        return ratio >= _SOURCE_MIN_RATIO.get(source, ITDOG_MIN_RATIO)
+        return ratio >= _SOURCE_MIN_RATIO.get(source, DEFAULT_MIN_RATIO)
 
     strong_multi = [s for s in multi_ok if strong_valid(s)]
 
