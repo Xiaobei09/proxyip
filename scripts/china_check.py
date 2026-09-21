@@ -748,13 +748,13 @@ def _sort_by_ms(lines: list[str], cn_ms: dict | None) -> list[str]:
     """``cn_ms`` 提供时按大陆延迟升序稳定排序；缺失排最后。"""
     if not cn_ms:
         return lines
+
+    def _key(item) -> tuple:
+        v = cn_ms.get(line_to_key(item[1]))
+        return (float("inf") if v is None else v, item[0])
+
     indexed = list(enumerate(lines))
-    indexed.sort(
-        key=lambda item: (
-            cn_ms.get(line_to_key(item[1]), float("inf")),
-            item[0],
-        )
-    )
+    indexed.sort(key=_key)
     return [line for _i, line in indexed]
 
 

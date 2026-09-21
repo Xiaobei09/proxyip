@@ -930,6 +930,18 @@ class TestAnnotations(unittest.TestCase):
         self.assertEqual(common.rewrite_latency("1.2.3.4:80#US", 99),
                          "1.2.3.4:80#US")
 
+    def test_sort_by_ms_explicit_none_last_stable(self):
+        """R9：cn_ms 显式 None 值与缺键同等垫底（旧实现 None<float 直接
+        TypeError；生产尚无 None 入表，此处锁防御）。"""
+        lines = ["1.1.1.1:443#US-9ms", "2.2.2.2:443#US-5ms",
+                 "3.3.3.3:443#US-1ms"]
+        cn_ms = {"1.1.1.1:443#US": 300, "2.2.2.2:443#US": None}
+        out = cc._sort_by_ms(lines, cn_ms)
+        self.assertEqual(
+            [l.split("#")[0] for l in out],
+            ["1.1.1.1:443", "2.2.2.2:443", "3.3.3.3:443"],
+        )
+
     def test_generate_all_cn_missing_ms_last_stable(self):
         text = "1.1.1.1:443#US-9ms-CN\n2.2.2.2:443#US-5ms-CN\n3.3.3.3:443#US-1ms-CN\n"
         reachable = {"1.1.1.1:443#US", "2.2.2.2:443#US"}
