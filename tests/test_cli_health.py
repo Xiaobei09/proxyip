@@ -94,6 +94,29 @@ class TestCliHealth(unittest.TestCase):
         out = proc.stdout
         self.assertNotIn("jkapi.com + ping.pe", out)
 
+    def test_china_help_flags_match_docs(self):
+        """R7：china_check --help 与 docs/scripts.md 表格双向对等
+        （flag-day 后只剩 generic＋基础旗标；防单边漂移）。"""
+        import re
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "china_check.py"),
+             "--help"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        self.assertEqual(proc.returncode, 0)
+        help_flags = set(re.findall(r"--[a-z0-9-]+", proc.stdout))
+        lines = (ROOT / "docs" / "scripts.md").read_text(
+            encoding="utf-8").split("\n")
+        start = next(i for i, l in enumerate(lines)
+                     if l.startswith("### `scripts/china_check.py`"))
+        end = next(i for i, l in enumerate(lines)
+                   if l.startswith("### `scripts/exit_family.py`"))
+        doc_flags = set(re.findall(r"--[a-z0-9-]+",
+                                   "\n".join(lines[start:end])))
+        self.assertEqual(help_flags - {"--help"}, doc_flags - {"---"})
+
     def test_missing_data_dir_degrades_gracefully(self):
         """R286：缺输入目录时各链脚本须优雅降级（空映射/skip 文案、
         返回 0、无 traceback），不得把空数据当硬失败掀翻 CI。"""
