@@ -101,7 +101,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -950,6 +950,20 @@ def annotate_cn_files(reachable_keys: set) -> None:
 
 # ------------------------------------------------------------ 主流程
 
+def _drain_futures(futures) -> None:
+    """等全部槽位任务完成（fire-and-forget 型 join）。
+
+    按**完成序**而非提交序等待，消除慢键队头阻塞（结果按 key 落盘，
+    与等待顺序无关）。worker 内异常已就地收敛为 error 行；若未来有
+    异常逃逸，此处 ``result()`` 原样上抛（与旧循环语义一致）。
+    有界性说明：worker 内全部网络 I/O 带超时，进程级另有 CI 作业
+    超时兜底；本函数不设局部 deadline（慢但健康的长尾不容误杀）。
+    后续如需相位级 deadline，只改这一处。
+    """
+    for fut in as_completed(futures):
+        fut.result()
+
+
 def _run_cn40_slots(
     candidates: list, entries: dict, timeout: float,
     cn41_token: str, concurrency: int,
@@ -981,9 +995,7 @@ def _run_cn40_slots(
         time.sleep(CN40_SLOT_GAP)
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = [pool.submit(work, item) for item in candidates]
-        for fut in futures:
-            fut.result()
+        _drain_futures([pool.submit(work, item) for item in candidates])
 
 
 def _run_cn30_slots(
@@ -1019,9 +1031,7 @@ def _run_cn30_slots(
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = [pool.submit(work, item) for item in candidates]
-        for fut in futures:
-            fut.result()
+        _drain_futures([pool.submit(work, item) for item in candidates])
 
 
 def _run_ws_source_slots(
@@ -1061,9 +1071,7 @@ def _run_ws_source_slots(
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = [pool.submit(work, item) for item in candidates]
-        for fut in futures:
-            fut.result()
+        _drain_futures([pool.submit(work, item) for item in candidates])
 
 
 def _run_cn08_slots(
@@ -1087,9 +1095,7 @@ def _run_cn08_slots(
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = [pool.submit(work, item) for item in candidates]
-        for fut in futures:
-            fut.result()
+        _drain_futures([pool.submit(work, item) for item in candidates])
 
 
 def _bundle_missing(source: str) -> dict:
@@ -1175,9 +1181,7 @@ def _run_raw_slots(
                 "status": "error", "ok": False, "ms": None, "error": _err(exc)}
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        futures = [pool.submit(work, item) for item in candidates]
-        for fut in futures:
-            fut.result()
+        _drain_futures([pool.submit(work, item) for item in candidates])
 
 
 def _batch_ping_normalize(res: dict) -> dict:

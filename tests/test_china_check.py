@@ -3941,5 +3941,29 @@ class TestWorkflowCodesInRegistry(unittest.TestCase):
         self.assertEqual(unknown, [], f"workflow 引用未知代号：{unknown}")
 
 
+class TestDrainFutures(unittest.TestCase):
+    """R11：槽位 join 收敛到 _drain_futures（完成序等待，结果无关序；
+    逃逸异常上抛，与旧提交序循环语义一致）。"""
+
+    def test_joins_all_regardless_of_order(self):
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        done = []
+        def work(i):
+            time.sleep(0.05 * (3 - i))
+            done.append(i)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            cc._drain_futures([pool.submit(work, i) for i in range(3)])
+        self.assertEqual(sorted(done), [0, 1, 2])
+
+    def test_escaping_exception_propagates(self):
+        from concurrent.futures import ThreadPoolExecutor
+        def boom():
+            raise RuntimeError("escape")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with self.assertRaises(RuntimeError):
+                cc._drain_futures([pool.submit(boom)])
+
+
 if __name__ == "__main__":
     unittest.main()
