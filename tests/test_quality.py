@@ -4492,5 +4492,27 @@ class TestRunExitCodes(unittest.TestCase):
         self.assertEqual(asyncio.run(qc.run(args)), 1)
 
 
+class TestRepSourcesRegistryWiring(unittest.TestCase):
+    """R14：信誉元数据 loader 优先（有包时公开表即 PCB 对象；无包跳过，
+    回退静态表值须一致，删除条件＝CI 直连 PCB）。"""
+
+    def _reg(self):
+        try:
+            from checks_bundle import load_plugin as lp
+            return lp("_rep_sources")
+        except Exception:
+            self.skipTest("needs PCB _rep_sources bundle")
+
+    def test_public_tables_are_pcb_objects(self):
+        reg = self._reg()
+        self.assertIs(qr.REPUTATION_WEIGHTS, reg.REPUTATION_WEIGHTS)
+        self.assertIs(qr.DEFAULT_REP_SOURCES, reg.DEFAULT_REP_SOURCES)
+        self.assertIs(qr.SOURCE_PACING, reg.SOURCE_PACING)
+
+    def test_bundle_flag_true_with_pcb(self):
+        self._reg()
+        self.assertTrue(qr._REP_SOURCES_BUNDLE)
+
+
 if __name__ == "__main__":
     unittest.main()

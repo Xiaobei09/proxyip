@@ -490,6 +490,20 @@ SOURCE_PACING = {
     "uceprotect": (6, 0.15),
     "psbl": (6, 0.15),
 }
+
+# 信誉元数据 loader 优先（R14）：有包时上表三名字重绑为 PCB 对象
+# （`TestRepSourcesRegistryWiring` 锁同一性）；无包回退上表静态值。
+_REP_SOURCES_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep = _load_pcb_plugin("_rep_sources")
+    REPUTATION_WEIGHTS = _rep.REPUTATION_WEIGHTS
+    DEFAULT_REP_SOURCES = _rep.DEFAULT_REP_SOURCES
+    SOURCE_PACING = _rep.SOURCE_PACING
+    _REP_SOURCES_BUNDLE = True
+except Exception:
+    pass
+
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
     if isinstance(value, (int, float)):
