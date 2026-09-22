@@ -193,8 +193,6 @@ IPNOISE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # FireHOL level2（L1 超集 + 更多聚合源，裸 IP + CIDR；比 L1 更广更噪，
 # 口径略弱：is_listed + 静态 50 + 权重 4）。
 FIREHOL_LEVEL2_URL = "[REDACTED_PRIVATE_RESOURCE]"
-GREYNOISE_URL = "https://api.greynoise.io/v3/community/{ip}"
-GREYNOISE_TIMEOUT = 8
 URLLAUS_URL = "[REDACTED_PRIVATE_RESOURCE]"
 THREATFOX_URL = "[REDACTED_PRIVATE_RESOURCE]"
 FIREHOL_LEVEL1_URL = (
@@ -555,45 +553,14 @@ except Exception:
     ncgy_lookup_sync = None
 
 
-def greynoise_lookup_sync(ip: str) -> dict | None:
-    """GreyNoise Community (keyless) — noise/riot/malicious-scan signal.
-
-    干净/未观测 IP 返回 HTTP 404 但体为 JSON（``{"noise":false,...}``），
-    已知扫描者返回 200 且带 ``classification``；两者均解析为信号。
-    """
-    out: dict = {"is_noise": False, "is_riot": False, "is_malicious": False}
-    req = urllib.request.Request(
-        GREYNOISE_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    try:
-        with deadline_open(req, GREYNOISE_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            try:
-                data = json.loads(
-                    exc.read(64 * 1024 + 1)
-                    [:64 * 1024].decode("utf-8", "replace")
-                )
-            except Exception:  # noqa: BLE001
-                return None
-        else:
-            return None
-    except Exception:  # noqa: BLE001
-        return None
-    if not isinstance(data, dict):
-        return None
-    out["is_noise"] = bool(data.get("noise"))
-    out["is_riot"] = bool(data.get("riot"))
-    classification = data.get("classification")
-    if isinstance(classification, str):
-        out["classification"] = classification.lower()
-        if classification.lower() == "malicious":
-            out["is_abuse"] = True
-    if not any(v for k, v in out.items() if k != "classification"):
-        return None
-    return out
+_REP_GREYNOISE_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_gns = _load_pcb_plugin("rep_greynoise")
+    greynoise_lookup_sync = _rep_gns.greynoise_lookup_sync
+    _REP_GREYNOISE_BUNDLE = True
+except Exception:
+    greynoise_lookup_sync = None
 
 
 def ipdata_lookup_sync(ip: str) -> dict | None:
@@ -2630,7 +2597,7 @@ async def lookup_all_risk(
         w, d = pacing.get("iplocation", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "iplocation", iplocation_lookup_sync, cap=IPLOCATION_CAP, workers=w, delay=d))
-    if "greynoise" in sources:
+    if "greynoise" in sources and greynoise_lookup_sync is not None:
         w, d = pacing.get("greynoise", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("greynoise", greynoise_lookup_sync, workers=w, delay=d))
     if "dnsbl" in sources:

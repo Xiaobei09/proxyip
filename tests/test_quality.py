@@ -4160,6 +4160,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_NETCOFFEE_BUNDLE)
         self.assertIsNotNone(qr.ncgy_lookup_sync)
         self.assertTrue(qr._REP_NCGY_BUNDLE)
+        self.assertIsNotNone(qr.greynoise_lookup_sync)
+        self.assertTrue(qr._REP_GREYNOISE_BUNDLE)
 
 
 if __name__ == "__main__":
