@@ -49,8 +49,6 @@ GETIPINTEL_TIMEOUT = 8
 GETIPINTEL_CAP = 2000
 IPAPI_IS_URL = "https://api.ipapi.is/?q={ip}"
 IPAPI_IS_TIMEOUT = 8
-IPQUERY_URL = "https://api.ipquery.io/{ip}"
-IPQUERY_TIMEOUT = 8
 FFRAUD_URL = "https://api.ffraud.com/public/ip/{ip}"
 FFRAUD_TIMEOUT = 8
 WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
@@ -729,31 +727,14 @@ def ipapi_is_lookup_sync(ip: str) -> dict | None:
     return out
 
 
-def ipquery_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``api.ipquery.io/{ip}`` risk flags + ISP (proxy/vpn/tor/datacenter)."""
-    req = urllib.request.Request(
-        IPQUERY_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, IPQUERY_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    risk = data.get("risk") or {}
-    isp = data.get("isp") or {}
-    out = {
-        "is_mobile": bool(risk.get("is_mobile")),
-        "is_vpn": bool(risk.get("is_vpn")),
-        "is_tor": bool(risk.get("is_tor")),
-        "is_proxy": bool(risk.get("is_proxy")),
-        "is_datacenter": bool(risk.get("is_datacenter")),
-        "asn": isp.get("asn"),
-        "org": isp.get("org"),
-    }
-    score = risk.get("risk_score")
-    if isinstance(score, (int, float)):
-        out["risk_score"] = round(score)
-    return out
+_REP_IPQUERY_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_iq = _load_pcb_plugin("rep_ipquery")
+    ipquery_lookup_sync = _rep_iq.ipquery_lookup_sync
+    _REP_IPQUERY_BUNDLE = True
+except Exception:
+    ipquery_lookup_sync = None
 
 
 def ffraud_lookup_sync(ip: str) -> dict | None:
@@ -2852,7 +2833,7 @@ async def lookup_all_risk(
     if "ipapi_is" in sources:
         w, d = pacing.get("ipapi_is", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipapi_is", ipapi_is_lookup_sync, workers=w, delay=d))
-    if "ipquery" in sources:
+    if "ipquery" in sources and ipquery_lookup_sync is not None:
         w, d = pacing.get("ipquery", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipquery", ipquery_lookup_sync, workers=w, delay=d))
     if "ffraud" in sources:

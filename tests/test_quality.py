@@ -2188,38 +2188,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["company_abuser_score"], 0.50)
         self.assertEqual(out["asn_abuser_score"], 0.20)
 
-    def test_ipquery_lookup_parsing(self):
-        payload = (
-            b'{"risk":{"is_mobile":false,"is_vpn":true,"is_tor":false,'
-            b'"is_proxy":false,"is_datacenter":true,"risk_score":35},'
-            b'"isp":{"asn":"AS15169","org":"Google LLC","isp":"Google"}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("api.ipquery.io/1.2.3.4", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.ipquery_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertTrue(out["is_vpn"])
-        self.assertTrue(out["is_datacenter"])
-        self.assertEqual(out["risk_score"], 35)
-        self.assertEqual(out["asn"], "AS15169")
-
     def test_ipwhois_lookup_parsing(self):
         # R242 回归：IPWHOIS_URL 用命名占位符 {ip}，URL 构造须 .format(ip=ip)，
         # 否则每次调用 KeyError，源 100% 失效（实测 rep_sources 中从不出现）。
@@ -4411,6 +4379,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertIsNotNone(qr.iplocation_lookup_sync)
         self.assertTrue(qr._REP_IPLOCATION_BUNDLE)
         self.assertEqual(qr.IPLOCATION_CAP, 3000)
+        self.assertIsNotNone(qr.ipquery_lookup_sync)
+        self.assertTrue(qr._REP_IPQUERY_BUNDLE)
 
 
 if __name__ == "__main__":
