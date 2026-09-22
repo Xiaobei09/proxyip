@@ -58,8 +58,6 @@ TOR_EXITS_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 IPLOCATION_CAP = 3000
-STOPFORUMSPAM_URL = "https://api.stopforumspam.org/api?ip={ip}&json"
-STOPFORUMSPAM_TIMEOUT = 10
 STOPFORUMSPAM_CAP = 3000
 MALTIVERSE_URL = "https://api.maltiverse.com/ip/{ip}"
 MALTIVERSE_TIMEOUT = 12
@@ -1106,39 +1104,16 @@ except Exception:
     ipwhois_lookup_sync = None
 
 
-def stopforumspam_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``stopforumspam.com`` HTTP-spammer + Tor-exit flags.
-
-    JSON: ``{"success":1,"ip":{"appears","confidence","frequency","torexit",
-    "asn","country"}}``。``appears`` 为 0/1（是否被举报为垃圾来源）。
-    无记录且非 Tor 出口 → ``None``（进入负缓存，不再重查）。
-    """
-    req = urllib.request.Request(
-        STOPFORUMSPAM_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, STOPFORUMSPAM_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    item = data.get("ip")
-    if not isinstance(item, dict):
-        return None
-    appears = bool(item.get("appears"))
-    torexit = bool(item.get("torexit"))
-    if not appears and not torexit:
-        return None
-    out: dict = {"is_abuse": appears, "torexit": torexit}
-    conf = item.get("confidence")
-    if isinstance(conf, (int, float)):
-        out["confidence"] = float(conf)
-    freq = item.get("frequency")
-    if isinstance(freq, (int, float)):
-        out["frequency"] = int(freq)
-    asn = norm_asn(item.get("asn"))
-    if asn:
-        out["asn"] = asn
-    return out
+_REP_STOPFORUMSPAM_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_sfs = _load_pcb_plugin("rep_stopforumspam")
+    stopforumspam_lookup_sync = _rep_sfs.stopforumspam_lookup_sync
+    STOPFORUMSPAM_CAP = _rep_sfs.CAP
+    _REP_STOPFORUMSPAM_BUNDLE = True
+except Exception:
+    stopforumspam_lookup_sync = None
+    STOPFORUMSPAM_CAP = 3000
 
 
 MALTIVERSE_RECENT_DAYS = 30
@@ -2782,7 +2757,7 @@ async def lookup_all_risk(
         w, d = pacing.get("hackmyip", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "hackmyip", hackmyip_lookup_sync, workers=w, delay=d))
-    if "stopforumspam" in sources:
+    if "stopforumspam" in sources and stopforumspam_lookup_sync is not None:
         w, d = pacing.get("stopforumspam", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "stopforumspam", stopforumspam_lookup_sync,

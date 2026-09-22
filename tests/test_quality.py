@@ -2155,68 +2155,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["asn_kind"], "hosting")
         self.assertEqual(out["abuser_score"], 0.35)
 
-    def test_stopforumspam_lookup_parsing(self):
-        payload = (
-            b'{"success":1,"ip":{"value":"1.2.3.4","appears":1,'
-            b'"frequency":92,"confidence":95.34,"torexit":1,"asn":60729,'
-            b'"country":"de"}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("stopforumspam.org/api?ip=1.2.3.4", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.stopforumspam_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertTrue(out["is_abuse"])
-        self.assertTrue(out["torexit"])
-        self.assertEqual(out["confidence"], 95.34)
-        self.assertEqual(out["frequency"], 92)
-        self.assertEqual(out["asn"], "AS60729")
-        self.assertEqual(
-            qr._flag_opinions("stopforumspam", out),
-            {"abuse": True, "tor": True})
-
-    def test_stopforumspam_clean_returns_none(self):
-        payload = (
-            b'{"success":1,"ip":{"value":"1.2.3.4","appears":0,'
-            b'"frequency":0,"torexit":0,"asn":15169,"country":"us"}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            self.assertIsNone(qc.stopforumspam_lookup_sync("1.2.3.4"))
-        finally:
-            qc.urllib.request.urlopen = orig
-
     def _maltiverse_with(self, payload):
         def fake_urlopen(req, timeout=0):
             self.assertIn("api.maltiverse.com/ip/1.2.3.4", req.full_url)
@@ -4256,6 +4194,9 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_IPWHOIS_BUNDLE)
         self.assertIsNotNone(qr.whatismyip_lookup_sync)
         self.assertTrue(qr._REP_WHATISMYIP_BUNDLE)
+        self.assertIsNotNone(qr.stopforumspam_lookup_sync)
+        self.assertTrue(qr._REP_STOPFORUMSPAM_BUNDLE)
+        self.assertEqual(qr.STOPFORUMSPAM_CAP, 3000)
 
 
 if __name__ == "__main__":
