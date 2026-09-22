@@ -49,8 +49,6 @@ GETIPINTEL_TIMEOUT = 8
 GETIPINTEL_CAP = 2000
 WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
 WHATISMYIP_TIMEOUT = 8
-IPWHOIS_URL = "https://ipwhois.app/json/{ip}"
-IPWHOIS_TIMEOUT = 8
 FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
@@ -1117,32 +1115,14 @@ def ip2location_lookup_sync(ip: str) -> dict | None:
     return {"is_proxy": bool(data.get("is_proxy"))}
 
 
-def ipwhois_lookup_sync(ip: str) -> dict | None:
-    """Free keyless ``ipwhois.app`` security flags + connection type."""
-    req = urllib.request.Request(
-        IPWHOIS_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, IPWHOIS_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict) or data.get("success") is False:
-        return None
-    conn = data.get("connection") or {}
-    sec = data.get("security")
-    sec = sec if isinstance(sec, dict) else {}
-    out = {
-        "security": {
-            k: bool(sec.get(k))
-            for k in ("anonymous", "proxy", "vpn", "tor", "hosting")
-        },
-        "connection_type": conn.get("type"),
-    }
-    asn = norm_asn(conn.get("asn"))
-    if asn:
-        out["asn"] = asn
-    if not any(out["security"].values()) and not conn.get("type") and not asn:
-        return None
-    return out
+_REP_IPWHOIS_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_wh = _load_pcb_plugin("rep_ipwhois")
+    ipwhois_lookup_sync = _rep_wh.ipwhois_lookup_sync
+    _REP_IPWHOIS_BUNDLE = True
+except Exception:
+    ipwhois_lookup_sync = None
 
 
 def stopforumspam_lookup_sync(ip: str) -> dict | None:
@@ -2810,7 +2790,7 @@ async def lookup_all_risk(
     if "ip2location" in sources:
         w, d = pacing.get("ip2location", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ip2location", ip2location_lookup_sync, workers=w, delay=d))
-    if "ipwhois" in sources:
+    if "ipwhois" in sources and ipwhois_lookup_sync is not None:
         w, d = pacing.get("ipwhois", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipwhois", ipwhois_lookup_sync, workers=w, delay=d))
     if "freeipapi" in sources and freeipapi_lookup_sync is not None:

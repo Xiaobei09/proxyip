@@ -2155,42 +2155,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["asn_kind"], "hosting")
         self.assertEqual(out["abuser_score"], 0.35)
 
-    def test_ipwhois_lookup_parsing(self):
-        # R242 回归：IPWHOIS_URL 用命名占位符 {ip}，URL 构造须 .format(ip=ip)，
-        # 否则每次调用 KeyError，源 100% 失效（实测 rep_sources 中从不出现）。
-        payload = (
-            b'{"success":true,"connection":{"asn":36352,"type":"Hosting"},'
-            b'"security":{"anonymous":false,"proxy":false,"vpn":false,'
-            b'"tor":false,"hosting":true}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("ipwhois.app/json/1.2.3.4", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.ipwhois_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertEqual(out["connection_type"], "Hosting")
-        self.assertTrue(out["security"]["hosting"])
-        self.assertEqual(out["asn"], "AS36352")
-        flags = qr._flag_opinions("ipwhois", out)
-        self.assertTrue(flags["hosting"])
-        self.assertFalse(flags["proxy"])
-
     def test_stopforumspam_lookup_parsing(self):
         payload = (
             b'{"success":1,"ip":{"value":"1.2.3.4","appears":1,'
@@ -4321,6 +4285,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_IPAPI_IS_BUNDLE)
         self.assertIsNotNone(qr.ffraud_lookup_sync)
         self.assertTrue(qr._REP_FFRAUD_BUNDLE)
+        self.assertIsNotNone(qr.ipwhois_lookup_sync)
+        self.assertTrue(qr._REP_IPWHOIS_BUNDLE)
 
 
 if __name__ == "__main__":
