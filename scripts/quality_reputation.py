@@ -1030,23 +1030,14 @@ except Exception:
     proxycheck_lookup_sync = None
 
 
-IP2LOCATION_URL = "https://api.ip2location.io/?ip={}"
-IP2LOCATION_TIMEOUT = 8
-
-
-def ip2location_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``api.ip2location.io`` is_proxy flag."""
-    req = urllib.request.Request(
-        IP2LOCATION_URL.format(ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, IP2LOCATION_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    if "is_proxy" not in data:
-        return None
-    return {"is_proxy": bool(data.get("is_proxy"))}
+_REP_IP2LOCATION_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_i2l = _load_pcb_plugin("rep_ip2location")
+    ip2location_lookup_sync = _rep_i2l.ip2location_lookup_sync
+    _REP_IP2LOCATION_BUNDLE = True
+except Exception:
+    ip2location_lookup_sync = None
 
 
 _REP_IPWHOIS_BUNDLE = False
@@ -2653,7 +2644,7 @@ async def lookup_all_risk(
     if "proxycheck" in sources and proxycheck_lookup_sync is not None:
         w, d = pacing.get("proxycheck", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("proxycheck", proxycheck_lookup_sync, workers=w, delay=d))
-    if "ip2location" in sources:
+    if "ip2location" in sources and ip2location_lookup_sync is not None:
         w, d = pacing.get("ip2location", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ip2location", ip2location_lookup_sync, workers=w, delay=d))
     if "ipwhois" in sources and ipwhois_lookup_sync is not None:
