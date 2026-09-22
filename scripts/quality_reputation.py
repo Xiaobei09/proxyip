@@ -34,8 +34,6 @@ REP_RISK_MEDIUM = 75
 
 REP_WORKERS = 10
 REP_DELAY = 0.15
-NCGY_URL = "https://ip.nc.gy/json?ip={ip}"
-NCGY_TIMEOUT = 12
 IPDATA_URL = "https://ipdata.info/json/{ip}"
 IPDATA_TIMEOUT = 8
 IPDATA_CAP = 2000
@@ -547,29 +545,14 @@ except Exception:
     netcoffee_lookup_sync = None
 
 
-def ncgy_lookup_sync(ip: str) -> dict | None:
-    """MaxMind GeoIP2 Anonymous IP flags via ``ip.nc.gy/json``."""
-    req = urllib.request.Request(
-        NCGY_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, NCGY_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    proxy = data.get("proxy") if isinstance(data, dict) else None
-    if not isinstance(proxy, dict):
-        return None
-    out = {
-        "is_proxy": bool(proxy.get("is_proxy")),
-        "is_vpn": bool(proxy.get("is_vpn")),
-        "is_tor": bool(proxy.get("is_tor")),
-        "is_hosting": bool(proxy.get("is_hosting")),
-        "is_cdn": bool(proxy.get("is_cdn")),
-        "is_school": bool(proxy.get("is_school")),
-        "is_anonymous": bool(proxy.get("is_anonymous")),
-    }
-    if not any(out.values()):
-        return {"clean": True}
-    return out
+_REP_NCGY_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_ncy = _load_pcb_plugin("rep_ncgy")
+    ncgy_lookup_sync = _rep_ncy.ncgy_lookup_sync
+    _REP_NCGY_BUNDLE = True
+except Exception:
+    ncgy_lookup_sync = None
 
 
 def greynoise_lookup_sync(ip: str) -> dict | None:
@@ -2576,7 +2559,7 @@ async def lookup_all_risk(
     if "netcoffee" in sources and netcoffee_lookup_sync is not None:
         w, d = pacing.get("netcoffee", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("netcoffee", netcoffee_lookup_sync, workers=w, delay=d))
-    if "ncgy" in sources:
+    if "ncgy" in sources and ncgy_lookup_sync is not None:
         w, d = pacing.get("ncgy", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ncgy", ncgy_lookup_sync, workers=w, delay=d))
     if "ipdata" in sources:
