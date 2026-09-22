@@ -1020,34 +1020,14 @@ async def fetch_wwuyi_blocked() -> IpSet:
     return IpSet(await fetch_text_list(WWUYI_BLOCKED_URL))
 
 
-PROXYCHECK_URL = "https://proxycheck.io/v3/{}"
-PROXYCHECK_TIMEOUT = 8
-
-
-def proxycheck_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``proxycheck.io/v3/{ip}`` proxy/VPN/tor/hosting/scraper detection."""
-    req = urllib.request.Request(
-        PROXYCHECK_URL.format(ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, PROXYCHECK_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict) or data.get("status") != "ok":
-        return None
-    info = data.get(ip) or {}
-    if not isinstance(info, dict):
-        return None
-    detections = info.get("detections") or {}
-    network = info.get("network") or {}
-    return {
-        "is_proxy": bool(detections.get("proxy")),
-        "is_vpn": bool(detections.get("vpn")),
-        "is_tor": bool(detections.get("tor")),
-        "is_hosting": bool(detections.get("hosting")),
-        "is_scraper": bool(detections.get("scraper")),
-        "risk": int(detections.get("risk") or 0),
-        "type": network.get("type"),
-    }
+_REP_PROXYCHECK_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_pc = _load_pcb_plugin("rep_proxycheck")
+    proxycheck_lookup_sync = _rep_pc.proxycheck_lookup_sync
+    _REP_PROXYCHECK_BUNDLE = True
+except Exception:
+    proxycheck_lookup_sync = None
 
 
 IP2LOCATION_URL = "https://api.ip2location.io/?ip={}"
@@ -2670,7 +2650,7 @@ async def lookup_all_risk(
     if "otx" in sources and otx_lookup_sync is not None:
         w, d = pacing.get("otx", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("otx", otx_lookup_sync, workers=w, delay=d))
-    if "proxycheck" in sources:
+    if "proxycheck" in sources and proxycheck_lookup_sync is not None:
         w, d = pacing.get("proxycheck", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("proxycheck", proxycheck_lookup_sync, workers=w, delay=d))
     if "ip2location" in sources:

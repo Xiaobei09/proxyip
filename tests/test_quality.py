@@ -4152,6 +4152,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_BLACKBOX_BUNDLE)
         self.assertIsNotNone(qr.otx_lookup_sync)
         self.assertTrue(qr._REP_OTX_BUNDLE)
+        self.assertIsNotNone(qr.proxycheck_lookup_sync)
+        self.assertTrue(qr._REP_PROXYCHECK_BUNDLE)
 
 
 if __name__ == "__main__":
