@@ -4162,6 +4162,9 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_NCGY_BUNDLE)
         self.assertIsNotNone(qr.greynoise_lookup_sync)
         self.assertTrue(qr._REP_GREYNOISE_BUNDLE)
+        self.assertIsNotNone(qr.ipdata_lookup_sync)
+        self.assertTrue(qr._REP_IPDATA_BUNDLE)
+        self.assertEqual(qr.IPDATA_CAP, 2000)
 
 
 if __name__ == "__main__":

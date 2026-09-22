@@ -24,7 +24,7 @@
 
 **维护宗旨：只保留「非 Cloudflare AS13335 + Cloudflare 边缘端口」连接池。** 因此不收录 Cloudflare 官方边缘 IP（如 `byJoey/cfnew-ipdb`——其 IP 全属 AS13335，而 Workers 出站 `connect()` 禁止直连 CF IP 网段，无法用于自建链路）。最终产物经端口白名单 `443/8443/2053/2083/2087/2096` 过滤，其余端口桶一律丢弃——可用于 Worker 内部 `connect()` 直连。
 
-主源 `all.json` 采用 **3 次线性退避重试**（1.5s/3s）后才回退 zip 镜像（镜像同样 3 次尝试）；附加 `.json`/`.zip` 源分别 3/2 次重试。`ip-api` 国籍批量按批重试 2 次，终失败仅跳过该批继续后续批次，网络抖动不再中断整次国籍填充。所有下载统一带**整体 wall-clock 截止**：`fetch_with_deadline`（daemon 线程 + `join(timeout)`）用于「返回 bytes」路径，`deadline_open`（上下文管理器、`resp.read()` 返回已读完整 body）用于 `with urlopen(...) as resp:` 形态的逐 IP 信仰抓取——覆盖 download 主源/`ip-api`、quality 探活与公开侧信誉 API（ipdata/getipintel；freeipapi/hackmyip/iplocation/scamalytics/ipquery/ipapi_is/ffraud/ipwhois/whatismyip/stopforumspam/maltiverse/blackbox/otx/proxycheck/ip2location/netcoffee/ncgy/greynoise 抓取实现已迁 PCB，同 deadline 语义由私有侧自含）
+主源 `all.json` 采用 **3 次线性退避重试**（1.5s/3s）后才回退 zip 镜像（镜像同样 3 次尝试）；附加 `.json`/`.zip` 源分别 3/2 次重试。`ip-api` 国籍批量按批重试 2 次，终失败仅跳过该批继续后续批次，网络抖动不再中断整次国籍填充。所有下载统一带**整体 wall-clock 截止**：`fetch_with_deadline`（daemon 线程 + `join(timeout)`）用于「返回 bytes」路径，`deadline_open`（上下文管理器、`resp.read()` 返回已读完整 body）用于 `with urlopen(...) as resp:` 形态的逐 IP 信仰抓取——覆盖 download 主源/`ip-api`、quality 探活与公开侧信誉 API（getipintel；freeipapi/hackmyip/iplocation/scamalytics/ipquery/ipapi_is/ffraud/ipwhois/whatismyip/stopforumspam/maltiverse/blackbox/otx/proxycheck/ip2location/netcoffee/ncgy/greynoise/ipdata 抓取实现已迁 PCB，同 deadline 语义由私有侧自含）
 （注意：netcoffee 依赖公开共享 helper `parse_abuser_score`，公开保留兜底供 download 路径复用，netcoffee 插件已自含 `_parse_abuser_score`）、external 校验、audit 国籍批量、健康 webhook。单次 `urlopen` 的 socket 超时只约束单次读写，遇到只回 200 头、响应体永不结束的上游仍会挂死管线——现在一律在 `timeout` 内按错误处理并走重试/兜底，任何上游都无法无限拖住流程（china_check 的 SSE 长连接轮询除外——其分块读取由内部 deadline 循环控制，不套用）。
 
 ### `scripts/validate_proxies.py`
@@ -126,7 +126,7 @@
 | `otx` | 8 | 免费 JSON 信誉（抓取实现已迁 PCB）；`100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
 | `ipsum` | 8 | GitHub 静态 IP 列表（stamparm/ipsum levels/3+），命中 3+ 黑名单 → 55 分 |
 | `ipapi_is` | 8 | 免费 JSON 风险查询（抓取实现已迁 PCB，opt-in）——**已退出默认源**：CI 生成的 `reputation_cache.json` 自加入以来 5 个版本中该源条目恒为 0（其余按 IP 源均有 ~1.8 万条），即 GitHub runner 从未成功拿到响应；疑似上游对云/机房出口限流或 TCP 丢弃，而每次失败要空等到超时（8s），会显著吞噬信誉相位预算（疑为 92min 运行中 ~56min 空档的主因之一）。解析器与权重保留，出口可达时可用 `--reputation-sources` 重新启用。tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
-| `ipdata` | 8 | `api.ipdata.co`，限速 50 次/分；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
+| `ipdata` | 8 | 免费 JSON 信誉（抓取实现已迁 PCB）；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
 | `whatismyip` | 3 | 免费 JSON 风险查询（抓取实现已迁 PCB，opt-in）；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
 | `dc_asn` | 5 | iplogs `datacenter-asns.csv` 静态机房 ASN 表，出口 `asn` 命中即 -15（fail-open） |
 | `abuse_list` | 5 | FireHOL `firehol_abusers_1d` 静态滥用 IP/CIDR 表，命中即 -40（fail-open） |

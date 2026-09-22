@@ -34,8 +34,6 @@ REP_RISK_MEDIUM = 75
 
 REP_WORKERS = 10
 REP_DELAY = 0.15
-IPDATA_URL = "https://ipdata.info/json/{ip}"
-IPDATA_TIMEOUT = 8
 IPDATA_CAP = 2000
 GETIPINTEL_URL = (
     "https://check.getipintel.net/check.php?ip={ip}"
@@ -563,27 +561,16 @@ except Exception:
     greynoise_lookup_sync = None
 
 
-def ipdata_lookup_sync(ip: str) -> dict | None:
-    """Security block (proxy/vpn/tor/anonymous/hosting + threat score)."""
-    req = urllib.request.Request(
-        IPDATA_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, IPDATA_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict) or not data.get("success", True):
-        return None
-    security = data.get("security") or {}
-    threat = security.get("threat") or {}
-    return {
-        "is_proxy": bool(data.get("is_proxy")),
-        "is_hosting": bool(data.get("is_hosting")),
-        "security": {
-            key: bool(security.get(key))
-            for key in ("anonymous", "proxy", "vpn", "tor", "hosting")
-        },
-        "threat_score": _as_int(threat.get("score")),
-    }
+_REP_IPDATA_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_ipd = _load_pcb_plugin("rep_ipdata")
+    ipdata_lookup_sync = _rep_ipd.ipdata_lookup_sync
+    IPDATA_CAP = _rep_ipd.CAP
+    _REP_IPDATA_BUNDLE = True
+except Exception:
+    ipdata_lookup_sync = None
+    IPDATA_CAP = 2000
 
 
 def getipintel_lookup_sync(ip: str, email: str) -> dict | None:
@@ -2529,7 +2516,7 @@ async def lookup_all_risk(
     if "ncgy" in sources and ncgy_lookup_sync is not None:
         w, d = pacing.get("ncgy", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ncgy", ncgy_lookup_sync, workers=w, delay=d))
-    if "ipdata" in sources:
+    if "ipdata" in sources and ipdata_lookup_sync is not None:
         api_tasks.append(cached_batch(
             "ipdata", ipdata_lookup_sync, cap=IPDATA_CAP, workers=2, delay=0.8
         ))
