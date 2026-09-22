@@ -1973,6 +1973,8 @@ class TestReputation(unittest.TestCase):
         self.assertNotIn("deep_bonus", rep["a"])
 
     def test_netcoffee_lookup_parsing(self):
+        if qc.netcoffee_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         payload = (
             b'{"trust_score":61,"is_datacenter":true,"is_vpn":false,'
             b'"is_proxy":false,"is_tor":false,"is_abuser":false,'
@@ -2004,6 +2006,8 @@ class TestReputation(unittest.TestCase):
         self.assertFalse(out["is_vpn"])
 
     def test_netcoffee_lookup_empty(self):
+        if qc.netcoffee_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         def fake_urlopen(req, timeout=0):
             class FakeResp:
                 def __enter__(self):
@@ -2025,6 +2029,8 @@ class TestReputation(unittest.TestCase):
             qc.urllib.request.urlopen = orig
 
     def test_ncgy_lookup_parsing(self):
+        if qc.ncgy_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         payload = (
             b'{"ip":"1.2.3.4","proxy":{"is_proxy":true,"is_vpn":false,'
             b'"is_tor":false,"is_hosting":true,"is_cdn":false,'
@@ -2057,6 +2063,8 @@ class TestReputation(unittest.TestCase):
         self.assertFalse(out["is_vpn"])
 
     def test_ncgy_lookup_clean(self):
+        if qc.ncgy_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         def fake_urlopen(req, timeout=0):
             class FakeResp:
                 def __enter__(self):
@@ -2084,6 +2092,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out, {"clean": True})
 
     def test_getipintel_lookup(self):
+        if qc.getipintel_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         def fake_urlopen(req, timeout=0):
             class FakeResp:
                 def __enter__(self):
@@ -2106,6 +2116,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out, {"probability": 0.25})
 
     def test_getipintel_error_none(self):
+        if qc.getipintel_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         def fake_urlopen(req, timeout=0):
             class FakeResp:
                 def __enter__(self):
@@ -2127,6 +2139,8 @@ class TestReputation(unittest.TestCase):
             qc.urllib.request.urlopen = orig
 
     def test_netcoffee_enriched_fields(self):
+        if qc.netcoffee_lookup_sync is None:
+            self.skipTest("PCB bundle 缺省（解析实现随 PCB 迁移）")
         payload = (
             b'{"trust_score":61,"is_datacenter":true,"company_type":"hosting",'
             b'"asn_kind":"hosting","abuser_score":"0.35 (High)"}'

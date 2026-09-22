@@ -341,8 +341,8 @@ class TestCnDisplayMs(unittest.TestCase):
         }}
         self.assertEqual(cn_display_ms(e), 34.0)
 
-    def test_pingpe_icmp_excluded_by_name(self):
-        # cn40 结果不带 level 字段（仅有 ms），须按名称剔除，不得 US-8ms 失真
+    def test_icmp_review_excluded_by_name(self):
+        # ICMP 复核源结果不带 level 字段（仅有 ms），须按名称剔除，不得失真
         e = {"sources": {"cn40": {"status": "ok", "ok": True, "ms": 8.0}}}
         self.assertIsNone(cn_display_ms(e))
         # 有真实 TCP 源时 cn40 不再干扰取值

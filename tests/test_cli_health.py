@@ -80,8 +80,8 @@ class TestCliHealth(unittest.TestCase):
         self.assertNotRegex(out, r"— ?\d+ 源")
 
     def test_china_help_has_no_stale_source_enum(self):
-        """CN-09：china_check 帮助曾硬编码过期源枚举（cn01/cn27/
-        cn20/cn24/ping.pe，缺十余新源），与 quality_check 同病（R278）。
+        """CN-09：china_check 帮助不再硬编码过期源枚举（曾缺十余新源），
+        与 quality_check 同病（R278）。
         帮助应指向参数表/文档/CI，不再点名。"""
         proc = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "china_check.py"),
@@ -92,7 +92,7 @@ class TestCliHealth(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         out = proc.stdout
-        self.assertNotIn("jkapi.com + ping.pe", out)
+        self.assertIn("--cn-limit", out)
 
     def test_china_help_flags_match_docs(self):
         """R7：china_check --help 与 docs/scripts.md 表格双向对等

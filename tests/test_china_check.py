@@ -427,7 +427,7 @@ class TestMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_cn20_cn24_double_ok_reachable(self):
-        """两只免额单节点源（cn20+jjkapi）双 ok → reachable，无需 cn27。"""
+        """两只免额单节点源（cn20+cn24）双 ok → reachable，无需 cn27。"""
         sources = {
             cc.CN20_CODE: {"status": "ok", "ok": True, "ms": 43},
             cc.CN24_CODE: {"status": "ok", "ok": True, "ms": 11},
@@ -620,7 +620,7 @@ class TestMergeVerdict(unittest.TestCase):
                 cc.merge_verdict(sources)["verdict"], "unreachable")
 
     def test_five_new_multi_sources_strong_reachable(self):
-        """新增五源（boce/ipip/17ce/ping0/cn13）达标 → 独立判 reachable。"""
+        """新增多个复核源达标 → 独立判 reachable。"""
         for name in (cc.CN42_CODE, cc.CN34_CODE, cc.CN43_CODE, cc.CN44_CODE, cc.CN13_CODE):
             src = {"status": "ok", "ok": True, "ms": 50, "level": "tcp",
                    "ok_nodes": 9, "nodes": 10, "ratio": 0.9}
@@ -638,8 +638,7 @@ class TestMergeVerdict(unittest.TestCase):
                 "uncertain", msg=f"{name} weak → uncertain")
 
     def test_per_source_ratio_threshold_wired(self):
-        """各多节点源成功率阈值常量必须真正接线（此前 cn11/cn09/boce/
-        ipip/17ce/ping0/cn13 的 *_MIN_RATIO 定义了却未接入 strong_valid，
+        """各多节点源成功率阈值常量必须真正接线（此前多个复核源的 *_MIN_RATIO 定义了却未接入 strong_valid，
         调高任意常量都会被静默回退到 DEFAULT_MIN_RATIO）。"""
         src = {"status": "ok", "ok": True, "ms": 60, "level": "tcp",
                "ok_nodes": 7, "nodes": 10, "ratio": 0.7}
@@ -696,14 +695,14 @@ class TestMergeVerdict(unittest.TestCase):
             cc._SOURCE_MIN_RATIO[cc.CN35_CODE] = old
 
     def test_cn35_cli_default_stays_opt_in(self):
-        """CN-45：ipip-trace 本地默认 opt-in（0/6），只在 CI 显式启用。"""
+        """CN-45：trace 复核源本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn35")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn35")["concurrency"], 6)
 
     def test_cn34_not_double_scheduled(self):
-        """CN-43 遗留 bug 回归：ipip 专用相之外，五源通用循环不得再跑 ipip
-        （limit≠0 时双跑双写）。"""
+        """CN-43 遗留 bug 回归：专用复核相之外，通用循环不得再跑已独立
+        调度的源（limit≠0 时双跑双写）。"""
         import re
         src = (Path(__file__).resolve().parent.parent / "scripts"
                / "china_check.py").read_text(encoding="utf-8")
@@ -1293,7 +1292,7 @@ class TestCn01MergeVerdict(unittest.TestCase):
         sources = {"cn01": self._s("fail"), cc.CN27_CODE: self._s("error")}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
-    def test_cn01_fail_plus_checkhost_fail(self):
+    def test_cn01_fail_plus_single_fail(self):
         sources = {"cn01": self._s("fail"), cc.CN27_CODE: self._s("fail")}
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
@@ -1609,12 +1608,12 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        def fake_jkapi(ip, port, timeout):
+        def fake_ssl_review(ip, port, timeout):
             return {"status": "ok", "ok": True, "ms": float(port)}
 
         with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
             cc, "cn27_check", side_effect=fake_cn27
-        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_ssl_review), \
                 mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
@@ -1647,12 +1646,12 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        def fake_jkapi(ip, port, timeout):
+        def fake_ssl_review(ip, port, timeout):
             return {"status": "fail", "ok": False, "ms": None, "error": ""}
 
         with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
             cc, "cn27_check", side_effect=fake_cn27
-        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_ssl_review), \
                 mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
@@ -1685,12 +1684,12 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         def fake_cn27(ip, port, limiter, timeout, api_key):
             return {"status": "ok", "ok": True, "ms": 1.0}
 
-        def fake_jkapi(ip, port, timeout):
+        def fake_ssl_review(ip, port, timeout):
             return {"status": "error", "ok": False, "ms": None, "error": "http 500"}
 
         with mock.patch.object(cc, "cn20_check", side_effect=fake_cn20), mock.patch.object(
             cc, "cn27_check", side_effect=fake_cn27
-        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+        ) as mch, mock.patch.object(cc, "cn24_check", side_effect=fake_ssl_review), \
                 mock.patch.object(cc, "cn25_check",
                                   return_value={"status": "error", "ok": False,
                                                 "ms": None, "error": "http 500"}), \
@@ -1787,8 +1786,8 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         self.assertEqual(mch.call_args_list, [])
         self.assertEqual(set(reachable), {"7.7.7.7:80#US"})
 
-    def test_xxscan_second_confirm_skips_cn27(self):
-        """CN-39：免额七源中任 2 ok 即双确认——cn20 ok + cn23 ok
+    def test_scan_second_confirm_skips_cn27(self):
+        """CN-39：免额单节点源中任 2 ok 即双确认——cn20 + cn23 ok
         （余者 error）→ 稀配额 cn27 直接让位。"""
         import unittest.mock as mock
 
@@ -1992,14 +1991,14 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
             seen["keys"] = [key for _, key, _, _, _ in sample]
             return {}
 
-        def fake_jkapi(ip, port, timeout):
+        def fake_ssl_review(ip, port, timeout):
             if ip == "10.2.0.1":
                 return {"status": "ok", "ok": True, "ms": 1.0}
             return {"status": "error", "ok": False, "ms": None, "error": "x"}
 
         with mock.patch.object(cc, "cn20_check",
                                return_value={"status": "ok", "ok": True, "ms": 1.0}), \
-              mock.patch.object(cc, "cn24_check", side_effect=fake_jkapi), \
+              mock.patch.object(cc, "cn24_check", side_effect=fake_ssl_review), \
               mock.patch.object(cc, "cn25_check",
                                 return_value={"status": "error", "ok": False,
                                               "ms": None, "error": "x"}), \
@@ -2035,7 +2034,7 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
             def fake_cn01(sample, args, page_url=None, **kw):
                 # 整站被墙/投毒：每个目标都只返回 error/fail，无任何 ok
                 return {key: {"status": poisoned_status, "ok": False,
-                              "ms": None, "error": "no itdog nodes"}
+                              "ms": None, "error": "no nodes"}
                         for _, key, _, _, _ in sample}
 
             with mock.patch.object(cc, "cn20_check",
@@ -2166,7 +2165,7 @@ class TestBiupingPingSource(unittest.TestCase):
 
 
 class TestAntpingPingSource(unittest.TestCase):
-    """CN-28：antping_ping（同站 ICMP，复用 code=3 分支）。"""
+    """CN-28：同站 ICMP，复用 code=3 分支。"""
 
     def test_strong_reachable(self):
         sources = {cc.CN15_CODE: {
@@ -2205,7 +2204,7 @@ class TestAntpingPingSource(unittest.TestCase):
             cc._SOURCE_MIN_RATIO[cc.CN15_CODE] = old
 
     def test_ws_slot_dispatch(self):
-        """通用 WS slot 须能派发 antping_ping 且只写本源键。"""
+        """通用 WS slot 须能派发同站 ping 槽且只写本源键。"""
         cands = [("1.2.3.4:443#US line", "1.2.3.4:443#US",
                   "1.2.3.4", "443", "US")]
         entries: dict = {"1.2.3.4:443#US": {}}
@@ -2223,7 +2222,7 @@ class TestGlobalpingSource(unittest.TestCase):
     协议细节见 pcb/tests/test_cn36.py）。"""
 
     def test_single_vote_wiring(self):
-        """单节点票：与 cn22（xxapi）交叉即 reachable；孤证 uncertain；双 fail 定罪。"""
+        """单节点票：与同站 status 槽交叉即 reachable；孤证 uncertain；双 fail 定罪。"""
         ok = {"status": "ok", "ok": True, "ms": 5.7, "level": "icmp"}
         xx = {"status": "ok", "ok": True, "ms": 60.0}
         self.assertEqual(
@@ -2239,7 +2238,7 @@ class TestGlobalpingSource(unittest.TestCase):
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
-        """CN-46：globalping 本地默认 opt-in（0/4），只在 CI 显式启用。"""
+        """CN-46：复核 ping 本地默认 opt-in（0/4），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn36")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn36")["concurrency"], 4)
@@ -2266,7 +2265,7 @@ class TestGlobalpingTraceSource(unittest.TestCase):
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
-        """CN-47：globalping-trace 本地默认 opt-in（0/4），只在 CI 显式启用。"""
+        """CN-47：复核 trace 本地默认 opt-in（0/4），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn37")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn37")["concurrency"], 4)
@@ -2293,7 +2292,7 @@ class TestGlobalpingHttpSource(unittest.TestCase):
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
-        """CN-48：globalping-http 本地默认 opt-in（0/4），只在 CI 显式启用。"""
+        """CN-48：复核 http 本地默认 opt-in（0/4），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn38")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn38")["concurrency"], 4)
@@ -2320,14 +2319,14 @@ class TestGlobalpingMtrSource(unittest.TestCase):
             "unreachable")
 
     def test_cli_default_stays_opt_in(self):
-        """CN-49：globalping-mtr 本地默认 opt-in（0/4），只在 CI 显式启用。"""
+        """CN-49：复核 mtr 本地默认 opt-in（0/4），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn39")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn39")["concurrency"], 4)
 
 
 class TestTcptestHttpMergeVerdict(unittest.TestCase):
-    """CN-35：cn32（tcptest http 应用层）并入多节点合成判定。"""
+    """CN-35：应用层复核并入多节点合成判定。"""
 
     def test_merge_strong_weak_fail(self):
         strong = {"status": "ok", "ok": True, "ms": 15.8, "level": "http",
@@ -2422,7 +2421,7 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
 
 
 class TestTcptestPingMergeVerdict(unittest.TestCase):
-    """CN-33：cn31（tcptest ICMP）并入多节点合成判定。"""
+    """CN-33：ICMP 复核并入多节点合成判定。"""
 
     def test_merge_strong_weak_fail(self):
         strong = {"status": "ok", "ok": True, "ms": 15.0, "level": "icmp",
@@ -2515,7 +2514,7 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
 
 
 class TestTcptestTraceMergeVerdict(unittest.TestCase):
-    """CN-40：cn33（tcptest 路由追踪）并入多节点合成判定。"""
+    """CN-40：路由复核并入多节点合成判定。"""
 
     def test_merge_strong_weak_fail(self):
         strong = {"status": "ok", "ok": True, "ms": None, "level": "icmp",
@@ -2980,7 +2979,7 @@ class TestCn01TcpingFallbackGuard(unittest.TestCase):
         def failed_nodes(sample, args, **kwargs):
             return {
                 item[1]: {"status": "error", "ok": False, "ms": None,
-                          "error": "no itdog nodes"}
+                          "error": "no nodes"}
                 for item in sample
             }
 
@@ -3334,7 +3333,7 @@ class TestTcpingcnMtrSource(unittest.TestCase):
             entries["1.2.3.4:443#US"][cc.CN19_CODE]["status"], "ok")
 
     def test_cli_default_stays_opt_in(self):
-        """CN-44：tcpingcn-mtr 本地默认 opt-in（0/6），只在 CI 显式启用。"""
+        """CN-44：mtr 复核本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn19")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn19")["concurrency"], 6)
@@ -3442,7 +3441,7 @@ class TestCiEnabledSources(unittest.TestCase):
     """CN-01：CI 启用的复核源与文档一致（防 CI 行与 README 链漂移）。
 
     cn11（34 大陆省运营商节点 TCPing）毕业为默认启用：CI 传
-    `--cn-limit cn11=200 --cn-concurrency cn11=6`（chinaz 同级预算）；
+    `--cn-limit cn11=200 --cn-concurrency cn11=6`（同级预算）；
     注册表默认仍 0（本地按需显式启用）。"""
 
     def test_ci_enables_cn11(self):
@@ -3499,39 +3498,38 @@ class TestCiEnabledSources(unittest.TestCase):
                 f"README 链与 CI 配额不一致：{name}")
 
     def test_cn04_cli_default_stays_opt_in(self):
-        """CN-27：aa1ping 本地默认 opt-in（0/6），只在 CI 显式启用；
-        与 cn11/biuding 毕业路径一致。"""
+        """CN-27：四源复核本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn04")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn04")["concurrency"], 6)
 
     def test_cn05_cli_default_stays_opt_in(self):
-        """CN-50：aa1http 本地默认 opt-in（0/6），只在 CI 显式启用。"""
+        """CN-50：同族复核本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn05")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn05")["concurrency"], 6)
 
     def test_cn15_cli_default_stays_opt_in(self):
-        """CN-28：antping-ping 本地默认 opt-in（0/8），只在 CI 显式启用。"""
+        """CN-28：同站 ping 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn15")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn15")["concurrency"], 8)
 
     def test_cn31_cli_default_stays_opt_in(self):
-        """CN-33：tcptest-ping 本地默认 opt-in（0/8，与 TCP 同并发），
+        """CN-33：复核 ping 本地默认 opt-in（0/8，与 TCP 同并发），
         只在 CI 显式启用（400/20）。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn31")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn31")["concurrency"], 8)
 
     def test_cn32_cli_default_stays_opt_in(self):
-        """CN-35：tcptest-http 本地默认 opt-in（0/8），只在 CI 显式启用。"""
+        """CN-35：复核 http 本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn32")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn32")["concurrency"], 8)
 
     def test_cn33_cli_default_stays_opt_in(self):
-        """CN-40：tcptest-trace 本地默认 opt-in（0/8），只在 CI 显式启用。"""
+        """CN-40：trace 复核本地默认 opt-in（0/8），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn33")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn33")["concurrency"], 8)
@@ -3543,7 +3541,7 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(reg.by_code("cn10")["concurrency"], 8)
 
     def test_cn12_cli_default_stays_opt_in(self):
-        """CN-36：ce98-ping 本地默认 opt-in（0/6），只在 CI 显式启用。"""
+        """CN-36：同站 ping 复核本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn12")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn12")["concurrency"], 6)
@@ -4083,7 +4081,7 @@ class TestSlotPhaseDispatchPerCode(unittest.TestCase):
 
 class TestArgparseDestConsumed(unittest.TestCase):
     """R18：argparse 每个 dest 必须被消费（直接读取/字符串引用/插件透传
-    白名单三者居其一；死旗标 --itdog-tcping-nodes/--17ce-token 即因此类
+    白名单三者居其一；死旗标（协议特有参数）即因此类
     审计发现，不再复发）。"""
 
     PASSTHROUGH = {"cn01_nodes", "cn01_batch_size", "cn01_concurrency",

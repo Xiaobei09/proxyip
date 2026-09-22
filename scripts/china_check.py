@@ -17,55 +17,34 @@
   （strict，不含历史兜底）
 - ``data/valid/all.txt`` / ``all_ltd.txt`` — 可达者追加 ``-CN`` 备注
 
-检测分层（均为无账号/免登录）：
+检测分层（均为无账号/免登录；每层通道身份/端点在 PCB 私有包中）：
 
-- L2 批量通道 cn01 实测（主源，全量，PCB 插件）：每任务 5 目标 × 24 节点
-  （电信/联通/移动各 8，池子 ~80/ISP，跨省等距采样），经 WebSocket 收结果，
-  TCP 连通即判可达；节点返回 http_code>0 时计应用层确认（level=http）——
-  TLS 端口上明文探测会收到 CF 的 400 响应，同样证明完整数据往返无 TCP 层干扰。
-- L2 cn02 补测（降级通道）：cn01 对某目标失败/被限时，改用纯 TCPING 复测——
-  节点池大得多（每 ISP ~75-88 个，默认取 8×3=24 节点），结果记为独立多节点源
-  ``cn02``。
-- L2 cn03 补测（CN-26，ICMP 主机存活通道）：同上触发条件，改用 ICMP 复测——
-  节点池电信 87 / 联通 83 / 移动 89（默认取 8×3=24 节点），结果记
-  为独立多节点源 ``cn03``（``level`` 归一为 ``icmp`` 且不产
+- L2 批量通道 cn01 实测（主源，全量，PCB 插件）：多节点、多运营商跨省
+  等距采样，经 WebSocket 收结果，TCP 连通即判可达；节点返回 http_code>0
+  时计应用层确认（level=http）——TLS 端口上明文探测收到的非 200 响应同样
+  证明完整数据往返无 TCP 层干扰。
+- L2 cn02 补测（降级通道）：cn01 对某目标失败/被限时，改用纯 TCP 复测，
+  节点池更大（默认同口 8×3=24 节点），结果记为独立多节点源 ``cn02``。
+- L2 cn03 补测（ICMP 主机存活通道）：同上触发条件，改用 ICMP 复测——
+  结果记为独立多节点源 ``cn03``（``level`` 归一为 ``icmp`` 且不产
   ``isp_ms``，ICMP 不得进展示延迟，多节点 ICMP 源同口径）。
-- L2 单节点实测（并发）：`cn27`（呼和浩特阿里云 1 节点，需控速）+
-  `cn20`（北京节点 TCP，免 key）+ `cn21`（CN-29：山东枣庄
-  BGP 节点 ICMP，免 key，`level=icmp`，echo 校验防垃圾回显）+
-  `cn24`（宁波电信 TCP，免 key）+
-  `cn25`（同站同节点 ICMP 主机存活，免 key，`level=icmp`，
-  不进延迟显示/不产 isp_ms）+   `cn26`（CN-37：同站同节点 TLS
-  握手，免 key，双镜像，`level="tcp"` 保守，无 ms，只作布尔见证）+
-  `cn22`（CN-38：同站 HTTP 状态码，免 key，
-  `level="http"`，无 ms）+ `cn23`（CN-39：同站 8 端口
-  扫描，仅 443 键产出证据，`level="tcp"`，无 ms）+
-  `cn28`（CN-31：同节点 ICMP，
-  仅 TCP 判 fail 时追加消歧，`level=icmp`，共用 250/h 配额）+
-  `cn29`（CN-32：同节点 HTTPS 应用层确认，首个 http 级
-  单节点源，仅 TCP-ok 且其余免额 0 ok 时追加猎取第二确认，共用配额）——
-  十只免额单节点源中任 2 ok 即双确认（single_ok≥2→reachable），cn27
-  的 250/h 配额不再是可达判定的瓶颈。
-- L3 多节点复核（有界并发小样本）：`cn40`（约 13 个大陆节点，≥7/13 可达即判可达）；
-  `cn30`（免费 REST，~146 大陆节点取子集做 TCP 探测，结果按节点成功率
-  判定）；`cn11`（socket.io-WS，34 个大陆各省运营商节点持续 TCPing，零 key）；
-  `cn09`（同站多节点 TCPing，HTTP SSE 约 39 个 ISP×节点测量单元，零 key）；
-  `cn10`（CN-34，同站 ICMP，`level=icmp`，不产 `isp_ms`）；可选
-  `cn41`（多运营商，需站长签发 token，缺则自动跳过）。
-  `cn04`（CN-27：独立运营商 28 城三网 TCPing，WS 纯 JSON 无鉴权，
-  节点原生 per-ISP，端口直连）。
-  `cn12`（CN-36：同站 ICMP，35 节点 socket.io，
-  结果帧与 TCP 同形，`level=icmp`，不产 `isp_ms`）。
-  `cn32`（CN-35：同站应用层，`status>0` 即确认，
-  `level=http`，ms 取 connect_ms；与 TCP 同节点采样）。
-  `cn17`（~163 TCP 节点 + CN-30 同通道 `cn18` ICMP、
-  `cn19` MTR，SHA-256 PoW + ALTCHA 会话复用纯 Python，真实端口直连）。
-- 已评估并放弃：`api.hostmonit.com/check_port`（已 404）。
-- 2026-09 穷尽复核（CN-19/21/22）：cn42（API 404＋验证墙）、cn34 前身接口（POST 405）、cn43（路由迁移）、cn44（Turnstile＋端点 404）、cn13
-  （TLS 无 SAN）、aizhan（AliyunCaptcha）、站长测速（captcha＋JS 内聚）、
-  cn27.net（零 CN）、dnschecker（403）、pingtool（404 无 CN）、
-  oioweb/uomg（TLS 坏）。CN-25/26/27 复核见 docs/logic.md（jk 同站第二协议/
-   cn03 已接入；cn42/cn43/aizhan 经逆向确认仍阻塞；ping.sx 零 CN）。
+- L2 单节点实测（并发）：`cn27`（单节点受限速）搭配 `cn20`（TCP）`、
+  `cn21`（ICMP，echo 校验防垃圾回显）、`cn22`（HTTP 状态码，`level="http"`）、
+  `cn23`（多端口扫描，仅授权端口产出证据）、`cn24`（TCP）、
+  `cn25`（ICMP 主机存活，不进延迟/不产 isp_ms）、`cn26`（TLS 握手，
+  `level="tcp"` 保守，只作布尔见证）、`cn28`（ICMP 消歧）、
+  `cn29`（HTTPS 应用层确认）——多只免额单节点源中任 2 ok 即双确认
+  （single_ok≥2→reachable），受限速的 cn27 不再是判定瓶颈。
+- L3 多节点复核（有界并发小样本）：`cn40`（约 13 个大陆节点，≥7/13 可达
+  即判可达）；`cn30`（免费 REST，大陆节点取子集做 TCP 探测，按节点成功率
+  判定）；`cn11`（持续 TCPing，多运营商节点）；`cn09`（多节点 TCPing，
+  HTTP SSE 测量单元）；`cn10`/`cn12`/`cn15`（ICMP，`level=icmp`，不产
+  `isp_ms`）；可选 `cn41`（多运营商，需站长签发 token，缺则自动跳过）；
+  `cn04`（独立运营商多城三网 TCPing，节点原生 per-ISP，端口直连）；
+  `cn32`（应用层确认，`status>0` 即确认，`level=http`，ms 取 connect_ms）；
+  `cn17`（多 TCP 节点 + 同通道 `cn18` ICMP、`cn19` MTR）。
+- 已于历史轮次评估并放弃若干通道（API 404 / 验证墙 / 路由迁移 / 无中国
+  节点等）；完整身份与弃用记录见 PCB 文档，公开树不展开。
 
 保守判定逻辑（merge_verdict）：
      多节点源（cn40/cn01/cn02/cn03/cn41/cn30/cn31/cn32/cn33/cn06/cn07/cn08/cn14/cn15/
@@ -146,16 +125,16 @@ from checks_bundle import load_plugin as _load_pcb_plugin
 _CN01_BUNDLE = False
 try:
     _cn01 = _load_pcb_plugin("cn01")
-    CN01_BATCH_SIZE = _cn01.ITDOG_BATCH_SIZE
-    CN01_CONCURRENCY = _cn01.ITDOG_CONCURRENCY
-    CN01_NODES_PER_ISP = _cn01.ITDOG_NODES_PER_ISP
-    CN01_PACING = _cn01.ITDOG_PACING
-    CN03_NODES_PER_ISP = _cn01.ITDOG_PING_NODES_PER_ISP
-    CN03_PAGE_URL = _cn01.ITDOG_PING_URL
-    CN01_TASK_TIMEOUT = _cn01.ITDOG_TASK_TIMEOUT
-    CN02_NODES_PER_ISP = _cn01.ITDOG_TCPING_NODES_PER_ISP
-    CN02_PAGE_URL = _cn01.ITDOG_TCPING_URL
-    cn01_batch_run = _cn01.itdog_batch_run
+    CN01_BATCH_SIZE = _cn01.BATCH_SIZE
+    CN01_CONCURRENCY = _cn01.CONCURRENCY
+    CN01_NODES_PER_ISP = _cn01.NODES_PER_ISP
+    CN01_PACING = _cn01.PACING
+    CN03_NODES_PER_ISP = _cn01.PING_NODES_PER_ISP
+    CN03_PAGE_URL = _cn01.PING_URL
+    CN01_TASK_TIMEOUT = _cn01.TASK_TIMEOUT
+    CN02_NODES_PER_ISP = _cn01.TCPING_NODES_PER_ISP
+    CN02_PAGE_URL = _cn01.TCPING_URL
+    cn01_batch_run = _cn01.batch_run
     _CN01_BUNDLE = True
 except Exception:
     CN01_BATCH_SIZE = 5
@@ -176,8 +155,8 @@ del _WS_MAX_BUF
 _CN04_BUNDLE = False
 try:
     _cn04 = _load_pcb_plugin("cn04")
-    cn04_check = _cn04.aa1ping_check
-    cn05_check = _cn04.aa1http_check
+    cn04_check = _cn04.ping_check
+    cn05_check = _cn04.http_check
     _CN04_BUNDLE = True
 except Exception:
     cn04_check = None
@@ -186,7 +165,7 @@ except Exception:
 _CN06_BUNDLE = False
 try:
     _cn06 = _load_pcb_plugin("cn06")
-    cn06_check = _cn06.tcpping_ws_check
+    cn06_check = _cn06.check
     CN06_CODE = _cn06.CODE
     _CN06_BUNDLE = True
 except Exception:
@@ -198,9 +177,9 @@ except Exception:
 _CN07_BUNDLE = False
 try:
     _cn07 = _load_pcb_plugin("cn07")
-    cn07_check = _cn07.coffee_check
+    cn07_check = _cn07.check
     CN07_CODE = _cn07.CODE
-    CN07_CONCURRENCY = _cn07.COFFEE_CONCURRENCY
+    CN07_CONCURRENCY = _cn07.CONCURRENCY
     _CN07_BUNDLE = True
 except Exception:
     cn07_check = None
@@ -234,9 +213,9 @@ CN27_HOUR_CAP = 250
 _CN27_BUNDLE = False
 try:
     _cn27 = _load_pcb_plugin("cn27")
-    cn27_check = _cn27.check_host_check
-    cn28_check = _cn27.checkhost_ping_check
-    cn29_check = _cn27.checkhost_http_check
+    cn27_check = _cn27.tcp_check
+    cn28_check = _cn27.ping_check
+    cn29_check = _cn27.http_check
     RateLimiter = _cn27.RateLimiter
     RateLimited = _cn27.RateLimited
     CN27_CODE = _cn27.CODE
@@ -259,10 +238,10 @@ except Exception:
 _CN20_BUNDLE = False
 try:
     _cn20 = _load_pcb_plugin("cn20")
-    cn20_check = _cn20.xxapi_check
-    cn21_check = _cn20.xxping_check
-    cn22_check = _cn20.xxstatus_check
-    cn23_check = _cn20.xxscan_check
+    cn20_check = _cn20.tcp_check
+    cn21_check = _cn20.ping_check
+    cn22_check = _cn20.status_check
+    cn23_check = _cn20.scan_check
     CN20_CODE = _cn20.CODE
     CN21_CODE = _cn20.CODE_PING
     CN22_CODE = _cn20.CODE_STATUS
@@ -285,9 +264,9 @@ except Exception:
 _CN24_BUNDLE = False
 try:
     _cn24 = _load_pcb_plugin("cn24")
-    cn24_check = _cn24.jkapi_check
-    cn25_check = _cn24.jkping_check
-    cn26_check = _cn24.jkssl_check
+    cn24_check = _cn24.tcp_check
+    cn25_check = _cn24.ping_check
+    cn26_check = _cn24.ssl_check
     CN24_CODE = _cn24.CODE
     CN25_CODE = _cn24.CODE_PING
     CN26_CODE = _cn24.CODE_SSL
@@ -307,7 +286,7 @@ except Exception:
 _CN40_BUNDLE = False
 try:
     _cn40 = _load_pcb_plugin("cn40")
-    cn40_check = _cn40.pingpe_check
+    cn40_check = _cn40.check
     CN40_CODE = _cn40.CODE
     _CN40_BUNDLE = True
 except Exception:
@@ -324,7 +303,7 @@ from china_engine import (
 _CN41_BUNDLE = False
 try:
     _cn41 = _load_pcb_plugin("cn41")
-    cn41_check = _cn41.tcpping_check
+    cn41_check = _cn41.check
     CN41_CODE = _cn41.CODE
     _CN41_BUNDLE = True
 except Exception:
@@ -340,9 +319,9 @@ except Exception:
 _CN30_BUNDLE = False
 try:
     _cn30 = _load_pcb_plugin("cn30")
-    cn30_fetch_nodes = _cn30.tcptest_fetch_nodes
-    cn30_pick_nodes = _cn30.tcptest_pick_nodes
-    cn30_check = _cn30.tcptest_check
+    cn30_fetch_nodes = _cn30.fetch_nodes
+    cn30_pick_nodes = _cn30.pick_nodes
+    cn30_check = _cn30.tcp_check
     CN30_CODE = _cn30.CODE
     CN31_CODE = _cn30.CODE_PING
     CN32_CODE = _cn30.CODE_HTTP
@@ -371,7 +350,7 @@ except Exception:
 _CN08_BUNDLE = False
 try:
     _cn08 = _load_pcb_plugin("cn08")
-    cn08_check = _cn08.pingloc_check
+    cn08_check = _cn08.check
     CN08_CODE = _cn08.CODE
     _CN08_BUNDLE = True
 except Exception:
@@ -380,8 +359,8 @@ except Exception:
 
 try:
     _cn14 = _load_pcb_plugin("cn14")
-    cn14_check = _cn14.antping_check
-    cn15_check = _cn14.antping_ping_check
+    cn14_check = _cn14.tcp_check
+    cn15_check = _cn14.ping_check
     CN14_CODE = _cn14.CODE
     CN15_CODE = _cn14.CODE_PING
 except Exception:
@@ -392,7 +371,7 @@ except Exception:
 
 try:
     _cn16 = _load_pcb_plugin("cn16")
-    cn16_check = _cn16.chinaz_check
+    cn16_check = _cn16.check
     CN16_CODE = _cn16.CODE
 except Exception:
     cn16_check = None
@@ -404,9 +383,9 @@ except Exception:
 _CN17_BUNDLE = False
 try:
     _cn17 = _load_pcb_plugin("cn17")
-    cn17_check = _cn17.tcpingcn_check
-    cn18_check = _cn17.tcpingcn_ping_check
-    cn19_check = _cn17.tcpingcn_mtr_check
+    cn17_check = _cn17.tcp_check
+    cn18_check = _cn17.ping_check
+    cn19_check = _cn17.mtr_check
     CN17_CODE = _cn17.CODE
     CN18_CODE = _cn17.CODE_PING
     CN19_CODE = _cn17.CODE_MTR
@@ -424,8 +403,8 @@ except Exception:
 _CN11_BUNDLE = False
 try:
     _cn11 = _load_pcb_plugin("cn11")
-    cn11_check = _cn11.ce98_check
-    cn12_check = _cn11.ce98_ping_check
+    cn11_check = _cn11.tcp_check
+    cn12_check = _cn11.ping_check
     CN11_CODE = _cn11.CODE
     CN12_CODE = _cn11.CODE_PING
     _CN11_BUNDLE = True
@@ -443,8 +422,8 @@ except Exception:
 _CN09_BUNDLE = False
 try:
     _cn09 = _load_pcb_plugin("cn09")
-    cn09_check = _cn09.biuping_check
-    cn10_check = _cn09.biuping_ping_check
+    cn09_check = _cn09.tcp_check
+    cn10_check = _cn09.ping_check
     CN09_CODE = _cn09.CODE_TCPING
     CN10_CODE = _cn09.CODE_PING
     _CN09_BUNDLE = True
@@ -462,10 +441,10 @@ except Exception:
 _CN36_BUNDLE = False
 try:
     _cn36 = _load_pcb_plugin("cn36")
-    cn36_check = _cn36.globalping_check
-    cn37_check = _cn36.globalping_trace_check
-    cn38_check = _cn36.globalping_http_check
-    cn39_check = _cn36.globalping_mtr_check
+    cn36_check = _cn36.ping_check
+    cn37_check = _cn36.trace_check
+    cn38_check = _cn36.http_check
+    cn39_check = _cn36.mtr_check
     CN36_CODE = _cn36.CODE
     CN37_CODE = _cn36.CODE_TRACE
     CN38_CODE = _cn36.CODE_HTTP
@@ -507,8 +486,8 @@ except Exception:
 _CN34_BUNDLE = False
 try:
     _cn34 = _load_pcb_plugin("cn34")
-    cn34_check = _cn34.ipip_check
-    cn35_check = _cn34.ipip_trace_check
+    cn34_check = _cn34.tcp_check
+    cn35_check = _cn34.trace_check
     CN34_CODE = _cn34.CODE
     CN35_CODE = _cn34.CODE_TRACE
     _CN34_BUNDLE = True
@@ -521,9 +500,9 @@ except Exception:
 _LEGACY_REVIEW_BUNDLE = False
 try:
     _cn42 = _load_pcb_plugin("cn42")
-    cn42_check = _cn42.boce_check
-    cn43_check = _cn42.seventeen_check
-    cn44_check = _cn42.ping0_check
+    cn42_check = _cn42.check1
+    cn43_check = _cn42.check2
+    cn44_check = _cn42.check3
     CN42_CODE = _cn42.CODE_BOCE
     CN43_CODE = _cn42.CODE_17CE
     CN44_CODE = _cn42.CODE_PING0
@@ -541,7 +520,7 @@ except Exception:
 _CN13_BUNDLE = False
 try:
     _cn13 = _load_pcb_plugin("cn13")
-    cn13_check = _cn13.wansui_check
+    cn13_check = _cn13.check
     CN13_CODE = _cn13.CODE
     _CN13_BUNDLE = True
 except Exception:
@@ -1486,8 +1465,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     # 缓存于插件）：只投「当前尚未被判可达」的键，先于 cn40（贵）跑，
     # 确认过的键会让位。--cn-limit cn30=-1 表示全池未定键全覆盖（uncertain/
     # 错误健全部扫过，让每个键都有资格走向 reachable 或 unreachable 定论）。
-    # --tcptest-ping-limit（CN-33）为 cn31 ICMP 通道（type=ping，无端口概念，
-    # level=icmp，不产 isp_ms），跑在 TCP 相之后（只投 TCP 仍未定论者）。
+    # 同族 ICMP 复核通道（type=ping，无端口概念，level=icmp，不产 isp_ms）
+    # 跑在 TCP 相之后（只投 TCP 仍未定论者）。
     cn30_nodes = []
     cn30_uuids = []
     cn30_operators: dict | None = None
@@ -1646,9 +1625,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             item for item in sample if needs_probe(entries, item[1])
         ]
 
-    # 新增四源多节点复核（全部无 key、大陆多节点）：cn08（HTTP+SSE）、
-    # antping（JWT+WS）、cn17（PoW+WS 纯 TCP）、chinaz（token+WS 纯 ICMP）。
-    # 各自按 --cn-limit CODE=N 投递（默认 0=跳过，-1=全部未定键）；均为多节点源，
+    # 新增多节点复核（全部无 key、大陆多节点）：各自按 --cn-limit CODE=N 投递
+    # （默认 0=跳过，-1=全部未定键）；均为多节点源，
     # 达标即可独立判 reachable，整站失败也可与单节点源联动判 unreachable。
 
     cn08_limit = cn_opt(args, "cn08", "limit",
@@ -1683,7 +1661,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn14 review: skipped (limit=0)", file=sys.stderr)
 
-    # antping_ping（CN-28）：同站 ICMP，主独立判 reachable；默认 0=跳过。
+    # cn15 ICMP 复核：独立判 reachable；默认 0=跳过。
     cn15_limit = cn_opt(args, "cn15", "limit",
                       default=0)
     if cn15_limit != 0:
@@ -1820,7 +1798,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn09 review: skipped (limit=0)", file=sys.stderr)
 
-    # biuping_ping（CN-34）：同站 ICMP，主独立判 reachable；默认 0=跳过。
+    # cn10 ICMP 复核：主独立判 reachable；默认 0=跳过。
     cn10_limit = cn_opt(args, "cn10", "limit",
                       default=0)
     if cn10_limit != 0:
