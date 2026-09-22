@@ -807,393 +807,49 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qr.source_score("dnsbl", {"is_listed": True}), 70)
         self.assertIsNone(qr.source_score("dnsbl", {}))
 
-    def test_dnsbl_lookup_parse(self):
-        """SBL(2/3)/XBL(4/5)→listed；PBL(6/7)/CSS(8/9)/无应答→None。"""
-        cases = [
-            (["127.0.0.2"], {"is_listed": True, "dnsbl_code": 2}),
-            (["127.0.0.3"], {"is_listed": True, "dnsbl_code": 3}),
-            (["127.0.0.4"], {"is_listed": True, "dnsbl_code": 4}),
-            (["127.0.0.5"], {"is_listed": True, "dnsbl_code": 5}),
-            (["127.0.0.2", "127.0.0.4"], {"is_listed": True, "dnsbl_code": 2}),
-            (["127.0.0.6"], None),  # PBL 忽略（邮件策略网段）
-            (["127.0.0.7"], None),
-            (["127.0.0.8"], None),  # CSS snowshoe 弱信号忽略
-            (["127.0.0.9"], None),
-            ([], None),             # NXDOMAIN/无应答 = 未列出
-        ]
-        for answers, expect in cases:
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertEqual(qr.dnsbl_lookup_sync("8.8.8.8"), expect)
-        # 非 IPv4 直接短路：不触发 DoH 查询
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.dnsbl_lookup_sync("2001:db8::1"))
-            self.assertIsNone(qr.dnsbl_lookup_sync("not-an-ip"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.2"]) as m:
-            qr.dnsbl_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-
-    def test_spamcop_lookup_sync_codes(self):
-        """R268：SpamCop 命中码 127.0.0.2 → listed；其余/空 → None。"""
-        for answers, expect in [
-            (["127.0.0.2"], {"is_listed": True, "dnsbl_code": 2}),
-            (["127.0.0.1"], None),   # 反解失败码忽略
-            (["127.0.0.4"], None),   # 非 SpamCop 码
-            ([], None),              # 未列出
-        ]:
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertEqual(qr.spamcop_lookup_sync("8.8.8.8"), expect)
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.spamcop_lookup_sync("2001:db8::1"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.2"]) as m:
-            qr.spamcop_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-        # 与 dnsbl 同维：listed 信号与罚分口径一致。
-        self.assertEqual(
-            qr._flag_opinions("spamcop", {"is_listed": True}),
-            {"listed": True})
-        self.assertEqual(qr.source_score("spamcop", {"is_listed": True}), 70)
-        self.assertIsNone(qr.source_score("spamcop", {}))
-
-    def test_dronebl_lookup_sync_codes(self):
-        """R269：DroneBL 命中码 2~13 → listed；其余/空 → None。"""
-        for code in (2, 3, 5, 7, 13):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query",
-                    return_value=[f"127.0.0.{code}"]):
-                self.assertEqual(
-                    qr.dronebl_lookup_sync("8.8.8.8"),
-                    {"is_listed": True, "dnsbl_code": code})
-        for answers, expect in [
-            (["127.0.0.1"], None),  # 非入榜码
-            ([], None),              # 未列出
-        ]:
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertEqual(qr.dronebl_lookup_sync("8.8.8.8"), expect)
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.dronebl_lookup_sync("2001:db8::1"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.3"]) as m:
-            qr.dronebl_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-        self.assertEqual(
-            qr._flag_opinions("dronebl", {"is_listed": True}),
-            {"listed": True})
-        self.assertEqual(qr.source_score("dronebl", {"is_listed": True}), 70)
-        self.assertIsNone(qr.source_score("dronebl", {}))
-
-    def test_default_sources_add_dronebl_drop_iplocation(self):
-        """R269：每轮一增一减——默认源含 dronebl、不含 iplocation。"""
-        self.assertIn("dronebl", qr.DEFAULT_REP_SOURCES)
-        self.assertNotIn("iplocation", qr.DEFAULT_REP_SOURCES)
-        self.assertIn("dronebl", qr.REPUTATION_WEIGHTS)
-        self.assertIn("iplocation", qr.REPUTATION_WEIGHTS)
-
-    def test_spamrats_lookup_sync_codes(self):
-        """R270/R271：SpamRats 命中码 2/3 → listed；DYN 4/其余/空 → None；
-        且 listed 信号必须进入共识投票与计分（R271 补接分支的回归锁）。"""
-        for code in (2, 3):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query",
-                    return_value=[f"127.0.0.{code}"]):
-                self.assertEqual(
-                    qr.spamrats_lookup_sync("8.8.8.8"),
-                    {"is_listed": True, "dnsbl_code": code})
-        for answers in (["127.0.0.1"], ["127.0.0.4"], []):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertIsNone(qr.spamrats_lookup_sync("8.8.8.8"))
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.spamrats_lookup_sync("2001:db8::1"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.2"]) as m:
-            qr.spamrats_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-        # opt-in：有权重/pacing/派发但不进默认。
-        self.assertNotIn("spamrats", qr.DEFAULT_REP_SOURCES)
-        self.assertIn("spamrats", qr.REPUTATION_WEIGHTS)
-        self.assertIn("spamrats", qr.SOURCE_PACING)
-        # 计分接线：与 spamcop/dronebl 同维同分。
-        self.assertEqual(
-            qr._flag_opinions("spamrats", {"is_listed": True}),
-            {"listed": True})
-        self.assertEqual(qr._flag_opinions("spamrats", {}), {})
-        self.assertEqual(qr.source_score("spamrats", {"is_listed": True}), 70)
-        self.assertIsNone(qr.source_score("spamrats", {}))
-
-    def test_sorbs_lookup_sync_codes(self):
-        """R271：SORBS 新增 opt-in 源——命中码 2/7 → listed；动态住宅段
-        4/8/9/其余/空 → None；listed 信号进入共识投票与计分。"""
-        for code in (2, 7):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query",
-                    return_value=[f"127.0.0.{code}"]):
-                self.assertEqual(
-                    qr.sorbs_lookup_sync("8.8.8.8"),
-                    {"is_listed": True, "dnsbl_code": code})
-        for answers in (["127.0.0.1"], ["127.0.0.4"], ["127.0.0.8"],
-                        ["127.0.0.9"], []):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertIsNone(qr.sorbs_lookup_sync("8.8.8.8"))
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.sorbs_lookup_sync("2001:db8::1"))
-            self.assertIsNone(qr.sorbs_lookup_sync("not-an-ip"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.2"]) as m:
-            qr.sorbs_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-        self.assertNotIn("sorbs", qr.DEFAULT_REP_SOURCES)
-        self.assertIn("sorbs", qr.REPUTATION_WEIGHTS)
-        self.assertEqual(qr.REPUTATION_WEIGHTS["sorbs"], 5)
-        self.assertIn("sorbs", qr.SOURCE_PACING)
-        self.assertEqual(
-            qr._flag_opinions("sorbs", {"is_listed": True}),
-            {"listed": True})
-        self.assertEqual(qr._flag_opinions("sorbs", {}), {})
-        self.assertEqual(qr.source_score("sorbs", {"is_listed": True}), 70)
-        self.assertIsNone(qr.source_score("sorbs", {}))
-
-    def test_dnsbl_family_consensus_listed(self):
-        """R271：dnsbl/spamcop/dronebl/spamrats/sorbs 五家命中 listed 时
-        共识均投 listed 票（任一漏接即回归失败）。R272 起含 uceprotect
-        共六家，R273 起含 psbl 共七家。"""
+    def test_dnsbl_family_scoring_semantics(self):
+        """DNSBL 七源（dnsbl/spamcop/dronebl/spamrats/sorbs/uceprotect/
+        psbl）命中 listed → 共识 listed 票与 source_score 70；未命中→无
+        意见/无分（评分语义公开契约；解析实现随 PCB rep_dnsbl）。"""
         for name in ("dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
                      "uceprotect", "psbl"):
             self.assertEqual(
                 qr._flag_opinions(name, {"is_listed": True}),
                 {"listed": True}, name)
+            self.assertEqual(qr._flag_opinions(name, {}), {}, name)
             self.assertEqual(
                 qr.source_score(name, {"is_listed": True}), 70, name)
+            self.assertIsNone(qr.source_score(name, {}), name)
 
-    def test_uceprotect_lookup_sync_codes(self):
-        """R272：UCEPROTECT L1 新增 opt-in 源——命中码仅 2 → listed；
-        其余/空 → None；listed 信号进入共识投票与计分。test-point
-        2.0.0.127 经 DoH 实测回包 127.0.0.2（分区存活实证）。"""
-        with unittest.mock.patch.object(
-                qr, "_doh_query", return_value=["127.0.0.2"]):
-            self.assertEqual(
-                qr.uceprotect_lookup_sync("8.8.8.8"),
-                {"is_listed": True, "dnsbl_code": 2})
-        for answers in (["127.0.0.1"], ["127.0.0.3"], ["127.0.0.4"], []):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertIsNone(qr.uceprotect_lookup_sync("8.8.8.8"))
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.uceprotect_lookup_sync("2001:db8::1"))
-            self.assertIsNone(qr.uceprotect_lookup_sync("not-an-ip"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.2"]) as m:
-            qr.uceprotect_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-        self.assertNotIn("uceprotect", qr.DEFAULT_REP_SOURCES)
-        self.assertIn("uceprotect", qr.REPUTATION_WEIGHTS)
-        self.assertEqual(qr.REPUTATION_WEIGHTS["uceprotect"], 5)
-        self.assertIn("uceprotect", qr.SOURCE_PACING)
-        self.assertEqual(
-            qr._flag_opinions("uceprotect", {"is_listed": True}),
-            {"listed": True})
-        self.assertEqual(qr._flag_opinions("uceprotect", {}), {})
-        self.assertEqual(
-            qr.source_score("uceprotect", {"is_listed": True}), 70)
-        self.assertIsNone(qr.source_score("uceprotect", {}))
-
-    def test_psbl_lookup_sync_codes(self):
-        """R273：PSBL 新增 opt-in 源——命中码仅 2 → listed；其余/空 →
-        None；listed 信号进入共识投票与计分。test-point 2.0.0.127 经
-        DoH 实测回包 127.0.0.2（分区存活实证）。"""
-        with unittest.mock.patch.object(
-                qr, "_doh_query", return_value=["127.0.0.2"]):
-            self.assertEqual(
-                qr.psbl_lookup_sync("8.8.8.8"),
-                {"is_listed": True, "dnsbl_code": 2})
-        for answers in (["127.0.0.1"], ["127.0.0.3"], []):
-            with unittest.mock.patch.object(
-                    qr, "_doh_query", return_value=answers):
-                self.assertIsNone(qr.psbl_lookup_sync("8.8.8.8"))
-        with unittest.mock.patch.object(qr, "_doh_query") as m:
-            self.assertIsNone(qr.psbl_lookup_sync("2001:db8::1"))
-            self.assertIsNone(qr.psbl_lookup_sync("not-an-ip"))
-            m.assert_not_called()
-        with unittest.mock.patch.object(qr, "_doh_query",
-                                        return_value=["127.0.0.2"]) as m:
-            qr.psbl_lookup_sync("1.2.3.4")
-            self.assertEqual(
-                m.call_args[0][0], "4.3.2.1.[REDACTED_PRIVATE_RESOURCE]")
-        self.assertNotIn("psbl", qr.DEFAULT_REP_SOURCES)
-        self.assertIn("psbl", qr.REPUTATION_WEIGHTS)
-        self.assertEqual(qr.REPUTATION_WEIGHTS["psbl"], 5)
-        self.assertIn("psbl", qr.SOURCE_PACING)
-        self.assertEqual(
-            qr._flag_opinions("psbl", {"is_listed": True}),
-            {"listed": True})
-        self.assertEqual(qr._flag_opinions("psbl", {}), {})
-        self.assertEqual(qr.source_score("psbl", {"is_listed": True}), 70)
-        self.assertIsNone(qr.source_score("psbl", {}))
-
-    def test_dnsbl_lookup_shared_skeleton(self):
-        """R273：七源 lookup 共用骨架——多应答取首个命中码、非 127 网段
-        跳过、非法码容错；spamcop 旧精确匹配语义等价（单码 2）。"""
-        with unittest.mock.patch.object(
-                qr, "_doh_query",
-                return_value=["8.8.8.8", "127.0.0.9", "not-an-ip",
-                              "127.0.0.2"]):
-            self.assertEqual(
-                qr.spamcop_lookup_sync("1.2.3.4"),
-                {"is_listed": True, "dnsbl_code": 2})
-        with unittest.mock.patch.object(
-                qr, "_doh_query",
-                return_value=["127.0.0.3", "127.0.0.2"]):
-            self.assertEqual(
-                qr.dnsbl_lookup_sync("1.2.3.4"),
-                {"is_listed": True, "dnsbl_code": 3})
-
-    def test_dnsbl_skeleton_constants_cleanup(self):
-        """R274：骨架常量锁——dnsbl 码表常量化；sorbs pacing 与其余
-        DNSBL 归一 (6, 0.15)；旧 SPAMCOP_LISTED_CODE 单码常量已移除
-        （语义由薄包装 frozenset((2,)) 承载）。"""
-        self.assertEqual(qr.DNSBL_LISTED_CODES, frozenset((2, 3, 4, 5)))
-        for name in ("spamcop", "dronebl", "spamrats", "sorbs",
-                     "uceprotect", "psbl"):
-            self.assertEqual(qr.SOURCE_PACING[name], (6, 0.15), name)
-        # dnsbl 例外：主源上限 12000/轮，pacing (6, 0.2) 保持不变。
+    def test_dnsbl_family_registry_semantics(self):
+        """R268/R269：名单与配额语义——dnsbl/spamcop/dronebl 入默认，
+        iplocation 不入默认但有权重；各源权重/pacing 齐全。"""
+        for name in ("dnsbl", "spamcop", "dronebl"):
+            self.assertIn(name, qr.DEFAULT_REP_SOURCES)
+        for name in ("iplocation", "spamrats", "sorbs", "uceprotect",
+                     "psbl", "maltiverse"):
+            self.assertNotIn(name, qr.DEFAULT_REP_SOURCES)
+            self.assertIn(name, qr.REPUTATION_WEIGHTS)
+            self.assertIn(name, qr.SOURCE_PACING)
+        self.assertTrue(all(
+            qr.SOURCE_PACING[n] == (6, 0.15)
+            for n in ("spamcop", "dronebl", "spamrats", "sorbs",
+                      "uceprotect", "psbl")))
         self.assertEqual(qr.SOURCE_PACING["dnsbl"], (6, 0.2))
-        self.assertFalse(hasattr(qr, "SPAMCOP_LISTED_CODE"))
 
-    def test_default_sources_drop_maltiverse_add_spamcop(self):
-        """R268：每轮一增一减——默认源含 spamcop、不含 maltiverse。"""
-        self.assertIn("spamcop", qr.DEFAULT_REP_SOURCES)
-        self.assertNotIn("maltiverse", qr.DEFAULT_REP_SOURCES)
-        self.assertIn("spamcop", qr.REPUTATION_WEIGHTS)
-        self.assertIn("maltiverse", qr.REPUTATION_WEIGHTS)
+    def test_dnsbl_lookup_fail_open_when_unbundled(self):
+        """无 PCB bundle 时七源 lookup 为 None（fail-open 跳过），有包时
+        可调用（回绑 rep_dnsbl）。"""
+        names = ("dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
+                 "uceprotect", "psbl")
+        fns = [getattr(qr, f"{n}_lookup_sync") for n in names]
+        if not qr._REP_DNSBL_BUNDLE or not all(fns):
+            self.assertTrue(all(f is None for f in fns),
+                            "无包 fail-open：七源 lookup 应全为 None")
+        else:
+            for n, f in zip(names, fns):
+                self.assertTrue(callable(f), n)
 
-    def test_doh_query_endpoint_fallback(self):
-        """端点失败转镜像；全部失败抛错（不把故障当「干净」）。"""
-        responses = [
-            "not json",
-            None,  # json null -> missing Status
-            {"Status": 0, "Answer": [{"data": "1.2.3.4"}]},
-        ]
-        index = [0]
-
-        def fake_deadline_open(req, timeout, max_bytes=None):
-            cur = responses[min(index[0], len(responses) - 1)]
-            index[0] += 1
-
-            class FakeResp:
-                def read(self, *a):
-                    if cur is None:
-                        return b"null"
-                    if isinstance(cur, str):
-                        raise OSError("bad payload")
-                    return json.dumps(cur).encode()
-                def __enter__(self):
-                    return self
-                def __exit__(self, *a):
-                    pass
-            return FakeResp()
-
-        qr._DOH_STICKY.clear()
-        with unittest.mock.patch.object(qr, "deadline_open",
-                                        side_effect=fake_deadline_open):
-            self.assertEqual(
-                qr._doh_query("1.2.3.4.[REDACTED_PRIVATE_RESOURCE]"),
-                ["1.2.3.4"])
-
-        # 全部端点失败 → 抛异常（而非返回 []）
-        qr._DOH_STICKY.clear()
-        with unittest.mock.patch.object(
-                qr, "deadline_open",
-                side_effect=OSError("all endpoints dead")):
-            with self.assertRaises(OSError):
-                qr._doh_query("1.2.3.4.[REDACTED_PRIVATE_RESOURCE]")
-
-    def test_doh_query_sticky_leader(self):
-        """成功端点被 sticky 复用：同一进程后续查询不再先空等慢/死端点。"""
-        qr._DOH_STICKY.clear()
-
-        def fake_deadline_open(req, timeout, max_bytes=None):
-            if "dns.google" not in req.full_url:
-                raise OSError("only dns.google reachable")
-
-            class FakeResp:
-                def read(self, *a):
-                    return json.dumps(
-                        {"Status": 0, "Answer": [{"data": "1.2.3.4"}]}
-                    ).encode()
-                def __enter__(self):
-                    return self
-                def __exit__(self, *a):
-                    pass
-            return FakeResp()
-
-        calls = []
-
-        def traced(req, timeout=30, max_bytes=None):
-            calls.append(req.full_url)
-            return fake_deadline_open(req, timeout, max_bytes)
-
-        with unittest.mock.patch.object(qr, "deadline_open",
-                                        side_effect=traced):
-            self.assertEqual(qr._doh_query("4.3.2.1.[REDACTED_PRIVATE_RESOURCE]"),
-                             ["1.2.3.4"])
-        # 第一次：alidns/cloudflare 失败 → 失败回落至 dns.google 成功。
-        self.assertEqual(len(calls), len(qr.DNSBL_DOH_ENDPOINTS))
-        self.assertEqual(qr._DOH_STICKY[-1][0], qr.DNSBL_DOH_ENDPOINTS[-1])
-
-        calls.clear()
-        with unittest.mock.patch.object(qr, "deadline_open",
-                                        side_effect=traced):
-            # sticky 命中 dns.google → 仅一次调用即返回，不再空等 alidns。
-            self.assertEqual(qr._doh_query("5.5.5.5.[REDACTED_PRIVATE_RESOURCE]"),
-                             ["1.2.3.4"])
-        self.assertEqual(len(calls), 1)
-        self.assertIn("dns.google", calls[0])
-
-    def test_doh_sticky_thread_safe(self):
-        """R262：并发读 stale/写 sticky 不得 IndexError，长度恒 ≤1。
-
-        list 无锁时「读到 stale 后 pop()」与他线程 pop 交错会抛
-        IndexError，使一次 DoH 查询白白失败并触发重试。多线程压测
-        helper 验证加锁后无异常且始终收敛为单条。
-        """
-        import threading as _th
-        qr._DOH_STICKY.clear()
-        qr._DOH_STICKY.append((qr.DNSBL_DOH_ENDPOINTS[0], 0.0))
-        errs = []
-
-        def worker():
-            try:
-                for _ in range(300):
-                    qr._doh_sticky_order()
-                    qr._doh_sticky_record(qr.DNSBL_DOH_ENDPOINTS[-1])
-            except Exception as exc:  # noqa: BLE001
-                errs.append(exc)
-
-        ts = [_th.Thread(target=worker) for _ in range(8)]
-        for t in ts:
-            t.start()
-        for t in ts:
-            t.join()
-        self.assertEqual(errs, [])
-        self.assertLessEqual(len(qr._DOH_STICKY), 1)
-        qr._DOH_STICKY.clear()
 
     def test_abuseipdb_public_source_registered(self):
         """R251：abuseipdb_public 公共黑名单默认启用、有权重/静态分。"""

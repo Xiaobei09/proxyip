@@ -172,12 +172,12 @@
 | `vpn_ips` | 3 | X4BNet lists_vpn VPN 出口 IP/CIDR（静态），命中投 `vpn` 票 |
 | `dshield` | 3 | FireHOL dshield_1d（DShield 攻击 /24 子网），命中投 `abuse` 票 |
 | `dnsbl` | 8 | Spamhaus ZEN 实时 DNSBL（免 key，DNS-over-HTTPS）——SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ `listed` 票；PBL 6/7（邮件策略）与 CSS 8/9（snowshoe 弱信号）忽略 |
-| `spamcop` | 5 | SpamCop `[REDACTED_PRIVATE_RESOURCE]` 社区实时 DNSBL（免 key，DNS-over-HTTPS）——`<rev-ip>.[REDACTED_PRIVATE_RESOURCE]` A 记录命中 `127.0.0.2` → `listed` 票；复用 dnsbl 的 DoH 端点回退/sticky/并发与负缓存，上限 9000/轮 |
-| `dronebl` | 5（默认） | DroneBL `[REDACTED_PRIVATE_RESOURCE]` 社区僵尸/失陷主机实时 DNSBL（免 key，DNS-over-HTTPS）——命中码 2~13 → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R269 新增） |
-| `spamrats` | 5（opt-in） | SpamRats `[REDACTED_PRIVATE_RESOURCE]` 社区双通路实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（AUTO）/`127.0.0.3`（AUTH）→ `listed` 票，DYN `127.0.0.4` 忽略；复用 dnsbl 通路，上限 9000/轮（R270 新增；R271 补接 `_flag_opinions`/`source_score` 计分接线；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
-| `sorbs` | 5（opt-in） | SORBS `[REDACTED_PRIVATE_RESOURCE]` 社区 open-proxy 实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（SOCKS）/`127.0.0.7`（HTTP）→ `listed` 票，动态住宅段忽略；复用 dnsbl 通路，上限 9000/轮（R271 新增；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
-| `uceprotect` | 5（opt-in） | UCEPROTECT Level 1 `[REDACTED_PRIVATE_RESOURCE]` 社区发送者黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票，仅用 L1（L2/L3 升级名单刻意不用）；复用 dnsbl 通路，上限 9000/轮（R272 新增；test-point `2.0.0.127` 经 DoH 实测回包 `127.0.0.2`，分区存活实证） |
-| `psbl` | 5（opt-in） | PSBL `[REDACTED_PRIVATE_RESOURCE]` 被动垃圾邮件黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R273 新增；test-point `2.0.0.127` 经 DoH 实测回包 `127.0.0.2`）。R273 起七源 lookup 共用 `_dnsbl_listed_lookup_sync` 骨架，各源仅保留 qname/码表/ docstring 差异 |
+| `spamcop` | 5 | SpamCop 社区实时 DNSBL（免 key，DNS-over-HTTPS）——`<rev-ip>.<zone>` A 记录命中 `127.0.0.2` → `listed` 票；复用 dnsbl 的 DoH 端点回退/sticky/并发与负缓存，上限 9000/轮 |
+| `dronebl` | 5（默认） | DroneBL 社区僵尸/失陷主机实时 DNSBL（免 key，DNS-over-HTTPS）——命中码 2~13 → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R269 新增） |
+| `spamrats` | 5（opt-in） | SpamRats 社区双通路实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（AUTO）/`127.0.0.3`（AUTH）→ `listed` 票，DYN `127.0.0.4` 忽略；复用 dnsbl 通路，上限 9000/轮（R270 新增；R271 补接 `_flag_opinions`/`source_score` 计分接线；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
+| `sorbs` | 5（opt-in） | SORBS 社区 open-proxy 实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（SOCKS）/`127.0.0.7`（HTTP）→ `listed` 票，动态住宅段忽略；复用 dnsbl 通路，上限 9000/轮（R271 新增；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
+| `uceprotect` | 5（opt-in） | UCEPROTECT Level 1 社区发送者黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票，仅用 L1（L2/L3 升级名单刻意不用）；复用 dnsbl 通路，上限 9000/轮（R272 新增；test-point 经 DoH 实测回包 `127.0.0.2`，分区存活实证） |
+| `psbl` | 5（opt-in） | PSBL 被动垃圾邮件黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R273 新增；test-point 经 DoH 实测回包 `127.0.0.2`）。R273 起七源 lookup 共用 `_dnsbl_listed_lookup_sync` 骨架，各源仅保留 qname/码表/ docstring 差异 |
 | `abuseipdb_public` | 5 | AbuseIPDB 公共黑名单（近 30 天置信举报，社区镜像，静态），命中投 `abuse` 票 |
 | `wwuyi_unreachable` | 2 | Wwuyi123 实测不可达 IP（裸 IP 小表，静态），命中投 `listed` 票（温和：失联证据非滥用） |
 | `wwuyi_blocked` | 2 | Wwuyi123 维护者拉黑 IP（裸 IP 小表，静态），命中投 `listed` 票（主动拒绝，略强，仍非滥用） |
@@ -199,13 +199,13 @@
 | `hackmyip` | 6 worker、0.2s |  |
 | `scamalytics` | 4 worker、0.5s | （上限 1500/轮） |
 | `stopforumspam` | 4 worker、0.3s | （上限 3000/轮） |
-| `dnsbl` | 6 worker、0.2s | （上限 12000/轮，Spamhaus ZEN 实时 DoH，`dns.alidns.com`→`cloudflare-dns.com`→`dns.google/resolve` 端点回退且**进程内 sticky 复用最近成功端点**（TTL 600s，加锁保证多 worker 并发下无竞态，避免每查询空等慢/死端点），全部失败按失败重试、不误判干净） |
-| `spamcop` | 6 worker、0.15s | （上限 9000/轮，[REDACTED_PRIVATE_RESOURCE] 社区实时 DNSBL） |
-| `sorbs` | 6 worker、0.15s | （上限 9000/轮，`[REDACTED_PRIVATE_RESOURCE]` opt-in DNSBL，SOCKS/HTTP 代理码 127.0.0.2/7——**R271 新增 opt-in 源；R274 起 pacing 与其余 DNSBL 归一 0.15s**） |
-| `dronebl` | 6 worker、0.15s | （上限 9000/轮，[REDACTED_PRIVATE_RESOURCE] 僵尸/失陷主机社区 DNSBL，命中码 2~13 均判 listed，复用 dnsbl 同一 DoH/负缓存/sticky 通路） |
-| `spamrats` | 6 worker、0.15s | （上限 SPAMRATS_CAP=9000/轮，[REDACTED_PRIVATE_RESOURCE] 社区双通路 DoH，A 码 127.0.0.2/3 → listed，**DYN 127.0.0.4 忽略**，复用 dnsbl sticky/负缓存——**R270 新增 opt-in 源**；R272 实测 test-point 无响应，保持 opt-in 待验证） |
-| `uceprotect` | 6 worker、0.15s | （上限 UCEPROTECT_CAP=9000/轮，[REDACTED_PRIVATE_RESOURCE] L1 社区发送者黑名单 DoH，A 码仅 127.0.0.2 → listed，L2/L3 不用，复用 dnsbl sticky/负缓存——**R272 新增 opt-in 源**，test-point `2.0.0.127` 实测回包 `127.0.0.2`） |
-| `psbl` | 6 worker、0.15s | （上限 PSBL_CAP=9000/轮，[REDACTED_PRIVATE_RESOURCE] 被动垃圾名单 DoH，A 码仅 127.0.0.2 → listed，复用 dnsbl sticky/负缓存——**R273 新增 opt-in 源**，test-point 实测回包 `127.0.0.2`） |
+| `dnsbl` | 6 worker、0.2s | （上限 12000/轮，Spamhaus ZEN 实时 DoH，三镜像端点回退且**进程内 sticky 复用最近成功端点**（TTL 600s，加锁保证多 worker 并发下无竞态，避免每查询空等慢/死端点），全部失败按失败重试、不误判干净） |
+| `spamcop` | 6 worker、0.15s | （上限 9000/轮，SpamCop 社区实时 DNSBL） |
+| `sorbs` | 6 worker、0.15s | （上限 9000/轮，SORBS opt-in DNSBL，SOCKS/HTTP 代理码 127.0.0.2/7——**R271 新增 opt-in 源；R274 起 pacing 与其余 DNSBL 归一 0.15s**） |
+| `dronebl` | 6 worker、0.15s | （上限 9000/轮，DroneBL 僵尸/失陷主机社区 DNSBL，命中码 2~13 均判 listed，复用 dnsbl 同一 DoH/负缓存/sticky 通路） |
+| `spamrats` | 6 worker、0.15s | （上限 SPAMRATS_CAP=9000/轮，SpamRats 社区双通路 DoH，A 码 127.0.0.2/3 → listed，**DYN 127.0.0.4 忽略**，复用 dnsbl sticky/负缓存——**R270 新增 opt-in 源**；R272 实测 test-point 无响应，保持 opt-in 待验证） |
+| `uceprotect` | 6 worker、0.15s | （上限 UCEPROTECT_CAP=9000/轮，UCEPROTECT L1 社区发送者黑名单 DoH，A 码仅 127.0.0.2 → listed，L2/L3 不用，复用 dnsbl sticky/负缓存——**R272 新增 opt-in 源**，test-point 实测回包 `127.0.0.2`） |
+| `psbl` | 6 worker、0.15s | （上限 PSBL_CAP=9000/轮，PSBL 被动垃圾名单 DoH，A 码仅 127.0.0.2 → listed，复用 dnsbl sticky/负缓存——**R273 新增 opt-in 源**，test-point 实测回包 `127.0.0.2`） |
 | `maltiverse` | 4 worker、0.3s | （上限 MALTIVERSE_CAP=2500/轮，opt-in） |
 | `greynoise` | 6 worker、0.3s | （无轮次上限，上游免费 40 req/min 限流） |
 | `iplocation` | 8 worker、0.12s | （上限 IPLOCATION_CAP=3000/轮，opt-in） |

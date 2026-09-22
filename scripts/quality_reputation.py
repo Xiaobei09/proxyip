@@ -16,7 +16,6 @@ import json
 import logging
 import re
 import sys
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -48,81 +47,24 @@ SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 IPLOCATION_CAP = 3000
 STOPFORUMSPAM_CAP = 3000
 MALTIVERSE_CAP = 2500
-# Spamhaus ZEN（SBL/XBL/CSS/PBL 合成实时 DNSBL）经 DNS-over-HTTPS 免 key 查询。
-# 多端点按序回退：alidns（公共 DoH，v4 HTTP/HTTPS 双就绪，实测可达）、
-# cloudflare-dns、dns.google（公共限量 ~1500/min）——单端点失败不视为
-# 「干净」，全部失败才报错重试。首选用可达性经过实证的端点，避免死端点
-# 空等超时拖慢相位（R244 教训）。
+# DNSBL 七源族（dnsbl/spamcop/dronebl/spamrats/sorbs/uceprotect/psbl）
+# 经 DNS-over-HTTPS 免 key 查询的具体实现（端点、zone、sticky、码表）随
+# PCB 私有插件 ``rep_dnsbl``（R49 迁入）；公开侧只保留配额兜底值，有包时
+# 由 loader 覆盖为插件值，无包时查找函数为 None → fail-open 跳过。
 DNSBL_ZEN_CAP = 12000
 DNSBL_TIMEOUT = 4
-# SpamCop（[REDACTED_PRIVATE_RESOURCE]）社区独立黑名单：与 Spamhaus 权威互补，
-# 命中码仅 127.0.0.2。复用 dnsbl 的 DoH/sticky/并发与负缓存机制，
-# 独立计数（避免命中共用 DNSBL_ZEN_CAP 的源头配额语义）。
 SPAMCOP_CAP = 9000
-# 注：旧单码常量 SPAMCOP_LISTED_CODE 已在 R273 骨架去重中移除，语义由
-# spamcop 薄包装的 frozenset((2,)) 等价承载（多应答用例已锁定）。
-# DroneBL（[REDACTED_PRIVATE_RESOURCE]）社区僵尸/失陷主机黑名单：命中多为被控
-# 主机/开代理人，与 Spamhaus/SpamCop 权威互补。复用同一 DoH 通路，
-# 独立配额。命中码 127.0.0.2~13（abuse/爆破/垃圾/重犯/模糊…) 均视为入榜。
 DRONEBL_CAP = 9000
-DRONEBL_LISTED_CODES = frozenset(range(2, 14))
-# SpamRats（[REDACTED_PRIVATE_RESOURCE]）社区双通路 DNSBL（第四独立权威，与
-# spamhaus/spamcop/dronebl 四家同构为免 key Realtime 社区派对）。
-# 命中表仅两码：AUTO 127.0.0.2（自动化自录）、AUTH 127.0.0.3（社区
-# 人工确认）→ `listed`；**DYN 127.0.0.4（动态住宅线）刻意忽略**——
-# 与 spamhaus PBL/自留 spamcop 同口径：动态住宅段是啥正合法用户基线，
-# 不当代理罪证（R270 决策，防叠噪）。
 SPAMRATS_CAP = 9000
 SORBS_CAP = 9000
-SPAMRATS_LISTED_CODES = frozenset((2, 3))
-SORBS_LISTED_CODES = frozenset((2, 7))
-# UCEPROTECT Level 1（[REDACTED_PRIVATE_RESOURCE]）社区发送者黑名单（第五独立
-# 权威，UCEPROTECT-Network 运营，与上四家互补）。仅用 L1（具体发送 IP）：
-# L2/L3 为升级名单（整段/AS 列入，争议大，不宜作代理罪证，刻意不用）。
-# 命中码仅 127.0.0.2 → `listed`；R272 经 DoH 以 test-point 2.0.0.127 实测
-# 回包 127.0.0.2，确认分区存活（同期 sorbs/spamrats test-point 无响应，
-# 保持 opt-in 待验证，不断言其死亡）。
 UCEPROTECT_CAP = 9000
-UCEPROTECT_LISTED_CODES = frozenset((2,))
-# PSBL（[REDACTED_PRIVATE_RESOURCE]）被动垃圾邮件黑名单（第六独立权威，GSRsoft 运营
-# 的社区陷阱网络，与上五家互补）。命中码仅 127.0.0.2 → `listed`。
-# R273 经 DoH 以 test-point 2.0.0.127 实测回包 127.0.0.2，确认分区存活。
 PSBL_CAP = 9000
-PSBL_LISTED_CODES = frozenset((2,))
-DNSBL_DOH_ENDPOINTS = (
-    "[REDACTED_PRIVATE_RESOURCE]",
-    "[REDACTED_PRIVATE_RESOURCE]",
-    "[REDACTED_PRIVATE_RESOURCE]",
+# 以 `is_listed` 投 listed 共识票的 DNSBL 家族（R279 表驱动；评分语义
+# 保留公开，端点/实现随 PCB）。
+_DNSBL_LISTED_SOURCES = (
+    "dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
+    "uceprotect", "psbl",
 )
-# 进程内 sticky：记住最近成功命中的 DoH 端点，同进程后续查询优先用它，
-# 失败自动回落其余端点（避免每次查询都先空等一个慢/死端点超时）。
-_DOH_STICKY: list = []
-_DOH_STICKY_TTL = 600
-# dnsbl 以多 worker 并发查询，sticky 列表的读/过期/写入必须加锁：否则
-# 「读到 stale 后 pop」与他线程的 pop/append 交错可致 IndexError（浪费
-# 一次查询并触发重试），或让长度短暂无界。
-_DOH_STICKY_LOCK = threading.Lock()
-
-
-def _doh_sticky_order() -> tuple:
-    """优先端点的有序回退序列（sticky 命中则置顶）。线程安全。"""
-    with _DOH_STICKY_LOCK:
-        if not _DOH_STICKY:
-            return DNSBL_DOH_ENDPOINTS
-        ep, until = _DOH_STICKY[-1]
-        if time.time() < until:
-            return (ep,) + tuple(
-                e for e in DNSBL_DOH_ENDPOINTS if e != ep)
-        _DOH_STICKY.pop()
-        return DNSBL_DOH_ENDPOINTS
-
-
-def _doh_sticky_record(base: str) -> None:
-    """记录最近成功端点（仅保留一条）。线程安全。"""
-    with _DOH_STICKY_LOCK:
-        _DOH_STICKY.append((base, time.time() + _DOH_STICKY_TTL))
-        if len(_DOH_STICKY) > 1:
-            del _DOH_STICKY[:-1]
 # AbuseIPDB 公共黑名单（近 30 天、置信度高的滥用举报 IP/CIDR，社区镜像，
 # GitHub 原始 + jsDelivr 镜像可回退）。独立于本仓库 key 版滥用相位。
 ABUSEIPDB_PUBLIC_URL = (
@@ -971,160 +913,34 @@ except Exception:
     MALTIVERSE_CAP = 2500
 
 
-def _doh_query(name: str, qtype: str = "A") -> list:
-    """DNS-over-HTTPS 查询：返回 A 记录数组。
-
-    按序尝试 ``DNSBL_DOH_ENDPOINTS``，单端点失败继续下一镜像；端点返回
-    合法 JSON（含 ``Status``）即视为权威应答（NXDOMAIN+无 Answer =
-    未列出 = 干净信号）；全部失败才抛出最后一个异常（由 ``batch_sync``
-    判为失败并重试，不会污染负缓存）。
-
-    Sticky 亲缘：进程内记住最近成功端点（TTL ``_DOH_STICKY_TTL``），
-    同批 IP 序列优先复用，避免每个查询都先空等一个慢/死端点拉满
-    ``DNSBL_TIMEOUT``；命中端点后续失效时会自动回落其余端点并重选。
-    """
-    order = _doh_sticky_order()
-    last = None
-    for base in order:
-        url = f"{base}?name={urllib.parse.quote(name)}&type={qtype}"
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": UA, "Accept": "application/dns-json"},
-        )
-        try:
-            with deadline_open(req, DNSBL_TIMEOUT) as resp:
-                data = json.loads(resp.read(64 * 1024 + 1))
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            continue
-        if not isinstance(data, dict):
-            last = RuntimeError(f"doh {base}: non-dict response")
-            continue
-        if "Status" not in data:
-            last = RuntimeError(f"doh {base}: missing Status")
-            continue
-        answers = [str(a.get("data"))
-                   for a in (data.get("Answer") or [])
-                   if isinstance(a, dict) and a.get("data")]
-        _doh_sticky_record(base)
-        return answers
-    raise last if last else RuntimeError("doh: no endpoints")
-
-
-def _dnsbl_listed_lookup_sync(ip: str, zone: str, codes) -> dict | None:
-    """通用 DNSBL 反查骨架（经 DoH，免 key，供各源薄包装复用）。
-
-    反查 ``<rev-ip>.<zone>`` A 记录；首个落入 ``codes`` 的 ``127.0.0.x``
-    返回 ``{"is_listed": True, "dnsbl_code": code}``；其余返回/无应答 →
-    ``None``（负缓存）。非 IPv4 直接短路，不触发查询。
-    各源公开函数保留自有 docstring（命中码语义）与函数名，下游与测试
-    钉住的 qname/码表行为保持不变（R273 去重：此前六源复制同一循环体，
-    曾致 R271 接线/docstring 双 bug）。
-    """
-    if ip.count(".") != 3 or not all(p.isdigit() for p in ip.split(".")):
-        return None
-    qname = f"{'.'.join(reversed(ip.split('.')))}.{zone}"
-    answers = _doh_query(qname, "A")
-    for ans in answers:
-        if not ans.startswith("127.0.0."):
-            continue
-        try:
-            code = int(ans.rsplit(".", 1)[1])
-        except ValueError:
-            continue
-        if code in codes:
-            return {"is_listed": True, "dnsbl_code": code}
-    return None
-
-
-DNSBL_LISTED_CODES = frozenset((2, 3, 4, 5))
-# 以 `is_listed` 投 listed 共识票的 DoH DNSBL 家族（R279 表驱动去重：
-# 此前 source_score/_flag_opinions 各复制七份三行分支；新增成员改此一处）。
-_DNSBL_LISTED_SOURCES = (
-    "dnsbl", "spamcop", "dronebl", "spamrats", "sorbs",
-    "uceprotect", "psbl",
-)
-
-
-def dnsbl_lookup_sync(ip: str) -> dict | None:
-    """Spamhaus ZEN 实时 DNSBL（经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；返回码 ``127.0.0.x``：
-    SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ ``listed`` 信号；
-    PBL 6/7（邮件策略网段，与代理信誉无关）与 CSS 8/9（snowshoe 弱信号）
-    忽略。未列出/不可解析 → ``None``（进入负缓存，不再重查）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     DNSBL_LISTED_CODES)
-
-
-def spamcop_lookup_sync(ip: str) -> dict | None:
-    """SpamCop（[REDACTED_PRIVATE_RESOURCE]）社区黑名单实时 DNSBL（经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；命中码仅 ``127.0.0.2``
-    （社区入榜）→ ``listed`` 信号。任何其他返回视为未列出。
-    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     frozenset((2,)))
-
-
-def dronebl_lookup_sync(ip: str) -> dict | None:
-    """DroneBL（[REDACTED_PRIVATE_RESOURCE]）僵尸/失陷主机实时 DNSBL（经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；命中码 ``127.0.0.2~13``
-    （abuse/爆破/垃圾/重犯/模糊等各类被控行为）→ ``listed`` 信号。
-    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     DRONEBL_LISTED_CODES)
-
-
-def spamrats_lookup_sync(ip: str) -> dict | None:
-    """SpamRats（[REDACTED_PRIVATE_RESOURCE]）社区双通路实时 DNSBL（经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；命中码仅 ``127.0.0.2``
-    （AUTO 自动化自录）与 ``127.0.0.3``（AUTH 社区人工确认）→ ``listed``
-    信号；``127.0.0.4``（DYN 动态住宅线）刻意忽略（与 spamhaus PBL 同口径）。
-    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     SPAMRATS_LISTED_CODES)
-
-
-def sorbs_lookup_sync(ip: str) -> dict | None:
-    """SORBS（[REDACTED_PRIVATE_RESOURCE]）社区 open-proxy 实时 DNSBL（经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；命中码仅 ``127.0.0.2``
-   （SOCKS 代理）与 ``127.0.0.7``（HTTP 代理）→ ``listed`` 信号；
-    动态住宅段 ``127.0.0.4/8/9`` 刻意忽略（与 spamhaus PBL 同口径）。
-    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     SORBS_LISTED_CODES)
-
-
-def uceprotect_lookup_sync(ip: str) -> dict | None:
-    """UCEPROTECT Level 1（[REDACTED_PRIVATE_RESOURCE]）社区发送者黑名单
-    （经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；命中码仅 ``127.0.0.2``
-    （L1 列入的发送 IP）→ ``listed`` 信号。L2/L3 升级名单刻意不用。
-    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     UCEPROTECT_LISTED_CODES)
-
-
-def psbl_lookup_sync(ip: str) -> dict | None:
-    """PSBL（[REDACTED_PRIVATE_RESOURCE]）被动垃圾邮件黑名单（经 DoH，免 key）。
-
-    反查 ``<rev-ip>.[REDACTED_PRIVATE_RESOURCE]`` A 记录；命中码仅 ``127.0.0.2``
-    （曾发送垃圾邮件的发送 IP）→ ``listed`` 信号。
-    未列出/不可解析 → ``None``（负缓存，复用 dnsbl 机制）。
-    """
-    return _dnsbl_listed_lookup_sync(ip, "[REDACTED_PRIVATE_RESOURCE]",
-                                     PSBL_LISTED_CODES)
+_REP_DNSBL_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_dnsbl = _load_pcb_plugin("rep_dnsbl")
+    dnsbl_lookup_sync = _rep_dnsbl.dnsbl_lookup_sync
+    spamcop_lookup_sync = _rep_dnsbl.spamcop_lookup_sync
+    dronebl_lookup_sync = _rep_dnsbl.dronebl_lookup_sync
+    spamrats_lookup_sync = _rep_dnsbl.spamrats_lookup_sync
+    sorbs_lookup_sync = _rep_dnsbl.sorbs_lookup_sync
+    uceprotect_lookup_sync = _rep_dnsbl.uceprotect_lookup_sync
+    psbl_lookup_sync = _rep_dnsbl.psbl_lookup_sync
+    DNSBL_ZEN_CAP = _rep_dnsbl.DNSBL_ZEN_CAP
+    DNSBL_TIMEOUT = _rep_dnsbl.DNSBL_TIMEOUT
+    SPAMCOP_CAP = _rep_dnsbl.SPAMCOP_CAP
+    DRONEBL_CAP = _rep_dnsbl.DRONEBL_CAP
+    SPAMRATS_CAP = _rep_dnsbl.SPAMRATS_CAP
+    SORBS_CAP = _rep_dnsbl.SORBS_CAP
+    UCEPROTECT_CAP = _rep_dnsbl.UCEPROTECT_CAP
+    PSBL_CAP = _rep_dnsbl.PSBL_CAP
+    _REP_DNSBL_BUNDLE = True
+except Exception:
+    dnsbl_lookup_sync = None
+    spamcop_lookup_sync = None
+    dronebl_lookup_sync = None
+    spamrats_lookup_sync = None
+    sorbs_lookup_sync = None
+    uceprotect_lookup_sync = None
+    psbl_lookup_sync = None
 
 
 _REP_FREEIPAPI_BUNDLE = False
@@ -2576,32 +2392,32 @@ async def lookup_all_risk(
     if "greynoise" in sources and greynoise_lookup_sync is not None:
         w, d = pacing.get("greynoise", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("greynoise", greynoise_lookup_sync, workers=w, delay=d))
-    if "dnsbl" in sources:
+    if "dnsbl" in sources and dnsbl_lookup_sync is not None:
         w, d = pacing.get("dnsbl", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "dnsbl", dnsbl_lookup_sync, cap=DNSBL_ZEN_CAP, workers=w, delay=d))
-    if "spamcop" in sources:
+    if "spamcop" in sources and spamcop_lookup_sync is not None:
         w, d = pacing.get("spamcop", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "spamcop", spamcop_lookup_sync, cap=SPAMCOP_CAP, workers=w, delay=d))
-    if "dronebl" in sources:
+    if "dronebl" in sources and dronebl_lookup_sync is not None:
         w, d = pacing.get("dronebl", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "dronebl", dronebl_lookup_sync, cap=DRONEBL_CAP, workers=w, delay=d))
-    if "spamrats" in sources:
+    if "spamrats" in sources and spamrats_lookup_sync is not None:
         w, d = pacing.get("spamrats", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "spamrats", spamrats_lookup_sync, cap=SPAMRATS_CAP, workers=w, delay=d))
-    if "sorbs" in sources:
+    if "sorbs" in sources and sorbs_lookup_sync is not None:
         w, d = pacing.get("sorbs", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "sorbs", sorbs_lookup_sync, cap=SORBS_CAP, workers=w, delay=d))
-    if "uceprotect" in sources:
+    if "uceprotect" in sources and uceprotect_lookup_sync is not None:
         w, d = pacing.get("uceprotect", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "uceprotect", uceprotect_lookup_sync, cap=UCEPROTECT_CAP,
             workers=w, delay=d))
-    if "psbl" in sources:
+    if "psbl" in sources and psbl_lookup_sync is not None:
         w, d = pacing.get("psbl", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "psbl", psbl_lookup_sync, cap=PSBL_CAP,
