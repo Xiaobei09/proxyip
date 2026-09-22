@@ -2155,58 +2155,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["asn_kind"], "hosting")
         self.assertEqual(out["abuser_score"], 0.35)
 
-    def _maltiverse_with(self, payload):
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("api.maltiverse.com/ip/1.2.3.4", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            return qc.maltiverse_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-
-    def test_maltiverse_lookup_parsing(self):
-        # 取 current 字段；忽略历史脏数据 is_known_attacker
-        out = self._maltiverse_with(
-            b'{"classification":"malicious","is_open_proxy":true,'
-            b'"is_known_attacker":true,"is_tor_node":false,'
-            b'"blacklist":[{"last_seen":"2026-09-01 00:00:00",'
-            b'"labels":["malicious-activity"],"source":"X"}]}'
-        )
-        self.assertEqual(out["classification"], "malicious")
-        self.assertTrue(out["is_open_proxy"])
-        self.assertTrue(out["recent_blacklist"])
-        self.assertNotIn("is_known_attacker", out)
-        self.assertNotIn("is_tor_node", out)
-        self.assertEqual(
-            qr._flag_opinions("maltiverse", out),
-            {"proxy": True, "abuse": True})
-
-    def test_maltiverse_clean_and_stale_blacklist(self):
-        # neutral 无结构布尔 + 陈旧黑名单 → None（负缓存）
-        self.assertIsNone(self._maltiverse_with(
-            b'{"classification":"neutral","is_open_proxy":false,'
-            b'"is_known_attacker":true,'
-            b'"blacklist":[{"last_seen":"2012-01-01 00:00:00",'
-            b'"labels":["malicious-activity"]}]}'
-        ))
-        # suspicious（无布尔）仍返回分类
-        out = self._maltiverse_with(b'{"classification":"suspicious"}')
-        self.assertEqual(out, {"classification": "suspicious"})
-        self.assertEqual(qr._flag_opinions("maltiverse", out), {"abuse": True})
-
     def test_maltiverse_source_score_and_vote(self):
         self.assertEqual(
             qc.source_score("maltiverse", {"classification": "malicious"}), 40)
@@ -4197,6 +4145,9 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertIsNotNone(qr.stopforumspam_lookup_sync)
         self.assertTrue(qr._REP_STOPFORUMSPAM_BUNDLE)
         self.assertEqual(qr.STOPFORUMSPAM_CAP, 3000)
+        self.assertIsNotNone(qr.maltiverse_lookup_sync)
+        self.assertTrue(qr._REP_MALTIVERSE_BUNDLE)
+        self.assertEqual(qr.MALTIVERSE_CAP, 2500)
 
 
 if __name__ == "__main__":

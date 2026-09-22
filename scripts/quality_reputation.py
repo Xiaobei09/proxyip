@@ -59,8 +59,6 @@ SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 IPLOCATION_CAP = 3000
 STOPFORUMSPAM_CAP = 3000
-MALTIVERSE_URL = "https://api.maltiverse.com/ip/{ip}"
-MALTIVERSE_TIMEOUT = 12
 MALTIVERSE_CAP = 2500
 # Spamhaus ZEN（SBL/XBL/CSS/PBL 合成实时 DNSBL）经 DNS-over-HTTPS 免 key 查询。
 # 多端点按序回退：alidns（公共 DoH，v4 HTTP/HTTPS 双就绪，实测可达）、
@@ -1116,61 +1114,16 @@ except Exception:
     STOPFORUMSPAM_CAP = 3000
 
 
-MALTIVERSE_RECENT_DAYS = 30
-
-
-def _maltiverse_recent_blacklist(
-    blacklist, days: int = MALTIVERSE_RECENT_DAYS
-) -> bool:
-    """``blacklist`` 名单中是否存在最近 ``days`` 天内的恶意/匿名化条目。"""
-    if not isinstance(blacklist, list):
-        return False
-    cutoff = time.strftime(
-        "%Y-%m-%d %H:%M:%S", time.gmtime(time.time() - days * 86400)
-    )
-    keep = ("malicious-activity", "attacker", "compromised",
-            "anomalous-activity", "anonymization", "tor", "proxy")
-    for e in blacklist:
-        if not isinstance(e, dict):
-            continue
-        ls = e.get("last_seen")
-        if not (isinstance(ls, str) and ls[:19] >= cutoff):
-            continue
-        labels = e.get("labels") or []
-        if not labels or any(str(x) in keep for x in labels):
-            return True
-    return False
-
-
-def maltiverse_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``api.maltiverse.com/ip/{ip}`` 聚合威胁情报。
-
-    仅取**当前有效**字段：``classification``（malicious/suspicious）、结构
-    布尔（open_proxy/tor_node/vpn_node/cnc/distributing_malware/iot_threat/
-    known_scanner/mining_pool）与最近 ``MALTIVERSE_RECENT_DAYS`` 天内的黑名单
-    条目。刻意忽略 ``is_known_attacker``（历史脏数据，8.8.8.8 亦为 True）与
-    ``is_hosting``（共识已充分，避免叠噪）。全空 → ``None``（进入负缓存）。
-    """
-    req = urllib.request.Request(
-        MALTIVERSE_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, MALTIVERSE_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    out: dict = {}
-    cls = data.get("classification")
-    if isinstance(cls, str) and cls.lower() in ("malicious", "suspicious"):
-        out["classification"] = cls.lower()
-    for k in ("is_open_proxy", "is_tor_node", "is_vpn_node", "is_cnc",
-              "is_distributing_malware", "is_iot_threat", "is_known_scanner",
-              "is_mining_pool"):
-        if data.get(k):
-            out[k] = True
-    if _maltiverse_recent_blacklist(data.get("blacklist")):
-        out["recent_blacklist"] = True
-    return out or None
+_REP_MALTIVERSE_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_mvi = _load_pcb_plugin("rep_maltiverse")
+    maltiverse_lookup_sync = _rep_mvi.maltiverse_lookup_sync
+    MALTIVERSE_CAP = _rep_mvi.CAP
+    _REP_MALTIVERSE_BUNDLE = True
+except Exception:
+    maltiverse_lookup_sync = None
+    MALTIVERSE_CAP = 2500
 
 
 def _doh_query(name: str, qtype: str = "A") -> list:
@@ -2762,7 +2715,7 @@ async def lookup_all_risk(
         api_tasks.append(cached_batch(
             "stopforumspam", stopforumspam_lookup_sync,
             cap=STOPFORUMSPAM_CAP, workers=w, delay=d))
-    if "maltiverse" in sources:
+    if "maltiverse" in sources and maltiverse_lookup_sync is not None:
         w, d = pacing.get("maltiverse", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "maltiverse", maltiverse_lookup_sync,
