@@ -732,25 +732,14 @@ except Exception:
     blackbox_lookup_sync = None
 
 
-OTX_URL = "https://otx.alienvault.com/api/v1/indicators/IPv4/{}/general"
-OTX_TIMEOUT = 8
-
-
-def otx_lookup_sync(ip: str) -> dict | None:
-    """AlienVault OTX reputation score + pulse count."""
-    req = urllib.request.Request(
-        OTX_URL.format(ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, OTX_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    return {
-        "reputation": int(data.get("reputation") or 0),
-        "pulse_count": int((data.get("pulse_info") or {}).get("count") or 0),
-        "validation": data.get("validation") or [],
-    }
+_REP_OTX_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_otx = _load_pcb_plugin("rep_otx")
+    otx_lookup_sync = _rep_otx.otx_lookup_sync
+    _REP_OTX_BUNDLE = True
+except Exception:
+    otx_lookup_sync = None
 
 
 IPSUM_URL = "[REDACTED_PRIVATE_RESOURCE]"
@@ -2678,7 +2667,7 @@ async def lookup_all_risk(
     if "blackbox" in sources and blackbox_lookup_sync is not None:
         w, d = pacing.get("blackbox", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("blackbox", blackbox_lookup_sync, workers=w, delay=d))
-    if "otx" in sources:
+    if "otx" in sources and otx_lookup_sync is not None:
         w, d = pacing.get("otx", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("otx", otx_lookup_sync, workers=w, delay=d))
     if "proxycheck" in sources:
