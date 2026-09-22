@@ -35,12 +35,6 @@ REP_RISK_MEDIUM = 75
 REP_WORKERS = 10
 REP_DELAY = 0.15
 IPDATA_CAP = 2000
-GETIPINTEL_URL = (
-    "https://check.getipintel.net/check.php?ip={ip}"
-    "&contact={email}&flags=m"
-)
-GETIPINTEL_TIMEOUT = 8
-GETIPINTEL_CAP = 2000
 FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
@@ -573,21 +567,16 @@ except Exception:
     IPDATA_CAP = 2000
 
 
-def getipintel_lookup_sync(ip: str, email: str) -> dict | None:
-    """Proxy/VPN probability (0-1) via GetIPIntel; negative values are errors."""
-    req = urllib.request.Request(
-        GETIPINTEL_URL.format(ip=ip, email=urllib.parse.quote(email)),
-        headers={"User-Agent": UA},
-    )
-    with deadline_open(req, GETIPINTEL_TIMEOUT) as resp:
-        text = resp.read().decode("utf-8").strip()
-    try:
-        prob = float(text)
-    except ValueError:
-        return None
-    if prob < 0:
-        return None
-    return {"probability": prob}
+_REP_GETIPINTEL_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_gip = _load_pcb_plugin("rep_getipintel")
+    getipintel_lookup_sync = _rep_gip.getipintel_lookup_sync
+    GETIPINTEL_CAP = _rep_gip.CAP
+    _REP_GETIPINTEL_BUNDLE = True
+except Exception:
+    getipintel_lookup_sync = None
+    GETIPINTEL_CAP = 2000
 
 
 _REP_IPAPI_IS_BUNDLE = False
@@ -2520,7 +2509,7 @@ async def lookup_all_risk(
         api_tasks.append(cached_batch(
             "ipdata", ipdata_lookup_sync, cap=IPDATA_CAP, workers=2, delay=0.8
         ))
-    if "getipintel" in sources:
+    if "getipintel" in sources and getipintel_lookup_sync is not None:
         if args.getipintel_email:
             fn = lambda ip: getipintel_lookup_sync(ip, args.getipintel_email)
             api_tasks.append(cached_batch(

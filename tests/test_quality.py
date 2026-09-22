@@ -4165,6 +4165,9 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertIsNotNone(qr.ipdata_lookup_sync)
         self.assertTrue(qr._REP_IPDATA_BUNDLE)
         self.assertEqual(qr.IPDATA_CAP, 2000)
+        self.assertIsNotNone(qr.getipintel_lookup_sync)
+        self.assertTrue(qr._REP_GETIPINTEL_BUNDLE)
+        self.assertEqual(qr.GETIPINTEL_CAP, 2000)
 
 
 if __name__ == "__main__":
