@@ -34,8 +34,6 @@ REP_RISK_MEDIUM = 75
 
 REP_WORKERS = 10
 REP_DELAY = 0.15
-NETCOFFEE_URL = "https://ip.net.coffee/api/iprisk/{ip}"
-NETCOFFEE_TIMEOUT = 12
 NCGY_URL = "https://ip.nc.gy/json?ip={ip}"
 NCGY_TIMEOUT = 12
 IPDATA_URL = "https://ipdata.info/json/{ip}"
@@ -539,41 +537,14 @@ class IpSet:
         return False
 
 
-def netcoffee_lookup_sync(ip: str) -> dict | None:
-    """``GET /api/iprisk/{ip}`` (free, keyless); returns reputation flags."""
-    url = NETCOFFEE_URL.format(ip=ip)
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": UA,
-            "Accept": "application/json",
-        },
-    )
-    with deadline_open(req, NETCOFFEE_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    out = {
-        "trust_score": data.get("trust_score"),
-        "is_datacenter": bool(data.get("is_datacenter")),
-        "is_vpn": bool(data.get("is_vpn")),
-        "is_proxy": bool(data.get("is_proxy")),
-        "is_tor": bool(data.get("is_tor")),
-        "is_abuser": bool(data.get("is_abuser")),
-        "is_mobile": bool(data.get("is_mobile")),
-        "is_crawler": bool(data.get("is_crawler")),
-        "isResidential": bool(data.get("isResidential")),
-        "company_type": data.get("company_type"),
-        "asn_kind": data.get("asn_kind"),
-    }
-    abuser = parse_abuser_score(data.get("abuser_score"))
-    if abuser is not None:
-        out["abuser_score"] = abuser
-    if out["trust_score"] is None and not any(
-        v for k, v in out.items() if k != "trust_score"
-    ):
-        return None
-    return out
+_REP_NETCOFFEE_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_ncf = _load_pcb_plugin("rep_netcoffee")
+    netcoffee_lookup_sync = _rep_ncf.netcoffee_lookup_sync
+    _REP_NETCOFFEE_BUNDLE = True
+except Exception:
+    netcoffee_lookup_sync = None
 
 
 def ncgy_lookup_sync(ip: str) -> dict | None:
@@ -2602,7 +2573,7 @@ async def lookup_all_risk(
 
     pacing = SOURCE_PACING
     api_tasks = []
-    if "netcoffee" in sources:
+    if "netcoffee" in sources and netcoffee_lookup_sync is not None:
         w, d = pacing.get("netcoffee", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("netcoffee", netcoffee_lookup_sync, workers=w, delay=d))
     if "ncgy" in sources:

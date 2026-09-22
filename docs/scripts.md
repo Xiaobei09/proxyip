@@ -24,7 +24,8 @@
 
 **维护宗旨：只保留「非 Cloudflare AS13335 + Cloudflare 边缘端口」连接池。** 因此不收录 Cloudflare 官方边缘 IP（如 `byJoey/cfnew-ipdb`——其 IP 全属 AS13335，而 Workers 出站 `connect()` 禁止直连 CF IP 网段，无法用于自建链路）。最终产物经端口白名单 `443/8443/2053/2083/2087/2096` 过滤，其余端口桶一律丢弃——可用于 Worker 内部 `connect()` 直连。
 
-主源 `all.json` 采用 **3 次线性退避重试**（1.5s/3s）后才回退 zip 镜像（镜像同样 3 次尝试）；附加 `.json`/`.zip` 源分别 3/2 次重试。`ip-api` 国籍批量按批重试 2 次，终失败仅跳过该批继续后续批次，网络抖动不再中断整次国籍填充。所有下载统一带**整体 wall-clock 截止**：`fetch_with_deadline`（daemon 线程 + `join(timeout)`）用于「返回 bytes」路径，`deadline_open`（上下文管理器、`resp.read()` 返回已读完整 body）用于 `with urlopen(...) as resp:` 形态的逐 IP 信仰抓取——覆盖 download 主源/`ip-api`、quality 探活与公开侧信誉 API（netcoffee/ncgy/greynoise/ipdata/getipintel；freeipapi/hackmyip/iplocation/scamalytics/ipquery/ipapi_is/ffraud/ipwhois/whatismyip/stopforumspam/maltiverse/blackbox/otx/proxycheck/ip2location 抓取实现已迁 PCB，同 deadline 语义由私有侧自含）、external 校验、audit 国籍批量、健康 webhook。单次 `urlopen` 的 socket 超时只约束单次读写，遇到只回 200 头、响应体永不结束的上游仍会挂死管线——现在一律在 `timeout` 内按错误处理并走重试/兜底，任何上游都无法无限拖住流程（china_check 的 SSE 长连接轮询除外——其分块读取由内部 deadline 循环控制，不套用）。
+主源 `all.json` 采用 **3 次线性退避重试**（1.5s/3s）后才回退 zip 镜像（镜像同样 3 次尝试）；附加 `.json`/`.zip` 源分别 3/2 次重试。`ip-api` 国籍批量按批重试 2 次，终失败仅跳过该批继续后续批次，网络抖动不再中断整次国籍填充。所有下载统一带**整体 wall-clock 截止**：`fetch_with_deadline`（daemon 线程 + `join(timeout)`）用于「返回 bytes」路径，`deadline_open`（上下文管理器、`resp.read()` 返回已读完整 body）用于 `with urlopen(...) as resp:` 形态的逐 IP 信仰抓取——覆盖 download 主源/`ip-api`、quality 探活与公开侧信誉 API（ncgy/greynoise/ipdata/getipintel；freeipapi/hackmyip/iplocation/scamalytics/ipquery/ipapi_is/ffraud/ipwhois/whatismyip/stopforumspam/maltiverse/blackbox/otx/proxycheck/ip2location/netcoffee 抓取实现已迁 PCB，同 deadline 语义由私有侧自含）
+（注意：netcoffee 依赖公开共享 helper `parse_abuser_score`，公开保留兜底供 download 路径复用，netcoffee 插件已自含 `_parse_abuser_score`）、external 校验、audit 国籍批量、健康 webhook。单次 `urlopen` 的 socket 超时只约束单次读写，遇到只回 200 头、响应体永不结束的上游仍会挂死管线——现在一律在 `timeout` 内按错误处理并走重试/兜底，任何上游都无法无限拖住流程（china_check 的 SSE 长连接轮询除外——其分块读取由内部 deadline 循环控制，不套用）。
 
 ### `scripts/validate_proxies.py`
 
@@ -116,7 +117,7 @@
 
 | 源 | 权重 | 说明 |
 |---|---|---|
-| `netcoffee` | 20 | `ip.net.coffee/api/iprisk/{ip}`，`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
+| `netcoffee` | 20 | 免费 JSON 信誉（抓取实现已迁 PCB）；`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
 | `ncgy` | 10 | `ip.nc.gy`（MaxMind 匿名 IP 库），`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
 | `ip-api` | 15 | 本地批量地理的标志：proxy / hosting 判负、mobile 奖励 +5；`countryCode` 存在即计入 |
 | `ipquery` | 12 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
