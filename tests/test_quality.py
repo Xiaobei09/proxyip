@@ -2291,39 +2291,6 @@ class TestReputation(unittest.TestCase):
         self.assertGreaterEqual(first, 64)
         self.assertEqual(first, second)
 
-    def test_whatismyip_lookup_parsing(self):
-        payload = (
-            b'{"data":{"security":{"isVpn":false,"isProxy":true,"isTor":false,'
-            b'"isHosting":false,"isBlacklisted":true,"score":40},'
-            b'"network":{"connectionType":"Residential"}}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("whatismyip.ai", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.whatismyip_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertTrue(out["is_proxy"])
-        self.assertTrue(out["is_blacklisted"])
-        self.assertEqual(out["score"], 40)
-        self.assertEqual(out["connection_type"], "Residential")
-
-
     def test_parse_abuser_score(self):
         self.assertEqual(qc.parse_abuser_score("0.0039 (Low)"), 0.0039)
         self.assertEqual(qc.parse_abuser_score("42"), 42.0)
@@ -4287,6 +4254,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_FFRAUD_BUNDLE)
         self.assertIsNotNone(qr.ipwhois_lookup_sync)
         self.assertTrue(qr._REP_IPWHOIS_BUNDLE)
+        self.assertIsNotNone(qr.whatismyip_lookup_sync)
+        self.assertTrue(qr._REP_WHATISMYIP_BUNDLE)
 
 
 if __name__ == "__main__":

@@ -47,8 +47,6 @@ GETIPINTEL_URL = (
 )
 GETIPINTEL_TIMEOUT = 8
 GETIPINTEL_CAP = 2000
-WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
-WHATISMYIP_TIMEOUT = 8
 FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
@@ -718,31 +716,14 @@ except Exception:
     ffraud_lookup_sync = None
 
 
-def whatismyip_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``whatismyip.ai/api/lookup/{ip}`` security score + flags."""
-    req = urllib.request.Request(
-        WHATISMYIP_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, WHATISMYIP_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    payload = data.get("data") if isinstance(data.get("data"), dict) else {}
-    security = payload.get("security") or {}
-    network = payload.get("network") or {}
-    out = {
-        "is_vpn": bool(security.get("isVpn")),
-        "is_proxy": bool(security.get("isProxy")),
-        "is_tor": bool(security.get("isTor")),
-        "is_hosting": bool(security.get("isHosting")),
-        "is_blacklisted": bool(security.get("isBlacklisted")),
-        "connection_type": network.get("connectionType"),
-    }
-    score = security.get("score")
-    if isinstance(score, (int, float)):
-        out["score"] = round(score)
-    return out
+_REP_WHATISMYIP_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_wmi = _load_pcb_plugin("rep_whatismyip")
+    whatismyip_lookup_sync = _rep_wmi.whatismyip_lookup_sync
+    _REP_WHATISMYIP_BUNDLE = True
+except Exception:
+    whatismyip_lookup_sync = None
 
 
 BLACKBOX_URL = "https://blackbox.ipinfo.app/api/v3beta/{}"
@@ -2775,7 +2756,7 @@ async def lookup_all_risk(
     if "ffraud" in sources and ffraud_lookup_sync is not None:
         w, d = pacing.get("ffraud", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ffraud", ffraud_lookup_sync, workers=w, delay=d))
-    if "whatismyip" in sources:
+    if "whatismyip" in sources and whatismyip_lookup_sync is not None:
         w, d = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("whatismyip", whatismyip_lookup_sync, workers=w, delay=d))
     if "blackbox" in sources:
