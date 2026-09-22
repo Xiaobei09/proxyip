@@ -722,26 +722,14 @@ except Exception:
     whatismyip_lookup_sync = None
 
 
-BLACKBOX_URL = "https://blackbox.ipinfo.app/api/v3beta/{}"
-BLACKBOX_TIMEOUT = 8
-
-
-def blackbox_lookup_sync(ip: str) -> dict | None:
-    """Blackbox v3beta classification + signal flags."""
-    req = urllib.request.Request(
-        BLACKBOX_URL.format(ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, BLACKBOX_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict) or not data.get("classification"):
-        return None
-    return {
-        "classification": data.get("classification"),
-        "confidence": data.get("confidence"),
-        "suspicious": bool(data.get("suspicious")),
-        "signals": data.get("signals") or {},
-    }
+_REP_BLACKBOX_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_bbx = _load_pcb_plugin("rep_blackbox")
+    blackbox_lookup_sync = _rep_bbx.blackbox_lookup_sync
+    _REP_BLACKBOX_BUNDLE = True
+except Exception:
+    blackbox_lookup_sync = None
 
 
 OTX_URL = "https://otx.alienvault.com/api/v1/indicators/IPv4/{}/general"
@@ -2687,7 +2675,7 @@ async def lookup_all_risk(
     if "whatismyip" in sources and whatismyip_lookup_sync is not None:
         w, d = pacing.get("whatismyip", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("whatismyip", whatismyip_lookup_sync, workers=w, delay=d))
-    if "blackbox" in sources:
+    if "blackbox" in sources and blackbox_lookup_sync is not None:
         w, d = pacing.get("blackbox", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("blackbox", blackbox_lookup_sync, workers=w, delay=d))
     if "otx" in sources:

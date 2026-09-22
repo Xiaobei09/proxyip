@@ -4148,6 +4148,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertIsNotNone(qr.maltiverse_lookup_sync)
         self.assertTrue(qr._REP_MALTIVERSE_BUNDLE)
         self.assertEqual(qr.MALTIVERSE_CAP, 2500)
+        self.assertIsNotNone(qr.blackbox_lookup_sync)
+        self.assertTrue(qr._REP_BLACKBOX_BUNDLE)
 
 
 if __name__ == "__main__":
