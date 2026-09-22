@@ -2327,37 +2327,6 @@ class TestReputation(unittest.TestCase):
         self.assertGreaterEqual(first, 64)
         self.assertEqual(first, second)
 
-    def test_ffraud_lookup_parsing(self):
-        payload = (
-            b'{"fraud_score":0,"risk":"none","proxy":false,"vpn":false,'
-            b'"tor":false,"hosting":true,"is_abuser":false,'
-            b'"recent_abuse":false,"connection_type":"Residential"}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("api.ffraud.com", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.ffraud_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertEqual(out["fraud_score"], 0)
-        self.assertTrue(out["is_hosting"])
-        self.assertEqual(out["connection_type"], "Residential")
-
     def test_whatismyip_lookup_parsing(self):
         payload = (
             b'{"data":{"security":{"isVpn":false,"isProxy":true,"isTor":false,'
@@ -4350,6 +4319,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertTrue(qr._REP_IPQUERY_BUNDLE)
         self.assertIsNotNone(qr.ipapi_is_lookup_sync)
         self.assertTrue(qr._REP_IPAPI_IS_BUNDLE)
+        self.assertIsNotNone(qr.ffraud_lookup_sync)
+        self.assertTrue(qr._REP_FFRAUD_BUNDLE)
 
 
 if __name__ == "__main__":

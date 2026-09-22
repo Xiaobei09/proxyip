@@ -47,8 +47,6 @@ GETIPINTEL_URL = (
 )
 GETIPINTEL_TIMEOUT = 8
 GETIPINTEL_CAP = 2000
-FFRAUD_URL = "https://api.ffraud.com/public/ip/{ip}"
-FFRAUD_TIMEOUT = 8
 WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
 WHATISMYIP_TIMEOUT = 8
 IPWHOIS_URL = "https://ipwhois.app/json/{ip}"
@@ -712,31 +710,14 @@ except Exception:
     ipquery_lookup_sync = None
 
 
-def ffraud_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``api.ffraud.com/public/ip/{ip}`` fraud score + flags."""
-    req = urllib.request.Request(
-        FFRAUD_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, FFRAUD_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    out = {
-        "is_vpn": bool(data.get("vpn")),
-        "is_proxy": bool(data.get("proxy")),
-        "is_tor": bool(data.get("tor")),
-        "is_hosting": bool(data.get("hosting")),
-        "is_mobile": bool(data.get("mobile")),
-        "is_abuser": bool(data.get("is_abuser")),
-        "recent_abuse": bool(data.get("recent_abuse")),
-        "is_residential_proxy": bool(data.get("is_residential_proxy")),
-        "connection_type": data.get("connection_type"),
-    }
-    score = data.get("fraud_score")
-    if isinstance(score, (int, float)):
-        out["fraud_score"] = round(score)
-    return out
+_REP_FFRAUD_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_ff = _load_pcb_plugin("rep_ffraud")
+    ffraud_lookup_sync = _rep_ff.ffraud_lookup_sync
+    _REP_FFRAUD_BUNDLE = True
+except Exception:
+    ffraud_lookup_sync = None
 
 
 def whatismyip_lookup_sync(ip: str) -> dict | None:
@@ -2811,7 +2792,7 @@ async def lookup_all_risk(
     if "ipquery" in sources and ipquery_lookup_sync is not None:
         w, d = pacing.get("ipquery", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipquery", ipquery_lookup_sync, workers=w, delay=d))
-    if "ffraud" in sources:
+    if "ffraud" in sources and ffraud_lookup_sync is not None:
         w, d = pacing.get("ffraud", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ffraud", ffraud_lookup_sync, workers=w, delay=d))
     if "whatismyip" in sources:
