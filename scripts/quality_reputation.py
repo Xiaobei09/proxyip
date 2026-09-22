@@ -67,8 +67,6 @@ RESPROXY_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
 TOR_EXITS_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
 SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
-IPLOCATION_URL = "https://api.iplocation.net/?ip={ip}"
-IPLOCATION_TIMEOUT = 10
 IPLOCATION_CAP = 3000
 STOPFORUMSPAM_URL = "https://api.stopforumspam.org/api?ip={ip}&json"
 STOPFORUMSPAM_TIMEOUT = 10
@@ -1491,26 +1489,16 @@ except Exception:
     SCAMALYTICS_CAP = 1500
 
 
-def iplocation_lookup_sync(ip: str) -> dict | None:
-    """Keyless ``api.iplocation.net/?ip={ip}``: isp + occasional ``is_proxy``."""
-    req = urllib.request.Request(
-        IPLOCATION_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, IPLOCATION_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict) or not data.get("ip"):
-        return None
-    out: dict = {}
-    proxy = data.get("is_proxy")
-    if isinstance(proxy, str) and proxy.lower() == "yes":
-        out["is_proxy"] = True
-    isp = data.get("isp")
-    if isinstance(isp, str) and isp:
-        out["isp"] = isp
-    if not out.get("is_proxy") and not out.get("isp"):
-        return None
-    return out
+_REP_IPLOCATION_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_iloc = _load_pcb_plugin("rep_iplocation")
+    iplocation_lookup_sync = _rep_iloc.iplocation_lookup_sync
+    IPLOCATION_CAP = _rep_iloc.CAP
+    _REP_IPLOCATION_BUNDLE = True
+except Exception:
+    iplocation_lookup_sync = None
+    IPLOCATION_CAP = 3000
 
 
 async def fetch_text_list(url: str, timeout: float = STATIC_LIST_TIMEOUT) -> set[str]:
@@ -2910,7 +2898,7 @@ async def lookup_all_risk(
         w, d = pacing.get("scamalytics", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "scamalytics", scamalytics_lookup_sync, cap=SCAMALYTICS_CAP, workers=w, delay=d))
-    if "iplocation" in sources:
+    if "iplocation" in sources and iplocation_lookup_sync is not None:
         w, d = pacing.get("iplocation", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch(
             "iplocation", iplocation_lookup_sync, cap=IPLOCATION_CAP, workers=w, delay=d))

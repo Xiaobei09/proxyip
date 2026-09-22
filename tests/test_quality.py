@@ -4061,27 +4061,6 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertTrue(0 < qr.FREEIPAPI_CAP <= 10000)
         self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
 
-    def test_iplocation_lookup_parsing(self):
-        body = json.dumps({
-            "ip": "1.2.3.4", "isp": "X Corp", "is_proxy": "Yes",
-        }).encode()
-        with unittest.mock.patch("urllib.request.urlopen") as m:
-            fake = unittest.mock.MagicMock()
-            fake.read.return_value = body
-            m.return_value.__enter__.return_value = fake
-            out = qr.iplocation_lookup_sync("1.2.3.4")
-        self.assertEqual(out, {"is_proxy": True, "isp": "X Corp"})
-
-    def test_iplocation_lookup_clean(self):
-        body = json.dumps({"ip": "1.2.3.4", "isp": "HomeNet",
-                           "is_proxy": "No"}).encode()
-        with unittest.mock.patch("urllib.request.urlopen") as m:
-            fake = unittest.mock.MagicMock()
-            fake.read.return_value = body
-            m.return_value.__enter__.return_value = fake
-            out = qr.iplocation_lookup_sync("1.2.3.4")
-        self.assertEqual(out, {"isp": "HomeNet"})
-
     def test_fetch_cins_splits_whitespace(self):
         lines = ["1.2.3.4 5.6.7.8", "  9.9.9.9  "]
 
@@ -4429,6 +4408,9 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertEqual(qr.FREEIPAPI_CAP, 3000)
         self.assertIsNotNone(qr.hackmyip_lookup_sync)
         self.assertTrue(qr._REP_HACKMYIP_BUNDLE)
+        self.assertIsNotNone(qr.iplocation_lookup_sync)
+        self.assertTrue(qr._REP_IPLOCATION_BUNDLE)
+        self.assertEqual(qr.IPLOCATION_CAP, 3000)
 
 
 if __name__ == "__main__":
