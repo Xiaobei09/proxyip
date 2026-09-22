@@ -47,8 +47,6 @@ GETIPINTEL_URL = (
 )
 GETIPINTEL_TIMEOUT = 8
 GETIPINTEL_CAP = 2000
-IPAPI_IS_URL = "https://api.ipapi.is/?q={ip}"
-IPAPI_IS_TIMEOUT = 8
 FFRAUD_URL = "https://api.ffraud.com/public/ip/{ip}"
 FFRAUD_TIMEOUT = 8
 WHATISMYIP_URL = "https://whatismyip.ai/api/lookup/{ip}"
@@ -694,37 +692,14 @@ def getipintel_lookup_sync(ip: str, email: str) -> dict | None:
     return {"probability": prob}
 
 
-def ipapi_is_lookup_sync(ip: str) -> dict | None:
-    """Free keyless ``api.ipapi.is`` security flags."""
-    req = urllib.request.Request(
-        IPAPI_IS_URL.format(ip=ip),
-        headers={"User-Agent": UA, "Accept": "application/json"},
-    )
-    with deadline_open(req, IPAPI_IS_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
-    company = data.get("company") or {}
-    asn = data.get("asn") or {}
-    out = {
-        "is_bogon": bool(data.get("is_bogon")),
-        "is_mobile": bool(data.get("is_mobile")),
-        "is_crawler": bool(data.get("is_crawler")),
-        "is_datacenter": bool(data.get("is_datacenter")),
-        "is_tor": bool(data.get("is_tor")),
-        "is_proxy": bool(data.get("is_proxy")),
-        "is_vpn": bool(data.get("is_vpn")),
-        "is_abuser": bool(data.get("is_abuser")),
-        "company_type": company.get("type"),
-        "asn_type": asn.get("type"),
-    }
-    abuser = parse_abuser_score(company.get("abuser_score"))
-    if abuser is not None:
-        out["company_abuser_score"] = abuser
-    abuser = parse_abuser_score(asn.get("abuser_score"))
-    if abuser is not None:
-        out["asn_abuser_score"] = abuser
-    return out
+_REP_IPAPI_IS_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_is = _load_pcb_plugin("rep_ipapi_is")
+    ipapi_is_lookup_sync = _rep_is.ipapi_is_lookup_sync
+    _REP_IPAPI_IS_BUNDLE = True
+except Exception:
+    ipapi_is_lookup_sync = None
 
 
 _REP_IPQUERY_BUNDLE = False
@@ -2830,7 +2805,7 @@ async def lookup_all_risk(
                 "Warning: GETIPINTEL_EMAIL not set; skipping getipintel source",
                 file=sys.stderr,
             )
-    if "ipapi_is" in sources:
+    if "ipapi_is" in sources and ipapi_is_lookup_sync is not None:
         w, d = pacing.get("ipapi_is", (REP_WORKERS, REP_DELAY))
         api_tasks.append(cached_batch("ipapi_is", ipapi_is_lookup_sync, workers=w, delay=d))
     if "ipquery" in sources and ipquery_lookup_sync is not None:

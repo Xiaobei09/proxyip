@@ -2155,39 +2155,6 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["asn_kind"], "hosting")
         self.assertEqual(out["abuser_score"], 0.35)
 
-    def test_ipapi_is_enriched_fields(self):
-        payload = (
-            b'{"is_datacenter":false,"is_vpn":true,"is_abuser":false,'
-            b'"company":{"type":"hosting","abuser_score":"0.50 (Medium)"},'
-            b'"asn":{"type":"hosting","abuser_score":"0.20 (Medium)"}}'
-        )
-
-        def fake_urlopen(req, timeout=0):
-            self.assertIn("api.ipapi.is", req.full_url)
-            class FakeResp:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *exc):
-                    return False
-
-                def read(self):
-                    return payload
-
-            return FakeResp()
-
-        orig = qc.urllib.request.urlopen
-        qc.urllib.request.urlopen = fake_urlopen
-        try:
-            out = qc.ipapi_is_lookup_sync("1.2.3.4")
-        finally:
-            qc.urllib.request.urlopen = orig
-        self.assertTrue(out["is_vpn"])
-        self.assertEqual(out["company_type"], "hosting")
-        self.assertEqual(out["asn_type"], "hosting")
-        self.assertEqual(out["company_abuser_score"], 0.50)
-        self.assertEqual(out["asn_abuser_score"], 0.20)
-
     def test_ipwhois_lookup_parsing(self):
         # R242 回归：IPWHOIS_URL 用命名占位符 {ip}，URL 构造须 .format(ip=ip)，
         # 否则每次调用 KeyError，源 100% 失效（实测 rep_sources 中从不出现）。
@@ -4381,6 +4348,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertEqual(qr.IPLOCATION_CAP, 3000)
         self.assertIsNotNone(qr.ipquery_lookup_sync)
         self.assertTrue(qr._REP_IPQUERY_BUNDLE)
+        self.assertIsNotNone(qr.ipapi_is_lookup_sync)
+        self.assertTrue(qr._REP_IPAPI_IS_BUNDLE)
 
 
 if __name__ == "__main__":
