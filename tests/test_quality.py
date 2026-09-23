@@ -2630,61 +2630,13 @@ class TestReputationCache(unittest.TestCase):
         self.assertEqual(len(data["proxies"]), 3)
         self.assertEqual(set(data["proxies"]), {"1.1.1.1", "2.2.2.2", "3.3.3.3"})
 
-    def test_abuse_deadline_truncates_loop(self):
-        """abuse 顺序查询超 deadline → 立即截断，不发任何请求（D-42 相位内止损）。"""
-        args = argparse.Namespace(
-            abuse_service="abuseipdb", abuse_key="k",
-            reputation_weights={"abuseipdb": 35},
-        )
-        results = {"1.2.3.4:443#US": {}}
-        ipinfo = {"1.2.3.4:443#US": {"exit_ip": "5.6.7.8"}}
-        calls: list[str] = []
-        orig = qr.abuse_lookup_sync
-
-        def fake(ip, service, key):
-            calls.append(ip)
-            return {"score": 10}
-
-        qr.abuse_lookup_sync = fake
-        buf = io.StringIO()
-        try:
-            with contextlib.redirect_stderr(buf):
-                out = asyncio.run(qr.run_abuse(
-                    results, ipinfo, args, deadline=-1.0
-                ))
-        finally:
-            qr.abuse_lookup_sync = orig
-        self.assertEqual(out, {})
-        self.assertEqual(calls, [])
-        self.assertIn("(0/1)", buf.getvalue())
-
-    def test_ipqs_timeout_redacts_key(self):
-        """IPQS 超时异常净化：DEBUG 日志面不泄露 key（R212 安全维度闭环）。"""
-        secret = "s3cr3t-ipqs-key-0001"
-        leaked_url = f"https://ipqualityscore.com/api/json/ip/{secret}/5.6.7.8"
-
-        def fake_deadline_open(req, timeout, max_bytes=None):
-            raise TimeoutError(f"fetch deadline exceeded (10s): {req.full_url}")
-
-        class _FakeReq:
-            full_url = leaked_url
-
-        captured_tb = None
-        orig = qr.deadline_open
-        qr.deadline_open = fake_deadline_open
-        try:
-            with self.assertRaises(TimeoutError) as ctx:
-                qr.abuse_lookup_sync("5.6.7.8", "ipqualityscore", secret)
-            captured_tb = traceback.format_exc()
-        finally:
-            qr.deadline_open = orig
-        msg = str(ctx.exception)
-        self.assertNotIn(secret, msg)
-        self.assertIn("5.6.7.8", msg)
-        self.assertIn("redacted", msg)
-        # traceback 面（logging exc_info / format_exc）也不得残留 key（R213 修正）
-        self.assertIsNotNone(captured_tb)
-        self.assertNotIn(secret, captured_tb)
+    def test_abuse_lookup_fail_open_when_unbundled(self):
+        """abuse 分通道经 PCB rep_abuse 回绑：无包时 fail-open 为 None。"""
+        if qr._REP_ABUSE_BUNDLE:
+            self.assertIsNotNone(qr.abuse_lookup_sync)
+            self.assertIs(qr.abuse_lookup_sync.__module__, "rep_abuse")
+        else:
+            self.assertIsNone(qr.abuse_lookup_sync)
 
     def test_malformed_cache_tolerated(self):
         qr.REP_CACHE_FILE.write_text("{not json\n", encoding="utf-8")

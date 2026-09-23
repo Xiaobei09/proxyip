@@ -19,7 +19,6 @@ import sys
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from bisect import bisect_right
 
 from common import *  # noqa: F401,F403  (paths, UA, write_json, keyed_json, ...)
@@ -941,6 +940,15 @@ except Exception:
     sorbs_lookup_sync = None
     uceprotect_lookup_sync = None
     psbl_lookup_sync = None
+
+
+_REP_ABUSE_BUNDLE = False
+try:
+    _rep_abuse = _load_pcb_plugin("rep_abuse")
+    abuse_lookup_sync = _rep_abuse.abuse_lookup_sync
+    _REP_ABUSE_BUNDLE = True
+except Exception:
+    abuse_lookup_sync = None
 
 
 _REP_FREEIPAPI_BUNDLE = False
@@ -2070,53 +2078,6 @@ def derive_risk(
     signals: dict, abuse: dict | None, weights: dict
 ) -> str:
     return reputation_risk(compute_reputation(signals, abuse, weights)) or "low"
-
-
-def abuse_lookup_sync(ip: str, service: str, key: str) -> dict:
-    if service == "abuseipdb":
-        url = (
-            "[REDACTED_PRIVATE_RESOURCE]"
-            f"?ipAddress={ip}&maxAgeInDays=90"
-        )
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Key": key,
-                "Accept": "application/json",
-                "User-Agent": "proxyip/quality 1.0",
-            },
-        )
-        with deadline_open(req, 10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))["data"]
-        return {
-            "service": "abuseipdb",
-            "score": data.get("abuseConfidenceScore"),
-            "is_tor": data.get("isTor"),
-            "is_proxy": data.get("isProxy"),
-            "is_hosting": data.get("isHosting"),
-            "country_code": data.get("countryCode"),
-        }
-    url = f"[REDACTED_PRIVATE_RESOURCE]"
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "proxyip/quality 1.0"}
-    )
-    try:
-        with deadline_open(req, 10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except TimeoutError:
-        raise TimeoutError(
-            f"ipqualityscore fetch timed out for {ip} (key redacted)"
-        ) from None
-    return {
-        "service": "ipqs",
-        "score": data.get("fraud_score"),
-        "proxy": data.get("proxy"),
-        "vpn": data.get("vpn"),
-        "hosting": data.get("hosting"),
-        "mobile": data.get("mobile"),
-        "bot": data.get("bot_status"),
-        "isp": data.get("isp"),
-    }
 
 
 async def run_abuse(
