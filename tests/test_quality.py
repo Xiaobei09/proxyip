@@ -536,6 +536,24 @@ class TestReputation(unittest.TestCase):
         self.assertIsNone(
             qc.source_score("ip2location", {"is_proxy": False}))
 
+    def test_source_score_blackbox(self):
+        self.assertEqual(
+            qc.source_score("blackbox", {"classification": "tor"}), 10)
+        self.assertEqual(
+            qc.source_score(
+                "blackbox", {"classification": "residential"}), 95)
+        self.assertEqual(
+            qc.source_score("blackbox", {}), 50)
+        self.assertEqual(
+            qc.source_score(
+                "blackbox",
+                {"classification": "tor", "suspicious": True}), 0)
+        self.assertEqual(
+            qc.source_score(
+                "blackbox",
+                {"classification": "residential",
+                 "suspicious": True}), 75)
+
     def test_weighted_merge(self):
         signals = {"netcoffee": {"trust_score": 80},
                    "ncgy": {"is_vpn": True}}
