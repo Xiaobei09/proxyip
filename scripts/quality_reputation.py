@@ -2086,7 +2086,7 @@ async def run_abuse(
 ) -> dict:
     """按出口 IP 查询滥用分；``deadline``（monotonic 绝对时刻）墙钟止损，
     顺序循环超龄即截断（防滥用 API 卡死把整个相位拖到 CI 硬杀）。"""
-    if args.abuse_service == "none" or not args.abuse_key:
+    if args.abuse_service == "none" or not args.abuse_key or abuse_lookup_sync is None:
         return {}
     exit_ips = sorted(
         {info["exit_ip"] for info in ipinfo.values() if info.get("exit_ip")}

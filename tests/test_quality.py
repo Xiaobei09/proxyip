@@ -2638,6 +2638,24 @@ class TestReputationCache(unittest.TestCase):
         else:
             self.assertIsNone(qr.abuse_lookup_sync)
 
+    def test_abuse_run_loop_safe_when_lookup_none(self):
+        """abuse 通道未绑定（None）时 run_abuse 安全短路空结果，不抛异常。"""
+        args = argparse.Namespace(
+            abuse_service="abuseipdb", abuse_key="k",
+            reputation_weights={"abuseipdb": 35},
+        )
+        orig = qr.abuse_lookup_sync
+        qr.abuse_lookup_sync = None
+        try:
+            out = asyncio.run(qr.run_abuse(
+                {"1.2.3.4:443#US": {}},
+                {"1.2.3.4:443#US": {"exit_ip": "5.6.7.8"}},
+                args,
+            ))
+        finally:
+            qr.abuse_lookup_sync = orig
+        self.assertEqual(out, {})
+
     def test_malformed_cache_tolerated(self):
         qr.REP_CACHE_FILE.write_text("{not json\n", encoding="utf-8")
         calls = []
