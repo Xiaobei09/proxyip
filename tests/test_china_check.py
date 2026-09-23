@@ -3864,8 +3864,16 @@ class TestCnOverrideMatrixR89(unittest.TestCase):
     """
 
     _DYN_CODES = ("cn42", "cn43", "cn44", "cn13")
+    _MATRIX = None
 
-    def _matrix(self):
+    @classmethod
+    def setUpClass(cls):
+        """R90性能：源文件读盘＋正则派生一次（原每断言一次，共 4 次）。"""
+        super().setUpClass()
+        cls._MATRIX = cls._derive_matrix()
+
+    @classmethod
+    def _derive_matrix(cls):
         import re
         from pathlib import Path
         src = (Path(cc.__file__).resolve().parent.parent
@@ -3877,8 +3885,11 @@ class TestCnOverrideMatrixR89(unittest.TestCase):
         dyn = set(re.findall(r'cn_opt\(args,\s*src,\s*"(limit|concurrency|nodes)"',
                              src))
         for kind in dyn:
-            got[kind] |= set(self._DYN_CODES)
+            got[kind] |= set(cls._DYN_CODES)
         return {k: sorted(v) for k, v in got.items()}
+
+    def _matrix(self):
+        return self._MATRIX
 
     def test_limit_matrix(self):
         m = self._matrix()["limit"]
@@ -3908,6 +3919,31 @@ class TestCnOverrideMatrixR89(unittest.TestCase):
         self.assertEqual(exempt, sorted(
             ["cn01", "cn02", "cn03"] + [f"cn{i:02d}" for i in range(20, 30)]
             + ["cn41"]))
+
+    def test_registry_loads_once_per_process_r90(self):
+        """R90性能：N 次 cn_opt 只触发 ≤1 次插件加载（进程内缓存）。
+
+        防回退逐调用 import（loader 含 sys.path 操作＋版本校验，
+        高频调用即放大约 55 处派线点的单轮开销）。
+        """
+        from types import SimpleNamespace
+        from unittest import mock
+        real_load = cc._load_pcb_plugin
+        calls = []
+        old = cc._SOURCES_REG
+        cc._SOURCES_REG = None
+        try:
+            with mock.patch.object(cc, "_load_pcb_plugin",
+                                   side_effect=lambda n: (calls.append(n),
+                                                          real_load(n))[1]):
+                args = SimpleNamespace(cn_limit={"cn30": 1},
+                                       cn_concurrency={}, cn_nodes={})
+                for code in ("cn30", "cn31", "cn07", "cn40", "cn99"):
+                    cc.cn_opt(args, code, "limit", default=0)
+                    cc.cn_opt(args, code, "concurrency", default=0)
+            self.assertLessEqual(len(calls), 1, calls)
+        finally:
+            cc._SOURCES_REG = old
 
 
 class TestEngineRegistryTables(unittest.TestCase):
