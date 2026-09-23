@@ -130,6 +130,40 @@ class TestAuditEndToEndCacheWritten(unittest.TestCase):
                 json.loads(cache_file.read_text(encoding="utf-8"))["ips"],
             )
 
+    def test_stale_cache_entries_retained_r95(self):
+        """R95数据格式：entry_geo 跨批累计保留（无主动裁剪）。
+
+        实现只增不减（audit 186-192 行：load 全量＋补缺失＋整体回写，
+        无删除路径）；docs/data-spec 与 scripts.md 均作此述。本测试
+        锁住该语义：过期 IP 不复查且不丢失。
+        """
+        from audit_entry_cc import audit as run_audit
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            qdir = base / "quality"
+            qdir.mkdir(parents=True)
+            (base / "valid").mkdir(parents=True)
+            src = base / "valid" / "all.txt"
+            src.write_text("1.1.1.1:443#US-10ms\n", encoding="utf-8")
+            (qdir / "entry_geo.json").write_text(
+                json.dumps({
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "ips": {"9.9.9.9": {"cc": "DE", "asn": 1}}}),
+                encoding="utf-8")
+            with mock.patch(
+                "audit_entry_cc.lookup_geo",
+                return_value={"1.1.1.1": {"cc": "US", "asn": 1234}},
+            ) as lg:
+                run_audit(src, qdir, timeout=10, delay=0)
+            if lg.called:
+                self.assertNotIn("9.9.9.9", lg.call_args[0][0])
+            saved = json.loads(
+                (qdir / "entry_geo.json").read_text(encoding="utf-8"))
+            self.assertIn("updated_at", saved)
+            self.assertIn("9.9.9.9", saved["ips"])
+            self.assertIn("1.1.1.1", saved["ips"])
+
 
 class TestAudit(unittest.TestCase):
     def _qfile(self, qdir: Path, name: str, data: dict) -> None:

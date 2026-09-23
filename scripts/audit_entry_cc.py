@@ -73,7 +73,7 @@ def load_entry_geo_cache(path: Path | None) -> dict[str, dict]:
 
 
 def save_entry_geo_cache(path: Path, cache: dict[str, dict]) -> None:
-    """持久化当前批入口 geo；format 稳定（data-spec 消费物由脚本重生成）。"""
+    """持久化累计入口 geo（跨批保留、无主动裁剪；data-spec 消费物由脚本重生成）。"""
     write_text_if_changed(
         path,
         json.dumps({
