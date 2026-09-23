@@ -49,6 +49,20 @@ class TestPcbLeakGuard(unittest.TestCase):
                         hits.append(f"{f.name}: {pat.pattern}")
         self.assertEqual(hits, [])
 
+    def test_workflow_literals_absent(self):
+        pats = [re.compile(re.escape(p)) for p in _GUARD.BANNED_LITERAL_RES]
+        hits = []
+        targets = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        targets += sorted((ROOT / ".github" / "scripts").glob("*.sh"))
+        for f in targets:
+            if not f.exists():
+                continue
+            text = f.read_text(encoding="utf-8")
+            for pat in pats:
+                if pat.search(text):
+                    hits.append(f"{f.name}: {pat.pattern}")
+        self.assertEqual(hits, [])
+
     def test_loader_contract(self):
         import sys
         sys.path.insert(0, str(ROOT / "scripts"))
