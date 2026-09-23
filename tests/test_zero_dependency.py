@@ -203,5 +203,35 @@ class TestNoCredentialNamesInLogs(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class TestTestsDirZeroDependency(unittest.TestCase):
+    """R94：tests/ 同样仅允许标准库＋项目内模块（与 scripts/ 同契约）。
+
+    STDLIB_TOP 未收录的常用标准库（shlex/types）在此类中显式增补；
+    项目内模块指 scripts/*.py 的 stem（tests 间无互引，见基线审计）。
+    """
+
+    TEST_STDLIB_EXTRA = {"shlex", "types"}
+
+    def test_all_test_imports_are_stdlib_or_local(self):
+        scripts = {p.stem for p in (ROOT / "scripts").glob("*.py")}
+        offenders: list[str] = []
+        for py in sorted((ROOT / "tests").glob("*.py")):
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    mods = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    mods = [node.module] if node.module else []
+                else:
+                    continue
+                for m in mods:
+                    top = m.split(".", 1)[0]
+                    if (top not in STDLIB_TOP
+                            and top not in self.TEST_STDLIB_EXTRA
+                            and top not in scripts):
+                        offenders.append(f"{py.name}: import {m}")
+        self.assertEqual(offenders, [], "第三方依赖泄漏:\n" + "\n".join(offenders))
+
+
 if __name__ == "__main__":
     unittest.main()
