@@ -3855,6 +3855,61 @@ class TestCnOptResolver(unittest.TestCase):
             cc._SOURCES_REG = old
 
 
+class TestCnOverrideMatrixR89(unittest.TestCase):
+    """R89功能查找：泛型覆盖适用矩阵（防静默接线漂移；改派线须同步改docs）。
+
+    矩阵由源码派生：字面量 cn_opt 调用＋动态循环变量（cn42/43/44/13
+    的 limit/concurrency）。intent 语义：batch-legacy（cn01-03）/
+    L2常开（cn20-29）/搭车（cn41）码无泛型 knob，设之无效。
+    """
+
+    _DYN_CODES = ("cn42", "cn43", "cn44", "cn13")
+
+    def _matrix(self):
+        import re
+        from pathlib import Path
+        src = (Path(cc.__file__).resolve().parent.parent
+               / "scripts" / "china_check.py").read_text(encoding="utf-8")
+        got = {"limit": set(), "concurrency": set(), "nodes": set()}
+        for m in re.finditer(
+                r'cn_opt\(args,\s*"(cn\d+)",\s*"(limit|concurrency|nodes)"', src):
+            got[m.group(2)].add(m.group(1))
+        dyn = set(re.findall(r'cn_opt\(args,\s*src,\s*"(limit|concurrency|nodes)"',
+                             src))
+        for kind in dyn:
+            got[kind] |= set(self._DYN_CODES)
+        return {k: sorted(v) for k, v in got.items()}
+
+    def test_limit_matrix(self):
+        m = self._matrix()["limit"]
+        self.assertEqual(m, sorted(
+            ["cn04", "cn05", "cn06", "cn07", "cn08", "cn09", "cn10",
+             "cn11", "cn12", "cn13", "cn14", "cn15", "cn16", "cn17",
+             "cn18", "cn19", "cn30", "cn31", "cn32", "cn33", "cn34",
+             "cn35", "cn36", "cn37", "cn38", "cn39", "cn40",
+             "cn42", "cn43", "cn44"]))
+
+    def test_concurrency_matrix(self):
+        m = self._matrix()["concurrency"]
+        self.assertEqual(m, sorted(
+            ["cn04", "cn05", "cn06", "cn07", "cn08", "cn09", "cn10",
+             "cn11", "cn12", "cn13", "cn14", "cn15", "cn16", "cn17",
+             "cn18", "cn19", "cn30", "cn31", "cn32", "cn33", "cn34",
+             "cn35", "cn36", "cn37", "cn38", "cn39", "cn40",
+             "cn42", "cn43", "cn44"]))
+
+    def test_nodes_matrix(self):
+        self.assertEqual(self._matrix()["nodes"], ["cn02", "cn30"])
+
+    def test_exempt_codes_documented(self):
+        m = self._matrix()
+        exempt = sorted(set(f"cn{i:02d}" for i in range(1, 45))
+                        - set(m["limit"]))
+        self.assertEqual(exempt, sorted(
+            ["cn01", "cn02", "cn03"] + [f"cn{i:02d}" for i in range(20, 30)]
+            + ["cn41"]))
+
+
 class TestEngineRegistryTables(unittest.TestCase):
     """engine 判定表注册表驱动（有包）与 legacy 回退（无包）双路径。"""
 
