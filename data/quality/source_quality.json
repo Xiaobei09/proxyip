@@ -30,10 +30,10 @@
         "US": 38
       },
       "family_dist": {
-        "dual": 7,
+        "dual": 8,
         "ipv4": 220,
-        "ipv6": 65,
-        "unknown": 6
+        "ipv6": 60,
+        "unknown": 5
       },
       "median_latency": 329.0,
       "median_speed": 1.46,
@@ -69,7 +69,8 @@
         "US": 3
       },
       "family_dist": {
-        "unknown": 32
+        "ipv4": 1,
+        "unknown": 31
       },
       "median_latency": 288.5,
       "median_speed": 3.75,
@@ -116,10 +117,10 @@
         "ZA": 2
       },
       "family_dist": {
-        "dual": 6,
-        "ipv4": 367,
-        "ipv6": 96,
-        "unknown": 28
+        "dual": 7,
+        "ipv4": 400,
+        "ipv6": 99,
+        "unknown": 33
       },
       "median_latency": 286.0,
       "median_speed": 1.73,
@@ -145,7 +146,7 @@
         "US": 1
       },
       "family_dist": {
-        "ipv4": 1
+        "unknown": 1
       },
       "median_latency": 48.0,
       "median_speed": 16.13,
@@ -222,10 +223,10 @@
         "US": 1847
       },
       "family_dist": {
-        "dual": 32,
-        "ipv4": 4851,
-        "ipv6": 11848,
-        "unknown": 34
+        "dual": 42,
+        "ipv4": 4884,
+        "ipv6": 11926,
+        "unknown": 50
       },
       "median_latency": 310.0,
       "median_speed": 1.46,
@@ -268,7 +269,7 @@
         "US": 10
       },
       "family_dist": {
-        "ipv4": 38,
+        "ipv4": 37,
         "ipv6": 3,
         "unknown": 27
       },
@@ -370,7 +371,7 @@
         "US": 3
       },
       "family_dist": {
-        "ipv4": 13
+        "ipv4": 22
       },
       "median_latency": 326.0,
       "median_speed": 1.29,
@@ -403,7 +404,11 @@
         "TR": 1,
         "US": 2
       },
-      "family_dist": {},
+      "family_dist": {
+        "ipv4": 9,
+        "ipv6": 3,
+        "unknown": 1
+      },
       "median_latency": 286.0,
       "median_speed": 1.62,
       "port_dist": {
@@ -439,7 +444,7 @@
       },
       "family_dist": {
         "ipv4": 20,
-        "ipv6": 6,
+        "ipv6": 5,
         "unknown": 15
       },
       "median_latency": 273.0,
@@ -476,7 +481,7 @@
       },
       "family_dist": {
         "ipv4": 1,
-        "unknown": 138
+        "unknown": 137
       },
       "median_latency": 299.0,
       "median_speed": null,
@@ -494,5 +499,5 @@
   },
   "total_alive": 18099,
   "total_proxies": 20601,
-  "ts": "2026-09-23T04:10:52Z"
+  "ts": "2026-09-23T04:32:46Z"
 }
