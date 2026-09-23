@@ -3763,6 +3763,45 @@ class TestCnOptResolver(unittest.TestCase):
                          {})
         self.assertEqual(cc.parse_cn_kv(None), {})
 
+    def test_parse_cn_kv_warns_malformed_r87(self):
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            out = cc.parse_cn_kv(["bogus", "cn30=800", "cn32=abc"])
+        self.assertEqual(out, {"cn30": 800})
+        err = buf.getvalue()
+        self.assertIn("bogus", err)
+        self.assertIn("cn32=abc", err)
+
+    def test_warn_unknown_cn_codes_r87(self):
+        import io
+        from contextlib import redirect_stderr
+        args = self._args(cn_limit={"cn30": 800, "cn99": 1},
+                          cn_concurrency={}, cn_nodes={})
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cc.warn_unknown_cn_codes(args)
+        self.assertIn("cn99", buf.getvalue())
+
+    def test_dry_run_prints_plan_r87(self):
+        import io
+        from contextlib import redirect_stderr
+        from unittest import mock
+        with mock.patch.object(cc, "read_json", return_value={}), \
+             mock.patch.object(cc, "load_sample",
+                               return_value=([("1.1.1.1", "1.1.1.1:443#US",
+                                              "1.1.1.1", "443", None)],
+                                             "all_rep.txt")):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = cc.main(["--dry-run", "--cn-limit", "cn30=800",
+                              "--cn-limit", "bogus"])
+            self.assertEqual(rc, 0)
+            err = buf.getvalue()
+            self.assertIn("dry-run plan", err)
+            self.assertIn("cn30", err)
+
     def test_generic_beats_legacy(self):
         args = self._args(cn_limit={"cn30": 800}, tcptest_limit=150)
         self.assertEqual(

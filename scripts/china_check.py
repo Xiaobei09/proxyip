@@ -1225,14 +1225,21 @@ def _sources_registry():
 
 
 def parse_cn_kv(pairs):
-    """解析 ``--cn-limit CODE=N``… 为 ``{code: N}``（非法项丢弃，code 小写化）。"""
+    """解析 ``--cn-limit CODE=N``… 为 ``{code: N}``（非法项丢弃，code 小写化）。
+
+    R87：丢弃项同步打 stderr warn（返回值不变，存量测试锁定），助用户
+    发现 ``缺 =N``/``非数字`` 等笔误；未知代号由 warn_unknown_cn_codes
+    在 registry 上下文中二次提示（此处无 registry 不判未知）。
+    """
     out = {}
     for item in pairs or []:
         if "=" not in item:
+            print(f"warn: ignoring malformed CODE=N {item!r}", file=sys.stderr)
             continue
         code, _, val = item.partition("=")
         code, val = code.strip().lower(), val.strip()
         if not code:
+            print(f"warn: ignoring malformed CODE=N {item!r}", file=sys.stderr)
             continue
         try:
             out[code] = int(val)
@@ -1240,8 +1247,33 @@ def parse_cn_kv(pairs):
             try:
                 out[code] = float(val)
             except ValueError:
+                print(f"warn: ignoring malformed CODE=N {item!r}", file=sys.stderr)
                 continue
     return out
+
+
+def warn_unknown_cn_codes(args) -> None:
+    """对三组 generic 覆盖中的未知代号打 stderr warn（R87 用户侧体验）。
+
+    有包时以 PCB 注册表为准；无包回退 cn01-cn44 模式。仅提示不丢弃
+    （cn_opt 对未知码本就回 default），返回值 None。
+    """
+    reg = _sources_registry()
+    known = None
+    if reg is not None:
+        try:
+            known = set(reg.codes())
+        except Exception:
+            known = None
+    if known is None:
+        known = {f"cn{i:02d}" for i in range(1, 45)}
+    for kind in ("cn_limit", "cn_concurrency", "cn_nodes"):
+        mapping = getattr(args, kind, None)
+        if not isinstance(mapping, dict):
+            continue
+        for code in sorted(mapping):
+            if code not in known:
+                print(f"warn: unknown CN code {code!r} ignored", file=sys.stderr)
 
 
 _CN_KIND_ATTR = {"limit": "cn_limit", "concurrency": "cn_concurrency",
@@ -2193,6 +2225,7 @@ def main(argv=None) -> int:
     args.cn_limit = parse_cn_kv(args.cn_limit)
     args.cn_concurrency = parse_cn_kv(args.cn_concurrency)
     args.cn_nodes = parse_cn_kv(args.cn_nodes)
+    warn_unknown_cn_codes(args)
 
     # 上一轮结果须在 write_json 覆盖 china.json 之前读取：
     # 用于 streak 连续可达计数与复检优先级（reachable 续保 > uncertain 升格）
@@ -2224,6 +2257,11 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         print("dry-run: no network, no writes", file=sys.stderr)
+        print(f"dry-run plan: sample={len(sample)} from {used} "
+              f"limit={args.limit} latency_cap={args.cn_latency_cap} "
+              f"cache_ttl={args.cn_cache_ttl} overrides="
+              f"limit:{args.cn_limit} concurrency:{args.cn_concurrency} "
+              f"nodes:{args.cn_nodes}", file=sys.stderr)
         return 0
 
     now_ts = time.time()

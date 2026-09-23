@@ -302,12 +302,12 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--cn01-timeout` | cn01 单任务收结果上限（秒） | 45 |
 | `--skip-cn01` | 跳过 cn01 批量探测 | 关 |
 | `--skip-cn02` | 跳过 cn02 大节点池补测 | 关 |
-| `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
+| `--dry-run` | 只输出计划（含sample/overrides），不发请求不写盘 | 关 |
 | `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
 | `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
-| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认） | 空 |
-| `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认） | 空 |
-| `--cn-nodes` | 按代号覆盖每键采样节点数（可重复） | 空 |
+| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn） | 空 |
+| `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认；非法/未知同上warn） | 空 |
+| `--cn-nodes` | 按代号覆盖每键采样节点数（可重复；非法/未知同上warn） | 空 |
 
 各代号默认值（由 PCB 注册表自动生成，勿手改；条数 0=跳过，-1=全部未定键；`常开`=L2 常开/配额族无条数概念）：
 
