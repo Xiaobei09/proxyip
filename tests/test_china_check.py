@@ -1169,6 +1169,32 @@ class TestLoadSample(unittest.TestCase):
         sample, _ = cc.load_sample(path, limit=0)
         self.assertEqual([s[1] for s in sample], ["4.4.4.4:80#US"])
 
+    def test_load_sample_falls_back_when_source_missing(self):
+        """R96跨工作流：上游未产出 source 时读 FALLBACK_SOURCE。"""
+        missing = self._path("china_check_nonexistent.txt")
+        fallback = self._path("china_check_fallback.txt")
+        fallback.write_text("9.9.9.9:443#DE-9ms\n", encoding="utf-8")
+        old = cc.FALLBACK_SOURCE
+        cc.FALLBACK_SOURCE = fallback
+        try:
+            sample, used = cc.load_sample(missing, limit=0)
+        finally:
+            cc.FALLBACK_SOURCE = old
+        self.assertEqual([s[1] for s in sample], ["9.9.9.9:443#DE"])
+        self.assertEqual(used, fallback)
+
+    def test_load_sample_both_missing_returns_empty(self):
+        """R96跨工作流：双缺失返回空样本（调用方退出 2，不崩溃）。"""
+        missing = self._path("china_check_nonexistent_both.txt")
+        old = cc.FALLBACK_SOURCE
+        cc.FALLBACK_SOURCE = self._path("china_check_fallback_missing.txt")
+        try:
+            sample, used = cc.load_sample(missing, limit=0)
+        finally:
+            cc.FALLBACK_SOURCE = old
+        self.assertEqual(sample, [])
+        self.assertEqual(used, missing)
+
 
 class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):

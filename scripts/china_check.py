@@ -610,8 +610,15 @@ def annotate_cn(line: str) -> str:
 # ------------------------------------------------------------ 数据装载与写出
 
 def load_sample(source: Path, limit: int) -> tuple[list, Path]:
-    """返回 ``([(line, key, ip, port, cc), ...], used_path)``，按信誉降序截取。"""
+    """返回 ``([(line, key, ip, port, cc), ...], used_path)``，按信誉降序截取。
+
+    跨工作流回退：上游未产出 ``source``（如首轮无 all_rep.txt）时读
+    ``FALLBACK_SOURCE``；两者皆无时返回空样本（调用方走
+    ``no sample lines`` 退出 2，而非 FileNotFoundError 崩溃，R96）。
+    """
     path = source if source.exists() else FALLBACK_SOURCE
+    if not path.exists():
+        return [], source
     lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
     out = []
     for line in lines:
