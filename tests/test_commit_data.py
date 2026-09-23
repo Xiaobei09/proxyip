@@ -178,10 +178,13 @@ class TestLoopCommitFormat(unittest.TestCase):
     """R285：带 `[Rnnn]` 轮次标记的 HEAD 提交须为单一允许 type。
 
     DEVELOPMENT.md 修正案：type 取 fix/feat/perf/docs/ci/chore/refactor/
-    test 其一（禁复合 type；历史 R273 `refactor+feat` 与 R281 `docs+test`
-    已记偏离，不追溯改写，只锁当下与未来）。机器人数据提交无标记，
-    自动跳过。R287：允许集从 DEVELOPMENT.md 实时解析（测试—文档互锁，
-    防两处二次漂移）。"""
+    test 其一（禁复合 type；前公约时代 R19/R21 `docs+test` 已记偏离，
+    不追溯改写，只锁当下与未来——R93 全历史审计确认本仓仅此两笔，
+    改写历史被禁）。机器人数据提交无标记，自动跳过。R287：允许集
+    从 DEVELOPMENT.md 实时解析（测试—文档互锁，防两处二次漂移）。"""
+
+    # 前公约时代已知偏离（R93 全历史 218 提交审计：仅此两笔）。
+    KNOWN_HISTORICAL_DEVIATIONS = ("[R19]", "[R21]")
 
     def _allowed_types(self) -> set[str]:
         doc = (ROOT / "DEVELOPMENT.md").read_text(encoding="utf-8")
@@ -207,6 +210,33 @@ class TestLoopCommitFormat(unittest.TestCase):
         self.assertIn(
             m.group(1), allowed,
             f"type {m.group(1)} 不在 DEVELOPMENT.md 允许集 {sorted(allowed)}")
+
+    def test_history_loop_commits_single_type(self):
+        """R93：全历史轮次提交须单 type，已知偏离仅 R19/R21。
+
+        HEAD 门禁只看当下；本测试防历史重演（未来复合 type
+        无论 HEAD 是否轮次提交一律变红）。改写历史被禁，旧偏离
+        由 KNOWN_HISTORICAL_DEVIATIONS 豁免。
+        """
+        allowed = self._allowed_types()
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--format=%s"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        bad = []
+        for subject in proc.stdout.splitlines():
+            if not re.search(r"\[R\d+\]", subject):
+                continue
+            m = re.match(r"^([a-z]+)(\([^)]+\))?: .+ \[R\d+\]$", subject)
+            if m is None or m.group(1) not in allowed:
+                if not any(k in subject
+                           for k in self.KNOWN_HISTORICAL_DEVIATIONS):
+                    bad.append(subject)
+        self.assertEqual(bad, [])
 
 
 class TestWorkflowTestGate(unittest.TestCase):
