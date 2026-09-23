@@ -73,6 +73,54 @@ class TestPcbLeakGuard(unittest.TestCase):
         self.assertIsInstance(cb.bundle_available(), bool)
 
 
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
+class TestTrueNameForwardLeak(unittest.TestCase):
+    """R91：CN 真名根不得前向泄漏进公开树（Phase A-2 改名前基线）。
+
+    真名表与允许基线均存 PCB（经 loader 获取），本文件零真名字面。
+    扫描整词（大小写不敏感）；命中行须匹配同文件的允许模式，
+    否则即新增泄漏。允许项仅覆盖已评估类别（CLI 凭证契约/信誉
+    规范名/接入实证史/legacy 旗标）；新文件中的真名一律不豁免。
+    """
+
+    def _metadata_roots(self):
+        import sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import checks_bundle as cb
+        try:
+            meta = cb.load_plugin("_metadata")
+        except Exception:
+            self.skipTest("PCB _metadata 不可用")
+        return meta.true_roots()
+
+    def test_true_roots_absent_except_allowlisted(self):
+        roots = self._metadata_roots()
+        word = [re.compile(r"(?<![A-Za-z0-9_])" + re.escape(r) +
+                           r"(?![A-Za-z0-9_])", re.IGNORECASE)
+                for r in roots]
+        allow = [(sfx, re.compile(pat))
+                 for sfx, pat in _GUARD.TRUE_ROOT_PUBLIC_ALLOW]
+        targets = []
+        for d in ("scripts", "tests"):
+            targets += sorted((ROOT / d).glob("*.py"))
+        targets += sorted((ROOT / "docs").glob("*.md"))
+        targets.append(ROOT / "README.md")
+        targets += sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        targets += sorted((ROOT / ".github" / "scripts").glob("*.sh"))
+        bad = []
+        for f in targets:
+            if not f.exists():
+                continue
+            rel = f.relative_to(ROOT).as_posix()
+            pats = [p for sfx, p in allow if rel == sfx]
+            for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(),
+                                     1):
+                if any(rx.search(line) for rx in word):
+                    if not any(p.search(line) for p in pats):
+                        bad.append(f"{rel}:{i}: {line.strip()[:100]}")
+        self.assertEqual(bad, [])
+
+
 class TestDocsLeakGuard(unittest.TestCase):
     def test_docs_source_endpoints_absent(self):
         if _GUARD is None:
