@@ -508,6 +508,16 @@ class TestReputation(unittest.TestCase):
             qc.source_score("ipapi_is", {"is_tor": True, "is_vpn": True}), 25)
         self.assertIsNone(qc.source_score("bogus", {}))
 
+    def test_source_score_dnsbl_listed(self):
+        self.assertEqual(
+            qc.source_score("dnsbl", {"is_listed": True}), 70)
+        self.assertEqual(
+            qc.source_score("spamcop", {"is_listed": True}), 70)
+        self.assertIsNone(
+            qc.source_score("dronebl", {"is_listed": False}))
+        self.assertIsNone(
+            qc.source_score("dnsbl", {}))
+
     def test_source_score_proxycheck(self):
         self.assertEqual(
             qc.source_score("proxycheck", {"is_proxy": True, "risk": 50}), 50)
