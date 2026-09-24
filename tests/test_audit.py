@@ -165,6 +165,50 @@ class TestAuditEndToEndCacheWritten(unittest.TestCase):
             self.assertIn("1.1.1.1", saved["ips"])
 
 
+class TestLookupGeoRetryR111(unittest.TestCase):
+    """R111网络健壮性：lookup_geo 有界重试＋耗尽跳过（不抛异常）。"""
+
+    def _resp(self, payload):
+        m = mock.MagicMock()
+        m.read.return_value = json.dumps(payload).encode()
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = m
+        return cm
+
+    def test_retry_then_success(self):
+        import audit_entry_cc as ae
+        payload = [{"status": "success", "query": "1.1.1.1",
+                    "countryCode": "US", "as": "AS1234 X"}]
+        calls = []
+
+        def fake_open(req, timeout):
+            calls.append(1)
+            if len(calls) == 1:
+                raise TimeoutError("boom")
+            return self._resp(payload)
+
+        with mock.patch.object(ae, "deadline_open", side_effect=fake_open), \
+             mock.patch.object(ae.time, "sleep"):
+            out = ae.lookup_geo(["1.1.1.1"], timeout=1, delay=0.01, retries=2)
+        self.assertEqual(out, {"1.1.1.1": {"cc": "US", "asn": 1234}})
+        self.assertEqual(len(calls), 2)
+
+    def test_exhaustion_skips_without_raise(self):
+        import io
+        from contextlib import redirect_stderr
+        import audit_entry_cc as ae
+
+        with mock.patch.object(ae, "deadline_open",
+                               side_effect=TimeoutError("down")), \
+             mock.patch.object(ae.time, "sleep"):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                out = ae.lookup_geo(["1.1.1.1", "2.2.2.2"], timeout=1,
+                                    delay=0.01, retries=1)
+        self.assertEqual(out, {})
+        self.assertIn("failed", buf.getvalue())
+
+
 class TestAudit(unittest.TestCase):
     def _qfile(self, qdir: Path, name: str, data: dict) -> None:
         (qdir / name).write_text(json.dumps(data), encoding="utf-8")
