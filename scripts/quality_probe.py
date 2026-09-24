@@ -18,7 +18,7 @@ from common import *  # noqa: F401,F403  (paths, UA, build_request, IPAPI_*, ...
 from common import _SSL_CTX  # noqa: F401  (import * skips underscore-prefixed names)
 from common import fetch_with_deadline  # noqa: F401  (import * 已含，显式声明便于检索)
 
-IPAPI_GET_URL = "[REDACTED_PRIVATE_RESOURCE]"
+# E3：IPAPI_GET_URL 已迁 PCB ext_api，经 common 回绑（无包为 None）。
 IPAPI_FIELDS = (
     "status,message,country,countryCode,regionName,city,"
     "as,asn,org,isp,proxy,hosting,mobile"
@@ -147,8 +147,11 @@ async def check_external_api(ip: str, port: str, timeout: int = 30) -> dict:
 
     Returns a dict with ``success``, ``response_ms``, ``colo``,
     ``ipv4_ok``, ``ipv6_ok`` and ``exit_geo`` fields. On any error
-    returns ``{"success": false}``.
+    returns ``{"success": false}``. 无包时（E3 端点为 None）直接
+    fail-open 跳过。
     """
+    if not EXTERNAL_CHECK_URL:
+        return {"success": False}
     url = f"{EXTERNAL_CHECK_URL}?proxyip={ip}:{port}"
 
     def _fetch() -> dict:
@@ -250,6 +253,8 @@ def group_chunks(items: list, size: int = IPAPI_BATCH_SIZE) -> list[list]:
 
 
 def ipapi_batch_sync(ips: list) -> list:
+    if not IPAPI_BATCH_URL:
+        raise RuntimeError("ip-api batch endpoint unavailable (no bundle)")
     payload = json.dumps(ips).encode("utf-8")
     req = urllib.request.Request(
         IPAPI_BATCH_URL + "?fields=" + IPAPI_FIELDS,
@@ -264,6 +269,8 @@ def ipapi_batch_sync(ips: list) -> list:
 
 
 def ipapi_get_sync(ip: str) -> dict:
+    if not IPAPI_GET_URL:
+        raise RuntimeError("ip-api get endpoint unavailable (no bundle)")
     req = urllib.request.Request(
         IPAPI_GET_URL.format(ip=ip) + "?fields=" + IPAPI_FIELDS,
         headers={"User-Agent": "proxyip/quality 1.0"},

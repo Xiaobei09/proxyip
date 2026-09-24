@@ -1084,7 +1084,10 @@ def lookup_countries(ips: list[str], timeout: int, delay: float) -> dict[str, st
 
     Returns ``{ip: countryCode}``. 每批单独重试 ``retries`` 次（线性退避），
     终失败只跳过该批继续后续批次（网络抖动时不至于整源放弃国籍填充）。
+    无包时（E3 端点为 None）直接返回空表 fail-open。
     """
+    if not IPAPI_BATCH_URL:
+        return {}
     found: dict[str, str] = {}
     fields = ["status", "query", "countryCode"]
     for start in range(0, len(ips), IPAPI_BATCH_SIZE):

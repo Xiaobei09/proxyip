@@ -80,33 +80,29 @@ MAX_HISTORY_RECORDS = 1000
 MAX_DIFF_FILES = 50
 PER_COUNTRY_LIMIT = 20
 
-EXTERNAL_CHECK_URL = "[REDACTED_PRIVATE_RESOURCE]"
+# E3：外部验证/地理端点已迁 PCB ext_api（经 _EXT_API_BUNDLE loader
+# 回绑 EXTERNAL_CHECK_URL / EXT_API_SOURCES / IPAPI_BATCH_URL /
+# IPAPI_GET_URL；无包时为 None/[]，调用方 fail-open 跳过）。
+# 注：ip-api 免费层仅提供 http 明文接口（https 为商业版）；请求体仅含
+# 出口 IP 与地理查询，无 webhook/token 等敏感信息，明文发送不构成泄漏
+# （对方 R256 旁注原意保留，端点字面已迁私有包）。
+_EXT_API_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _ext_api = _load_pcb_plugin("ext_api")
+    EXTERNAL_CHECK_URL = _ext_api.EXTERNAL_CHECK_URL
+    EXT_API_SOURCES = _ext_api.EXT_API_SOURCES
+    IPAPI_BATCH_URL = _ext_api.IPAPI_BATCH_URL
+    IPAPI_GET_URL = _ext_api.IPAPI_GET_URL
+    _EXT_API_BUNDLE = True
+except Exception:
+    EXTERNAL_CHECK_URL = None
+    EXT_API_SOURCES = []
+    IPAPI_BATCH_URL = None
+    IPAPI_GET_URL = None
 EXT_CHECK_FILE = VALID_DIR / "ext_check.json"
 
-# ---------------------------------------------------------------- 外部 API 多源配置
-EXT_API_SOURCES = [
-    {
-        "name": "090227",
-        "url": "[REDACTED_PRIVATE_RESOURCE]",
-        "param_key": "proxyip",
-        "timeout": 10,
-    },
-    {
-        "name": "cmliu",
-        "url": "[REDACTED_PRIVATE_RESOURCE]",
-        "param_key": "proxyip",
-        "timeout": 10,
-    },
-    {
-        "name": "toicf",
-        "url": "[REDACTED_PRIVATE_RESOURCE]",
-        "param_key": "candidate",
-        "timeout": 15,
-    },
-]
-
 # ---------------------------------------------------------------- ip-api 共享常量
-IPAPI_BATCH_URL = "[REDACTED_PRIVATE_RESOURCE]"
 IPAPI_BATCH_SIZE = 100
 IPAPI_BATCH_DELAY = 1.2
 

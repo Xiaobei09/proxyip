@@ -45,9 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (
     DATA_DIR, line_to_key, parse_ltd_line, read_json, build_exit_cc_map,
     deadline_open, write_text_if_changed,
+    IPAPI_BATCH_URL,
 )
 
-IPAPI_BATCH_URL = "[REDACTED_PRIVATE_RESOURCE]"
 IPAPI_BATCH_SIZE = 100
 IPAPI_BATCH_DELAY = 1.5
 CF_ASN = 13335
@@ -99,8 +99,11 @@ def lookup_geo(
     """Batch ip-api 查询 → ``{ip: {"cc", "asn"}}``。
 
     单批失败重试 ``retries`` 次后跳过该批继续（审计宁缺毋滥，
-    不因个别批失败放弃全量）。
+    不因个别批失败放弃全量）。无包时（E3 端点为 None）直接
+    返回空表 fail-open。
     """
+    if not IPAPI_BATCH_URL:
+        return {}
     found: dict[str, dict] = {}
     fields = ["status", "query", "countryCode", "as"]
     for start in range(0, len(ips), IPAPI_BATCH_SIZE):
