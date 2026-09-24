@@ -1033,22 +1033,6 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["bruteforceblocker"])
         self.assertEqual(qc.STATIC_LIST_SCORES["bruteforceblocker"], 45)
 
-    def test_firehol_level2_fetch_uses_default_timeout(self):
-        """REP-3：365KB 小表用默认静态超时；URL 为 level2 netset。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"1.2.3.4\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_firehol_level2())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("firehol_level2", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertEqual(len(got), 1)
-
     def test_bruteforceblocker_fetch_strips_inline_comments(self):
         """REP-4：`IP # 时间 次数 ID` 行内注释取首列；URL 为 blist.php。"""
         calls = []
@@ -3492,7 +3476,12 @@ class TestNewReputationSources(unittest.TestCase):
                      "fetch_feodo", "fetch_dan_tor", "fetch_tor_bulk",
                      "fetch_blocklist_de", "fetch_tor_exits",
                      "fetch_spamhaus_drop", "fetch_dc_asn", "fetch_vpn_asn",
-                     "fetch_resproxy_asn"):
+                     "fetch_resproxy_asn", "fetch_firehol_abusers",
+                     "fetch_firehol_level1", "fetch_firehol_level2",
+                     "fetch_c2_tracker", "fetch_botscout",
+                     "fetch_sslproxies", "fetch_socks_proxy",
+                     "fetch_dshield", "fetch_x4bnet_vpn",
+                     "fetch_binarydefense", "fetch_greensnow"):
             with self.subTest(name=name):
                 fn = getattr(qr, name, "MISSING")
                 if qr._REP_STATIC_BUNDLE:

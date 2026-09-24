@@ -33,10 +33,6 @@ REP_RISK_MEDIUM = 75
 REP_WORKERS = 10
 REP_DELAY = 0.15
 IPDATA_CAP = 2000
-FIREHOL_ABUSERS_URL = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
-    "master/firehol_abusers_1d.netset"
-)
 # E1b：以下端点已迁 PCB rep_static（经 _REP_STATIC_BUNDLE loader 获取）：
 # DC_ASN_URL / VPN_ASN_URL / RESPROXY_ASN_URL / TOR_EXITS_URL /
 # SPAMHAUS_DROP_URL / SPAMHAUS_EDROP_URL（原定义已删）。
@@ -120,37 +116,8 @@ MYIPMS_BLACKLIST_URL = (
 IPNOISE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # FireHOL level2（L1 超集 + 更多聚合源，裸 IP + CIDR；比 L1 更广更噪，
 # 口径略弱：is_listed + 静态 50 + 权重 4）。
-FIREHOL_LEVEL2_URL = "[REDACTED_PRIVATE_RESOURCE]"
 URLLAUS_URL = "[REDACTED_PRIVATE_RESOURCE]"
 THREATFOX_URL = "[REDACTED_PRIVATE_RESOURCE]"
-FIREHOL_LEVEL1_URL = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
-    "master/firehol_level1.netset"
-)
-BINARYDEFENSE_URL = "[REDACTED_PRIVATE_RESOURCE]"
-FIREHOL_C2_TRACKER_URL = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
-    "master/c2_tracker.ipset"
-)
-FIREHOL_BOTSCOUT_URL = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
-    "master/botscout_7d.ipset"
-)
-GREENSNOW_URL = "[REDACTED_PRIVATE_RESOURCE]"
-X4BNET_VPN_URL = (
-    "[REDACTED_PRIVATE_RESOURCE]"
-)
-FIREHOL_DSHIELD_URL = (
-    "[REDACTED_PRIVATE_RESOURCE]"
-)
-FIREHOL_SSLPROXIES_URL = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
-    "master/sslproxies_1d.ipset"
-)
-FIREHOL_SOCKSPROXY_URL = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
-    "master/socks_proxy_1d.ipset"
-)
 STATIC_LIST_TIMEOUT = 15
 # 静态黑名单正文上限：ThreatFox json/recent、FireHOL netset 等可达数十 MB，
 # 远超通用 FETCH_BODY_MAX=16MiB。黑洞/截断即静默丢失整源信誉信号，
@@ -732,54 +699,10 @@ async def fetch_threatfox() -> IpSet:
     return IpSet(ips)
 
 
-async def fetch_firehol_level1() -> IpSet:
-    """FireHOL ``firehol_level1`` 严格封禁 IP/CIDR（防火墙级黑名单）。"""
-    return IpSet(await fetch_text_list(FIREHOL_LEVEL1_URL))
-
-
-async def fetch_firehol_level2() -> IpSet:
-    """FireHOL ``firehol_level2``（L1 超集，裸 IP + CIDR，更广更噪）。"""
-    return IpSet(await fetch_text_list(FIREHOL_LEVEL2_URL))
-
-
-async def fetch_binarydefense() -> IpSet:
-    """Binary Defense Artillery 恶意 IP/CIDR 封禁集。"""
-    return IpSet(await fetch_text_list(BINARYDEFENSE_URL))
-
-
-async def fetch_c2_tracker() -> IpSet:
-    """FireHOL ``c2_tracker`` 命令与控制（C2）基础设施 IP。"""
-    return IpSet(await fetch_text_list(FIREHOL_C2_TRACKER_URL))
-
-
-async def fetch_botscout() -> IpSet:
-    """FireHOL ``botscout_7d`` 僵尸网络/爬虫源 IP（7 天窗口覆盖面更大）。"""
-    return IpSet(await fetch_text_list(FIREHOL_BOTSCOUT_URL))
-
-
-async def fetch_greensnow() -> IpSet:
-    """GreenSnow 活跃攻击 IP（DDoS/扫描/暴力破解）。"""
-    return IpSet(await fetch_text_list(GREENSNOW_URL))
-
-
-async def fetch_sslproxies() -> IpSet:
-    """FireHOL ``sslproxies_1d`` 活跃 SSL 代理 IP（独立代理族证据）。"""
-    return IpSet(await fetch_text_list(FIREHOL_SSLPROXIES_URL))
-
-
-async def fetch_socks_proxy() -> IpSet:
-    """FireHOL ``socks_proxy_1d`` 活跃 SOCKS 代理 IP（独立代理族证据）。"""
-    return IpSet(await fetch_text_list(FIREHOL_SOCKSPROXY_URL))
-
-
-async def fetch_x4bnet_vpn() -> IpSet:
-    """X4BNet lists_vpn ``VPN 出口 IP/CIDR``（社区维护，覆盖面大）。"""
-    return IpSet(await fetch_text_list(X4BNET_VPN_URL))
-
-
-async def fetch_dshield() -> IpSet:
-    """FireHOL ``dshield_1d`` DShield 社区封禁攻击 /24 子网。"""
-    return IpSet(await fetch_text_list(FIREHOL_DSHIELD_URL))
+# E1c：以下 11 名单抓取已迁 PCB rep_static（经 _REP_STATIC_BUNDLE
+# loader 回绑；无包为 None，dispatch 守卫跳过）：firehol_abusers /
+# level1 / level2 / c2_tracker / botscout / sslproxies / socks_proxy /
+# dshield / x4bnet_vpn / binarydefense / greensnow（原实现已删）。
 
 
 async def fetch_abuseipdb_public() -> IpSet:
@@ -919,6 +842,17 @@ try:
     fetch_dc_asn = _rep_static.fetch_dc_asn
     fetch_vpn_asn = _rep_static.fetch_vpn_asn
     fetch_resproxy_asn = _rep_static.fetch_resproxy_asn
+    fetch_firehol_abusers = _rep_static.fetch_firehol_abusers
+    fetch_firehol_level1 = _rep_static.fetch_firehol_level1
+    fetch_firehol_level2 = _rep_static.fetch_firehol_level2
+    fetch_c2_tracker = _rep_static.fetch_c2_tracker
+    fetch_botscout = _rep_static.fetch_botscout
+    fetch_sslproxies = _rep_static.fetch_sslproxies
+    fetch_socks_proxy = _rep_static.fetch_socks_proxy
+    fetch_dshield = _rep_static.fetch_dshield
+    fetch_x4bnet_vpn = _rep_static.fetch_x4bnet_vpn
+    fetch_binarydefense = _rep_static.fetch_binarydefense
+    fetch_greensnow = _rep_static.fetch_greensnow
     _REP_STATIC_BUNDLE = True
 except Exception:
     fetch_cins_badguys = None
@@ -932,6 +866,17 @@ except Exception:
     fetch_dc_asn = None
     fetch_vpn_asn = None
     fetch_resproxy_asn = None
+    fetch_firehol_abusers = None
+    fetch_firehol_level1 = None
+    fetch_firehol_level2 = None
+    fetch_c2_tracker = None
+    fetch_botscout = None
+    fetch_sslproxies = None
+    fetch_socks_proxy = None
+    fetch_dshield = None
+    fetch_x4bnet_vpn = None
+    fetch_binarydefense = None
+    fetch_greensnow = None
 
 
 _REP_FREEIPAPI_BUNDLE = False
@@ -1016,15 +961,6 @@ async def fetch_text_list(url: str, timeout: float = STATIC_LIST_TIMEOUT) -> set
     return out
 
 
-async def fetch_firehol_abusers() -> IpSet:
-    """FireHOL ``firehol_abusers_1d`` (abusive IPs/CIDRs) as an ``IpSet``."""
-    return IpSet(await fetch_text_list(FIREHOL_ABUSERS_URL))
-
-
-# E1b：fetch_tor_exits / fetch_spamhaus_drop 已迁 PCB rep_static
-#（经 _REP_STATIC_BUNDLE loader 回绑；无包为 None，dispatch 守卫跳过）。
-
-
 async def fetch_asn_list(url: str) -> set[str]:
     """CSV → normalized ``ASxxxx`` set (locates the ``asn`` column by header)."""
     rows = list(await fetch_text_list(url))
@@ -1090,7 +1026,7 @@ async def fetch_static_lists(sources: list) -> dict:
         "wwuyi_blocked": IpSet(),
     }
     mapping = []
-    if "abuse_list" in sources:
+    if "abuse_list" in sources and fetch_firehol_abusers is not None:
         mapping.append(("abuse_list", fetch_firehol_abusers()))
     if "tor_exit" in sources and fetch_tor_exits is not None:
         mapping.append(("tor_exit", fetch_tor_exits()))
@@ -1130,25 +1066,25 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("urlhaus", fetch_urlhaus()))
     if "threatfox" in sources:
         mapping.append(("threatfox", fetch_threatfox()))
-    if "firehol_level1" in sources:
+    if "firehol_level1" in sources and fetch_firehol_level1 is not None:
         mapping.append(("firehol_level1", fetch_firehol_level1()))
-    if "firehol_level2" in sources:
+    if "firehol_level2" in sources and fetch_firehol_level2 is not None:
         mapping.append(("firehol_level2", fetch_firehol_level2()))
-    if "binarydefense" in sources:
+    if "binarydefense" in sources and fetch_binarydefense is not None:
         mapping.append(("binarydefense", fetch_binarydefense()))
-    if "c2_tracker" in sources:
+    if "c2_tracker" in sources and fetch_c2_tracker is not None:
         mapping.append(("c2_tracker", fetch_c2_tracker()))
-    if "botscout" in sources:
+    if "botscout" in sources and fetch_botscout is not None:
         mapping.append(("botscout", fetch_botscout()))
-    if "greensnow" in sources:
+    if "greensnow" in sources and fetch_greensnow is not None:
         mapping.append(("greensnow", fetch_greensnow()))
-    if "sslproxies" in sources:
+    if "sslproxies" in sources and fetch_sslproxies is not None:
         mapping.append(("sslproxies", fetch_sslproxies()))
-    if "socks_proxy" in sources:
+    if "socks_proxy" in sources and fetch_socks_proxy is not None:
         mapping.append(("socks_proxy", fetch_socks_proxy()))
-    if "vpn_ips" in sources:
+    if "vpn_ips" in sources and fetch_x4bnet_vpn is not None:
         mapping.append(("vpn_ips", fetch_x4bnet_vpn()))
-    if "dshield" in sources:
+    if "dshield" in sources and fetch_dshield is not None:
         mapping.append(("dshield", fetch_dshield()))
     if "abuseipdb_public" in sources:
         mapping.append(("abuseipdb_public", fetch_abuseipdb_public()))
