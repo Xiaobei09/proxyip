@@ -1281,6 +1281,41 @@ class TestLoadSample(unittest.TestCase):
         out = buf.getvalue()
         self.assertGreaterEqual(out.count("--list-cn"), 4)
 
+class TestHelpDocsFlagsR103(unittest.TestCase):
+    """R103功能查找：--help 旗标集与 docs 章节双向一致（增删旗标须同步）。"""
+
+    DOC_HEADER = "### `scripts/china_check.py`"
+
+    def _help_flags(self):
+        import re
+        import subprocess
+        import sys
+        from pathlib import Path
+        proc = subprocess.run(
+            [sys.executable, str(Path(cc.__file__).with_name("china_check.py")),
+             "--help"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0)
+        return (set(re.findall(r"--([a-z0-9][a-z0-9\-]*)", proc.stdout))
+                - {"help"})
+
+    def _docs_flags(self):
+        import re
+        from pathlib import Path
+        lines = (Path(cc.__file__).resolve().parent.parent
+                 / "docs" / "scripts.md").read_text(encoding="utf-8").splitlines()
+        start = next(i for i, l in enumerate(lines) if l.strip() == self.DOC_HEADER)
+        stop = next((i for i in range(start + 1, len(lines))
+                     if lines[i].startswith("### ")), len(lines))
+        got = set()
+        for line in lines[start:stop]:
+            got.update(re.findall(r"--([a-z0-9][a-z0-9\-]*)", line))
+        return {f for f in got if not f.endswith("-")}  # 排除 --cn- 类占位符
+
+    def test_help_docs_flags_match(self):
+        self.assertEqual(self._help_flags(), self._docs_flags())
+
+
 class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):
         item = ("1.2.3.4:2087#US", "1.2.3.4:2087#US", "1.2.3.4", "2087", "US")
