@@ -885,6 +885,22 @@ class TestReputation(unittest.TestCase):
                 rows[s.strip()] = (int(m.group(2)), float(m.group(3)))
         self.assertEqual(rows, dict(qr.SOURCE_PACING))
 
+    def test_docs_default_sources_match_impl_r113(self):
+        """R113验证正确性：docs 默认源清单与实现集合一致（54 项，防增减无声）。"""
+        import re
+        from pathlib import Path
+        line = next(
+            l for l in (Path(qr.__file__).resolve().parent.parent
+                        / "docs" / "scripts.md").read_text(
+                            encoding="utf-8").splitlines()
+            if l.startswith("| `--reputation-sources`"))
+        m = re.search(r"\| ([a-z0-9_,\-]+) \|$", line)
+        self.assertIsNotNone(m, "默认清单行解析失败")
+        assert m is not None
+        self.assertEqual(set(m.group(1).split(",")),
+                         set(qr.DEFAULT_REP_SOURCES))
+        self.assertEqual(len(qr.DEFAULT_REP_SOURCES), 54)
+
     def test_dnsbl_lookup_fail_open_when_unbundled(self):
         """无 PCB bundle 时七源 lookup 为 None（fail-open 跳过），有包时
         可调用（回绑 rep_dnsbl）。"""
