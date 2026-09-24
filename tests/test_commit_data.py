@@ -239,6 +239,26 @@ class TestLoopCommitFormat(unittest.TestCase):
         self.assertEqual(bad, [])
 
 
+    def test_loop_commits_never_touch_data_or_noise_r107(self):
+        """R107：轮次提交不得带 data//.opencode//pycache（66 笔全历史审计干净）。"""
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--format=COMMIT:%H:%s",
+             "--name-only"],
+            capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        bad = []
+        cur_loop = False
+        for line in proc.stdout.splitlines():
+            if line.startswith("COMMIT:"):
+                _, _, subject = line.partition(":")[2].partition(" ")
+                cur_loop = bool(re.search(r"\[R\d+\]", subject))
+            elif cur_loop and line and (
+                    line.startswith("data/") or line.startswith(".opencode/")
+                    or "__pycache__" in line or line.endswith(".pyc")):
+                bad.append(line)
+        self.assertEqual(bad, [])
+
 class TestWorkflowTestGate(unittest.TestCase):
     """R290：数据链工作流必须先过单测门禁，再进重型网络阶段。
 
