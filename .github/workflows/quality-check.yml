@@ -25,6 +25,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Checkout PCB bundle (read-only, pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: Xiaobei09/PCB
+          ref: 5cdd7fd1a47fd0bbc0f9e721b9cc8ab26e40a4d6
+          token: ${{ secrets.BUNDLE_PAT }}
+          path: pcb
+
       - name: Mark job start
         run: touch .jobstart
 
