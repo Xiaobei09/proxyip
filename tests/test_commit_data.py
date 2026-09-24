@@ -240,23 +240,33 @@ class TestLoopCommitFormat(unittest.TestCase):
 
 
     def test_loop_commits_never_touch_data_or_noise_r107(self):
-        """R107：轮次提交不得带 data//.opencode//pycache（66 笔全历史审计干净）。"""
-        proc = subprocess.run(
-            ["git", "-C", str(ROOT), "log", "--format=COMMIT:%H:%s",
-             "--name-only"],
+        """R107：轮次提交不得带 data//.opencode//pycache（66 笔全历史审计干净）。
+
+        R121：改逐提交归因（每提交独立取文件清单；旧整块流式解析在
+        CI 环境下误报，不再使用）。
+        """
+        list_proc = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--format=%H:%s"],
             capture_output=True, text=True, timeout=60)
-        if proc.returncode != 0:
+        if list_proc.returncode != 0:
             self.skipTest("无 git 环境")
+        loop_shas = [
+            line.partition(":")[0]
+            for line in list_proc.stdout.splitlines()
+            if re.search(r"\[R\d+\]", line.partition(":")[2])]
         bad = []
-        cur_loop = False
-        for line in proc.stdout.splitlines():
-            if line.startswith("COMMIT:"):
-                _, _, subject = line.partition(":")[2].partition(" ")
-                cur_loop = bool(re.search(r"\[R\d+\]", subject))
-            elif cur_loop and line and (
-                    line.startswith("data/") or line.startswith(".opencode/")
-                    or "__pycache__" in line or line.endswith(".pyc")):
-                bad.append(line)
+        for sha in loop_shas:
+            show = subprocess.run(
+                ["git", "-C", str(ROOT), "show", "--format=",
+                 "--name-only", sha],
+                capture_output=True, text=True, timeout=60)
+            if show.returncode != 0:
+                continue
+            for line in show.stdout.splitlines():
+                if (line.startswith("data/")
+                        or line.startswith(".opencode/")
+                        or "__pycache__" in line or line.endswith(".pyc")):
+                    bad.append(f"{sha[:9]}: {line}")
         self.assertEqual(bad, [])
 
 class TestWorkflowTestGate(unittest.TestCase):

@@ -1222,6 +1222,8 @@ class TestListCnDiscoverability(unittest.TestCase):
 
     def test_list_cn_prints_registry_r100(self):
         """R100可发现性：--list-cn 输出 44 代号＋表头（动态读注册表）。"""
+        if cc._sources_registry() is None:
+            self.skipTest("needs PCB _sources bundle")
         import io
         from contextlib import redirect_stdout
         from unittest import mock
@@ -4098,20 +4100,39 @@ class TestCnOverrideMatrixR89(unittest.TestCase):
             + ["cn41"]))
 
     def test_inapplicable_warns_r99(self):
-        """R99验证正确性：豁免码设覆盖打 warn，生效码静默（与矩阵同构）。"""
+        """R99验证正确性：豁免码设覆盖打 warn，生效码静默（与矩阵同构）。
+
+        R121：改用注入假注册表（公开 CI 无包时真注册表不可用，
+        旧版直连真源致 CI 失败）。
+        """
         import io
         from contextlib import redirect_stderr
         from types import SimpleNamespace
-        args = SimpleNamespace(
-            cn_limit={"cn30": 1, "cn01": 1, "cn20": 1, "cn41": 1},
-            cn_concurrency={}, cn_nodes={"cn30": 1, "cn07": 1})
-        buf = io.StringIO()
-        with redirect_stderr(buf):
-            cc.warn_inapplicable_cn_codes(args)
-        err = buf.getvalue()
-        for c in ("cn01", "cn20", "cn41", "cn07"):
-            self.assertIn(c, err, c)
-        self.assertNotIn("'cn30'", err)
+
+        class FakeReg:
+            FAM = {"cn30": "slot", "cn07": "slot", "cn01": "batch",
+                   "cn20": "l2", "cn41": "slot"}
+
+            @classmethod
+            def by_code(cls, code):
+                fam = cls.FAM.get(code)
+                return {"family": fam} if fam else None
+
+        old = cc._SOURCES_REG
+        cc._SOURCES_REG = FakeReg()
+        try:
+            args = SimpleNamespace(
+                cn_limit={"cn30": 1, "cn01": 1, "cn20": 1, "cn41": 1},
+                cn_concurrency={}, cn_nodes={"cn30": 1, "cn07": 1})
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                cc.warn_inapplicable_cn_codes(args)
+            err = buf.getvalue()
+            for c in ("cn01", "cn20", "cn41", "cn07"):
+                self.assertIn(c, err, c)
+            self.assertNotIn("'cn30'", err)
+        finally:
+            cc._SOURCES_REG = old
 
     def test_inapplicable_skips_without_bundle_r99(self):
         """R99：无包时跳过豁免提示（fail-open 少提示）。"""

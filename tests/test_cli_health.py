@@ -115,7 +115,9 @@ class TestCliHealth(unittest.TestCase):
                    if l.startswith("### `scripts/exit_family.py`"))
         doc_flags = set(re.findall(r"--[a-z0-9-]+",
                                    "\n".join(lines[start:end])))
-        self.assertEqual(help_flags - {"--help"}, doc_flags - {"---"})
+        # 排除 --- 分隔线与 --cn- 类占位符（R103 同例；R99 docs 措辞引入）
+        doc_flags = {f for f in doc_flags if not f.endswith("-")}
+        self.assertEqual(help_flags - {"--help"}, doc_flags)
 
     def test_missing_data_dir_degrades_gracefully(self):
         """R286：缺输入目录时各链脚本须优雅降级（空映射/skip 文案、
