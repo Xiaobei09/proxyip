@@ -907,6 +907,23 @@ class TestReputation(unittest.TestCase):
                          - set(qr.REPUTATION_WEIGHTS))
         self.assertEqual(orphans, [])
 
+    def test_static_lists_out_shape_r138(self):
+        """R138跨工作流：空源调用返回完整36键字典（防派线/键漂移）。"""
+        out = asyncio.run(qr.fetch_static_lists([]))
+        self.assertEqual(sorted(out), [
+            "abuse_list", "abuseipdb_public", "binarydefense",
+            "blackhole_monster", "blocklist_de", "blocklist_de_apache",
+            "blocklist_de_ssh", "botscout", "bruteforceblocker",
+            "c2_tracker", "cins", "danmeuk_tor", "dataplane_vncrfb",
+            "dc_asn", "drb_c2", "dshield", "et_compromised", "feodo",
+            "firehol_level1", "firehol_level2", "greensnow", "ipnoise",
+            "myipms_blacklist", "nordvpn_exits", "resproxy_asn",
+            "socks_proxy", "spamhaus", "sslproxies", "threatfox",
+            "tor_bulk", "tor_exit", "urlhaus", "vpn_asn", "vpn_ips",
+            "wwuyi_blocked", "wwuyi_unreachable",
+        ])
+        self.assertTrue(all(len(v) == 0 for v in out.values()))
+
     def test_dnsbl_lookup_fail_open_when_unbundled(self):
         """无 PCB bundle 时七源 lookup 为 None（fail-open 跳过），有包时
         可调用（回绑 rep_dnsbl）。"""
