@@ -1028,6 +1028,14 @@ class TestMergeExtVerdict(unittest.TestCase):
         verdict = vp.merge_ext_verdict(results)
         self.assertEqual(verdict["alive"], "skipped")
 
+    def test_empty_results_skipped_r155(self):
+        """R155验证正确性：E3无包空表链 []→skipped（零任务不断言死活，
+        fail-open 语义在裁决层闭环）。"""
+        verdict = vp.merge_ext_verdict([])
+        self.assertEqual(verdict["alive"], "skipped")
+        self.assertEqual(verdict["basis"], [])
+        self.assertIsNone(verdict["merged"])
+
 
 class TestMergeGeo(unittest.TestCase):
     def test_geo_mismatch_detection(self):
