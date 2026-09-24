@@ -965,38 +965,6 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["wwuyi_blocked"])
         self.assertEqual(qc.STATIC_LIST_SCORES["wwuyi_blocked"], 65)
 
-    def test_wwuyi_unreachable_fetch_uses_default_timeout(self):
-        """REP-1：小表用默认静态超时；URL 为上游 unreachable_ips.txt。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"1.2.3.4\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_wwuyi_unreachable())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("unreachable_ips.txt", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertEqual(len(got), 1)
-
-    def test_wwuyi_blocked_fetch_uses_default_timeout(self):
-        """REP-2：小表用默认静态超时；URL 为上游 blocked_ips.txt。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"1.2.3.4\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_wwuyi_blocked())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("blocked_ips.txt", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertEqual(len(got), 1)
-
     def test_firehol_level2_source_registered(self):
         """REP-3：firehol_level2 默认启用、有权重/静态分。
 
@@ -1069,24 +1037,6 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["drb_c2"])
         self.assertEqual(qc.STATIC_LIST_SCORES["drb_c2"], 50)
 
-    def test_drb_c2_fetch_takes_first_csv_column(self):
-        """REP-6：`IP,描述` 取首列；URL 为 IPC2s-30day.csv。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return ("#ip,ioc\n1.15.76.39,Possible Cobaltstrike C2 IP\n"
-                    ).encode()
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_drb_c2())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("IPC2s-30day.csv", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("1.15.76.39", got)
-        self.assertEqual(len(got), 1)
-
     def test_nordvpn_exits_source_registered(self):
         """REP-7：nordvpn_exits 默认启用、有权重/静态分。
 
@@ -1104,23 +1054,6 @@ class TestReputation(unittest.TestCase):
             qc.source_score("nordvpn_exits", {"is_vpn": True}),
             qc.STATIC_LIST_SCORES["nordvpn_exits"])
         self.assertEqual(qc.STATIC_LIST_SCORES["nordvpn_exits"], 55)
-
-    def test_nordvpn_exits_fetch_takes_first_csv_column(self):
-        """REP-7：`IP,描述` 取首列；URL 为 NordVPNIPs.csv。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return ("#ip,status\n89.35.28.131,NordVPN IP\n").encode()
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_nordvpn_exits())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("NordVPNIPs.csv", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("89.35.28.131", got)
-        self.assertEqual(len(got), 1)
 
     def test_blackhole_monster_source_registered(self):
         """REP-8：blackhole_monster 默认启用、有权重/静态分。
@@ -1175,23 +1108,6 @@ class TestReputation(unittest.TestCase):
             qc.source_score("ipnoise", {"is_abuse": True}),
             qc.STATIC_LIST_SCORES["ipnoise"])
         self.assertEqual(qc.STATIC_LIST_SCORES["ipnoise"], 50)
-
-    def test_abuseipdb_public_fetch_uses_large_timeout(self):
-        """R259：8.2MB 列表用独立放宽超时，慢网不致统一 15s fail-open。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"1.2.3.4\n5.6.7.8\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_abuseipdb_public())
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][1], qr.ABUSEIPDB_PUBLIC_TIMEOUT)
-        self.assertGreater(qr.ABUSEIPDB_PUBLIC_TIMEOUT,
-                           qr.STATIC_LIST_TIMEOUT)
-        self.assertEqual(len(got), 2)
 
     def test_docs_enumerate_all_sources(self):
         """R256：docs/logic.md 与 docs/scripts.md 必须命名每个信誉源。
@@ -3398,7 +3314,10 @@ class TestNewReputationSources(unittest.TestCase):
                      "fetch_blocklist_de_ssh", "fetch_blocklist_de_apache",
                      "fetch_bruteforceblocker", "fetch_dataplane_vncrfb",
                      "fetch_blackhole_monster", "fetch_myipms_blacklist",
-                     "fetch_ipnoise"):
+                     "fetch_ipnoise", "fetch_ipsum_list", "fetch_drb_c2",
+                     "fetch_nordvpn_exits", "fetch_urlhaus", "fetch_threatfox",
+                     "fetch_abuseipdb_public", "fetch_wwuyi_unreachable",
+                     "fetch_wwuyi_blocked"):
             with self.subTest(name=name):
                 fn = getattr(qr, name, "MISSING")
                 if qr._REP_STATIC_BUNDLE:

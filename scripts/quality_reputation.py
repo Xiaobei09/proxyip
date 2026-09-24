@@ -59,24 +59,11 @@ _DNSBL_LISTED_SOURCES = (
 )
 # AbuseIPDB 公共黑名单（近 30 天、置信度高的滥用举报 IP/CIDR，社区镜像，
 # GitHub 原始 + jsDelivr 镜像可回退）。独立于本仓库 key 版滥用相位。
-ABUSEIPDB_PUBLIC_URL = (
-    "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/"
-    "abuseipdb-s100-30d.ipv4"
-)
 # ~8.2MB 是静态源中体量最大的：放宽容限避免慢网统一 15s 超时 fail-open。
-ABUSEIPDB_PUBLIC_TIMEOUT = 45
 # Wwuyi123 维护者实测不可达 IP（其 CF 反代候选池的失联项，裸 IP 行）：
 # 第三方"用不上"证据，非滥用，温和口径（is_listed + 静态 70 + 权重 2）。
-WWUYI_UNREACHABLE_URL = (
-    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/"
-    "unreachable_ips.txt"
-)
 # 同站维护者拉黑 IP（裸 IP 行）：主动拒绝类证据，口径略强于失联
 # （is_listed + 静态 65 + 权重 2），仍非滥用定性。
-WWUYI_BLOCKED_URL = (
-    "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/"
-    "blocked_ips.txt"
-)
 # E1a：以下 6 名单端点已迁 PCB rep_static（公开侧经 _REP_STATIC_BUNDLE
 # loader 获取，无包时对应 fetch_* 为 None）：CINS_BADGUYS_URL /
 # ET_COMPROMISED_URL / FEODO_URL / DAN_TOR_URL / TOR_BULK_URL /
@@ -87,16 +74,8 @@ WWUYI_BLOCKED_URL = (
 # 取第 3 字段；与 maltrail 同解析契约；VNC 爆破新信号族，同 ssh 族定级）。
 # drb-ra C2IntelFeeds 30 天审核 C2（`IP,描述` 逗号格式，取首列；单研究员
 # 审核 + Possible 定性，口径略弱于聚合：is_abuse + 静态 50 + 权重 4）。
-DRB_C2_URL = (
-    "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/"
-    "IPC2s-30day.csv"
-)
 # 同站 NordVPN 出口表（`IP,描述` 逗号格式，取首列；日更；VPN 出口信号，
 # 与 x4bnet vpn_ips 同级：is_vpn + 静态 55 + 权重 3）。
-NORVPN_EXITS_URL = (
-    "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/vpn/"
-    "NordVPNIPs.csv"
-)
 # blackhole.monster 每日攻击者裸 IP 表（Maltrail 定性 known attacker）：
 # is_abuse + 静态 50 + 权重 4。
 # myip.ms 10 天攻击源 htaccess（`deny from IP`，取第 3 列；攻击自家
@@ -105,8 +84,6 @@ NORVPN_EXITS_URL = (
 # 连上即敌对）：is_abuse + 静态 50 + 权重 4。
 # FireHOL level2（L1 超集 + 更多聚合源，裸 IP + CIDR；比 L1 更广更噪，
 # 口径略弱：is_listed + 静态 50 + 权重 4）。
-URLLAUS_URL = "[REDACTED_PRIVATE_RESOURCE]"
-THREATFOX_URL = "[REDACTED_PRIVATE_RESOURCE]"
 STATIC_LIST_TIMEOUT = 15
 # 静态黑名单正文上限：ThreatFox json/recent、FireHOL netset 等可达数十 MB，
 # 远超通用 FETCH_BODY_MAX=16MiB。黑洞/截断即静默丢失整源信誉信号，
@@ -531,14 +508,6 @@ except Exception:
     otx_lookup_sync = None
 
 
-IPSUM_URL = "[REDACTED_PRIVATE_RESOURCE]"
-
-
-async def fetch_ipsum_list() -> set[str]:
-    """IPsum level 3+ blacklist (IPs listed in 3+ blocklists)."""
-    return await fetch_text_list(IPSUM_URL)
-
-
 # E1a：以下 6 名单抓取已迁 PCB rep_static（公开侧经 _REP_STATIC_BUNDLE
 # loader 回绑对应 fetch_*；无包时各为 None，dispatch 守卫跳过）：
 # fetch_cins_badguys / fetch_et_compromised / fetch_feodo /
@@ -551,128 +520,10 @@ async def fetch_ipsum_list() -> set[str]:
 # blackhole_monster / myipms_blacklist / ipnoise（原实现已删）。
 
 
-async def fetch_drb_c2() -> IpSet:
-    """drb-ra 30 天审核 C2（`IP,描述` 逗号格式，取首列）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(DRB_C2_URL):
-        first = line.split(",", 1)[0].strip()
-        if first:
-            rows.add(first)
-    return IpSet(rows)
-
-
-async def fetch_nordvpn_exits() -> IpSet:
-    """drb-ra NordVPN 出口表（`IP,描述` 逗号格式，取首列）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(NORVPN_EXITS_URL):
-        first = line.split(",", 1)[0].strip()
-        if first:
-            rows.add(first)
-    return IpSet(rows)
-
-
-async def fetch_urlhaus() -> IpSet:
-    """abuse.ch URLhaus 恶意软件分发托管（``csv_recent``，URL 主机 IP 聚合）。"""
-    rows = list(await fetch_text_list(URLLAUS_URL))
-    ips: set[str] = set()
-    for row in rows:
-        if row.startswith("```") or ("`" in row and "```" in row):
-            continue
-        parts = [p.strip().strip('"') for p in row.split(",")]
-        if len(parts) < 3 or parts[0].lower() in ("id",):
-            continue
-        url = parts[2]
-        try:
-            host = urllib.parse.urlsplit(url).hostname or ""
-        except ValueError:  # pragma: no cover
-            continue
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            continue
-        ips.add(host)
-    return IpSet(ips)
-
-
-async def fetch_threatfox() -> IpSet:
-    """abuse.ch ThreatFox 恶意软件 IOC/C2（``json/recent``，ip:port/url/ipv4 取值）。"""
-    try:
-        text = await asyncio.to_thread(
-            lambda: fetch_with_mirror(
-                THREATFOX_URL, STATIC_LIST_TIMEOUT, headers={"User-Agent": UA},
-                max_bytes=STATIC_LIST_MAX,
-            ).decode("utf-8", errors="replace")
-        )
-    except Exception as exc:  # noqa: BLE001
-        logging.warning("fetch threatfox failed open: %s", err_name(exc))
-        return IpSet()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return IpSet()
-    ips: set[str] = set()
-
-    def add_ioc(item: dict) -> None:
-        typ = item.get("ioc_type")
-        val = item.get("ioc_value")
-        if not isinstance(val, str):
-            return
-        if typ == "ipv4" or typ == "ip:port":
-            host = val.split(":", 1)[0]
-        elif typ == "url":
-            try:
-                host = urllib.parse.urlsplit(val).hostname or ""
-            except ValueError:  # pragma: no cover
-                return
-        else:
-            return
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            return
-        ips.add(host)
-
-    if isinstance(data, dict):
-        for groups in data.values():
-            for item in groups if isinstance(groups, list) else []:
-                if isinstance(item, dict):
-                    add_ioc(item)
-    return IpSet(ips)
-
-
 # E1c：以下 11 名单抓取已迁 PCB rep_static（经 _REP_STATIC_BUNDLE
 # loader 回绑；无包为 None，dispatch 守卫跳过）：firehol_abusers /
 # level1 / level2 / c2_tracker / botscout / sslproxies / socks_proxy /
 # dshield / x4bnet_vpn / binarydefense / greensnow（原实现已删）。
-
-
-async def fetch_abuseipdb_public() -> IpSet:
-    """AbuseIPDB 公共黑名单（置信度 ≥ 报告数阈值，近 30 天）。
-
-    单行一个 IP/CIDR（``#`` 注释由 ``fetch_text_list`` 剔除）；独立于
-    本仓库 key 版滥用相位，且与现有静态源（firehol 系/abuse.ch 系）
-    不同上游（AbuseIPDB 社区举报），提供「criminal-activity + deliberate
-    滥用」高精度信号。
-    """
-    return IpSet(await fetch_text_list(
-        ABUSEIPDB_PUBLIC_URL, timeout=ABUSEIPDB_PUBLIC_TIMEOUT))
-
-
-async def fetch_wwuyi_unreachable() -> IpSet:
-    """Wwuyi123 实测不可达 IP（裸 IP 行，小表，默认超时即可）。
-
-    第三方"用不上"证据：命中投 ``is_listed``（温和口径，非滥用）。
-    """
-    return IpSet(await fetch_text_list(WWUYI_UNREACHABLE_URL))
-
-
-async def fetch_wwuyi_blocked() -> IpSet:
-    """Wwuyi123 拉黑 IP（裸 IP 行，小表，默认超时即可）。
-
-    同 unreachable 的失联证据，口径略强（维护者主动拒绝），仍投
-    ``is_listed``（非滥用定性）。
-    """
-    return IpSet(await fetch_text_list(WWUYI_BLOCKED_URL))
 
 
 _REP_PROXYCHECK_BUNDLE = False
@@ -801,6 +652,14 @@ try:
     fetch_blackhole_monster = _rep_static.fetch_blackhole_monster
     fetch_myipms_blacklist = _rep_static.fetch_myipms_blacklist
     fetch_ipnoise = _rep_static.fetch_ipnoise
+    fetch_ipsum_list = _rep_static.fetch_ipsum_list
+    fetch_drb_c2 = _rep_static.fetch_drb_c2
+    fetch_nordvpn_exits = _rep_static.fetch_nordvpn_exits
+    fetch_urlhaus = _rep_static.fetch_urlhaus
+    fetch_threatfox = _rep_static.fetch_threatfox
+    fetch_abuseipdb_public = _rep_static.fetch_abuseipdb_public
+    fetch_wwuyi_unreachable = _rep_static.fetch_wwuyi_unreachable
+    fetch_wwuyi_blocked = _rep_static.fetch_wwuyi_blocked
     _REP_STATIC_BUNDLE = True
 except Exception:
     fetch_cins_badguys = None
@@ -832,6 +691,14 @@ except Exception:
     fetch_blackhole_monster = None
     fetch_myipms_blacklist = None
     fetch_ipnoise = None
+    fetch_ipsum_list = None
+    fetch_drb_c2 = None
+    fetch_nordvpn_exits = None
+    fetch_urlhaus = None
+    fetch_threatfox = None
+    fetch_abuseipdb_public = None
+    fetch_wwuyi_unreachable = None
+    fetch_wwuyi_blocked = None
 
 
 _REP_FREEIPAPI_BUNDLE = False
@@ -1001,9 +868,9 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("bruteforceblocker", fetch_bruteforceblocker()))
     if "dataplane_vncrfb" in sources and fetch_dataplane_vncrfb is not None:
         mapping.append(("dataplane_vncrfb", fetch_dataplane_vncrfb()))
-    if "drb_c2" in sources:
+    if "drb_c2" in sources and fetch_drb_c2 is not None:
         mapping.append(("drb_c2", fetch_drb_c2()))
-    if "nordvpn_exits" in sources:
+    if "nordvpn_exits" in sources and fetch_nordvpn_exits is not None:
         mapping.append(("nordvpn_exits", fetch_nordvpn_exits()))
     if "blackhole_monster" in sources and fetch_blackhole_monster is not None:
         mapping.append(("blackhole_monster", fetch_blackhole_monster()))
@@ -1017,9 +884,9 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("danmeuk_tor", fetch_dan_tor()))
     if "tor_bulk" in sources and fetch_tor_bulk is not None:
         mapping.append(("tor_bulk", fetch_tor_bulk()))
-    if "urlhaus" in sources:
+    if "urlhaus" in sources and fetch_urlhaus is not None:
         mapping.append(("urlhaus", fetch_urlhaus()))
-    if "threatfox" in sources:
+    if "threatfox" in sources and fetch_threatfox is not None:
         mapping.append(("threatfox", fetch_threatfox()))
     if "firehol_level1" in sources and fetch_firehol_level1 is not None:
         mapping.append(("firehol_level1", fetch_firehol_level1()))
@@ -1041,11 +908,11 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("vpn_ips", fetch_x4bnet_vpn()))
     if "dshield" in sources and fetch_dshield is not None:
         mapping.append(("dshield", fetch_dshield()))
-    if "abuseipdb_public" in sources:
+    if "abuseipdb_public" in sources and fetch_abuseipdb_public is not None:
         mapping.append(("abuseipdb_public", fetch_abuseipdb_public()))
-    if "wwuyi_unreachable" in sources:
+    if "wwuyi_unreachable" in sources and fetch_wwuyi_unreachable is not None:
         mapping.append(("wwuyi_unreachable", fetch_wwuyi_unreachable()))
-    if "wwuyi_blocked" in sources:
+    if "wwuyi_blocked" in sources and fetch_wwuyi_blocked is not None:
         mapping.append(("wwuyi_blocked", fetch_wwuyi_blocked()))
     if "dc_asn" in sources and fetch_dc_asn is not None:
         mapping.append(("dc_asn", fetch_dc_asn()))
@@ -2242,7 +2109,7 @@ async def lookup_all_risk(
             workers=w, delay=d))
     if api_tasks:
         await asyncio.gather(*api_tasks)
-    if "ipsum" in sources:
+    if "ipsum" in sources and fetch_ipsum_list is not None:
         ipsum_set = await fetch_ipsum_list()
         for ip in uniq:
             if ip in ipsum_set:
