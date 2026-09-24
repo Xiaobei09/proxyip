@@ -1215,6 +1215,11 @@ class TestLoadSample(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("no sample", buf.getvalue())
 
+
+
+class TestListCnDiscoverability(unittest.TestCase):
+    """R106可维护性：--list-cn 发现功能测试内聚（自 TestLoadSample 迁出，纯移动）。"""
+
     def test_list_cn_prints_registry_r100(self):
         """R100可发现性：--list-cn 输出 44 代号＋表头（动态读注册表）。"""
         import io
