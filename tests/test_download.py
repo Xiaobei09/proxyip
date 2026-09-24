@@ -933,10 +933,12 @@ class TestWriteSourceAttribution(unittest.TestCase):
     def test_same_origin_urls_share_one_attribution_label(self):
         # IP-OPT-1：同源多文件只记一个归属标签（同站重复不再判 multi）。
         by_port = {"443": {"ALL": ["2.2.2.2", "3.3.3.3"]}}
-        source_ip_sets = {
-            "[REDACTED_PRIVATE_RESOURCE]": {"2.2.2.2"},
-            "[REDACTED_PRIVATE_RESOURCE]": {"2.2.2.2", "3.3.3.3"},
-        }
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
+        pair = [u for u in (u for _k, u in dp.EXTRA_SOURCES)
+                if dp.source_origin(u) == "wanwu"][:2]
+        self.assertEqual(len(pair), 2)
+        source_ip_sets = {pair[0]: {"2.2.2.2"}, pair[1]: {"2.2.2.2", "3.3.3.3"}}
         dp.write_source_attribution(by_port, set(), source_ip_sets)
         data = json.loads(dp.IP_SOURCES_FILE.read_text())
         self.assertEqual(data["sources"]["2.2.2.2:443#ALL"], "wanwu")
@@ -950,10 +952,14 @@ class TestProxyMirrorSources(unittest.TestCase):
         self.assertEqual(by_port["443"]["ALL"], ["5.6.7.8"])
 
     def test_source_label_mapping(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         self.assertEqual(dp.source_label("https://x/a.txt"), "a")
         self.assertEqual(dp.source_label("https://x/proxies/http.txt"), "http")
 
     def test_cf_country_scoped_and_leilao_sources_registered(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         # IP-OPT-8：ipdb.api 三接口经 14 轮生产 unique 恒 0 + 与 ymyuuu 文件
         # 逐字节镜像确认，摘除（github raw 的 CN 镜像回退已覆盖可用性）。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
@@ -964,16 +970,9 @@ class TestProxyMirrorSources(unittest.TestCase):
         ):
             self.assertNotIn(u, urls)
         # LeilaoMi 精选池（非 CF ASN）默认启用以提升覆盖，且带可读标签。
-        self.assertIn(
-            "[REDACTED_PRIVATE_RESOURCE]",
-            urls,
-        )
-        self.assertEqual(
-            dp.source_label(
-                "[REDACTED_PRIVATE_RESOURCE]"
-            ),
-            "leilao_cfproxy",
-        )
+        leilao = [u for u in urls
+                  if dp.source_label(u) == "leilao_cfproxy"]
+        self.assertTrue(leilao)
 
     def test_ipcsv_first_column_bare_ips(self):
         # IP-05：ymyuuu proxy.csv（首列裸 IP，其余为测速列）经 ipcsv 分支
@@ -990,10 +989,12 @@ class TestProxyMirrorSources(unittest.TestCase):
         self.assertEqual(by_port["443"].get("US"), ["1.1.1.1"])
 
     def test_ipcsv_source_registered(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
-        u = "[REDACTED_PRIVATE_RESOURCE]"
-        self.assertIn(u, urls)
-        self.assertEqual(dp.source_label(u), "ymyuuu_proxy_csv")
+        csvs = [u for u in urls
+                if dp.source_label(u) == "ymyuuu_proxy_csv"]
+        self.assertEqual(len(csvs), 1)
 
     def test_country_code_noted_lines_parse_as_bare_ips(self):        # bestproxy&country=true 采用 ip#CC 元数据标记（无端口），必须经
         # extract_bare_ips 解析成功并去掉 #CC 后缀，而非落入 plain/port 分支。
@@ -1060,63 +1061,38 @@ class TestProxyMirrorSources(unittest.TestCase):
             self.assertIn(kind, ("ip", "plain", "csv", "ipnote", "ipcsv", "b64ip", "colocsv", "dccsv"))
 
     def test_five_cf_proxyip_sources_registered(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         # IP-OPT-1 同源合并：Wwuyi123（4 文件）→ wwuyi，
         # wanwushequ 地区榜（18 文件）→ wanwu；文件仍逐个抓取，
         # 储存只记一个来源。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
-        for u in (
-            "[REDACTED_PRIVATE_RESOURCE]",
-            "[REDACTED_PRIVATE_RESOURCE]",
-            "[REDACTED_PRIVATE_RESOURCE]",
-            "[REDACTED_PRIVATE_RESOURCE]",
-            "[REDACTED_PRIVATE_RESOURCE]",
-        ):
-            self.assertIn(u, urls)
-            self.assertEqual(dp.source_origin(u), "wwuyi")
-        for stem in ("US", "JP", "HK", "SG", "KR", "DE", "GB", "FI",
-                     "FR", "CH", "NL", "LV", "PL", "SE", "RU", "CA",
-                     "IN", "TW"):
-            u = ("https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/"
-                 + stem + ".txt")
-            self.assertIn(u, urls)
-            self.assertEqual(dp.source_origin(u), "wanwu")
-        for u, origin in (
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "wentao"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "ymyuuu"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "ymyuuu"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "ymyuuu"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "leilao_cfproxy"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "leilao_cfproxy"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "svip_cfip"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "afr"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "wangallen"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "farel"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "cmliu"),
-            ("[REDACTED_PRIVATE_RESOURCE]",
-             "cmliu"),
-        ):
-            self.assertIn(u, urls)
-            self.assertEqual(dp.source_origin(u), origin)
+        wwuyi = [u for u in urls if dp.source_origin(u) == "wwuyi"]
+        self.assertEqual(len(wwuyi), 5)
+        wanwu = [u for u in urls if dp.source_origin(u) == "wanwu"]
+        self.assertEqual(len(wanwu), 18)
+        origins = {}
+        for _kind, u in dp.EXTRA_SOURCES:
+            origins.setdefault(dp.source_origin(u), []).append(u)
+        for origin in ("wentao", "ymyuuu", "leilao_cfproxy", "svip_cfip",
+                       "afr", "wangallen", "farel", "cmliu"):
+            self.assertTrue(origins.get(origin), origin)
+        labels = {}
+        for u, label in dp.SOURCE_LABELS.items():
+            labels.setdefault(label, []).append(u)
+        for label in ("leilao_cfproxy", "svip_cfip", "ymyuuu_proxy_csv"):
+            self.assertTrue(labels.get(label), label)
 
     def test_same_origin_urls_merge_into_one_stats_row(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         # 同源多文件 → stats 只有一行 origin；同站重复不算交叉 overlap。
+        pair = [u for u in (u for _k, u in dp.EXTRA_SOURCES)
+                if dp.source_origin(u) == "wanwu"][:2]
+        self.assertEqual(len(pair), 2)
         stats = dp._build_source_stats(
             {"1.1.1.1"},
-            {
-                "[REDACTED_PRIVATE_RESOURCE]": {"2.2.2.2"},
-                "[REDACTED_PRIVATE_RESOURCE]": {"2.2.2.2", "3.3.3.3"},
-            },
+            {pair[0]: {"2.2.2.2"}, pair[1]: {"2.2.2.2", "3.3.3.3"}},
             {"1.1.1.1", "2.2.2.2", "3.3.3.3"},
         )
         self.assertEqual(
@@ -1125,23 +1101,22 @@ class TestProxyMirrorSources(unittest.TestCase):
         self.assertEqual(stats["wanwu"]["overlap"], 0)
 
     def test_r215_proxyip_source_policy_compliant(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         # R214 首增 byJoey/cfnew-ipdb（CF 官方 AS13335 边缘 10 万+）与
         # LancelotRar（同为 CF 官方段 top200）——与 EXTRA_SOURCES 政策
         # 「非 AS13335 / 排除官方 CF 段」冲突，R215 回退，代之以实测
         # 非 AS13335 的 svip-s/cloudflare_ip 第三方反代池（ipnote 格式）。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
-        self.assertIn(
-            "[REDACTED_PRIVATE_RESOURCE]",
-            urls)
+        self.assertTrue(
+            any(u.endswith("/best_ips.txt") for u in urls))
         self.assertNotIn(
             "https://raw.githubusercontent.com/byJoey/cfnew-ipdb/main/all.txt", urls)
         self.assertNotIn(
             "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top200.txt",
             urls)
-        self.assertEqual(
-            dp.source_label(
-                "[REDACTED_PRIVATE_RESOURCE]"),
-            "svip_cfip")
+        self.assertTrue(
+            any(dp.source_label(u) == "svip_cfip" for u in urls))
 
     def test_load_extras_with_url(self):
         url = "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
@@ -1398,12 +1373,12 @@ class TestWriteDiff(unittest.TestCase):
 
 class TestMirrorUrls(unittest.TestCase):
     def test_raw_url_yields_ordered_mirrors(self):
-        url = "[REDACTED_PRIVATE_RESOURCE]"
+        url = "https://raw.githubusercontent.com/example/demo/main/list.txt"
         mirrors = common.mirror_urls(url)
         self.assertEqual(mirrors, [
             "[REDACTED_PRIVATE_RESOURCE]" + url,
-            "[REDACTED_PRIVATE_RESOURCE]ymyuuu/IPDB@master/BestProxy/proxy.txt",
-            "[REDACTED_PRIVATE_RESOURCE]ymyuuu/IPDB/master/BestProxy/proxy.txt",
+            "[REDACTED_PRIVATE_RESOURCE]example/demo@main/list.txt",
+            "[REDACTED_PRIVATE_RESOURCE]example/demo/main/list.txt",
         ])
 
     def test_non_raw_url_has_no_mirrors(self):

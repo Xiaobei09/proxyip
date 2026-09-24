@@ -118,173 +118,33 @@ SMALL_SETS: dict[str, list[str]] = {
 # 维护目标是「非 Cloudflare AS13335 + Cloudflare 边缘常用端口」的可直连
 # 连接池（用于 Cloudflare Worker `connect()` 等自建链路）。AS13335 排除仅靠
 # 「只收录自证第三方反代来源」实现，代码层不做 ASN 校验（无 ip-api/ASN 门）。
-EXTRA_SOURCES: list[tuple[str, str]] = [
-    # --- CF 第三方反代（优选 proxyip）池：全部自称 CF 反代、端口落 CF 边缘 ---
-    # 收录来源仅限库名/榜单自证 CF 第三方优选反代（含 443/8443/2053/2083/2087/2096），
-    # 通用 HTTP/SOCKS 代理池与非 CF 云池（阿里/谷歌/Edge 等）一律不入池。
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-4：同站根 proxy.txt（372 裸 IP→443，306 条独立于 BestProxy；
-    # ASN 抽查 10/10 非 AS13335）。同站 bestcf*.txt/bestcf.txt 系官方 CF 段，
-    # 按池政策排除；根 bestproxy.txt 仅 1 IP 不收。
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("csv", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-02：同站手工精选裸 IP（多国别 VPS；ASN 抽查 20/20 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-2：同站准入白名单裸 IP（136 全唯一→443；ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-3：LeilaoMi 精选榜裸 IP（20 全唯一→443；ASN 抽查 8/8 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-3：LeilaoMi 全量榜 base64（165 全唯一→443；ASN 抽查 10/10 非 AS13335）
-    ("b64ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-01：同站香港榜（裸 IP→443；ASN 抽查 12/12 非 AS13335，见轮次记录）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-03：同站新加坡榜（裸 IP→443；ASN 抽查 20/20 非 AS13335，见轮次记录）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-04：同站韩国榜（裸 IP→443；6 行含 1 重复→5 唯一，ASN 抽查 6/6 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-07：同站英国榜（裸 IP→443；71 行全唯一，ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-08：同站芬兰榜（裸 IP→443；137 行全唯一，ASN 抽查 12/12 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-09：同站法国榜（裸 IP→443；57 行全唯一，ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-10：同站瑞士榜（裸 IP→443；60 行全唯一，ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-11：同站荷兰榜（裸 IP→443；391 行全唯一，ASN 抽查 12/12 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-12：同站拉脱维亚榜（裸 IP→443；55 行全唯一，ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-13：同站波兰榜（裸 IP→443；49 行全唯一，ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-14：同站瑞典榜（裸 IP→443；33 行全唯一，ASN 抽查 10/33 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-15：同站俄罗斯榜（裸 IP→443；23 行全唯一，ASN 抽查 10/10 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-16：同站加拿大榜（裸 IP→443；16 行全唯一，ASN 16/16 全查非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-17：同站印度榜（裸 IP→443；8 行全唯一，ASN 8/8 全查非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-18：同站台湾榜（裸 IP→443；仅 1 条，中华电信 AS3462 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-06：同站德国榜（裸 IP→443；128 行全唯一，ASN 抽查 12/12 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-05：ymyuuu 测速榜 CSV（首列裸 IP→443；110 行全有效、国家码/速度列全空，
-    # ASN 抽查 12/12 非 AS13335；新 ipcsv 分支解析，见轮次记录）
-    ("ipcsv", "[REDACTED_PRIVATE_RESOURCE]"),
-    # --- proxyip 源扩展（R214 首增 byJoey/LancelotRar 为 CF 官方 AS13335 段，
-    #     与池政策「非 AS13335/排除官方 CF 段」冲突已于 R215 回退）---
-    # svip-s/cloudflare_ip 实测为第三方反代 VPS（非 AS13335），格式 ip:port#CC [注解]
-    ("ipnote", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-3：同站全量榜（459 条全落 CF 边缘端口；ASN 抽查 10/10 非 AS13335）
-    ("ipnote", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-6：afrcloud07/ListProxy 日更测速榜（IP,port,CC,ISP；边缘端口 1147 唯一，
-    # ASN 抽查 10/10 非 AS13335；muhaip2 同类榜停更 10 个月已否决）
-    ("csv", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-7：wangallen123 精选榜（25 裸 IP#中文国家签→443；ASN 抽查 8/8 非 AS13335）
-    ("ip", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-7：FarelRA 追踪榜（792 行 IP,Colo,Region→443，Colo 派生国家；
-    # ASN 抽查 10/10 非 AS13335，Oracle 集中备注；onlyoyrao999 同类为官方 CF 段已否决）
-    ("colocsv", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-9：cmliu 实测榜（2244 行含延迟/速度，1156 落边缘端口→577 唯一；
-    # ASN 抽查 14/14 非 AS13335，Oracle 集中备注）
-    ("dccsv", "[REDACTED_PRIVATE_RESOURCE]"),
-    # IP-OPT-9：cmliu 精选 API（4 行 ip:port#CC，ASN 4/4 非 AS13335）
-    ("plain", "[REDACTED_PRIVATE_RESOURCE]"),
-]
+# E2：下载源清单三表已迁 PCB dl_sources（公开侧经 _DL_SOURCES_BUNDLE
+# loader 回绑 EXTRA_SOURCES / SOURCE_LABELS / SOURCE_ORIGIN_MAP；
+# 无包时依次为空：下载仅 all.json 主源＋用户 --extra-source，
+# 标签/归属走通用规则。原 43+25+21(+18) 条目已删，见插件与相等断言）。
+_DL_SOURCES_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _dl_sources = _load_pcb_plugin("dl_sources")
+    EXTRA_SOURCES = _dl_sources.EXTRA_SOURCES
+    SOURCE_LABELS = _dl_sources.SOURCE_LABELS
+    SOURCE_ORIGIN_MAP = _dl_sources.SOURCE_ORIGIN_MAP
+    _DL_SOURCES_BUNDLE = True
+except Exception:
+    EXTRA_SOURCES = []
+    SOURCE_LABELS = {}
+    SOURCE_ORIGIN_MAP = {}
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
 CF_EDGE_PORTS = frozenset({"443", "8443", "2053", "2083", "2087", "2096"})
 DEFAULT_EXTRA_PORT = "443"
 MAX_EXTRA_SOURCE_BYTES = 4_000_000  # 单源体积上限：超出则跳过解析，防止 10 万+ 级冲击
 
-SOURCE_LABELS: dict[str, str] = {
-    "[REDACTED_PRIVATE_RESOURCE]": "svip_cfip",
-    "[REDACTED_PRIVATE_RESOURCE]": "leilao_cfproxy",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_proxyip",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_proxyip_cc",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_all",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi_manual",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_us",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_jp",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_hk",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_sg",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_kr",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_gb",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_fi",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_fr",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_ch",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_nl",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_lv",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_pl",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_se",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_ru",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_ca",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_in",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_tw",
-    "[REDACTED_PRIVATE_RESOURCE]": "wanwu_de",
-    "[REDACTED_PRIVATE_RESOURCE]": "ymyuuu_proxy_csv",
-}
 
 # 同源合并（IP-OPT-1）：同一上游仓库/接口的多文件在**储存层**只记一个
 # 来源（source_stats / 归属 / 健康历史以 origin 为键），抓取仍按文件并行。
 # 同站文件互为备份、重复不能算独立佐证；合并后 36 URL → 9 来源。
 # 未列入映射的 URL 回落为 source_label（单文件来源保持原标签，历史不断）。
-SOURCE_ORIGIN_MAP: dict[str, str] = {
-    # wentao883/TG-wxgqlfx_ZBDW（fdip/vlid/yxip 三榜）
-    "[REDACTED_PRIVATE_RESOURCE]": "wentao",
-    "[REDACTED_PRIVATE_RESOURCE]": "wentao",
-    "[REDACTED_PRIVATE_RESOURCE]": "wentao",
-    # ymyuuu/IPDB BestProxy（三 txt + 一 csv）
-    "[REDACTED_PRIVATE_RESOURCE]": "ymyuuu",
-    "[REDACTED_PRIVATE_RESOURCE]": "ymyuuu",
-    "[REDACTED_PRIVATE_RESOURCE]": "ymyuuu",
-    "[REDACTED_PRIVATE_RESOURCE]": "ymyuuu",
-    "[REDACTED_PRIVATE_RESOURCE]": "ymyuuu",
-    # Wwuyi123/CF-Proxyip（四文件，含手工精选）
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi",
-    "[REDACTED_PRIVATE_RESOURCE]": "wwuyi",
-    # LeilaoMi（all.txt 经 SOURCE_LABELS 回落为 leilao_cfproxy，此处显式同源）
-    "[REDACTED_PRIVATE_RESOURCE]": "leilao_cfproxy",
-    "[REDACTED_PRIVATE_RESOURCE]": "leilao_cfproxy",
-    # svip-s（best_ips.txt 回落为 svip_cfip，此处显式同源）
-    "[REDACTED_PRIVATE_RESOURCE]": "svip_cfip",
-    # afrcloud07（文件名主干 proxyip 会与 mountain787 碰撞，显式独立来源）
-    "[REDACTED_PRIVATE_RESOURCE]": "afr",
-    "[REDACTED_PRIVATE_RESOURCE]": "wangallen",
-    "[REDACTED_PRIVATE_RESOURCE]": "farel",
-    "[REDACTED_PRIVATE_RESOURCE]": "cmliu",
-    "[REDACTED_PRIVATE_RESOURCE]": "cmliu",
-}
-
-
-def _wanwu_origin_map() -> dict[str, str]:
-    """wanwushequ/ProxyIP 地区榜（18 文件）→ 同一 ``wanwu`` 来源。"""
-    base = "https://raw.githubusercontent.com/wanwushequ/ProxyIP/main/"
-    return {
-        base + name: "wanwu" for name in (
-            "US.txt", "JP.txt", "HK.txt", "SG.txt", "KR.txt", "GB.txt",
-            "FI.txt", "FR.txt", "CH.txt", "NL.txt", "LV.txt", "PL.txt",
-            "SE.txt", "RU.txt", "CA.txt", "IN.txt", "TW.txt", "DE.txt",
-        )
-    }
-
-
-SOURCE_ORIGIN_MAP.update(_wanwu_origin_map())
 
 
 def source_origin(url: str) -> str:
