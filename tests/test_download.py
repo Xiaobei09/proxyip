@@ -1631,6 +1631,8 @@ class TestExtraSourcesCountMatchesReadme(unittest.TestCase):
     增减源时两处必须同动。同源多文件只计一个来源（别水轮数）。"""
 
     def test_readme_count_equals_extra_sources(self):
+        if not dp.EXTRA_SOURCES:
+            self.skipTest("needs PCB dl_sources bundle")
         import re
         readme = (Path(__file__).resolve().parent.parent / "README.md"
                   ).read_text(encoding="utf-8")
