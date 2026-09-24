@@ -172,6 +172,16 @@ class TestNormalizeNote(unittest.TestCase):
         line = "1.2.3.4:443#🇺🇸US-50ms-CN-XYZ"
         self.assertEqual(normalize_note(line), f"{line}")
 
+    def test_decimal_latency_never_dropped_r123(self):
+        """R123数据格式：小数延迟非常规排序但不得丢失（零真实触发，
+        common.py 属他方编辑区，只锁不丢属性；排序归一待对方协调）。"""
+        for line in ("1.2.3.4:443#🇺🇸US-8.5ms-5.86MB/s",
+                     "1.2.3.4:443#🇺🇸US-8.55ms-5.86MB/s"):
+            with self.subTest(line=line):
+                out = normalize_note(line)
+                ms = line.split("#", 1)[1].split("-")[1]
+                self.assertIn(ms, out.split("-"))
+
     def test_cn_view_speed_token_idempotent(self):
         # CN 视图速度 token（≈ 前缀）须留在速度位，不得被当作未知段垫底
         line = "1.2.3.4:443#🇺🇸US-42ms-≈2.0MB/s-fast-90"
