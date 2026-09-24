@@ -3323,10 +3323,18 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
 
     def test_static_bundled_binds_all_plugin_fetchers_r130(self):
-        """R130功能完整性：有包时插件全部 fetch_* 在公开侧有绑定（防漏绑）。"""
+        """R130功能完整性：有包时插件全部 fetch_* 在公开侧有绑定（防漏绑）。
+
+        R140：经 loader 动态加载（公开代码禁静态直引 PCB 插件，R48 单向
+        依赖；静态 import 会触发零依赖门禁在无包 CI 误报）。
+        """
         if not qr._REP_STATIC_BUNDLE:
             self.skipTest("needs PCB rep_static bundle")
-        import rep_static as plug
+        import checks_bundle as cb
+        try:
+            plug = cb.load_plugin("rep_static")
+        except Exception:
+            self.skipTest("needs PCB rep_static bundle")
         missing = [
             n for n in dir(plug)
             if n.startswith("fetch_") and callable(getattr(plug, n))
