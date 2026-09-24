@@ -1283,6 +1283,43 @@ def warn_unknown_cn_codes(args) -> None:
                 print(f"warn: unknown CN code {code!r} ignored", file=sys.stderr)
 
 
+# R99：泛型覆盖生效集合（须与 R89 适用矩阵一致，矩阵测试锁派线，
+# 此处锁提示语义；双锁同源，漂移时两边同时变红）。
+_NODES_HONORING_CODES = frozenset({"cn02", "cn30"})
+
+
+def warn_inapplicable_cn_codes(args) -> None:
+    """对已知但无泛型 knob 概念的代号打 stderr warn（R99 验证正确性）。
+
+    判定（与 R89 矩阵同构）：limit/concurrency 仅 slot 家族（除搭车
+    cn41）生效——batch 走 legacy 旗标、L2 常开全池、cn41 搭 cn40 相；
+    nodes 仅 cn02/cn30 采样可调。无包时注册表不可用则跳过（fail-open
+    少提示，不多报错）。仅提示不丢弃，返回值 None。
+    """
+    reg = _sources_registry()
+    if reg is None:
+        return
+    for kind, attr in (("limit", "cn_limit"), ("concurrency", "cn_concurrency"),
+                       ("nodes", "cn_nodes")):
+        mapping = getattr(args, attr, None)
+        if not isinstance(mapping, dict):
+            continue
+        for code in sorted(mapping):
+            try:
+                entry = reg.by_code(code)
+            except Exception:
+                continue
+            if entry is None:
+                continue  # 未知码已由 warn_unknown_cn_codes 提示
+            if kind == "nodes":
+                honored = code in _NODES_HONORING_CODES
+            else:
+                honored = entry.get("family") == "slot" and code != "cn41"
+            if not honored:
+                print(f"warn: --cn-{kind} for {code!r} has no effect",
+                      file=sys.stderr)
+
+
 _CN_KIND_ATTR = {"limit": "cn_limit", "concurrency": "cn_concurrency",
                  "nodes": "cn_nodes"}
 _CN_KIND_REGKEY = {"limit": "limit_default", "concurrency": "concurrency",
@@ -2233,6 +2270,7 @@ def main(argv=None) -> int:
     args.cn_concurrency = parse_cn_kv(args.cn_concurrency)
     args.cn_nodes = parse_cn_kv(args.cn_nodes)
     warn_unknown_cn_codes(args)
+    warn_inapplicable_cn_codes(args)
 
     # 上一轮结果须在 write_json 覆盖 china.json 之前读取：
     # 用于 streak 连续可达计数与复检优先级（reachable 续保 > uncertain 升格）

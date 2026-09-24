@@ -3966,6 +3966,39 @@ class TestCnOverrideMatrixR89(unittest.TestCase):
             ["cn01", "cn02", "cn03"] + [f"cn{i:02d}" for i in range(20, 30)]
             + ["cn41"]))
 
+    def test_inapplicable_warns_r99(self):
+        """R99验证正确性：豁免码设覆盖打 warn，生效码静默（与矩阵同构）。"""
+        import io
+        from contextlib import redirect_stderr
+        from types import SimpleNamespace
+        args = SimpleNamespace(
+            cn_limit={"cn30": 1, "cn01": 1, "cn20": 1, "cn41": 1},
+            cn_concurrency={}, cn_nodes={"cn30": 1, "cn07": 1})
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            cc.warn_inapplicable_cn_codes(args)
+        err = buf.getvalue()
+        for c in ("cn01", "cn20", "cn41", "cn07"):
+            self.assertIn(c, err, c)
+        self.assertNotIn("'cn30'", err)
+
+    def test_inapplicable_skips_without_bundle_r99(self):
+        """R99：无包时跳过豁免提示（fail-open 少提示）。"""
+        import io
+        from contextlib import redirect_stderr
+        from types import SimpleNamespace
+        old = cc._SOURCES_REG
+        cc._SOURCES_REG = False
+        try:
+            args = SimpleNamespace(
+                cn_limit={"cn01": 1}, cn_concurrency={}, cn_nodes={})
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                cc.warn_inapplicable_cn_codes(args)
+            self.assertEqual(buf.getvalue(), "")
+        finally:
+            cc._SOURCES_REG = old
+
     def test_registry_loads_once_per_process_r90(self):
         """R90性能：N 次 cn_opt 只触发 ≤1 次插件加载（进程内缓存）。
 
