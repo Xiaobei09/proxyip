@@ -901,6 +901,12 @@ class TestReputation(unittest.TestCase):
                          set(qr.DEFAULT_REP_SOURCES))
         self.assertEqual(len(qr.DEFAULT_REP_SOURCES), 54)
 
+    def test_score_keys_have_weights_r137(self):
+        """R137数据格式：分数键全有对应权重（防E1后孤儿分数）。"""
+        orphans = sorted(set(qr.STATIC_LIST_SCORES)
+                         - set(qr.REPUTATION_WEIGHTS))
+        self.assertEqual(orphans, [])
+
     def test_dnsbl_lookup_fail_open_when_unbundled(self):
         """无 PCB bundle 时七源 lookup 为 None（fail-open 跳过），有包时
         可调用（回绑 rep_dnsbl）。"""
