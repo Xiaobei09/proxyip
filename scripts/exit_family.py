@@ -63,6 +63,11 @@ from common import (
 
 DEFAULT_SOURCE = VALID_ALL_FILE
 
+# 未知键探测方法默认值（index.json 无记录的新键；仅记录标签，探测路径
+# 与方法无关——双栈回显固定流程。main 计划行与 check_one 记录须一致，
+# R116 锁）。
+DEFAULT_METHOD = "tls"
+
 WORKERS_DEFAULT = 16
 TIMEOUT_DEFAULT = 10
 
@@ -337,7 +342,7 @@ def evidence_of(v4: str | None, v6: str | None) -> str:
 
 def check_one(item, methods: dict, timeout: float) -> dict:
     line, key, ip, port, cc = item
-    method = methods.get(key, "tls")
+    method = methods.get(key, DEFAULT_METHOD)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     base = {
         "line": line,
@@ -509,7 +514,7 @@ def main(argv=None) -> int:
     methods = load_methods()
     method_counts = {}
     for item in sample:
-        m = methods.get(item[1], "tls")
+        m = methods.get(item[1], DEFAULT_METHOD)
         method_counts[m] = method_counts.get(m, 0) + 1
     print(f"sample: {len(sample)} from {args.source}", file=sys.stderr)
     print(f"methods: {method_counts}", file=sys.stderr)

@@ -445,6 +445,19 @@ class TestLoadSample(unittest.TestCase):
             self.assertIn("limit=7", err)
 
 
+    def test_default_method_constant_r116(self):
+        """R116功能完整性：未知键方法默认值收敛一处（计划与记录一致）。"""
+        self.assertEqual(ef.DEFAULT_METHOD, "tls")
+
+    def test_check_one_unknown_key_uses_default_r116(self):
+        item = ("9.9.9.9:443#DE", "9.9.9.9:443#DE", "9.9.9.9", "443", "DE")
+        with mock.patch.object(ef, "_probe_targets",
+                               return_value=(None, None)), \
+             mock.patch.object(ef, "_probe_one", return_value=None):
+            rec = ef.check_one(item, {}, timeout=1)[1]
+        self.assertEqual(rec["method"], ef.DEFAULT_METHOD)
+        self.assertEqual(rec["family"], "unknown")
+
 class TestUpstreamMeta(unittest.TestCase):
     def setUp(self):
         self._base = Path(tempfile.mkdtemp(prefix="efm_"))
