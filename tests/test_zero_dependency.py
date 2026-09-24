@@ -212,6 +212,11 @@ class TestTestsDirZeroDependency(unittest.TestCase):
 
     TEST_STDLIB_EXTRA = {"shlex", "types"}
 
+    # R136：第一方 PCB 插件（测试与插件一致性校验如 R127 parity 允许直引；
+    # 第三方禁令针对外部依赖，门禁不自缚第一方）。
+    PCB_PLUGINS = frozenset(
+        p.stem for p in (ROOT / "pcb" / "plugins").glob("*.py"))
+
     def test_all_test_imports_are_stdlib_or_local(self):
         scripts = {p.stem for p in (ROOT / "scripts").glob("*.py")}
         offenders: list[str] = []
@@ -228,7 +233,8 @@ class TestTestsDirZeroDependency(unittest.TestCase):
                     top = m.split(".", 1)[0]
                     if (top not in STDLIB_TOP
                             and top not in self.TEST_STDLIB_EXTRA
-                            and top not in scripts):
+                            and top not in scripts
+                            and top not in self.PCB_PLUGINS):
                         offenders.append(f"{py.name}: import {m}")
         self.assertEqual(offenders, [], "第三方依赖泄漏:\n" + "\n".join(offenders))
 
