@@ -298,6 +298,25 @@ class TestLoopCommitFormat(unittest.TestCase):
                     bad.append(f"{sha[:9]}: {line}")
         self.assertEqual(bad, [])
 
+class TestWorkflowSecretHygiene(unittest.TestCase):
+    """R147安全合规：workflow/脚本不得 echo/打印 secret（GitHub 自动脱敏仅覆盖值传递，显式打印即泄漏）。"""
+
+    def test_no_secret_echo_in_workflows(self):
+        import re
+        pats = [re.compile(r"echo[^\n]*secrets\.", re.IGNORECASE),
+                re.compile(r"print[^\n]*secrets\.", re.IGNORECASE),
+                re.compile(r"echo[^\n]*github\.token", re.IGNORECASE)]
+        bad = []
+        targets = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        targets += sorted((ROOT / ".github" / "scripts").glob("*.sh"))
+        for f in targets:
+            text = f.read_text(encoding="utf-8")
+            for pat in pats:
+                if pat.search(text):
+                    bad.append(f"{f.name}: {pat.pattern[:30]}")
+        self.assertEqual(bad, [])
+
+
 class TestWorkflowTestGate(unittest.TestCase):
     """R290：数据链工作流必须先过单测门禁，再进重型网络阶段。
 
