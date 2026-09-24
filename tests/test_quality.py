@@ -3299,6 +3299,17 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertTrue(0 < qr.FREEIPAPI_CAP <= 10000)
         self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
 
+    def test_static_bundled_binds_all_plugin_fetchers_r130(self):
+        """R130功能完整性：有包时插件全部 fetch_* 在公开侧有绑定（防漏绑）。"""
+        if not qr._REP_STATIC_BUNDLE:
+            self.skipTest("needs PCB rep_static bundle")
+        import rep_static as plug
+        missing = [
+            n for n in dir(plug)
+            if n.startswith("fetch_") and callable(getattr(plug, n))
+            and not callable(getattr(qr, n, None))]
+        self.assertEqual(missing, [])
+
     def test_static_a_lookup_fail_open_when_unbundled(self):
         """R118 E1a：无包时 6 名单抓取为 None（fail-open 跳过，源留空集）。"""
         for name in ("fetch_cins_badguys", "fetch_et_compromised",
