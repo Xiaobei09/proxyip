@@ -757,6 +757,18 @@ def parse_reputation_weights(
     return base, unknown
 
 
+def list_rep_sources() -> int:
+    """`--list-rep-sources`：打印全部信誉源与权重/默认成员（R142 可发现性）。
+
+    动态读权重表（经 PCB 回绑，无包回退内置静态值）；无网络无写盘。
+    """
+    defaults = set(DEFAULT_REP_SOURCES)
+    print("name weight default")
+    for name, weight in REPUTATION_WEIGHTS.items():
+        print(f"{name} {weight} {'yes' if name in defaults else 'no'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -786,6 +798,10 @@ def main(argv: list[str] | None = None) -> int:
         dest="reputation_weights_override",
         default=None,
         help="Comma list of name:weight overrides, e.g. netcoffee:40,ncgy:20",
+    )
+    parser.add_argument(
+        "--list-rep-sources", action="store_true",
+        help="列出全部信誉源与权重/默认成员（动态读权重表，无网络无写盘）",
     )
     parser.add_argument(
         "--rep-cache-ttl",
@@ -819,6 +835,8 @@ def main(argv: list[str] | None = None) -> int:
              "and partial results are still committed",
     )
     args = parser.parse_args(argv)
+    if args.list_rep_sources:
+        return list_rep_sources()
     import os
 
     args.abuse_key = ""

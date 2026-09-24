@@ -901,6 +901,36 @@ class TestReputation(unittest.TestCase):
                          set(qr.DEFAULT_REP_SOURCES))
         self.assertEqual(len(qr.DEFAULT_REP_SOURCES), 54)
 
+    def test_list_rep_sources_output_r142(self):
+        """R142可发现性：--list-rep-sources 输出权重表全量＋表头。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(qc.main(["--list-rep-sources"]), 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(qc.REPUTATION_WEIGHTS) + 1)
+        self.assertTrue(lines[0].startswith("name weight"))
+        by_name = {l.split()[0]: l for l in lines[1:]}
+        self.assertIn("netcoffee 20 yes", by_name.get("netcoffee", ""))
+
+    def test_list_rep_sources_matches_weights_r142(self):
+        """R142：输出行与权重/默认表逐行一致。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            qc.main(["--list-rep-sources"])
+        rows = {}
+        for line in buf.getvalue().splitlines()[1:]:
+            name, weight, default = line.split()
+            rows[name] = (weight, default)
+        self.assertEqual(sorted(rows), sorted(qc.REPUTATION_WEIGHTS))
+        for name, (weight, default) in rows.items():
+            self.assertEqual(int(weight), qc.REPUTATION_WEIGHTS[name])
+            self.assertEqual(default,
+                             "yes" if name in qc.DEFAULT_REP_SOURCES else "no")
+
     def test_score_keys_have_weights_r137(self):
         """R137数据格式：分数键全有对应权重（防E1后孤儿分数）。"""
         orphans = sorted(set(qr.STATIC_LIST_SCORES)
