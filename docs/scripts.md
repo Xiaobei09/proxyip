@@ -15,6 +15,7 @@
 | `--per-country-limit` | 限量版每国条数（0 = 不生成） | 20 |
 | `--extra-source KIND,URL` | 追加一个补充来源（`plain`/`ip`/`csv`/`json`，可重复） | 无 |
 | `--no-extra-sources` | 跳过内置 CF 反代补充来源（内置清单由 PCB bundle 提供，无包时本就为空） | 关 |
+| `--list-extra-sources` | 列出内置补充来源 origin 表（R156，无网络无写盘；无包时提示返回 2） | 关 |
 
 #### CF 反代补充来源
 

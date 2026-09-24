@@ -164,6 +164,23 @@ def extra_source_origins(
     return seen
 
 
+def list_extra_sources() -> int:
+    """``--list-extra-sources``：打印内置补充来源 origin 表（R156 可发现性）。
+
+    动态读 ``EXTRA_SOURCES`` 经 origin 去重（以 loader 回绑为唯一真相源，
+    零硬编码）；无包时 fail-open 提示并返回 2（对标 ``--list-cn``）。
+    只读清单，无网络无写盘。
+    """
+    if not EXTRA_SOURCES:
+        print("list-extra-sources: PCB bundle missing (no built-in sources)",
+              file=sys.stderr)
+        return 2
+    print("origin")
+    for origin in extra_source_origins():
+        print(origin)
+    return 0
+
+
 # ``all.json``/``all.zip``/``all.txt`` 等通用清单名会被多个镜像共用，仅取
 # 文件名主干会产生 ``all`` 碰撞（互覆 stats/归属/健康监控）。此时用
 # 注册域作前缀消歧（如 ``mirror-a/all``、``mirror-b/all``）；其余来源
@@ -1370,7 +1387,15 @@ def main(argv: list[str] | None = None) -> int:
         "--no-extra-sources", action="store_true",
         help="Skip the built-in extra CF reverse-proxy sources",
     )
+    parser.add_argument(
+        "--list-extra-sources", action="store_true",
+        help="List built-in extra source origins and exit "
+        "(no network, no writes)",
+    )
     args = parser.parse_args(argv)
+
+    if args.list_extra_sources:
+        return list_extra_sources()
 
     extra_sources = list(EXTRA_SOURCES)
     if not args.no_extra_sources:
