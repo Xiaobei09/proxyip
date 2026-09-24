@@ -426,6 +426,24 @@ class TestLoadSample(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("no sample", buf.getvalue())
 
+    def test_dry_run_prints_plan_r115(self):
+        """R115用户侧体验：dry-run 输出计划行（与 china_check 同口径）。"""
+        import io
+        from contextlib import redirect_stderr
+        item = ("1.1.1.1:443#US", "1.1.1.1:443#US", "1.1.1.1", "443", "US")
+        with mock.patch.object(ef, "load_sample",
+                               return_value=[item]), \
+             mock.patch.object(ef, "load_methods", return_value={}), \
+             mock.patch.object(ef, "check_one",
+                               side_effect=AssertionError("must not probe")):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = ef.main(["--dry-run", "--limit", "7"])
+            self.assertEqual(rc, 0)
+            err = buf.getvalue()
+            self.assertIn("dry-run plan", err)
+            self.assertIn("limit=7", err)
+
 
 class TestUpstreamMeta(unittest.TestCase):
     def setUp(self):

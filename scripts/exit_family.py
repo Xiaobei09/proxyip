@@ -516,6 +516,9 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         print("dry-run: no network, no writes", file=sys.stderr)
+        print(f"dry-run plan: sample={len(sample)} from {args.source} "
+              f"limit={args.limit} workers={args.workers} "
+              f"timeout={args.timeout}", file=sys.stderr)
         return 0
 
     verify_pinning()

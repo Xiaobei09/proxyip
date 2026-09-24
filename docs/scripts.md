@@ -396,7 +396,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--limit` | 只检测前 N 条（0=全部） | 0 |
 | `--workers` | 并发上限 | 16 |
 | `-t, --timeout` | 单次连接超时（秒） | 10 |
-| `--dry-run` | 只输出计划，不发请求不写盘 | 关 |
+| `--dry-run` | 只输出计划（含sample/plan），不发请求不写盘 | 关 |
 
 ### `scripts/generate_fingerprint.py`
 
