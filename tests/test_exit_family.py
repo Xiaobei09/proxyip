@@ -413,6 +413,19 @@ class TestLoadSample(unittest.TestCase):
         sample = ef.load_sample(path, limit=0)
         self.assertEqual([s[1] for s in sample], ["4.4.4.4:80#US"])
 
+    def test_main_exits_2_on_empty_sample_r110(self):
+        """R110跨工作流：空样本时 main 返回 2 且不触探测（R97 同类锁）。"""
+        import io
+        from contextlib import redirect_stderr
+        with mock.patch.object(ef, "load_sample", return_value=[]), \
+             mock.patch.object(ef, "load_methods",
+                               side_effect=AssertionError("must not probe")):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = ef.main(["--limit", "5"])
+            self.assertEqual(rc, 2)
+            self.assertIn("no sample", buf.getvalue())
+
 
 class TestUpstreamMeta(unittest.TestCase):
     def setUp(self):
