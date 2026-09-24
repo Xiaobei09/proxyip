@@ -1179,6 +1179,18 @@ class TestMainCLIArgs(unittest.TestCase):
             args.ext_check = False
         self.assertFalse(args.ext_check)
 
+    def test_no_adaptive_speed_visible_in_help_r145(self):
+        """R145功能查找：--no-adaptive-speed 须可见（docs 已记载，help 曾隐藏）。"""
+        import subprocess
+        import sys
+        from pathlib import Path
+        proc = subprocess.run(
+            [sys.executable, str(Path(vp.__file__).with_name("validate_proxies.py")),
+             "--help"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("--no-adaptive-speed", proc.stdout)
+
 
 class TestAdaptiveSpeedParams(unittest.TestCase):
     def test_low_rtt_no_change(self):

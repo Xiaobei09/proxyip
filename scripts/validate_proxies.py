@@ -1435,7 +1435,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--speed-warmup-bytes", type=int, default=SPEED_WARMUP_BYTES, help="Bytes discarded before the steady-state speed window (0 = time from first byte)")
     parser.add_argument("--no-speed", action="store_true", help="Skip speed measurement")
     parser.add_argument("--adaptive-speed", action="store_true", default=True, help="Adapt download window to RTT (default: on)")
-    parser.add_argument("--no-adaptive-speed", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-adaptive-speed", action="store_true", help="关闭 RTT 自适应下载窗口（固定 5s / 1MB）")
     parser.add_argument(
         "--quick-prefilter", action="store_true", default=True,
         help="Pre-probe entries not alive last run with a fast TCP connect "
