@@ -244,7 +244,16 @@ class TestLoopCommitFormat(unittest.TestCase):
 
         R121：改逐提交归因（每提交独立取文件清单；旧整块流式解析在
         CI 环境下误报，不再使用）。
+        R133：shallow checkout 豁免——CI 默认 depth-1，边界提交的
+        `git show` 展开全树（误报全量 data；本地复现：定点 worktree
+        全对象通过）。本地全历史 clone 照常执行。
         """
+        shallow = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--is-shallow-repository"],
+            capture_output=True, text=True, timeout=60)
+        if (shallow.returncode == 0
+                and shallow.stdout.strip() == "true"):
+            self.skipTest("shallow checkout 无历史可审（CI 默认 depth-1）")
         list_proc = subprocess.run(
             ["git", "-C", str(ROOT), "log", "--format=%H:%s"],
             capture_output=True, text=True, timeout=60)
