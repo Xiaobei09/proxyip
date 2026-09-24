@@ -4120,6 +4120,16 @@ class TestCnOverrideMatrixR89(unittest.TestCase):
                 for code in ("cn30", "cn31", "cn07", "cn40", "cn99"):
                     cc.cn_opt(args, code, "limit", default=0)
                     cc.cn_opt(args, code, "concurrency", default=0)
+                args2 = SimpleNamespace(
+                    cn_limit={"cn01": 1}, cn_concurrency={"cn20": 1},
+                    cn_nodes={"cn07": 1})
+                cc.warn_unknown_cn_codes(args2)
+                cc.warn_inapplicable_cn_codes(args2)
+                import io
+                from contextlib import redirect_stderr, redirect_stdout
+                with redirect_stderr(io.StringIO()), \
+                     redirect_stdout(io.StringIO()):
+                    cc.list_cn_sources()
             self.assertLessEqual(len(calls), 1, calls)
         finally:
             cc._SOURCES_REG = old
