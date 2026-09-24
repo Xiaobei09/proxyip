@@ -434,6 +434,174 @@ class TestAnnotation(unittest.TestCase):
         self.assertFalse(hasattr(qc, "build_exits"))
 
 
+
+
+class TestRegistryLocksR148(unittest.TestCase):
+    """R148可维护性：注册表/契约锁内聚（自 TestReputation 迁出，纯移动）。"""
+
+    def test_docs_pacing_table_matches_impl_r112(self):
+        """R112源接入：docs 并发/间隔表与消费端 pacing 全量一致（防腐烂）。
+
+        表格为手维护分组（`a/b` 同值），任一值漂移即红；以 qr 消费视图
+        为准（含 PCB 回绑与静态回退）。
+        """
+        import re
+        from pathlib import Path
+        rows: dict[str, tuple[int, float]] = {}
+        for line in (Path(qr.__file__).resolve().parent.parent
+                     / "docs" / "scripts.md").read_text(
+                         encoding="utf-8").splitlines():
+            m = re.match(r"^\|\s*`([^`]+)`\s*\|\s*(\d+) worker、([\d.]+)s",
+                         line)
+            if not m:
+                continue
+            for s in m.group(1).split("/"):
+                rows[s.strip()] = (int(m.group(2)), float(m.group(3)))
+        self.assertEqual(rows, dict(qr.SOURCE_PACING))
+
+    def test_docs_default_sources_match_impl_r113(self):
+        """R113验证正确性：docs 默认源清单与实现集合一致（54 项，防增减无声）。"""
+        import re
+        from pathlib import Path
+        line = next(
+            l for l in (Path(qr.__file__).resolve().parent.parent
+                        / "docs" / "scripts.md").read_text(
+                            encoding="utf-8").splitlines()
+            if l.startswith("| `--reputation-sources`"))
+        m = re.search(r"\| ([a-z0-9_,\-]+) \|$", line)
+        self.assertIsNotNone(m, "默认清单行解析失败")
+        assert m is not None
+        self.assertEqual(set(m.group(1).split(",")),
+                         set(qr.DEFAULT_REP_SOURCES))
+        self.assertEqual(len(qr.DEFAULT_REP_SOURCES), 54)
+
+    def test_list_rep_sources_output_r142(self):
+        """R142可发现性：--list-rep-sources 输出权重表全量＋表头。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(qc.main(["--list-rep-sources"]), 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(qc.REPUTATION_WEIGHTS) + 1)
+        self.assertTrue(lines[0].startswith("name weight"))
+        by_name = {l.split()[0]: l for l in lines[1:]}
+        self.assertIn("netcoffee 20 yes", by_name.get("netcoffee", ""))
+
+    def test_list_rep_sources_matches_weights_r142(self):
+        """R142：输出行与权重/默认表逐行一致。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            qc.main(["--list-rep-sources"])
+        rows = {}
+        for line in buf.getvalue().splitlines()[1:]:
+            name, weight, default = line.split()
+            rows[name] = (weight, default)
+        self.assertEqual(sorted(rows), sorted(qc.REPUTATION_WEIGHTS))
+        for name, (weight, default) in rows.items():
+            self.assertEqual(int(weight), qc.REPUTATION_WEIGHTS[name])
+            self.assertEqual(default,
+                             "yes" if name in qc.DEFAULT_REP_SOURCES else "no")
+
+    def test_help_references_list_rep_sources_r143(self):
+        """R143用户侧体验：--help 须指引 --list-rep-sources（发现闭环）。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                qc.main(["--help"])
+        self.assertEqual(cm.exception.code, 0)
+        out = buf.getvalue()
+        self.assertGreaterEqual(out.count("--list-rep-sources"), 3)
+
+    def test_score_keys_have_weights_r137(self):
+        """R137数据格式：分数键全有对应权重（防E1后孤儿分数）。"""
+        orphans = sorted(set(qr.STATIC_LIST_SCORES)
+                         - set(qr.REPUTATION_WEIGHTS))
+        self.assertEqual(orphans, [])
+
+    def test_static_lists_out_shape_r138(self):
+        """R138跨工作流：空源调用返回完整36键字典（防派线/键漂移）。"""
+        out = asyncio.run(qr.fetch_static_lists([]))
+        self.assertEqual(sorted(out), [
+            "abuse_list", "abuseipdb_public", "binarydefense",
+            "blackhole_monster", "blocklist_de", "blocklist_de_apache",
+            "blocklist_de_ssh", "botscout", "bruteforceblocker",
+            "c2_tracker", "cins", "danmeuk_tor", "dataplane_vncrfb",
+            "dc_asn", "drb_c2", "dshield", "et_compromised", "feodo",
+            "firehol_level1", "firehol_level2", "greensnow", "ipnoise",
+            "myipms_blacklist", "nordvpn_exits", "resproxy_asn",
+            "socks_proxy", "spamhaus", "sslproxies", "threatfox",
+            "tor_bulk", "tor_exit", "urlhaus", "vpn_asn", "vpn_ips",
+            "wwuyi_blocked", "wwuyi_unreachable",
+        ])
+        self.assertTrue(all(len(v) == 0 for v in out.values()))
+
+    def test_static_bundled_binds_all_plugin_fetchers_r130(self):
+        """R130功能完整性：有包时插件全部 fetch_* 在公开侧有绑定（防漏绑）。
+
+        R140：经 loader 动态加载（公开代码禁静态直引 PCB 插件，R48 单向
+        依赖；静态 import 会触发零依赖门禁在无包 CI 误报）。
+        """
+        if not qr._REP_STATIC_BUNDLE:
+            self.skipTest("needs PCB rep_static bundle")
+        import checks_bundle as cb
+        try:
+            plug = cb.load_plugin("rep_static")
+        except Exception:
+            self.skipTest("needs PCB rep_static bundle")
+        missing = [
+            n for n in dir(plug)
+            if n.startswith("fetch_") and callable(getattr(plug, n))
+            and not callable(getattr(qr, n, None))]
+        self.assertEqual(missing, [])
+
+    def test_dispatch_names_resolve_r141(self):
+        """R141验证正确性：派线消费的 fetch_* 必有定义或回绑（防悬空引用）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse(Path(qr.__file__).read_text(encoding="utf-8"))
+        called = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id.startswith("fetch_")}
+        defined = {
+            n.name for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name.startswith("fetch_")}
+        bound = set()
+        imported = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign):
+                for tgt in n.targets:
+                    if (isinstance(tgt, ast.Name)
+                            and tgt.id.startswith("fetch_")
+                            and isinstance(n.value, ast.Attribute)):
+                        bound.add(tgt.id)
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    if a.name.startswith("fetch_"):
+                        imported.add(a.asname or a.name)
+                if any(a.name == "*" for a in n.names) and n.module:
+                    try:
+                        mod = __import__(n.module, fromlist=["*"])
+                        imported.update(
+                            x for x in dir(mod) if x.startswith("fetch_"))
+                    except ImportError:
+                        pass
+            elif isinstance(n, ast.Import):
+                for a in n.names:
+                    top = a.name.split(".", 1)[0]
+                    if top.startswith("fetch_"):
+                        imported.add(a.asname or top)
+        self.assertGreater(len(called), 30)  # 防 AST 遍历空转真空通过
+        dangling = sorted(called - defined - bound - imported)
+        self.assertEqual(dangling, [])
+
+
 class TestReputation(unittest.TestCase):
     W = qc.REPUTATION_WEIGHTS
 
@@ -864,107 +1032,6 @@ class TestReputation(unittest.TestCase):
             for n in ("spamcop", "dronebl", "spamrats", "sorbs",
                       "uceprotect", "psbl")))
         self.assertEqual(qr.SOURCE_PACING["dnsbl"], (6, 0.2))
-
-    def test_docs_pacing_table_matches_impl_r112(self):
-        """R112源接入：docs 并发/间隔表与消费端 pacing 全量一致（防腐烂）。
-
-        表格为手维护分组（`a/b` 同值），任一值漂移即红；以 qr 消费视图
-        为准（含 PCB 回绑与静态回退）。
-        """
-        import re
-        from pathlib import Path
-        rows: dict[str, tuple[int, float]] = {}
-        for line in (Path(qr.__file__).resolve().parent.parent
-                     / "docs" / "scripts.md").read_text(
-                         encoding="utf-8").splitlines():
-            m = re.match(r"^\|\s*`([^`]+)`\s*\|\s*(\d+) worker、([\d.]+)s",
-                         line)
-            if not m:
-                continue
-            for s in m.group(1).split("/"):
-                rows[s.strip()] = (int(m.group(2)), float(m.group(3)))
-        self.assertEqual(rows, dict(qr.SOURCE_PACING))
-
-    def test_docs_default_sources_match_impl_r113(self):
-        """R113验证正确性：docs 默认源清单与实现集合一致（54 项，防增减无声）。"""
-        import re
-        from pathlib import Path
-        line = next(
-            l for l in (Path(qr.__file__).resolve().parent.parent
-                        / "docs" / "scripts.md").read_text(
-                            encoding="utf-8").splitlines()
-            if l.startswith("| `--reputation-sources`"))
-        m = re.search(r"\| ([a-z0-9_,\-]+) \|$", line)
-        self.assertIsNotNone(m, "默认清单行解析失败")
-        assert m is not None
-        self.assertEqual(set(m.group(1).split(",")),
-                         set(qr.DEFAULT_REP_SOURCES))
-        self.assertEqual(len(qr.DEFAULT_REP_SOURCES), 54)
-
-    def test_list_rep_sources_output_r142(self):
-        """R142可发现性：--list-rep-sources 输出权重表全量＋表头。"""
-        import io
-        from contextlib import redirect_stdout
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            self.assertEqual(qc.main(["--list-rep-sources"]), 0)
-        lines = buf.getvalue().splitlines()
-        self.assertEqual(len(lines), len(qc.REPUTATION_WEIGHTS) + 1)
-        self.assertTrue(lines[0].startswith("name weight"))
-        by_name = {l.split()[0]: l for l in lines[1:]}
-        self.assertIn("netcoffee 20 yes", by_name.get("netcoffee", ""))
-
-    def test_list_rep_sources_matches_weights_r142(self):
-        """R142：输出行与权重/默认表逐行一致。"""
-        import io
-        from contextlib import redirect_stdout
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            qc.main(["--list-rep-sources"])
-        rows = {}
-        for line in buf.getvalue().splitlines()[1:]:
-            name, weight, default = line.split()
-            rows[name] = (weight, default)
-        self.assertEqual(sorted(rows), sorted(qc.REPUTATION_WEIGHTS))
-        for name, (weight, default) in rows.items():
-            self.assertEqual(int(weight), qc.REPUTATION_WEIGHTS[name])
-            self.assertEqual(default,
-                             "yes" if name in qc.DEFAULT_REP_SOURCES else "no")
-
-    def test_help_references_list_rep_sources_r143(self):
-        """R143用户侧体验：--help 须指引 --list-rep-sources（发现闭环）。"""
-        import io
-        from contextlib import redirect_stdout
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            with self.assertRaises(SystemExit) as cm:
-                qc.main(["--help"])
-        self.assertEqual(cm.exception.code, 0)
-        out = buf.getvalue()
-        self.assertGreaterEqual(out.count("--list-rep-sources"), 3)
-
-    def test_score_keys_have_weights_r137(self):
-        """R137数据格式：分数键全有对应权重（防E1后孤儿分数）。"""
-        orphans = sorted(set(qr.STATIC_LIST_SCORES)
-                         - set(qr.REPUTATION_WEIGHTS))
-        self.assertEqual(orphans, [])
-
-    def test_static_lists_out_shape_r138(self):
-        """R138跨工作流：空源调用返回完整36键字典（防派线/键漂移）。"""
-        out = asyncio.run(qr.fetch_static_lists([]))
-        self.assertEqual(sorted(out), [
-            "abuse_list", "abuseipdb_public", "binarydefense",
-            "blackhole_monster", "blocklist_de", "blocklist_de_apache",
-            "blocklist_de_ssh", "botscout", "bruteforceblocker",
-            "c2_tracker", "cins", "danmeuk_tor", "dataplane_vncrfb",
-            "dc_asn", "drb_c2", "dshield", "et_compromised", "feodo",
-            "firehol_level1", "firehol_level2", "greensnow", "ipnoise",
-            "myipms_blacklist", "nordvpn_exits", "resproxy_asn",
-            "socks_proxy", "spamhaus", "sslproxies", "threatfox",
-            "tor_bulk", "tor_exit", "urlhaus", "vpn_asn", "vpn_ips",
-            "wwuyi_blocked", "wwuyi_unreachable",
-        ])
-        self.assertTrue(all(len(v) == 0 for v in out.values()))
 
     def test_dnsbl_lookup_fail_open_when_unbundled(self):
         """无 PCB bundle 时七源 lookup 为 None（fail-open 跳过），有包时
@@ -3378,67 +3445,6 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertTrue(0 < qr.SCAMALYTICS_CAP <= 5000)
         self.assertTrue(0 < qr.FREEIPAPI_CAP <= 10000)
         self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
-
-    def test_static_bundled_binds_all_plugin_fetchers_r130(self):
-        """R130功能完整性：有包时插件全部 fetch_* 在公开侧有绑定（防漏绑）。
-
-        R140：经 loader 动态加载（公开代码禁静态直引 PCB 插件，R48 单向
-        依赖；静态 import 会触发零依赖门禁在无包 CI 误报）。
-        """
-        if not qr._REP_STATIC_BUNDLE:
-            self.skipTest("needs PCB rep_static bundle")
-        import checks_bundle as cb
-        try:
-            plug = cb.load_plugin("rep_static")
-        except Exception:
-            self.skipTest("needs PCB rep_static bundle")
-        missing = [
-            n for n in dir(plug)
-            if n.startswith("fetch_") and callable(getattr(plug, n))
-            and not callable(getattr(qr, n, None))]
-        self.assertEqual(missing, [])
-
-    def test_dispatch_names_resolve_r141(self):
-        """R141验证正确性：派线消费的 fetch_* 必有定义或回绑（防悬空引用）。"""
-        import ast
-        from pathlib import Path
-        tree = ast.parse(Path(qr.__file__).read_text(encoding="utf-8"))
-        called = {
-            n.func.id for n in ast.walk(tree)
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-            and n.func.id.startswith("fetch_")}
-        defined = {
-            n.name for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and n.name.startswith("fetch_")}
-        bound = set()
-        imported = set()
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Assign):
-                for tgt in n.targets:
-                    if (isinstance(tgt, ast.Name)
-                            and tgt.id.startswith("fetch_")
-                            and isinstance(n.value, ast.Attribute)):
-                        bound.add(tgt.id)
-            elif isinstance(n, ast.ImportFrom):
-                for a in n.names:
-                    if a.name.startswith("fetch_"):
-                        imported.add(a.asname or a.name)
-                if any(a.name == "*" for a in n.names) and n.module:
-                    try:
-                        mod = __import__(n.module, fromlist=["*"])
-                        imported.update(
-                            x for x in dir(mod) if x.startswith("fetch_"))
-                    except ImportError:
-                        pass
-            elif isinstance(n, ast.Import):
-                for a in n.names:
-                    top = a.name.split(".", 1)[0]
-                    if top.startswith("fetch_"):
-                        imported.add(a.asname or top)
-        self.assertGreater(len(called), 30)  # 防 AST 遍历空转真空通过
-        dangling = sorted(called - defined - bound - imported)
-        self.assertEqual(dangling, [])
 
     def test_static_a_lookup_fail_open_when_unbundled(self):
         """R118 E1a：无包时 6 名单抓取为 None（fail-open 跳过，源留空集）。"""
