@@ -303,6 +303,7 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--skip-cn01` | 跳过 cn01 批量探测 | 关 |
 | `--skip-cn02` | 跳过 cn02 大节点池补测 | 关 |
 | `--dry-run` | 只输出计划（含sample/overrides），不发请求不写盘 | 关 |
+| `--list-cn` | 列出 PCB 注册表全部代号与默认（R100，无网络无写盘；无包时提示返回 2） | 关 |
 | `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
 | `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
 | `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn） | 空 |

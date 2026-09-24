@@ -1215,6 +1215,37 @@ class TestLoadSample(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("no sample", buf.getvalue())
 
+    def test_list_cn_prints_registry_r100(self):
+        """R100可发现性：--list-cn 输出 44 代号＋表头（动态读注册表）。"""
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        with mock.patch.object(cc, "run_measurements",
+                               side_effect=AssertionError("must not probe")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cc.main(["--list-cn"])
+            self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), 45)
+        self.assertTrue(lines[0].startswith("code plugin"))
+        self.assertTrue(all(l.startswith("cn") for l in lines[1:]))
+
+    def test_list_cn_without_bundle_r100(self):
+        """R100：无包时 --list-cn 提示并返回 2（fail-open）。"""
+        import io
+        from contextlib import redirect_stderr
+        old = cc._SOURCES_REG
+        cc._SOURCES_REG = False
+        try:
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = cc.main(["--list-cn"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bundle missing", buf.getvalue())
+        finally:
+            cc._SOURCES_REG = old
+
 
 class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):

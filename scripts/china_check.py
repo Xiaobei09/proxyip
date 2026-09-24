@@ -1220,6 +1220,24 @@ def merge_cn_cache(entries, reachable, uncertain, cached):
 _SOURCES_REG = None
 
 
+def list_cn_sources() -> int:
+    """`--list-cn`：打印 PCB 注册表代号表（R100 可发现性）。
+
+    动态读取（零硬编码，以 _sources 注册表为唯一真相源）；
+    无包时 fail-open 提示并返回 2。只读注册表，无网络无写盘。
+    """
+    reg = _sources_registry()
+    if reg is None:
+        print("list-cn: PCB bundle missing (see docs/scripts.md 代号表)",
+              file=sys.stderr)
+        return 2
+    print("code plugin func family limit concurrency")
+    for e in reg.SOURCES:
+        print(f"{e['code']} {e['plugin']} {e['func']} {e['family']} "
+              f"{e['limit_default']} {e['concurrency']}")
+    return 0
+
+
 def _sources_registry():
     """PCB 源注册表模块（动态读取；无包回 None）。进程内缓存一次。"""
     global _SOURCES_REG
@@ -2258,6 +2276,9 @@ def main(argv=None) -> int:
     parser.add_argument("--cn-nodes", action="append", default=[],
                         metavar="CODE=N",
                         help="按代号覆盖每键采样节点数（可重复），优先于 legacy 节点旗标")
+    parser.add_argument("--list-cn", action="store_true",
+                        help="列出 PCB 注册表全部代号与默认（code/plugin/func/"
+                        "family/limit/concurrency），无网络无写盘")
     args = parser.parse_args(argv)
 
     api_key = args.api_key or os_environ("CHINA_CHECK_API_KEY")
@@ -2271,6 +2292,9 @@ def main(argv=None) -> int:
     args.cn_nodes = parse_cn_kv(args.cn_nodes)
     warn_unknown_cn_codes(args)
     warn_inapplicable_cn_codes(args)
+
+    if args.list_cn:
+        return list_cn_sources()
 
     # 上一轮结果须在 write_json 覆盖 china.json 之前读取：
     # 用于 streak 连续可达计数与复检优先级（reachable 续保 > uncertain 升格）
