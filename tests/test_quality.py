@@ -1353,6 +1353,21 @@ class TestReputation(unittest.TestCase):
             asyncio.run(qr.lookup_all_risk(["1.1.1.1"], args))
         self.assertIn("all empty", buf2.getvalue())
 
+    def test_lookup_ignores_unbundled_ipsum_r144(self):
+        """R144功能完整性：无包时 ipsum 第二调用点守卫跳过（不崩溃不计分）。"""
+        args = argparse.Namespace(
+            reputation_sources=["ipsum"],
+            no_rep_cache=True, rep_cache_ttl=0, getipintel_email="",
+        )
+        full_empty = asyncio.run(qr.fetch_static_lists([]))
+        with unittest.mock.patch.object(qr, "fetch_ipsum_list", None), \
+             unittest.mock.patch.object(qr, "fetch_static_lists",
+                                        return_value=full_empty), \
+             contextlib.redirect_stdout(io.StringIO()):
+            risk = asyncio.run(qr.lookup_all_risk(["1.1.1.1"], args))
+        self.assertIsInstance(risk, dict)
+        self.assertNotIn("ipsum", json.dumps(risk))
+
     def test_batch_cap_truncation_reported(self):
         """R257：cap 截断可见性——need>cap 时日志带 cap-truncated N。
 
