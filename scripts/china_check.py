@@ -2269,13 +2269,13 @@ def main(argv=None) -> int:
     parser.add_argument("--cn-limit", action="append", default=[],
                         metavar="CODE=N",
                         help="按代号覆盖复核条数（可重复；如 --cn-limit cn30=800），优先于 "
-                        "PCB 注册表默认")
+                        "PCB 注册表默认（有效代号见 --list-cn）")
     parser.add_argument("--cn-concurrency", action="append", default=[],
                         metavar="CODE=N",
-                        help="按代号覆盖并发数（可重复），优先于注册表默认")
+                        help="按代号覆盖并发数（可重复），优先于注册表默认（有效代号见 --list-cn）")
     parser.add_argument("--cn-nodes", action="append", default=[],
                         metavar="CODE=N",
-                        help="按代号覆盖每键采样节点数（可重复），优先于 legacy 节点旗标")
+                        help="按代号覆盖每键采样节点数（可重复），优先于 legacy 节点旗标（有效代号见 --list-cn）")
     parser.add_argument("--list-cn", action="store_true",
                         help="列出 PCB 注册表全部代号与默认（code/plugin/func/"
                         "family/limit/concurrency），无网络无写盘")

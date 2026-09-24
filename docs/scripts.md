@@ -306,9 +306,9 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--list-cn` | 列出 PCB 注册表全部代号与默认（R100，无网络无写盘；无包时提示返回 2） | 关 |
 | `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
 | `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
-| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn） | 空 |
-| `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认；非法/未知同上warn） | 空 |
-| `--cn-nodes` | 按代号覆盖每键采样节点数（可重复；非法/未知同上warn） | 空 |
+| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn；有效代号见 `--list-cn`） | 空 |
+| `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
+| `--cn-nodes` | 按代号覆盖每键采样节点数（可重复；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
 
 泛型覆盖适用矩阵（R89；派线漂移由 `TestCnOverrideMatrixR89` 锁定，改派线须同步改此段）：
 - `--cn-limit`/`--cn-concurrency` 生效 30 码：cn04-12、cn13-19、cn30-40、cn42-44（其中 cn42-44/cn13 经动态循环变量派发，无字面量调用）。

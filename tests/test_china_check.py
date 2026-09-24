@@ -1247,6 +1247,18 @@ class TestLoadSample(unittest.TestCase):
             cc._SOURCES_REG = old
 
 
+    def test_help_references_list_cn_r101(self):
+        """R101用户侧体验：--help 须指引 --list-cn（发现闭环）。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cc.main(["--help"])
+        self.assertEqual(cm.exception.code, 0)
+        out = buf.getvalue()
+        self.assertGreaterEqual(out.count("--list-cn"), 4)
+
 class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):
         item = ("1.2.3.4:2087#US", "1.2.3.4:2087#US", "1.2.3.4", "2087", "US")
