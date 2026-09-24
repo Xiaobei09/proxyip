@@ -123,6 +123,24 @@ class TestSpeedHelpers(unittest.TestCase):
             "1.2.3.4:443#\U0001F1EF\U0001F1F5JP-80ms",
         )
 
+    def test_fmt_entry_roundtrip_contract_r109(self):
+        """R109数据格式：fmt_entry 产出恒满足契约 A 精度（ms 整数/速度两位）。"""
+        import re
+        from common import parse_ltd_line
+        for latency in (0, 8.4, 8.5, 120.5, 999.9):
+            for speed in (None, 0.445, 5.864, 100.0):
+                with self.subTest(latency=latency, speed=speed):
+                    line = vp.fmt_entry("1.2.3.4", "443", "US", latency, speed)
+                    parsed = parse_ltd_line(line)
+                    self.assertIsNotNone(parsed, line)
+                    self.assertEqual(parsed[0], "1.2.3.4:443#US")
+                    note = line.split("#", 1)[1]
+                    self.assertRegex(note, r"-\d+ms($|-)")
+                    if speed is None:
+                        self.assertNotIn("MB/s", note)
+                    else:
+                        self.assertRegex(note, r"-\d+\.\d{2}MB/s$")
+
 
 class TestMergeOldNote(unittest.TestCase):
     def test_region_speed_tokens(self):
