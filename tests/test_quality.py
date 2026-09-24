@@ -865,6 +865,26 @@ class TestReputation(unittest.TestCase):
                       "uceprotect", "psbl")))
         self.assertEqual(qr.SOURCE_PACING["dnsbl"], (6, 0.2))
 
+    def test_docs_pacing_table_matches_impl_r112(self):
+        """R112源接入：docs 并发/间隔表与消费端 pacing 全量一致（防腐烂）。
+
+        表格为手维护分组（`a/b` 同值），任一值漂移即红；以 qr 消费视图
+        为准（含 PCB 回绑与静态回退）。
+        """
+        import re
+        from pathlib import Path
+        rows: dict[str, tuple[int, float]] = {}
+        for line in (Path(qr.__file__).resolve().parent.parent
+                     / "docs" / "scripts.md").read_text(
+                         encoding="utf-8").splitlines():
+            m = re.match(r"^\|\s*`([^`]+)`\s*\|\s*(\d+) worker、([\d.]+)s",
+                         line)
+            if not m:
+                continue
+            for s in m.group(1).split("/"):
+                rows[s.strip()] = (int(m.group(2)), float(m.group(3)))
+        self.assertEqual(rows, dict(qr.SOURCE_PACING))
+
     def test_dnsbl_lookup_fail_open_when_unbundled(self):
         """无 PCB bundle 时七源 lookup 为 None（fail-open 跳过），有包时
         可调用（回绑 rep_dnsbl）。"""
