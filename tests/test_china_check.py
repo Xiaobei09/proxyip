@@ -1266,8 +1266,25 @@ class TestLoadSample(unittest.TestCase):
         for e in reg.SOURCES:
             cols = rows[e["code"]]
             self.assertEqual(cols[0], e["plugin"])
-            self.assertEqual(cols[1], e["func"])
-            self.assertEqual(cols[2], e["family"])
+            self.assertEqual(cols[1], e["family"])
+
+    def test_list_cn_output_has_no_true_names_r105(self):
+        """R105安全合规：--list-cn 输出不得含真名根（func 列已摘除）。"""
+        import io
+        import re
+        from contextlib import redirect_stdout
+        try:
+            meta = cc._load_pcb_plugin("_metadata")
+        except Exception:
+            self.skipTest("needs PCB _metadata bundle")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(cc.main(["--list-cn"]), 0)
+        out = buf.getvalue()
+        bad = [r for r in meta.true_roots()
+               if re.search(r"(?<![A-Za-z0-9_])" + re.escape(r) +
+                           r"(?![A-Za-z0-9_])", out, re.IGNORECASE)]
+        self.assertEqual(bad, [])
 
     def test_help_references_list_cn_r101(self):
         """R101用户侧体验：--help 须指引 --list-cn（发现闭环）。"""

@@ -1231,9 +1231,9 @@ def list_cn_sources() -> int:
         print("list-cn: PCB bundle missing (see docs/scripts.md 代号表)",
               file=sys.stderr)
         return 2
-    print("code plugin func family limit concurrency")
+    print("code plugin family limit concurrency")
     for e in reg.SOURCES:
-        print(f"{e['code']} {e['plugin']} {e['func']} {e['family']} "
+        print(f"{e['code']} {e['plugin']} {e['family']} "
               f"{e['limit_default']} {e['concurrency']}")
     return 0
 
@@ -2277,8 +2277,9 @@ def main(argv=None) -> int:
                         metavar="CODE=N",
                         help="按代号覆盖每键采样节点数（可重复），优先于 legacy 节点旗标（有效代号见 --list-cn）")
     parser.add_argument("--list-cn", action="store_true",
-                        help="列出 PCB 注册表全部代号与默认（code/plugin/func/"
-                        "family/limit/concurrency），无网络无写盘")
+                        help="列出 PCB 注册表全部代号与默认（code/plugin/"
+                        "family/limit/concurrency；不含插件内部函数名），"
+                        "无网络无写盘")
     args = parser.parse_args(argv)
 
     api_key = args.api_key or os_environ("CHINA_CHECK_API_KEY")
