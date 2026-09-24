@@ -285,7 +285,10 @@ async def batch_ipapi(ips: list, deadline: float | None = None) -> dict:
     ``deadline``（``time.monotonic()`` 绝对时刻）用于墙钟止损：批量分块与
     per-IP 兜底循环都会在超龄后提前退出，避免上游全挂时 1.5s/IP 的顺序
     兜底把整个质量相位拖到 CI 硬杀（D-42 时间预算因此也覆盖相位内部）。
+    无包时（E3 双端点为 None）直接返回空表，不空转重试/sleep。
     """
+    if not IPAPI_BATCH_URL and not IPAPI_GET_URL:
+        return {}
     def _over() -> bool:
         return deadline is not None and time.monotonic() >= deadline
 

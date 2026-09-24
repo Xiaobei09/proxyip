@@ -267,6 +267,20 @@ class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out, {})
         self.assertIn("truncated by time deadline", buf.getvalue())
 
+    async def test_no_bundle_returns_empty_without_sleep(self):
+        """R153网络健壮性：E3无包双端点None→直接空表，不空转重试/sleep
+        （否则万级IP×1.5s兜底拖死质量相位）。"""
+        with unittest.mock.patch.object(qp, "IPAPI_BATCH_URL", None), \
+             unittest.mock.patch.object(qp, "IPAPI_GET_URL", None), \
+             unittest.mock.patch.object(qp, "ipapi_batch_sync") as batch, \
+             unittest.mock.patch.object(qp, "ipapi_get_sync") as get, \
+             unittest.mock.patch.object(qp.asyncio, "sleep") as sl:
+            out = await qp.batch_ipapi(["1.1.1.1", "2.2.2.2"])
+        self.assertEqual(out, {})
+        batch.assert_not_called()
+        get.assert_not_called()
+        sl.assert_not_called()
+
     async def test_batch_partial_ok_short_circuits_fallback(self):
         """批量部分成功（any_batch_ok=True）→ per-IP 兜底永不触发。"""
         with unittest.mock.patch.object(
