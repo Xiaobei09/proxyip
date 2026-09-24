@@ -1247,6 +1247,28 @@ class TestLoadSample(unittest.TestCase):
             cc._SOURCES_REG = old
 
 
+    def test_list_cn_matches_registry_r102(self):
+        """R102功能完整性：--list-cn 输出与注册表逐行一致。"""
+        import io
+        from contextlib import redirect_stdout
+        reg = cc._sources_registry()
+        if reg is None:
+            self.skipTest("needs PCB _sources bundle")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(cc.main(["--list-cn"]), 0)
+        rows = {}
+        for line in buf.getvalue().splitlines()[1:]:
+            parts = line.split()
+            rows[parts[0]] = parts[1:]
+        self.assertEqual(len(rows), 44)
+        self.assertEqual(sorted(rows), reg.codes())
+        for e in reg.SOURCES:
+            cols = rows[e["code"]]
+            self.assertEqual(cols[0], e["plugin"])
+            self.assertEqual(cols[1], e["func"])
+            self.assertEqual(cols[2], e["family"])
+
     def test_help_references_list_cn_r101(self):
         """R101用户侧体验：--help 须指引 --list-cn（发现闭环）。"""
         import io
