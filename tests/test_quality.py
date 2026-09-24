@@ -523,6 +523,15 @@ class TestRegistryLocksR148(unittest.TestCase):
                          - set(qr.REPUTATION_WEIGHTS))
         self.assertEqual(orphans, [])
 
+    def test_default_and_pacing_subset_of_weights_r154(self):
+        """R154源接入：默认清单/PACING 键全有对应权重（防增源漏权重的
+        静默丢失：--list-rep-sources 按权重表迭代，无权重的默认源会被
+        静默丢弃，加权合并亦直接忽略）。"""
+        self.assertEqual(sorted(set(qr.DEFAULT_REP_SOURCES)
+                               - set(qr.REPUTATION_WEIGHTS)), [])
+        self.assertEqual(sorted(set(qr.SOURCE_PACING)
+                               - set(qr.REPUTATION_WEIGHTS)), [])
+
     def test_static_lists_out_shape_r138(self):
         """R138跨工作流：空源调用返回完整36键字典（防派线/键漂移）。"""
         out = asyncio.run(qr.fetch_static_lists([]))
