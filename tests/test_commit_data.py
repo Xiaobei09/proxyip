@@ -239,6 +239,26 @@ class TestLoopCommitFormat(unittest.TestCase):
         self.assertEqual(bad, [])
 
 
+    # R121 全角事故提交（不可改写，禁 force-push；唯一已知偏离）。
+    KNOWN_FULLWIDTH_DEVIATION = ("4680c8eee",)
+
+    def test_no_fullwidth_brackets_in_subjects_r135(self):
+        """R135：提交标题禁全角括号（R121 误用［R121]致门禁 skip 的教训）。"""
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--format=%H:%s"],
+            capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            self.skipTest("无 git 环境")
+        bad = []
+        for line in proc.stdout.splitlines():
+            sha = line.split(" ", 1)[0]
+            subject = line[len(sha) + 1:]
+            if re.search(r"[［］【】]", subject):
+                bad.append(sha)
+        self.assertTrue(
+            all(s.startswith(self.KNOWN_FULLWIDTH_DEVIATION) for s in bad),
+            bad)
+
     def test_loop_commits_never_touch_data_or_noise_r107(self):
         """R107：轮次提交不得带 data//.opencode//pycache（66 笔全历史审计干净）。
 
