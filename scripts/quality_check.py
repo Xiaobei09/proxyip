@@ -791,13 +791,15 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Comma list of sources for --reputation-provider multi "
         "(default: all DEFAULT_REP_SOURCES，见 quality_reputation.py "
-        "常量与 docs/scripts.md『默认源与权重』表；如 netcoffee,ncgy,ip-api)",
+        "常量与 docs/scripts.md『默认源与权重』表；如 netcoffee,ncgy,ip-api；"
+        "有效源名见 --list-rep-sources)",
     )
     parser.add_argument(
         "--reputation-weights",
         dest="reputation_weights_override",
         default=None,
-        help="Comma list of name:weight overrides, e.g. netcoffee:40,ncgy:20",
+        help="Comma list of name:weight overrides, e.g. netcoffee:40,ncgy:20 "
+        "(有效源名见 --list-rep-sources)",
     )
     parser.add_argument(
         "--list-rep-sources", action="store_true",

@@ -931,6 +931,18 @@ class TestReputation(unittest.TestCase):
             self.assertEqual(default,
                              "yes" if name in qc.DEFAULT_REP_SOURCES else "no")
 
+    def test_help_references_list_rep_sources_r143(self):
+        """R143用户侧体验：--help 须指引 --list-rep-sources（发现闭环）。"""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                qc.main(["--help"])
+        self.assertEqual(cm.exception.code, 0)
+        out = buf.getvalue()
+        self.assertGreaterEqual(out.count("--list-rep-sources"), 3)
+
     def test_score_keys_have_weights_r137(self):
         """R137数据格式：分数键全有对应权重（防E1后孤儿分数）。"""
         orphans = sorted(set(qr.STATIC_LIST_SCORES)
