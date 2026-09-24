@@ -1195,6 +1195,26 @@ class TestLoadSample(unittest.TestCase):
         self.assertEqual(sample, [])
         self.assertEqual(used, missing)
 
+    def test_main_exits_2_on_empty_sample_r97(self):
+        """R97网络健壮性：空样本时 main 返回 2 且不触探测/写盘。
+
+        锁住 R96 的 fail-soft 契约（缺产出/双缺失均经此路）。
+        """
+        import io
+        from contextlib import redirect_stderr
+        from pathlib import Path
+        from unittest import mock
+        with mock.patch.object(cc, "read_json", return_value={}), \
+             mock.patch.object(cc, "load_sample",
+                               return_value=([], Path("nope.txt"))), \
+             mock.patch.object(cc, "run_measurements",
+                               side_effect=AssertionError("must not probe")):
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = cc.main(["--limit", "5"])
+            self.assertEqual(rc, 2)
+            self.assertIn("no sample", buf.getvalue())
+
 
 class TestBuildEntry(unittest.TestCase):
     def test_build_entry_shape(self):
