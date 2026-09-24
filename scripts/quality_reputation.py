@@ -84,12 +84,10 @@ WWUYI_BLOCKED_URL = (
     "https://raw.githubusercontent.com/Wwuyi123/CF-Proxyip/main/ips/"
     "blocked_ips.txt"
 )
-CINS_BADGUYS_URL = "[REDACTED_PRIVATE_RESOURCE]"
-ET_COMPROMISED_URL = "[REDACTED_PRIVATE_RESOURCE]"
-FEODO_URL = "[REDACTED_PRIVATE_RESOURCE]"
-DAN_TOR_URL = "[REDACTED_PRIVATE_RESOURCE]"
-TOR_BULK_URL = "[REDACTED_PRIVATE_RESOURCE]"
-BLOCKLIST_DE_URL = "[REDACTED_PRIVATE_RESOURCE]"
+# E1a：以下 6 名单端点已迁 PCB rep_static（公开侧经 _REP_STATIC_BUNDLE
+# loader 获取，无包时对应 fetch_* 为 None）：CINS_BADGUYS_URL /
+# ET_COMPROMISED_URL / FEODO_URL / DAN_TOR_URL / TOR_BULK_URL /
+# BLOCKLIST_DE_URL（原定义已删）。
 BLOCKLIST_DE_SSH_URL = "[REDACTED_PRIVATE_RESOURCE]"
 BLOCKLIST_DE_APACHE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # BruteForceBlocker（danger.rulez.sk 社区 SSH 爆破榜，`IP # 时间 次数 ID`
@@ -588,52 +586,10 @@ async def fetch_ipsum_list() -> set[str]:
     return await fetch_text_list(IPSUM_URL)
 
 
-async def fetch_cins_badguys() -> IpSet:
-    """CINS Army ``ci-badguys.txt`` 活跃滥用/拒绝服务 IP（单行空白分隔）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(CINS_BADGUYS_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_et_compromised() -> IpSet:
-    """EmergingThreats ``compromised-ips.txt`` 被入侵主机（单行空白分隔）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(ET_COMPROMISED_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_feodo() -> IpSet:
-    """abuse.ch Feodo Tracker 僵尸网络 C2 IP（``ipblocklist.txt``，单行空白分隔）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(FEODO_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_dan_tor() -> IpSet:
-    """dan.me.uk Tor 节点列表（比 check.torproject 覆盖更全，独立权威）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(DAN_TOR_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_tor_bulk() -> IpSet:
-    """check.torproject.org TorBulkExitList（出口节点，作为 tor 信号冗余）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(TOR_BULK_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_blocklist_de() -> IpSet:
-    """blocklist.de 全集（僵尸/暴力破解/扫描，独立滥用源）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(BLOCKLIST_DE_URL):
-        rows.update(line.split())
-    return IpSet(rows)
+# E1a：以下 6 名单抓取已迁 PCB rep_static（公开侧经 _REP_STATIC_BUNDLE
+# loader 回绑对应 fetch_*；无包时各为 None，dispatch 守卫跳过）：
+# fetch_cins_badguys / fetch_et_compromised / fetch_feodo /
+# fetch_dan_tor / fetch_tor_bulk / fetch_blocklist_de（原实现已删）。
 
 
 async def fetch_blocklist_de_ssh() -> IpSet:
@@ -951,6 +907,26 @@ except Exception:
     abuse_lookup_sync = None
 
 
+_REP_STATIC_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _rep_static = _load_pcb_plugin("rep_static")
+    fetch_cins_badguys = _rep_static.fetch_cins_badguys
+    fetch_et_compromised = _rep_static.fetch_et_compromised
+    fetch_feodo = _rep_static.fetch_feodo
+    fetch_dan_tor = _rep_static.fetch_dan_tor
+    fetch_tor_bulk = _rep_static.fetch_tor_bulk
+    fetch_blocklist_de = _rep_static.fetch_blocklist_de
+    _REP_STATIC_BUNDLE = True
+except Exception:
+    fetch_cins_badguys = None
+    fetch_et_compromised = None
+    fetch_feodo = None
+    fetch_dan_tor = None
+    fetch_tor_bulk = None
+    fetch_blocklist_de = None
+
+
 _REP_FREEIPAPI_BUNDLE = False
 try:
     from checks_bundle import load_plugin as _load_pcb_plugin
@@ -1130,13 +1106,13 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("tor_exit", fetch_tor_exits()))
     if "spamhaus" in sources:
         mapping.append(("spamhaus", fetch_spamhaus_drop()))
-    if "cins" in sources:
+    if "cins" in sources and fetch_cins_badguys is not None:
         mapping.append(("cins", fetch_cins_badguys()))
-    if "et_compromised" in sources:
+    if "et_compromised" in sources and fetch_et_compromised is not None:
         mapping.append(("et_compromised", fetch_et_compromised()))
-    if "feodo" in sources:
+    if "feodo" in sources and fetch_feodo is not None:
         mapping.append(("feodo", fetch_feodo()))
-    if "blocklist_de" in sources:
+    if "blocklist_de" in sources and fetch_blocklist_de is not None:
         mapping.append(("blocklist_de", fetch_blocklist_de()))
     if "blocklist_de_ssh" in sources:
         mapping.append(("blocklist_de_ssh", fetch_blocklist_de_ssh()))
@@ -1156,9 +1132,9 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("ipnoise", fetch_ipnoise()))
     if "blocklist_de_apache" in sources:
         mapping.append(("blocklist_de_apache", fetch_blocklist_de_apache()))
-    if "danmeuk_tor" in sources:
+    if "danmeuk_tor" in sources and fetch_dan_tor is not None:
         mapping.append(("danmeuk_tor", fetch_dan_tor()))
-    if "tor_bulk" in sources:
+    if "tor_bulk" in sources and fetch_tor_bulk is not None:
         mapping.append(("tor_bulk", fetch_tor_bulk()))
     if "urlhaus" in sources:
         mapping.append(("urlhaus", fetch_urlhaus()))

@@ -3486,18 +3486,17 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertTrue(0 < qr.FREEIPAPI_CAP <= 10000)
         self.assertTrue(0 < qr.IPLOCATION_CAP <= 10000)
 
-    def test_fetch_cins_splits_whitespace(self):
-        lines = ["1.2.3.4 5.6.7.8", "  9.9.9.9  "]
-
-        async def _fake(url):
-            return lines
-
-        with unittest.mock.patch.object(qr, "fetch_text_list",
-                                        side_effect=_fake):
-            ipset = asyncio.run(
-                qr.fetch_cins_badguys())
-        for ip in ("1.2.3.4", "5.6.7.8", "9.9.9.9"):
-            self.assertIn(ip, ipset)
+    def test_static_a_lookup_fail_open_when_unbundled(self):
+        """R118 E1a：无包时 6 名单抓取为 None（fail-open 跳过，源留空集）。"""
+        for name in ("fetch_cins_badguys", "fetch_et_compromised",
+                     "fetch_feodo", "fetch_dan_tor", "fetch_tor_bulk",
+                     "fetch_blocklist_de"):
+            with self.subTest(name=name):
+                fn = getattr(qr, name, "MISSING")
+                if qr._REP_STATIC_BUNDLE:
+                    self.assertTrue(callable(fn), name)
+                else:
+                    self.assertIsNone(fn, name)
 
     def test_fetch_static_lists_includes_new(self):
         async def _c():
