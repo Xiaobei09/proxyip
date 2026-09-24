@@ -81,16 +81,10 @@ WWUYI_BLOCKED_URL = (
 # loader 获取，无包时对应 fetch_* 为 None）：CINS_BADGUYS_URL /
 # ET_COMPROMISED_URL / FEODO_URL / DAN_TOR_URL / TOR_BULK_URL /
 # BLOCKLIST_DE_URL（原定义已删）。
-BLOCKLIST_DE_SSH_URL = "[REDACTED_PRIVATE_RESOURCE]"
-BLOCKLIST_DE_APACHE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # BruteForceBlocker（danger.rulez.sk 社区 SSH 爆破榜，`IP # 时间 次数 ID`
 # 行内注释格式，取首列；与 blocklist_de_ssh 同信号族同定级）。
-BRUTEFORCEBLOCKER_URL = (
-    "[REDACTED_PRIVATE_RESOURCE]"
-)
 # dataplane.org VNC 爆破榜（`count | org | IP | datetime | feed` 管道格式，
 # 取第 3 字段；与 maltrail 同解析契约；VNC 爆破新信号族，同 ssh 族定级）。
-DATAPLANE_VNCRFB_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # drb-ra C2IntelFeeds 30 天审核 C2（`IP,描述` 逗号格式，取首列；单研究员
 # 审核 + Possible 定性，口径略弱于聚合：is_abuse + 静态 50 + 权重 4）。
 DRB_C2_URL = (
@@ -105,15 +99,10 @@ NORVPN_EXITS_URL = (
 )
 # blackhole.monster 每日攻击者裸 IP 表（Maltrail 定性 known attacker）：
 # is_abuse + 静态 50 + 权重 4。
-BLACKHOLE_MONSTER_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # myip.ms 10 天攻击源 htaccess（`deny from IP`，取第 3 列；攻击自家
 # 基础设施的扫描/机器人，10 天窗口）：is_abuse + 静态 50 + 权重 4。
-MYIPMS_BLACKLIST_URL = (
-    "[REDACTED_PRIVATE_RESOURCE]"
-)
 # IPnoise（sekuripy.hr 分布式交互蜜罐 7 天窗口，裸 IP；蜜罐无合法服务，
 # 连上即敌对）：is_abuse + 静态 50 + 权重 4。
-IPNOISE_URL = "[REDACTED_PRIVATE_RESOURCE]"
 # FireHOL level2（L1 超集 + 更多聚合源，裸 IP + CIDR；比 L1 更广更噪，
 # 口径略弱：is_listed + 静态 50 + 权重 4）。
 URLLAUS_URL = "[REDACTED_PRIVATE_RESOURCE]"
@@ -556,30 +545,10 @@ async def fetch_ipsum_list() -> set[str]:
 # fetch_dan_tor / fetch_tor_bulk / fetch_blocklist_de（原实现已删）。
 
 
-async def fetch_blocklist_de_ssh() -> IpSet:
-    """blocklist.de SSH 暴力破解源 IP（独立攻击类别）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(BLOCKLIST_DE_SSH_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_bruteforceblocker() -> IpSet:
-    """BruteForceBlocker SSH 爆破榜（`IP # 时间 次数 ID` 行内注释，取首列）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(BRUTEFORCEBLOCKER_URL):
-        rows.update(line.split())
-    return IpSet(rows)
-
-
-async def fetch_dataplane_vncrfb() -> IpSet:
-    """dataplane.org VNC 爆破榜（`count | org | IP | datetime | feed` 取第 3 字段）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(DATAPLANE_VNCRFB_URL):
-        parts = [p.strip() for p in line.split("|")]
-        if len(parts) > 2:
-            rows.add(parts[2])
-    return IpSet(rows)
+# E1d：以下 7 名单抓取已迁 PCB rep_static（经 _REP_STATIC_BUNDLE
+# loader 回绑；无包为 None，dispatch 守卫跳过）：blocklist_de_ssh /
+# blocklist_de_apache / bruteforceblocker / dataplane_vncrfb /
+# blackhole_monster / myipms_blacklist / ipnoise（原实现已删）。
 
 
 async def fetch_drb_c2() -> IpSet:
@@ -599,34 +568,6 @@ async def fetch_nordvpn_exits() -> IpSet:
         first = line.split(",", 1)[0].strip()
         if first:
             rows.add(first)
-    return IpSet(rows)
-
-
-async def fetch_blackhole_monster() -> IpSet:
-    """blackhole.monster 每日攻击者裸 IP 表（Maltrail 定性 known attacker）。"""
-    return IpSet(await fetch_text_list(BLACKHOLE_MONSTER_URL))
-
-
-async def fetch_myipms_blacklist() -> IpSet:
-    """myip.ms 10 天攻击源 htaccess（`deny from IP` 取第 3 列）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(MYIPMS_BLACKLIST_URL):
-        parts = line.split()
-        if len(parts) >= 3 and parts[0] == "deny" and parts[1] == "from":
-            rows.add(parts[2])
-    return IpSet(rows)
-
-
-async def fetch_ipnoise() -> IpSet:
-    """IPnoise 7 天蜜罐攻击者裸 IP 表（`#` 注释由 fetch_text_list 剔除）。"""
-    return IpSet(await fetch_text_list(IPNOISE_URL))
-
-
-async def fetch_blocklist_de_apache() -> IpSet:
-    """blocklist.de Apache 探测/攻击源 IP（独立攻击类别）。"""
-    rows: set[str] = set()
-    for line in await fetch_text_list(BLOCKLIST_DE_APACHE_URL):
-        rows.update(line.split())
     return IpSet(rows)
 
 
@@ -853,6 +794,13 @@ try:
     fetch_x4bnet_vpn = _rep_static.fetch_x4bnet_vpn
     fetch_binarydefense = _rep_static.fetch_binarydefense
     fetch_greensnow = _rep_static.fetch_greensnow
+    fetch_blocklist_de_ssh = _rep_static.fetch_blocklist_de_ssh
+    fetch_blocklist_de_apache = _rep_static.fetch_blocklist_de_apache
+    fetch_bruteforceblocker = _rep_static.fetch_bruteforceblocker
+    fetch_dataplane_vncrfb = _rep_static.fetch_dataplane_vncrfb
+    fetch_blackhole_monster = _rep_static.fetch_blackhole_monster
+    fetch_myipms_blacklist = _rep_static.fetch_myipms_blacklist
+    fetch_ipnoise = _rep_static.fetch_ipnoise
     _REP_STATIC_BUNDLE = True
 except Exception:
     fetch_cins_badguys = None
@@ -877,6 +825,13 @@ except Exception:
     fetch_x4bnet_vpn = None
     fetch_binarydefense = None
     fetch_greensnow = None
+    fetch_blocklist_de_ssh = None
+    fetch_blocklist_de_apache = None
+    fetch_bruteforceblocker = None
+    fetch_dataplane_vncrfb = None
+    fetch_blackhole_monster = None
+    fetch_myipms_blacklist = None
+    fetch_ipnoise = None
 
 
 _REP_FREEIPAPI_BUNDLE = False
@@ -1040,23 +995,23 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("feodo", fetch_feodo()))
     if "blocklist_de" in sources and fetch_blocklist_de is not None:
         mapping.append(("blocklist_de", fetch_blocklist_de()))
-    if "blocklist_de_ssh" in sources:
+    if "blocklist_de_ssh" in sources and fetch_blocklist_de_ssh is not None:
         mapping.append(("blocklist_de_ssh", fetch_blocklist_de_ssh()))
-    if "bruteforceblocker" in sources:
+    if "bruteforceblocker" in sources and fetch_bruteforceblocker is not None:
         mapping.append(("bruteforceblocker", fetch_bruteforceblocker()))
-    if "dataplane_vncrfb" in sources:
+    if "dataplane_vncrfb" in sources and fetch_dataplane_vncrfb is not None:
         mapping.append(("dataplane_vncrfb", fetch_dataplane_vncrfb()))
     if "drb_c2" in sources:
         mapping.append(("drb_c2", fetch_drb_c2()))
     if "nordvpn_exits" in sources:
         mapping.append(("nordvpn_exits", fetch_nordvpn_exits()))
-    if "blackhole_monster" in sources:
+    if "blackhole_monster" in sources and fetch_blackhole_monster is not None:
         mapping.append(("blackhole_monster", fetch_blackhole_monster()))
-    if "myipms_blacklist" in sources:
+    if "myipms_blacklist" in sources and fetch_myipms_blacklist is not None:
         mapping.append(("myipms_blacklist", fetch_myipms_blacklist()))
-    if "ipnoise" in sources:
+    if "ipnoise" in sources and fetch_ipnoise is not None:
         mapping.append(("ipnoise", fetch_ipnoise()))
-    if "blocklist_de_apache" in sources:
+    if "blocklist_de_apache" in sources and fetch_blocklist_de_apache is not None:
         mapping.append(("blocklist_de_apache", fetch_blocklist_de_apache()))
     if "danmeuk_tor" in sources and fetch_dan_tor is not None:
         mapping.append(("danmeuk_tor", fetch_dan_tor()))

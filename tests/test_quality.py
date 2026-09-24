@@ -1033,24 +1033,6 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["bruteforceblocker"])
         self.assertEqual(qc.STATIC_LIST_SCORES["bruteforceblocker"], 45)
 
-    def test_bruteforceblocker_fetch_strips_inline_comments(self):
-        """REP-4：`IP # 时间 次数 ID` 行内注释取首列；URL 为 blist.php。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return ("171.231.185.91\t\t# 2026-09-17 10:44:35\t\t25\t2853450\n"
-                    "# comment line\n").encode()
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_bruteforceblocker())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("blist.php", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("171.231.185.91", got)
-        self.assertEqual(len(got), 1)
-
     def test_dataplane_vncrfb_source_registered(self):
         """REP-5：dataplane_vncrfb 默认启用、有权重/静态分。
 
@@ -1068,24 +1050,6 @@ class TestReputation(unittest.TestCase):
             qc.source_score("dataplane_vncrfb", {"is_abuse": True}),
             qc.STATIC_LIST_SCORES["dataplane_vncrfb"])
         self.assertEqual(qc.STATIC_LIST_SCORES["dataplane_vncrfb"], 45)
-
-    def test_dataplane_vncrfb_fetch_takes_third_pipe_field(self):
-        """REP-5：`count | org | IP | …` 取第 3 字段；URL 为 vncrfb.txt。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return ("14 | ORG | 1.2.3.4 | 2026-09-18 | vncrfb\n"
-                    "# comment\nshort|only\n").encode()
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_dataplane_vncrfb())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("vncrfb.txt", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("1.2.3.4", got)
-        self.assertEqual(len(got), 1)
 
     def test_drb_c2_source_registered(self):
         """REP-6：drb_c2 默认启用、有权重/静态分。
@@ -1176,23 +1140,6 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["blackhole_monster"])
         self.assertEqual(qc.STATIC_LIST_SCORES["blackhole_monster"], 50)
 
-    def test_blackhole_monster_fetch_bare_ips(self):
-        """REP-8：裸 IP 直取；URL 为 blackhole-today。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"1.14.69.226\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_blackhole_monster())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("blackhole-today", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("1.14.69.226", got)
-        self.assertEqual(len(got), 1)
-
     def test_myipms_blacklist_source_registered(self):
         """REP-9：myipms_blacklist 默认启用、有权重/静态分。
 
@@ -1211,23 +1158,6 @@ class TestReputation(unittest.TestCase):
             qc.STATIC_LIST_SCORES["myipms_blacklist"])
         self.assertEqual(qc.STATIC_LIST_SCORES["myipms_blacklist"], 50)
 
-    def test_myipms_blacklist_fetch_takes_deny_from_column(self):
-        """REP-9：`deny from IP` 取第 3 列；URL 为 latest_blacklist.txt。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"# comment\ndeny from 156.59.198.135\nallow from 9.9.9.9\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_myipms_blacklist())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("latest_blacklist.txt", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("156.59.198.135", got)
-        self.assertEqual(len(got), 1)
-
     def test_ipnoise_source_registered(self):
         """REP-10：ipnoise 默认启用、有权重/静态分。
 
@@ -1245,23 +1175,6 @@ class TestReputation(unittest.TestCase):
             qc.source_score("ipnoise", {"is_abuse": True}),
             qc.STATIC_LIST_SCORES["ipnoise"])
         self.assertEqual(qc.STATIC_LIST_SCORES["ipnoise"], 50)
-
-    def test_ipnoise_fetch_bare_ips(self):
-        """REP-10：裸 IP 直取（`#` 注释行跳过）；URL 为 7d.txt。"""
-        calls = []
-
-        def fake(url, timeout, headers=None, max_bytes=None):
-            calls.append((url, timeout))
-            return b"# Title: IPnoise\n1.2.3.4\n"
-
-        with unittest.mock.patch.object(qr, "fetch_with_mirror",
-                                        side_effect=fake):
-            got = asyncio.run(qr.fetch_ipnoise())
-        self.assertEqual(len(calls), 1)
-        self.assertIn("7d.txt", calls[0][0])
-        self.assertEqual(calls[0][1], qr.STATIC_LIST_TIMEOUT)
-        self.assertIn("1.2.3.4", got)
-        self.assertEqual(len(got), 1)
 
     def test_abuseipdb_public_fetch_uses_large_timeout(self):
         """R259：8.2MB 列表用独立放宽超时，慢网不致统一 15s fail-open。"""
@@ -3481,7 +3394,11 @@ class TestNewReputationSources(unittest.TestCase):
                      "fetch_c2_tracker", "fetch_botscout",
                      "fetch_sslproxies", "fetch_socks_proxy",
                      "fetch_dshield", "fetch_x4bnet_vpn",
-                     "fetch_binarydefense", "fetch_greensnow"):
+                     "fetch_binarydefense", "fetch_greensnow",
+                     "fetch_blocklist_de_ssh", "fetch_blocklist_de_apache",
+                     "fetch_bruteforceblocker", "fetch_dataplane_vncrfb",
+                     "fetch_blackhole_monster", "fetch_myipms_blacklist",
+                     "fetch_ipnoise"):
             with self.subTest(name=name):
                 fn = getattr(qr, name, "MISSING")
                 if qr._REP_STATIC_BUNDLE:
