@@ -3490,7 +3490,9 @@ class TestNewReputationSources(unittest.TestCase):
         """R118 E1a：无包时 6 名单抓取为 None（fail-open 跳过，源留空集）。"""
         for name in ("fetch_cins_badguys", "fetch_et_compromised",
                      "fetch_feodo", "fetch_dan_tor", "fetch_tor_bulk",
-                     "fetch_blocklist_de"):
+                     "fetch_blocklist_de", "fetch_tor_exits",
+                     "fetch_spamhaus_drop", "fetch_dc_asn", "fetch_vpn_asn",
+                     "fetch_resproxy_asn"):
             with self.subTest(name=name):
                 fn = getattr(qr, name, "MISSING")
                 if qr._REP_STATIC_BUNDLE:

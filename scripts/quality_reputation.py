@@ -37,12 +37,9 @@ FIREHOL_ABUSERS_URL = (
     "https://raw.githubusercontent.com/firehol/blocklist-ipsets/"
     "master/firehol_abusers_1d.netset"
 )
-DC_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
-VPN_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
-RESPROXY_ASN_URL = "[REDACTED_PRIVATE_RESOURCE]"
-TOR_EXITS_URL = "[REDACTED_PRIVATE_RESOURCE]"
-SPAMHAUS_DROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
-SPAMHAUS_EDROP_URL = "[REDACTED_PRIVATE_RESOURCE]"
+# E1b：以下端点已迁 PCB rep_static（经 _REP_STATIC_BUNDLE loader 获取）：
+# DC_ASN_URL / VPN_ASN_URL / RESPROXY_ASN_URL / TOR_EXITS_URL /
+# SPAMHAUS_DROP_URL / SPAMHAUS_EDROP_URL（原定义已删）。
 IPLOCATION_CAP = 3000
 STOPFORUMSPAM_CAP = 3000
 MALTIVERSE_CAP = 2500
@@ -917,6 +914,11 @@ try:
     fetch_dan_tor = _rep_static.fetch_dan_tor
     fetch_tor_bulk = _rep_static.fetch_tor_bulk
     fetch_blocklist_de = _rep_static.fetch_blocklist_de
+    fetch_tor_exits = _rep_static.fetch_tor_exits
+    fetch_spamhaus_drop = _rep_static.fetch_spamhaus_drop
+    fetch_dc_asn = _rep_static.fetch_dc_asn
+    fetch_vpn_asn = _rep_static.fetch_vpn_asn
+    fetch_resproxy_asn = _rep_static.fetch_resproxy_asn
     _REP_STATIC_BUNDLE = True
 except Exception:
     fetch_cins_badguys = None
@@ -925,6 +927,11 @@ except Exception:
     fetch_dan_tor = None
     fetch_tor_bulk = None
     fetch_blocklist_de = None
+    fetch_tor_exits = None
+    fetch_spamhaus_drop = None
+    fetch_dc_asn = None
+    fetch_vpn_asn = None
+    fetch_resproxy_asn = None
 
 
 _REP_FREEIPAPI_BUNDLE = False
@@ -1014,25 +1021,8 @@ async def fetch_firehol_abusers() -> IpSet:
     return IpSet(await fetch_text_list(FIREHOL_ABUSERS_URL))
 
 
-async def fetch_tor_exits() -> IpSet:
-    """Tor exit node IPs（``ExitAddress`` 行取第二列）。"""
-    lines = await fetch_text_list(TOR_EXITS_URL)
-    ips = [
-        ln.split()[1]
-        for ln in lines if ln.startswith(("ExitAddress",))
-    ]
-    return IpSet(ips)
-
-
-async def fetch_spamhaus_drop() -> IpSet:
-    """Spamhaus DROP + EDROP CIDR 网段（``<cidr> ; 描述`` 行）。"""
-    cidrs = []
-    for url in (SPAMHAUS_DROP_URL, SPAMHAUS_EDROP_URL):
-        for ln in await fetch_text_list(url):
-            entry = ln.split(";")[0].strip()
-            if "/" in entry:
-                cidrs.append(entry)
-    return IpSet(cidrs)
+# E1b：fetch_tor_exits / fetch_spamhaus_drop 已迁 PCB rep_static
+#（经 _REP_STATIC_BUNDLE loader 回绑；无包为 None，dispatch 守卫跳过）。
 
 
 async def fetch_asn_list(url: str) -> set[str]:
@@ -1102,9 +1092,9 @@ async def fetch_static_lists(sources: list) -> dict:
     mapping = []
     if "abuse_list" in sources:
         mapping.append(("abuse_list", fetch_firehol_abusers()))
-    if "tor_exit" in sources:
+    if "tor_exit" in sources and fetch_tor_exits is not None:
         mapping.append(("tor_exit", fetch_tor_exits()))
-    if "spamhaus" in sources:
+    if "spamhaus" in sources and fetch_spamhaus_drop is not None:
         mapping.append(("spamhaus", fetch_spamhaus_drop()))
     if "cins" in sources and fetch_cins_badguys is not None:
         mapping.append(("cins", fetch_cins_badguys()))
@@ -1166,12 +1156,12 @@ async def fetch_static_lists(sources: list) -> dict:
         mapping.append(("wwuyi_unreachable", fetch_wwuyi_unreachable()))
     if "wwuyi_blocked" in sources:
         mapping.append(("wwuyi_blocked", fetch_wwuyi_blocked()))
-    if "dc_asn" in sources:
-        mapping.append(("dc_asn", fetch_asn_list(DC_ASN_URL)))
-    if "vpn_asn" in sources:
-        mapping.append(("vpn_asn", fetch_asn_list(VPN_ASN_URL)))
-    if "resproxy_asn" in sources:
-        mapping.append(("resproxy_asn", fetch_asn_list(RESPROXY_ASN_URL)))
+    if "dc_asn" in sources and fetch_dc_asn is not None:
+        mapping.append(("dc_asn", fetch_dc_asn()))
+    if "vpn_asn" in sources and fetch_vpn_asn is not None:
+        mapping.append(("vpn_asn", fetch_vpn_asn()))
+    if "resproxy_asn" in sources and fetch_resproxy_asn is not None:
+        mapping.append(("resproxy_asn", fetch_resproxy_asn()))
     results = await asyncio.gather(
         *(task for _name, task in mapping), return_exceptions=True
     )
