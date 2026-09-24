@@ -3341,6 +3341,48 @@ class TestNewReputationSources(unittest.TestCase):
             and not callable(getattr(qr, n, None))]
         self.assertEqual(missing, [])
 
+    def test_dispatch_names_resolve_r141(self):
+        """R141验证正确性：派线消费的 fetch_* 必有定义或回绑（防悬空引用）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse(Path(qr.__file__).read_text(encoding="utf-8"))
+        called = {
+            n.func.id for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id.startswith("fetch_")}
+        defined = {
+            n.name for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name.startswith("fetch_")}
+        bound = set()
+        imported = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign):
+                for tgt in n.targets:
+                    if (isinstance(tgt, ast.Name)
+                            and tgt.id.startswith("fetch_")
+                            and isinstance(n.value, ast.Attribute)):
+                        bound.add(tgt.id)
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    if a.name.startswith("fetch_"):
+                        imported.add(a.asname or a.name)
+                if any(a.name == "*" for a in n.names) and n.module:
+                    try:
+                        mod = __import__(n.module, fromlist=["*"])
+                        imported.update(
+                            x for x in dir(mod) if x.startswith("fetch_"))
+                    except ImportError:
+                        pass
+            elif isinstance(n, ast.Import):
+                for a in n.names:
+                    top = a.name.split(".", 1)[0]
+                    if top.startswith("fetch_"):
+                        imported.add(a.asname or top)
+        self.assertGreater(len(called), 30)  # 防 AST 遍历空转真空通过
+        dangling = sorted(called - defined - bound - imported)
+        self.assertEqual(dangling, [])
+
     def test_static_a_lookup_fail_open_when_unbundled(self):
         """R118 E1a：无包时 6 名单抓取为 None（fail-open 跳过，源留空集）。"""
         for name in ("fetch_cins_badguys", "fetch_et_compromised",
