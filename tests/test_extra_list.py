@@ -85,6 +85,28 @@ class TestListExtraSources(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         self.assertIn("--list-extra-sources", buf.getvalue())
 
+    def test_extra_kinds_have_parse_branches_r158(self):
+        """R158功能完整性：EXTRA kind 全有 parse_source 分支（防增源漏绑
+        静默跳过；R130 绑定锁的下载侧对应）。分支集取自源码 AST（零硬编码
+        双份清单），用户文档 kind（json）一并覆盖。"""
+        import ast
+        src = (Path(dp.__file__).read_text(encoding="utf-8"))
+        tree = ast.parse(src)
+        branches: set[str] = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Compare)
+                    and len(node.ops) == 1
+                    and isinstance(node.ops[0], ast.Eq)):
+                left, right = node.left, node.comparators[0]
+                if (isinstance(left, ast.Name) and left.id == "kind"
+                        and isinstance(right, ast.Constant)
+                        and isinstance(right.value, str)):
+                    branches.add(right.value)
+        used = {k for k, _ in dp.EXTRA_SOURCES}
+        self.assertEqual(sorted(used - branches), [])
+        self.assertIn("json", branches)
+        self.assertGreaterEqual(branches, used | {"json"})
+
 
 if __name__ == "__main__":
     unittest.main()
