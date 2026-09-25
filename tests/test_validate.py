@@ -995,6 +995,18 @@ class TestNormalizeExtResponse(unittest.TestCase):
                 "success": True, "probe_results": {}})
             self.assertIs(result["ok"], True)
 
+    def test_non_bool_success_logs_debug_r170(self):
+        """R170可用性：非布尔 success 判否时留 debug 痕迹（排障可观测；
+        缺键与真布尔保持静默）。"""
+        with self.assertLogs("root", level="DEBUG") as logs:
+            vp._normalize_ext_response({"name": "090227"}, {
+                "success": "false", "probe_results": {}})
+        self.assertTrue(any("not bool" in m for m in logs.output))
+        with self.assertNoLogs("root", level="DEBUG"):
+            vp._normalize_ext_response({"name": "090227"}, {
+                "success": True, "probe_results": {}})
+            vp._normalize_ext_response({"name": "090227"}, {})
+
 
 class TestMergeExtVerdict(unittest.TestCase):
     def test_two_ok_sources_consensus(self):
