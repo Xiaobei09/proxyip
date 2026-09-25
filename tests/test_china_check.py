@@ -1275,6 +1275,16 @@ class TestSlotTableBuilderR178(unittest.TestCase):
         out = table[code]("1.2.3.4", "443")
         self.assertFalse(out.get("ok", True))
 
+    def test_no_registry_yields_algorithmic_stubs(self):
+        """无包时算法生成全代号桩（保旧回退语义；零字面）。"""
+        import unittest.mock as mock
+        with mock.patch.object(cc, "_sources_registry", return_value=None):
+            table = cc._build_slot_table(7)
+        self.assertEqual(len(table), 44)
+        code = next(iter(table))
+        out = table[code]("1.2.3.4", "443")
+        self.assertFalse(out.get("ok", True))
+
 
 class TestListCnDiscoverability(unittest.TestCase):
     """R106可维护性：--list-cn 发现功能测试内聚（自 TestLoadSample 迁出，纯移动）。"""

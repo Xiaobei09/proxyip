@@ -1019,26 +1019,7 @@ def _run_ws_source_slots(
     """JWT/WS 或 PoW/WS 类源的多键并发复核（cn14/cn15 / cn17/cn18/cn19 / cn16）。
 
     每个源按 ``candidates`` 前段投递；只写 ``entries[key][source]``。"""
-    fn = {
-        CN14_CODE: lambda ip, port: (
-            cn14_check(ip, port, timeout)
-            if cn14_check else _bundle_missing(CN14_CODE)),
-        CN15_CODE: lambda ip, port: (
-            cn15_check(ip, port, timeout)
-            if cn15_check else _bundle_missing(CN15_CODE)),
-        CN17_CODE: lambda ip, port: (
-            cn17_check(ip, port, timeout)
-            if cn17_check else _bundle_missing(CN17_CODE)),
-        CN18_CODE: lambda ip, port: (
-            cn18_check(ip, port, timeout)
-            if cn18_check else _bundle_missing(CN18_CODE)),
-        CN19_CODE: lambda ip, port: (
-            cn19_check(ip, port, timeout)
-            if cn19_check else _bundle_missing(CN19_CODE)),
-        CN16_CODE: lambda ip, port: (
-            cn16_check(ip, "", timeout)
-            if cn16_check else _bundle_missing(CN16_CODE)),
-    }[source]
+    fn = _build_slot_table(timeout)[source]
 
     def work(item) -> None:
         _, key, ip, port, _ = item
@@ -1089,8 +1070,18 @@ def _build_slot_table(timeout):
 
     键为运行时代号（registry codes，无字面）；调用形态读条目 ``bind``
     （缺省标准三参；特形见 registry）。插件/函数缺失即 _bundle_missing
-    桩。纯构造，无网络。旧手写表在切流后删除。
+    桩。无包时算法生成全代号桩（行1290先例），保旧回退语义。纯构造，
+    无网络。
     """
+    try:
+        reg = _sources_registry()
+        entries = list(reg.SOURCES) if reg is not None else []
+    except Exception:
+        entries = []
+    if not entries:
+        return {f"cn{i:02d}": (lambda ip, port, _c=f"cn{i:02d}":
+                               _bundle_missing(_c))
+                for i in range(1, 45)}
     table = {}
     try:
         reg = _sources_registry()
@@ -1134,65 +1125,7 @@ def _run_raw_slots(
     """多节点复核通用 slot：按 ``source``（代号）派发到对应的多节点 check 函数
     （cn11 socket.io-WS / cn09 等 HTTP-SSE / cn04 纯 WS），只写 ``entries[key][source]``。
     插件缺失时记 error 行（fail-open）。"""
-    fn = {
-        CN11_CODE: lambda ip, port: (
-            cn11_check(ip, port, timeout) if cn11_check
-            else _bundle_missing(CN11_CODE)),
-        CN12_CODE: lambda ip, port: (
-            cn12_check(ip, port, timeout) if cn12_check
-            else _bundle_missing(CN12_CODE)),
-        CN09_CODE: lambda ip, port: (
-            cn09_check(ip, port, timeout) if cn09_check
-            else _bundle_missing(CN09_CODE)),
-        CN10_CODE: lambda ip, port: (
-            cn10_check(ip, port, timeout) if cn10_check
-            else _bundle_missing(CN10_CODE)),
-        CN04_CODE: lambda ip, port: (
-            cn04_check(ip, port, timeout) if cn04_check
-            else _bundle_missing(CN04_CODE)),
-        CN05_CODE: lambda ip, port: (
-            cn05_check(ip, port, timeout) if cn05_check
-            else _bundle_missing(CN05_CODE)),
-        CN06_CODE: lambda ip, port: (
-            cn06_check(ip, port, timeout) if cn06_check
-            else _bundle_missing(CN06_CODE)),
-        CN07_CODE: lambda ip, port: (
-            cn07_check(ip, timeout) if cn07_check
-            else _bundle_missing(CN07_CODE)),
-        CN35_CODE: lambda ip, port: (
-            cn35_check(ip, port, timeout) if cn35_check
-            else _bundle_missing(CN35_CODE)),
-        CN36_CODE: lambda ip, port: (
-            cn36_check(ip, port, timeout) if cn36_check
-            else _bundle_missing(CN36_CODE)),
-        CN37_CODE: lambda ip, port: (
-            cn37_check(ip, port, timeout)
-            if cn37_check
-            else _bundle_missing(CN37_CODE)),
-        CN38_CODE: lambda ip, port: (
-            cn38_check(ip, port, timeout)
-            if cn38_check
-            else _bundle_missing(CN38_CODE)),
-        CN39_CODE: lambda ip, port: (
-            cn39_check(ip, port, timeout)
-            if cn39_check
-            else _bundle_missing(CN39_CODE)),
-        CN42_CODE: lambda ip, port: (
-            cn42_check(ip, port, timeout) if cn42_check
-            else _bundle_missing(CN42_CODE)),
-        CN34_CODE: lambda ip, port: (
-            cn34_check(ip, port, timeout) if cn34_check
-            else _bundle_missing(CN34_CODE)),
-        CN43_CODE: lambda ip, port: (
-            cn43_check(ip, port, timeout) if cn43_check
-            else _bundle_missing(CN43_CODE)),
-        CN44_CODE: lambda ip, port: (
-            cn44_check(ip, port, timeout) if cn44_check
-            else _bundle_missing(CN44_CODE)),
-        CN13_CODE: lambda ip, port: (
-            cn13_check(ip, port, timeout) if cn13_check
-            else _bundle_missing(CN13_CODE)),
-    }[source]
+    fn = _build_slot_table(timeout)[source]
 
     def work(item) -> None:
         _, key, ip, port, _ = item

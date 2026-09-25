@@ -1691,3 +1691,47 @@ class TestHistoryRecordShape(unittest.TestCase):
             {"ts", "total", "checked", "alive", "dead"},
         )
         self.assertEqual(len(line), 5)
+
+
+class TestValidateDryRunR183b(unittest.TestCase):
+    """R183b用户侧体验：validate --dry-run 只计划不探测不写盘。
+
+    全树此前仅 exit_family/china_check 有 dry-run（待验证⑤悬置项）。
+    """
+
+    def _source(self, tmp, lines):
+        p = Path(tmp) / "all.txt"
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return p
+
+    def test_plan_prints_and_skips_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = self._source(tmp, ["1.2.3.4:443#US", "5.6.7.8:80#JP"])
+            err = io.StringIO()
+            with mock.patch.object(vp, "check_entries",
+                                   side_effect=AssertionError("must not probe")), \
+                 mock.patch.object(vp, "write_valid_outputs",
+                                   side_effect=AssertionError("must not write")), \
+                 contextlib.redirect_stderr(err):
+                rc = vp.main(["--source", str(src), "--dry-run"])
+            self.assertEqual(rc, 0)
+            out = err.getvalue()
+            self.assertIn("dry-run: no network, no writes", out)
+            self.assertIn("dry-run plan: entries=2", out)
+            self.assertIn("ext_check=off", out)
+
+    def test_limit_applies_to_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = self._source(tmp, ["1.2.3.4:443#US", "5.6.7.8:80#JP",
+                                     "9.9.9.9:443#DE"])
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = vp.main(["--source", str(src), "--dry-run", "--limit", "2"])
+            self.assertEqual(rc, 0)
+            self.assertIn("dry-run plan: entries=2", err.getvalue())
+
+    def test_missing_source_still_errors(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = vp.main(["--source", "/nonexistent/all.txt", "--dry-run"])
+        self.assertEqual(rc, 1)

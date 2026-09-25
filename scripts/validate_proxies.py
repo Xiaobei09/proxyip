@@ -1341,6 +1341,16 @@ async def run(args: argparse.Namespace) -> int:
         entries = entries[: args.limit]
     total = len(entries)
 
+    if getattr(args, "dry_run", False):
+        print("dry-run: no network, no writes", file=sys.stderr)
+        print(f"dry-run plan: entries={total} from {args.source} "
+              f"limit={args.limit} timeout={args.timeout}s "
+              f"workers={args.workers} "
+              f"speed={'off' if args.no_speed else 'on'} "
+              f"ext_check={'on' if args.ext_check else 'off'}",
+              file=sys.stderr)
+        return 0
+
     # 上一轮存活集合须在 write_index 覆盖 index.json 之前读取
     prev_keys = load_prev_alive_keys()
     prev_ipports = (
@@ -1468,6 +1478,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-t", "--timeout", type=int, default=TIMEOUT, help="Per-proxy timeout (seconds)")
     parser.add_argument("-w", "--workers", type=int, default=WORKERS, help="Max concurrent checks")
     parser.add_argument("--limit", type=int, default=0, help="Max proxies to check (0 = all)")
+    parser.add_argument("--dry-run", action="store_true", help="只打印检查计划（条目数/来源/关键参数），不探测不写盘")
     parser.add_argument("--time-budget", type=int, default=0, help="Stop after this many seconds (0 = unlimited)")
     parser.add_argument("--per-country-limit", type=int, default=PER_COUNTRY_LIMIT, help="Limit for _ltd outputs")
     parser.add_argument("--ext-check", action="store_true", help="Enable external API multi-source validation")
