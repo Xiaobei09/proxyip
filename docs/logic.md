@@ -154,8 +154,8 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 | ipsum | 8 | 55 | `is_listed` | 命中 3+ 黑名单 |
 | abuse_list | 5 | 60 | `is_abuse` | 历史滥用 |
 | abuseipdb_public | 5 | 55 | `is_abuse` | AbuseIPDB 近 30 天高置信滥用举报（社区镜像） |
-| wwuyi_unreachable | 2 | 70 | `is_listed` | Wwuyi123 实测不可达（第三方失联证据，非滥用，温和） |
-| wwuyi_blocked | 2 | 65 | `is_listed` | Wwuyi123 维护者拉黑（主动拒绝，略强，仍非滥用） |
+| wwuyi_unreachable | 2 | 70 | `is_listed` | 上游实测不可达（第三方失联证据，非滥用，温和） |
+| wwuyi_blocked | 2 | 65 | `is_listed` | 上游维护者拉黑（主动拒绝，略强，仍非滥用） |
 | cins | 5 | 50 | `is_listed` | CINS 活跃滥用/拒绝服务 IP |
 | danmeuk_tor | 5 | 40 | `is_tor` | Dan.me.uk Tor 出口 |
 | dc_asn | 5 | 85 | `is_hosting` | 机房/数据中心 ASN |
