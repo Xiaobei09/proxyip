@@ -42,17 +42,24 @@ class TestExtBundleContract(unittest.TestCase):
         import download_proxies as dp
         import asyncio
         import quality_probe as qp
+        import validate_proxies as vp
         with mock.patch.object(cm, "IPAPI_BATCH_URL", None), \
              mock.patch.object(cm, "IPAPI_GET_URL", None), \
              mock.patch.object(cm, "EXTERNAL_CHECK_URL", None), \
              mock.patch.object(cm, "EXT_API_SOURCES", []), \
              mock.patch.object(ae, "IPAPI_BATCH_URL", None), \
              mock.patch.object(dp, "IPAPI_BATCH_URL", None), \
-             mock.patch.object(qp, "EXTERNAL_CHECK_URL", None):
+             mock.patch.object(qp, "EXTERNAL_CHECK_URL", None), \
+             mock.patch.object(vp, "EXT_API_SOURCES", []):
             self.assertEqual(ae.lookup_geo(["1.1.1.1"], timeout=1, delay=0), {})
             self.assertEqual(dp.lookup_countries(["1.1.1.1"], 1, 0), {})
             self.assertEqual(asyncio.run(qp.check_external_api("1.1.1.1", "443")),
                              {"success": False})
+            # R166跨工作流：验证链零任务→空表→skipped 裁决闭环。
+            self.assertEqual(asyncio.run(
+                vp.check_all_ext_apis("1.1.1.1", "443", 10)), [])
+            self.assertEqual(
+                vp.merge_ext_verdict([])["alive"], "skipped")
 
 
 if __name__ == "__main__":
