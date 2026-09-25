@@ -3,19 +3,17 @@
 import ast
 import pathlib
 import re
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 
-STDLIB_TOP = {
-    "argparse", "ast", "asyncio", "base64", "bisect", "collections",
-    "concurrent", "contextlib", "csv", "dataclasses", "datetime", "hashlib",
-    "http", "io", "ipaddress", "json", "logging", "math", "os", "pathlib",
-    "random", "re", "shutil", "socket", "ssl", "statistics", "struct",
-    "subprocess", "sys", "tempfile", "threading", "time", "traceback",
-    "unittest", "urllib", "xml", "zipfile", "__future__",
-}
+# R180：以解释器 ground truth（sys.stdlib_module_names；硬约束 Python 3.11+
+# 保底）替代手写表。手写表曾漏 inspect 致 R178 新测误报，TEST_STDLIB_EXTRA
+# 补丁式增补（shlex/types）同理被 subsumed。第三方判定语义不变（断言仍为
+# offenders == []），仅消除未来标准库导入的误报 hazard。
+STDLIB_TOP = set(sys.stdlib_module_names)
 
 
 class TestZeroDependencyContract(unittest.TestCase):
@@ -206,11 +204,9 @@ class TestNoCredentialNamesInLogs(unittest.TestCase):
 class TestTestsDirZeroDependency(unittest.TestCase):
     """R94：tests/ 同样仅允许标准库＋项目内模块（与 scripts/ 同契约）。
 
-    STDLIB_TOP 未收录的常用标准库（shlex/types）在此类中显式增补；
+    标准库以 STDLIB_TOP（R180 ground truth）为准，不再逐个增补；
     项目内模块指 scripts/*.py 的 stem（tests 间无互引，见基线审计）。
     """
-
-    TEST_STDLIB_EXTRA = {"shlex", "types"}
 
     # R136：第一方 PCB 插件（测试与插件一致性校验如 R127 parity 允许直引；
     # 第三方禁令针对外部依赖，门禁不自缚第一方）。
@@ -232,7 +228,6 @@ class TestTestsDirZeroDependency(unittest.TestCase):
                 for m in mods:
                     top = m.split(".", 1)[0]
                     if (top not in STDLIB_TOP
-                            and top not in self.TEST_STDLIB_EXTRA
                             and top not in scripts
                             and top not in self.PCB_PLUGINS):
                         offenders.append(f"{py.name}: import {m}")
