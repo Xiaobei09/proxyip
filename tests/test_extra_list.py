@@ -15,6 +15,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import download_proxies as dp
 
 
+def _run_main_mocked(argv, extra_sources):
+    """全管线 mock 下跑 ``dp.main``，返回 ``(rc, stderr)``。
+
+    R162 可维护性：收敛 R157/R161 两处 22 行重复管线（漂移即双改漏一）。
+    ``extra_sources`` 为本次运行模拟的内置清单（ копии ，防跨测污染）。
+    """
+    patchers = [
+        mock.patch.object(
+            dp, "load_source",
+            return_value=({"443": {"US": ["1.1.1.1"]}}, None),
+        ),
+        mock.patch.object(dp, "load_extras", return_value=({}, set(), {})),
+        mock.patch.object(dp, "enrich_countries", return_value=0),
+        mock.patch.object(dp, "write_outputs", return_value=(
+            {"__total__": 1, "__unique__": 1, "__countries__": 1,
+             "__ports__": 1, "__sets__": {}, "443": 1},
+            ["1.1.1.1:443#US"],
+        )),
+        mock.patch.object(dp, "write_source_attribution"),
+        mock.patch.object(dp, "_append_source_history"),
+        mock.patch.object(dp, "_build_source_stats", return_value={}),
+        mock.patch.object(dp, "write_text_if_changed"),
+        mock.patch.object(dp, "load_previous_all", return_value=[]),
+        mock.patch.object(dp, "write_diff", return_value=(0, 0)),
+        mock.patch.object(dp, "append_history"),
+        mock.patch.object(dp, "print_stats"),
+        mock.patch.object(dp, "write_upstream_meta"),
+    ]
+    for p in patchers:
+        p.start()
+    try:
+        with mock.patch.object(dp, "EXTRA_SOURCES", list(extra_sources)):
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = dp.main(argv)
+            return rc, err.getvalue()
+    finally:
+        for p in patchers:
+            p.stop()
+
+
 class TestListExtraSources(unittest.TestCase):
     def test_bundled_lists_origins(self):
         if not dp.EXTRA_SOURCES:
@@ -38,44 +79,13 @@ class TestListExtraSources(unittest.TestCase):
     def test_warns_when_builtin_empty_r157(self):
         """R157用户侧体验：无包内置为空时 stderr warn（静默降级可见），
         显式 --no-extra-sources 时保持静默（用户意图明确）。"""
-        patchers = [
-            mock.patch.object(
-                dp, "load_source",
-                return_value=({"443": {"US": ["1.1.1.1"]}}, None),
-            ),
-            mock.patch.object(dp, "load_extras", return_value=({}, set(), {})),
-            mock.patch.object(dp, "enrich_countries", return_value=0),
-            mock.patch.object(dp, "write_outputs", return_value=(
-                {"__total__": 1, "__unique__": 1, "__countries__": 1,
-                 "__ports__": 1, "__sets__": {}, "443": 1},
-                ["1.1.1.1:443#US"],
-            )),
-            mock.patch.object(dp, "write_source_attribution"),
-            mock.patch.object(dp, "_append_source_history"),
-            mock.patch.object(dp, "_build_source_stats", return_value={}),
-            mock.patch.object(dp, "write_text_if_changed"),
-            mock.patch.object(dp, "load_previous_all", return_value=[]),
-            mock.patch.object(dp, "write_diff", return_value=(0, 0)),
-            mock.patch.object(dp, "append_history"),
-            mock.patch.object(dp, "print_stats"),
-            mock.patch.object(dp, "write_upstream_meta"),
-        ]
-        for p in patchers:
-            p.start()
-        try:
-            with mock.patch.object(dp, "EXTRA_SOURCES", []):
-                err = io.StringIO()
-                with redirect_stderr(err):
-                    self.assertEqual(dp.main([]), 0)
-                self.assertIn("PCB bundle missing", err.getvalue())
-                self.assertIn("--list-extra-sources", err.getvalue())
-                err2 = io.StringIO()
-                with redirect_stderr(err2):
-                    self.assertEqual(dp.main(["--no-extra-sources"]), 0)
-                self.assertNotIn("Warning", err2.getvalue())
-        finally:
-            for p in patchers:
-                p.stop()
+        rc, err = _run_main_mocked([], extra_sources=[])
+        self.assertEqual(rc, 0)
+        self.assertIn("PCB bundle missing", err)
+        self.assertIn("--list-extra-sources", err)
+        rc, err = _run_main_mocked(["--no-extra-sources"], extra_sources=[])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Warning", err)
 
     def test_help_mentions_flag(self):
         buf = io.StringIO()
@@ -98,41 +108,13 @@ class TestListExtraSources(unittest.TestCase):
     def test_malformed_spec_echo_redacted_r161(self):
         """R161安全合规：畸形 --extra-source 回显须脱敏（凭证不进 CI 日志）；
         未知 kind 回显同理（经 load_extras 真分支，fetch 已 mock）。"""
-        patchers = [
-            mock.patch.object(
-                dp, "load_source",
-                return_value=({"443": {"US": ["1.1.1.1"]}}, None),
-            ),
-            mock.patch.object(dp, "load_extras", return_value=({}, set(), {})),
-            mock.patch.object(dp, "enrich_countries", return_value=0),
-            mock.patch.object(dp, "write_outputs", return_value=(
-                {"__total__": 1, "__unique__": 1, "__countries__": 1,
-                 "__ports__": 1, "__sets__": {}, "443": 1},
-                ["1.1.1.1:443#US"],
-            )),
-            mock.patch.object(dp, "write_source_attribution"),
-            mock.patch.object(dp, "_append_source_history"),
-            mock.patch.object(dp, "_build_source_stats", return_value={}),
-            mock.patch.object(dp, "write_text_if_changed"),
-            mock.patch.object(dp, "load_previous_all", return_value=[]),
-            mock.patch.object(dp, "write_diff", return_value=(0, 0)),
-            mock.patch.object(dp, "append_history"),
-            mock.patch.object(dp, "print_stats"),
-            mock.patch.object(dp, "write_upstream_meta"),
-        ]
-        for p in patchers:
-            p.start()
-        try:
-            err = io.StringIO()
-            with redirect_stderr(err):
-                self.assertEqual(dp.main(
-                    ["--extra-source", "https://u:p@example.com/x"]), 0)
-            self.assertIn("Ignoring malformed", err.getvalue())
-            self.assertIn("***@", err.getvalue())
-            self.assertNotIn("u:p@", err.getvalue())
-        finally:
-            for p in patchers:
-                p.stop()
+        rc, err = _run_main_mocked(
+            ["--extra-source", "https://u:p@example.com/x"],
+            extra_sources=list(dp.EXTRA_SOURCES))
+        self.assertEqual(rc, 0)
+        self.assertIn("Ignoring malformed", err)
+        self.assertIn("***@", err)
+        self.assertNotIn("u:p@", err)
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(dp, "_fetch_extra_retry",
                                return_value=b"1.1.1.1\n"):
