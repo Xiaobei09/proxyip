@@ -1217,6 +1217,65 @@ class TestLoadSample(unittest.TestCase):
 
 
 
+class TestSlotTableBuilderR178(unittest.TestCase):
+    """R178 M4b-core：注册表驱动派发表（零字面；调用形态读 bind）。"""
+
+    def _reg(self):
+        reg = cc._sources_registry()
+        if reg is None:
+            self.skipTest("needs PCB _sources bundle")
+        return reg
+
+    def test_covers_registry(self):
+        reg = self._reg()
+        table = cc._build_slot_table(7)
+        self.assertEqual(set(table), set(reg.codes()))
+
+    def test_bind_conventions(self):
+        import unittest.mock as mock
+        reg = self._reg()
+        by_bind = {}
+        for e in reg.SOURCES:
+            by_bind.setdefault(e.get("bind", "ip-port-timeout"), e["code"])
+        std = by_bind["ip-port-timeout"]
+        e = reg.by_code(std)
+        mod = cc._load_pcb_plugin(e["plugin"])
+        with mock.patch.object(mod, e["func"],
+                               return_value={"ok": True}) as m:
+            table = cc._build_slot_table(7)
+            self.assertEqual(table[std]("1.2.3.4", "443"), {"ok": True})
+            m.assert_called_once_with("1.2.3.4", "443", 7)
+        if "ip-timeout" in by_bind:
+            code = by_bind["ip-timeout"]
+            e = reg.by_code(code)
+            mod = cc._load_pcb_plugin(e["plugin"])
+            with mock.patch.object(mod, e["func"],
+                                   return_value={"ok": True}) as m:
+                table = cc._build_slot_table(9)
+                table[code]("1.2.3.4", "443")
+                m.assert_called_once_with("1.2.3.4", 9)
+        if "ip-empty-timeout" in by_bind:
+            code = by_bind["ip-empty-timeout"]
+            e = reg.by_code(code)
+            mod = cc._load_pcb_plugin(e["plugin"])
+            with mock.patch.object(mod, e["func"],
+                                   return_value={"ok": True}) as m:
+                table = cc._build_slot_table(9)
+                table[code]("1.2.3.4", "443")
+                m.assert_called_once_with("1.2.3.4", "", 9)
+
+    def test_missing_plugin_is_bundle_missing_stub(self):
+        import unittest.mock as mock
+        reg = self._reg()
+        code = reg.codes()[0]
+        real_loader = cc._load_pcb_plugin
+        with mock.patch.object(cc, "_load_pcb_plugin",
+                               side_effect=RuntimeError("no bundle")):
+            table = cc._build_slot_table(7)
+        out = table[code]("1.2.3.4", "443")
+        self.assertFalse(out.get("ok", True))
+
+
 class TestListCnDiscoverability(unittest.TestCase):
     """R106可维护性：--list-cn 发现功能测试内聚（自 TestLoadSample 迁出，纯移动）。"""
 
@@ -4627,6 +4686,41 @@ class TestWorkflowTriggerEdges(unittest.TestCase):
                    if m else [])
             got = [x for x in got if x]
             self.assertEqual(got, want, f"{name} 触发边漂移")
+
+
+class TestEngineTablesConsistencyR177(unittest.TestCase):
+    """R177可维护性：引擎判定表与注册表一致＋回退元组零裸字面。
+
+    - 有包时 _MULTI_OK/_SINGLE_OK 集合须等于注册表 verdict 分组（引擎
+      不得私自增删；R176 真名化后宿主/函数已变，码值仍以注册表为准）。
+    - _SOURCE_MIN_RATIO 键须为 _MULTI_OK 子集（弱确认阈值只对多节点源有意义）。
+    - 回退 _SINGLE_OK/_MULTI_OK 定义元组须经 CN*_CODE 常量组装，不得再出现
+      裸 "cnXX" 字面（R177-FIX-01 收敛 engine 10 处后的回归锁；改回裸字面即红）。
+    """
+
+    def test_tables_match_registry(self):
+        import china_engine as ce
+        reg = _registry_sources(self)
+        multi = {e["code"] for e in reg.SOURCES
+                 if e.get("verdict") == "multi"}
+        single = {e["code"] for e in reg.SOURCES
+                  if e.get("verdict") == "single"}
+        self.assertEqual(set(ce._MULTI_OK), multi)
+        self.assertEqual(set(ce._SINGLE_OK), single)
+        self.assertLessEqual(set(ce._SOURCE_MIN_RATIO), set(ce._MULTI_OK))
+
+    def test_fallback_tuples_have_no_bare_literals(self):
+        import re
+        from pathlib import Path
+        import china_engine as ce
+        src = (Path(ce.__file__).resolve().parent.parent
+               / "scripts" / "china_engine.py").read_text(encoding="utf-8")
+        tuples = re.findall(r"_(?:MULTI|SINGLE)_OK = \((.*?)\)",
+                            src, re.S)
+        self.assertTrue(tuples, "未找到回退判定元组")
+        for tup in tuples:
+            hits = re.findall(r'"cn\d{2}"', tup)
+            self.assertEqual(hits, [], f"回退元组含裸字面: {hits}")
 
 
 if __name__ == "__main__":

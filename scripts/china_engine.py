@@ -2,7 +2,7 @@
 """大陆可达判定引擎（merge_verdict 及阈值表）。
 
 从 ``china_check`` 拆出的纯判定层：输入各源 status/ratio/nodes，输出
-verdict/basis/ms/level；不含任何站点私有协议细节（源身份以代号出现）。
+verdict/basis/ms/level；不含任何站点私有协议细节（源身份以注册表码出现）。
 ``china_check`` 以兼容导入回填（``cc.merge_verdict`` 等名字保持可用，
 测试零改）。
 """
@@ -87,6 +87,38 @@ except Exception:
     CN17_CODE = "cn17"
     CN18_CODE = "cn18"
     CN19_CODE = "cn19"
+
+try:
+    _cn20 = _load_pcb_plugin("cn20")
+    CN20_CODE = _cn20.CODE
+    CN21_CODE = _cn20.CODE_PING
+    CN22_CODE = _cn20.CODE_STATUS
+    CN23_CODE = _cn20.CODE_SCAN
+except Exception:
+    CN20_CODE = "cn20"
+    CN21_CODE = "cn21"
+    CN22_CODE = "cn22"
+    CN23_CODE = "cn23"
+
+try:
+    _cn24 = _load_pcb_plugin("cn24")
+    CN24_CODE = _cn24.CODE
+    CN25_CODE = _cn24.CODE_PING
+    CN26_CODE = _cn24.CODE_SSL
+except Exception:
+    CN24_CODE = "cn24"
+    CN25_CODE = "cn25"
+    CN26_CODE = "cn26"
+
+try:
+    _cn27 = _load_pcb_plugin("cn27")
+    CN27_CODE = _cn27.CODE
+    CN28_CODE = _cn27.CODE_PING
+    CN29_CODE = _cn27.CODE_HTTP
+except Exception:
+    CN27_CODE = "cn27"
+    CN28_CODE = "cn28"
+    CN29_CODE = "cn29"
 try:
     _cn30 = _load_pcb_plugin("cn30")
     CN30_CODE = _cn30.CODE
@@ -196,7 +228,7 @@ else:
     _MULTI_OK = (
         CN40_CODE, CN01_CODE, CN41_CODE, CN02_CODE, CN03_CODE, CN30_CODE, CN31_CODE, CN32_CODE, CN33_CODE, CN06_CODE, CN07_CODE, CN08_CODE, CN14_CODE, CN15_CODE, CN17_CODE, CN18_CODE, CN19_CODE, CN16_CODE, CN11_CODE, CN12_CODE, CN09_CODE, CN10_CODE, CN04_CODE, CN05_CODE,
         CN42_CODE, CN34_CODE, CN35_CODE, CN43_CODE, CN44_CODE, CN13_CODE)
-    _SINGLE_OK = ("cn27", "cn28", "cn29", "cn20", "cn21", "cn22", "cn23", "cn24", "cn25", "cn26", CN36_CODE, CN37_CODE, CN38_CODE, CN39_CODE)
+    _SINGLE_OK = (CN27_CODE, CN28_CODE, CN29_CODE, CN20_CODE, CN21_CODE, CN22_CODE, CN23_CODE, CN24_CODE, CN25_CODE, CN26_CODE, CN36_CODE, CN37_CODE, CN38_CODE, CN39_CODE)
     _SOURCE_MIN_RATIO = {
         CN07_CODE: CN07_MIN_RATIO,
         CN16_CODE: CN16_MIN_RATIO,
@@ -231,7 +263,7 @@ def merge_verdict(sources: dict) -> dict:
     - 确认证据至少一路强：≥1 个达标多节点源（threshold+≥5 节点）或
       ≥2 个单节点源（交叉）→ reachable；仅 1 个单节点源或弱多节点
       （无强多节点）→ uncertain（单点/弱证据不可靠）
-    - 多节点源（cn40 / cn01 / cn02 / cn41）单独确认 → reachable，
+    - 多节点源（见 _MULTI_OK）单独确认 → reachable，
       但**要求该源节点成功率达阈值**（cn01 系列按 ``ratio``≥0.5；
       cn40/cn41 内部已是多数/60% 规则，视作满足）；比率过低的单源
       判定 → uncertain（单节点假阳性抑制）
@@ -287,7 +319,7 @@ def merge_verdict(sources: dict) -> dict:
     if len(single_ok) >= 2:
         basis = ok_sources[:]
         return {"verdict": "reachable", "basis": basis, "ms": ms, "level": level}
-    # 多节点源只有弱确认（如 cn01 仅 1/24 节点可达）→ 不能单独定论
+    # 多节点源只有弱确认（如某源仅 1/24 节点可达）→ 不能单独定论
     if multi_ok:
         basis = ok_sources[:]
         return {"verdict": "uncertain", "basis": basis, "ms": ms, "level": level}
