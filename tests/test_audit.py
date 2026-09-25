@@ -284,6 +284,47 @@ class TestAudit(unittest.TestCase):
                 msg="entry_audit.json 顶层字段契约漂移（data-spec:285）",
             )
 
+    def test_no_bundle_missing_warns_r172(self):
+        """R172功能完整性：无包＋缓存缺失时 warn（R157 家族审计链对应；
+        真 lookup 短路零网络；有包/有缓存皆静默）。"""
+        import io
+        from contextlib import redirect_stderr
+        from audit_entry_cc import audit as run_audit
+        import audit_entry_cc as ae
+
+        def _tree(entries):
+            td = tempfile.TemporaryDirectory()
+            base = Path(td.name)
+            (base / "valid").mkdir(parents=True)
+            qdir = base / "quality"
+            qdir.mkdir(parents=True)
+            (base / "valid" / "all.txt").write_text(
+                "".join(entries), encoding="utf-8")
+            return td, base, qdir
+
+        td, base, qdir = _tree(["1.1.1.1:443#US-10ms\n"])
+        try:
+            with mock.patch.object(ae, "IPAPI_BATCH_URL", None):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    report = run_audit(base / "valid" / "all.txt", qdir,
+                                       timeout=1, delay=0)
+                self.assertIn("PCB bundle missing", err.getvalue())
+                self.assertIn("entry_unknown", report["summary"])
+        finally:
+            td.cleanup()
+        td, base, qdir = _tree(["1.1.1.1:443#US-10ms\n"])
+        try:
+            geo = {"1.1.1.1": {"cc": "US", "asn": 1234}}
+            with mock.patch("audit_entry_cc.lookup_geo", return_value=geo):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    run_audit(base / "valid" / "all.txt", qdir,
+                              timeout=1, delay=0)
+                self.assertNotIn("Warning", err.getvalue())
+        finally:
+            td.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

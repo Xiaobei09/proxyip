@@ -191,6 +191,9 @@ def audit(source: Path, quality_dir: Path, timeout: int, delay: float) -> dict:
     if missing:
         fresh = lookup_geo(sorted(missing), timeout=timeout, delay=delay) \
             if missing else {}
+        if not fresh and IPAPI_BATCH_URL is None:
+            print("Warning: entry geo lookup skipped (PCB bundle missing?)",
+                  file=sys.stderr)
         geo.update(fresh)
     save_entry_geo_cache(quality_dir / ENTRY_GEO_CACHE, geo)
     for row in rows:
