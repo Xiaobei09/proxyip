@@ -203,6 +203,16 @@ async def check_one_ext_api(
         return {"name": source["name"], "ok": False, "error": err_name(exc)}
 
 
+def ext_check_warn_needed(ext_check: bool, sources: list | None = None) -> bool:
+    """ext 开启但无源时需 stderr warn（R157 家族：静默降级可见）。
+
+    ``sources`` 默读 ``EXT_API_SOURCES``；显式传参便于测试。无包时源表为
+    空，开启检查即全体 skipped 却无声——warn 一次，不阻断。
+    """
+    SOURCES = sources if sources is not None else EXT_API_SOURCES
+    return bool(ext_check) and not SOURCES
+
+
 async def check_all_ext_apis(
     ip: str, port: str, ext_timeout: int,
 ) -> list[dict]:
@@ -1282,6 +1292,9 @@ async def check_entries(
 
     # External API enrichment for alive proxies + recheck for failed ones
     if args.ext_check and ext_sem is not None:
+        if ext_check_warn_needed(args.ext_check):
+            print("Warning: external API check enabled but no sources "
+                  "(PCB bundle missing?)", file=sys.stderr)
         ext_tasks: list[asyncio.Task] = []
         for ip, port, cc, method, latency, speed in ext_pending:
             ext_tasks.append(

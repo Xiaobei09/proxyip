@@ -1007,6 +1007,15 @@ class TestNormalizeExtResponse(unittest.TestCase):
                 "success": True, "probe_results": {}})
             vp._normalize_ext_response({"name": "090227"}, {})
 
+    def test_ext_warn_needed_r171(self):
+        """R171用户侧体验：ext 开启＋无源才 warn（显式关闭/有源皆静默）。"""
+        self.assertTrue(vp.ext_check_warn_needed(True, []))
+        self.assertFalse(vp.ext_check_warn_needed(False, []))
+        self.assertFalse(vp.ext_check_warn_needed(True, [{"name": "x"}]))
+        self.assertFalse(vp.ext_check_warn_needed(False, [{"name": "x"}]))
+        self.assertEqual(vp.ext_check_warn_needed(True),
+                         vp.ext_check_warn_needed(True, vp.EXT_API_SOURCES))
+
 
 class TestMergeExtVerdict(unittest.TestCase):
     def test_two_ok_sources_consensus(self):
