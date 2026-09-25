@@ -3258,6 +3258,14 @@ class TestFreshDeepSpeed(unittest.TestCase):
 
 
 class TestExternalCheck(unittest.TestCase):
+    def setUp(self):
+        # R163：传输层已 mock 时须绕过 E3 无包短路（dummy 端点永不真调）。
+        import quality_probe as qs
+        self._url_patch = unittest.mock.patch.object(
+            qs, "EXTERNAL_CHECK_URL", "https://dummy.invalid/check")
+        self._url_patch.start()
+        self.addCleanup(self._url_patch.stop)
+
     def test_check_external_api_success(self):
         import quality_probe as qs
         fake_data = {

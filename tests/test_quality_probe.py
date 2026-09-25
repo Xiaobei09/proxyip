@@ -159,6 +159,14 @@ class TestRunChecks(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBatchIpapi(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # R163：传输层已 mock 时须绕过 E3/R153 无包短路（dummy 端点永不真调）。
+        for name in ("IPAPI_BATCH_URL", "IPAPI_GET_URL"):
+            p = unittest.mock.patch.object(
+                qp, name, f"http://dummy.invalid/{name.lower()}")
+            p.start()
+            self.addCleanup(p.stop)
+
     async def test_partial_success_keeps_only_success(self):
         with unittest.mock.patch.object(
             qp, "ipapi_batch_sync",
@@ -323,6 +331,13 @@ class TestCheckExternalApiBoolGuard(unittest.IsolatedAsyncioTestCase):
     字符串 ``"false"``/``"true"``（部分 API 的字符串布尔）不得漂移成
     成功判定；None/0/字符串均非显式 ``True``。
     """
+
+    def setUp(self):
+        # R163：传输层已 mock 时须绕过 E3 无包短路（dummy 端点永不真调）。
+        p = unittest.mock.patch.object(
+            qp, "EXTERNAL_CHECK_URL", "https://dummy.invalid/check")
+        p.start()
+        self.addCleanup(p.stop)
 
     async def _run(self, payload: bytes) -> dict:
         with unittest.mock.patch("quality_probe.fetch_with_deadline",

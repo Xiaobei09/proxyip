@@ -725,6 +725,13 @@ class TestMergeByPort(unittest.TestCase):
 
 
 class TestLookupAndEnrich(unittest.TestCase):
+    def setUp(self):
+        # R163：传输层已 mock 时须绕过 E3 无包短路（dummy 端点永不真调）。
+        self._url_patch = unittest.mock.patch.object(
+            dp, "IPAPI_BATCH_URL", "http://dummy.invalid/batch")
+        self._url_patch.start()
+        self.addCleanup(self._url_patch.stop)
+
     class _Resp:
         def __init__(self, data):
             self._data = data

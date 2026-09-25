@@ -168,6 +168,14 @@ class TestAuditEndToEndCacheWritten(unittest.TestCase):
 class TestLookupGeoRetryR111(unittest.TestCase):
     """R111网络健壮性：lookup_geo 有界重试＋耗尽跳过（不抛异常）。"""
 
+    def setUp(self):
+        # R163：传输层已 mock 时须绕过 E3 无包短路（dummy 端点永不真调）。
+        import audit_entry_cc as ae
+        self._url_patch = mock.patch.object(
+            ae, "IPAPI_BATCH_URL", "http://dummy.invalid/batch")
+        self._url_patch.start()
+        self.addCleanup(self._url_patch.stop)
+
     def _resp(self, payload):
         m = mock.MagicMock()
         m.read.return_value = json.dumps(payload).encode()
