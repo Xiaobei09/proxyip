@@ -3934,51 +3934,136 @@ class TestCiEnabledSources(unittest.TestCase):
             flag = f"--cn-limit {code}={lim}"
             self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
 
+    def _china_step_script(self) -> str:
+        """提取 China reachability 步的 ``run: |`` shell 块。"""
+        root = Path(__file__).resolve().parent.parent
+        lines = (root / ".github" / "workflows" / "china-check.yml").read_text(
+            encoding="utf-8").splitlines()
+        step = next(i for i, line in enumerate(lines)
+                    if line.strip() == "- name: China reachability check")
+        start = next(i for i in range(step + 1, len(lines))
+                     if lines[i].strip() == "run: |")
+        base = len(lines[start]) - len(lines[start].lstrip())
+        body = []
+        for line in lines[start + 1:]:
+            if not line.strip():
+                body.append("")
+                continue
+            indent = len(line) - len(line.lstrip())
+            if indent <= base:
+                break
+            body.append(line)
+        return "\n".join(body).strip() + "\n"
+
     def test_ci_command_dry_runs(self):
-        """R15：workflow china 步骤原样 dry-run（parser/workflow 漂移即红；
-        无网络无写盘；此前每轮手工验证，现锁进套件）。"""
+        """R15：workflow 主探测与超时回退命令原样 dry-run；parser/workflow
+        漂移、无效 flag 或续行断裂即红，且全程不触网络/写盘。"""
         import re
         import shlex
         import unittest.mock as mock
+        script = self._china_step_script()
+        commands = re.findall(
+            r"timeout .*?\s\\?\n\s+(python scripts/china_check.py.*?"
+            r"--cn-cache-ttl 21600)",
+            script, re.S)
+        self.assertEqual(len(commands), 2,
+                         "须同时存在主探测与有界回退两条 china_check 命令")
+        for raw in commands:
+            cmd = " ".join(
+                line.strip().removesuffix("\\").strip()
+                for line in raw.splitlines() if line.strip())
+            cmd = cmd.replace('"${CN_FALLBACK_LIMIT}"', "300")
+            argv = shlex.split(cmd)
+            self.assertEqual(argv[:2], ["python", "scripts/china_check.py"])
+            with mock.patch.object(
+                    cc, "request_follow",
+                    side_effect=AssertionError("dry-run must not touch net")):
+                self.assertEqual(cc.main(argv[2:] + ["--dry-run"]), 0)
+
+    def test_ci_timeout_fallback_reserves_job_budget(self):
+        """公开仓 job 上限 6h：主探测须在硬杀前回退，且两段 timeout
+        之外至少留 30m 给标注、校验和提交。回退命令只取小样本，禁携带
+        全量 ``--limit 0``。"""
+        import re
+        import subprocess
         root = Path(__file__).resolve().parent.parent
+        script = self._china_step_script()
+        subprocess.run(["bash", "-n"], input=script, text=True, check=True)
         wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
             encoding="utf-8")
-        m = re.search(r"run: >-\n((?:[ ]{9,}.*\n?)+)", wf)
-        self.assertIsNotNone(m, "china 步骤 run 块丢失")
-        cmd = " ".join(l.strip() for l in m.group(1).splitlines()
-                       if l.strip())
-        argv = shlex.split(cmd)
-        self.assertEqual(argv[:2], ["python", "scripts/china_check.py"])
-        with mock.patch.object(
-                cc, "request_follow",
-                side_effect=AssertionError("dry-run must not touch net")):
-            self.assertEqual(cc.main(argv[2:] + ["--dry-run"]), 0)
+        job_s = int(re.search(r"timeout-minutes:\s*(\d+)", wf).group(1)) * 60
+        primary_s = int(re.search(
+            r"CN_PRIMARY_TIMEOUT_SECONDS:\s*(\d+)", wf).group(1))
+        fallback_s = int(re.search(
+            r"CN_FALLBACK_TIMEOUT_SECONDS:\s*(\d+)", wf).group(1))
+        limit = int(re.search(r"CN_FALLBACK_LIMIT:\s*(\d+)", wf).group(1))
+        self.assertGreaterEqual(job_s - primary_s - fallback_s, 1800)
+        self.assertGreater(limit, 0)
+        self.assertLessEqual(limit, 500)
+        self.assertIn('echo "mode=fallback" >> "$GITHUB_OUTPUT"', script)
+        self.assertIn('echo "mode=full" >> "$GITHUB_OUTPUT"', script)
+        self.assertIn("find data -type f -name '*.tmp'", script)
+        self.assertRegex(script, r'--limit "\$\{CN_FALLBACK_LIMIT\}"')
+        self.assertNotRegex(script, r'CN_FALLBACK_LIMIT[^\n]*--limit 0')
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        docs = (root / "docs" / "scripts.md").read_text(encoding="utf-8")
+        self.assertIn("300 条有界样本", readme)
+        self.assertIn("公开仓 6h 超时回退", docs)
 
-    def test_ci_run_block_folds_to_single_command(self):
-        """URGENT-CI：china-check.yml 的 `run: >-` 折叠块必须折成单条 shell
-        命令——任一续行缩进多一格即成超缩进行，YAML 保留其换行，bash 把
-        `--xxx-limit` 当独立命令执行（exit 127），且整轮跑残缺命令
-        （2026-09-19 run 35467680392：2.5h 后死于 line 2，L3 全 skip）。
-        另禁重复行（argparse last-wins 掩盖配额漂移）。"""
-        wf = (Path(__file__).resolve().parent.parent / ".github"
-              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
-        lines = wf.splitlines()
-        start = next(i for i, l in enumerate(lines) if l.strip() == "run: >-")
-        block = []
-        for l in lines[start + 1:]:
-            if not l.strip():
-                continue
-            indent = len(l) - len(l.lstrip())
-            if indent <= 8:
-                break
-            block.append(l)
-        self.assertTrue(block, "CI run 块为空")
-        indents = {len(l) - len(l.lstrip()) for l in block}
-        self.assertEqual(len(indents), 1,
-                         f"CI run 块缩进不统一（>- 折叠断裂）：{sorted(indents)}")
-        stripped = [l.strip() for l in block]
-        self.assertEqual(len(stripped), len(set(stripped)), "CI run 块有重复行")
-        self.assertTrue(stripped[0].startswith("python scripts/china_check.py"))
+    def test_ci_timeout_branch_runs_fallback(self):
+        """以假 python 验证 timeout(124) 才进回退；普通失败原样返回，
+        禁止把真实代码/网络错误伪装成降级成功。"""
+        import os
+        import stat
+        import subprocess
+        script = self._china_step_script()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake = bin_dir / "python"
+            fake.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$*\" >> \"$TRACE_FILE\"\n"
+                "if [[ \" $* \" == *\" --limit 0 \"*"
+                " && \"${FAKE_SLEEP:-0}\" = 1 ]]; then sleep 5; fi\n"
+                "exit \"${FAKE_EXIT:-0}\"\n",
+                encoding="utf-8")
+            fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+
+            def run(fake_sleep, fake_exit):
+                trace = root / f"trace-{fake_sleep}-{fake_exit}"
+                output = root / f"output-{fake_sleep}-{fake_exit}"
+                env = os.environ.copy()
+                env.update({
+                    "PATH": f"{bin_dir}:{env['PATH']}",
+                    "TRACE_FILE": str(trace),
+                    "GITHUB_OUTPUT": str(output),
+                    "CN_PRIMARY_TIMEOUT_SECONDS": "1",
+                    "CN_FALLBACK_TIMEOUT_SECONDS": "5",
+                    "CN_FALLBACK_LIMIT": "2",
+                    "FAKE_SLEEP": str(fake_sleep),
+                    "FAKE_EXIT": str(fake_exit),
+                })
+                proc = subprocess.run(
+                    ["bash", "-c", script], env=env, text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                lines = trace.read_text(encoding="utf-8").splitlines() \
+                    if trace.exists() else []
+                return proc, output.read_text(encoding="utf-8"), lines
+
+            proc, output, lines = run(1, 0)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("mode=fallback", output)
+            self.assertEqual(len(lines), 2)
+            self.assertIn("--limit 0", lines[0])
+            self.assertIn("--limit 2", lines[1])
+
+            proc, output, lines = run(0, 7)
+            self.assertEqual(proc.returncode, 7)
+            self.assertIn("mode=full", output)
+            self.assertEqual(len(lines), 1)
+            self.assertNotIn("--limit 2", lines[0])
 
     def test_cn17_limit_restored_after_altcha(self):
         """CN-30：cn17 ALTCHA 打通后复活——CI 配额恢复 400，
@@ -4006,7 +4091,8 @@ class TestCiEnabledSources(unittest.TestCase):
         defined = set(re.findall(r'"(--[a-z0-9-]+)"', src))
         used = set(re.findall(r"--[a-z0-9-]+", wf))
         script_flags = {f for f in used if not f.startswith("--jq")
-                        and f != "--json" and f != "--workflow"}
+                        and f not in ("--json", "--workflow",
+                                      "--signal", "--kill-after")}
         unknown = sorted(script_flags - defined)
         self.assertEqual(unknown, [], f"CI 用了未定义的 flag：{unknown}")
 

@@ -27,6 +27,10 @@ jobs:
     env:
       CHINA_CHECK_API_KEY: ${{ secrets.CHINA_CHECK_API_KEY }}
       TCPPING_CN_TOKEN: ${{ secrets.TCPPING_CN_TOKEN }}
+      # 公开仓单 job 硬上限 6h；主探测最多占 4.5h，预留 1h 给回退与提交。
+      CN_PRIMARY_TIMEOUT_SECONDS: 16200
+      CN_FALLBACK_TIMEOUT_SECONDS: 3600
+      CN_FALLBACK_LIMIT: 300
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -76,36 +80,53 @@ jobs:
       - name: China reachability check
         id: china
         if: steps.gate.outputs.skip != 'true'
-        run: >-
-          python scripts/china_check.py
-          --source data/valid/all.txt --limit 0
-          --cn-limit cn30=800 --cn-concurrency cn30=20
-          --cn-limit cn31=400 --cn-concurrency cn31=20
-          --cn-limit cn32=200 --cn-concurrency cn32=8
-          --cn-limit cn33=200 --cn-concurrency cn33=6
-          --cn-limit cn07=1200 --cn-concurrency cn07=40
-          --cn-limit cn08=600 --cn-concurrency cn08=12
-          --cn-limit cn14=500 --cn-concurrency cn14=8
-          --cn-limit cn15=200 --cn-concurrency cn15=8
-          --cn-limit cn17=400 --cn-concurrency cn17=8
-          --cn-limit cn18=200 --cn-concurrency cn18=6
-          --cn-limit cn19=200 --cn-concurrency cn19=6
-          --cn-limit cn16=200 --cn-concurrency cn16=8
-          --cn-limit cn11=200 --cn-concurrency cn11=6
-          --cn-limit cn12=200 --cn-concurrency cn12=6
-          --cn-limit cn09=200 --cn-concurrency cn09=8
-          --cn-limit cn10=200 --cn-concurrency cn10=8
-          --cn-limit cn04=200 --cn-concurrency cn04=6
-          --cn-limit cn05=200 --cn-concurrency cn05=6
-          --cn-limit cn06=200 --cn-concurrency cn06=6
-          --cn-limit cn34=100 --cn-concurrency cn34=8
-          --cn-limit cn35=100 --cn-concurrency cn35=8
-          --cn-limit cn36=60 --cn-concurrency cn36=4
-          --cn-limit cn37=40 --cn-concurrency cn37=4
-          --cn-limit cn38=40 --cn-concurrency cn38=4
-          --cn-limit cn39=40 --cn-concurrency cn39=4
-          --cn-limit cn40=300 --cn-concurrency cn40=6
-          --cn-cache-ttl 21600
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
+            python scripts/china_check.py \
+            --source data/valid/all.txt --limit 0 \
+            --cn-limit cn30=800 --cn-concurrency cn30=20 \
+            --cn-limit cn31=400 --cn-concurrency cn31=20 \
+            --cn-limit cn32=200 --cn-concurrency cn32=8 \
+            --cn-limit cn33=200 --cn-concurrency cn33=6 \
+            --cn-limit cn07=1200 --cn-concurrency cn07=40 \
+            --cn-limit cn08=600 --cn-concurrency cn08=12 \
+            --cn-limit cn14=500 --cn-concurrency cn14=8 \
+            --cn-limit cn15=200 --cn-concurrency cn15=8 \
+            --cn-limit cn17=400 --cn-concurrency cn17=8 \
+            --cn-limit cn18=200 --cn-concurrency cn18=6 \
+            --cn-limit cn19=200 --cn-concurrency cn19=6 \
+            --cn-limit cn16=200 --cn-concurrency cn16=8 \
+            --cn-limit cn11=200 --cn-concurrency cn11=6 \
+            --cn-limit cn12=200 --cn-concurrency cn12=6 \
+            --cn-limit cn09=200 --cn-concurrency cn09=8 \
+            --cn-limit cn10=200 --cn-concurrency cn10=8 \
+            --cn-limit cn04=200 --cn-concurrency cn04=6 \
+            --cn-limit cn05=200 --cn-concurrency cn05=6 \
+            --cn-limit cn06=200 --cn-concurrency cn06=6 \
+            --cn-limit cn34=100 --cn-concurrency cn34=8 \
+            --cn-limit cn35=100 --cn-concurrency cn35=8 \
+            --cn-limit cn36=60 --cn-concurrency cn36=4 \
+            --cn-limit cn37=40 --cn-concurrency cn37=4 \
+            --cn-limit cn38=40 --cn-concurrency cn38=4 \
+            --cn-limit cn39=40 --cn-concurrency cn39=4 \
+            --cn-limit cn40=300 --cn-concurrency cn40=6 \
+            --cn-cache-ttl 21600
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; then
+            echo "mode=fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning::主 CN 探测达到 ${CN_PRIMARY_TIMEOUT_SECONDS}s 上限；转入 ${CN_FALLBACK_LIMIT} 条有界回退"
+            find data -type f -name '*.tmp' -newer .jobstart -delete 2>/dev/null || true
+            timeout --signal=TERM --kill-after=60s "${CN_FALLBACK_TIMEOUT_SECONDS}s" \
+              python scripts/china_check.py \
+              --source data/valid/all.txt \
+              --limit "${CN_FALLBACK_LIMIT}" \
+              --cn-cache-ttl 21600
+          else
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            exit "$rc"
+          fi
 
       - name: Annotate and classify
         id: annotate
@@ -132,6 +153,7 @@ jobs:
       - name: Show summary
         if: steps.gate.outputs.skip != 'true'
         run: |
+          echo "China check mode: ${{ steps.china.outputs.mode || 'full' }}"
           echo "China-reachable proxies:"
           wc -l data/valid/all_cn.txt 2>/dev/null || true
           echo "Verdict distribution:"
