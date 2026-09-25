@@ -589,14 +589,17 @@ def merge_isp_ms(entries: dict) -> None:
         e.pop("isp_ms", None)
         e.pop("isp_speed", None)
         sources = e.get("sources")
+        merged: dict[str, float] = {}
+        if cached_complete:
+            merged.update({
+                key: float(cached_values[key]) for key in _CARRIER_KEYS
+            })
         if not isinstance(sources, dict):
-            if cached_complete:
+            if merged:
                 e["isp_ms"] = {
-                    key: round(float(cached_values[key]), 1)
-                    for key in _CARRIER_KEYS
+                    key: round(value, 1) for key, value in merged.items()
                 }
             continue
-        merged: dict[str, float] = {}
         for _name, r in sources.items():
             if not isinstance(r, dict):
                 continue
@@ -609,11 +612,6 @@ def merge_isp_ms(entries: dict) -> None:
         if merged:
             e["isp_ms"] = {
                 isp: round(v, 1) for isp, v in sorted(merged.items())
-            }
-        elif cached_complete:
-            e["isp_ms"] = {
-                key: round(float(cached_values[key]), 1)
-                for key in _CARRIER_KEYS
             }
 
 
