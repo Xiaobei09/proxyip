@@ -118,6 +118,8 @@ class TestIpTypeAndRisk(unittest.TestCase):
         self.assertEqual(qc.classify_ip({}), "RES")
 
     def test_derive_risk_keyless(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         w = qc.REPUTATION_WEIGHTS
         self.assertEqual(
             qc.derive_risk({"ip-api": {"proxy": True, "hosting": True}},
@@ -219,6 +221,8 @@ class TestBatchSyncDeadline(unittest.TestCase):
 
 class TestBuildIpinfo(unittest.TestCase):
     def test_tls_proxy_geo_match(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "cc": "US",
@@ -244,6 +248,8 @@ class TestBuildIpinfo(unittest.TestCase):
         self.assertTrue(info["geo_checked"])
 
     def test_reputation_netcoffee_wins(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "cc": "US",
@@ -343,6 +349,8 @@ class TestResolveExitIps(unittest.TestCase):
             self.assertEqual(out[key]["exit_ip_source"], "proxy")
 
     def test_build_reputation_uses_exit_ip(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         risk_data = {"9.9.9.9": {"netcoffee": {"trust_score": 80}}}
         rep_map = qc.build_reputation_map(
             {"a": {"key": "k", "ip": "1.1.1.1", "exit_ip": "9.9.9.9"}},
@@ -445,6 +453,8 @@ class TestRegistryLocksR148(unittest.TestCase):
         表格为手维护分组（`a/b` 同值），任一值漂移即红；以 qr 消费视图
         为准（含 PCB 回绑与静态回退）。
         """
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         import re
         from pathlib import Path
         rows: dict[str, tuple[int, float]] = {}
@@ -460,23 +470,24 @@ class TestRegistryLocksR148(unittest.TestCase):
         self.assertEqual(rows, dict(qr.SOURCE_PACING))
 
     def test_docs_default_sources_match_impl_r113(self):
-        """R113验证正确性：docs 默认源清单与实现集合一致（54 项，防增减无声）。"""
-        import re
+        """R113验证正确性（M3 改写）：docs 默认清单行不再内联 54 名，转指
+        `--list-rep-sources`（真相源在 PCB）；行内须无源名字面、无数量断言。
+        集合一致性由运行时锁覆盖（R154 子集锁＋list 输出对照）。"""
         from pathlib import Path
         line = next(
             l for l in (Path(qr.__file__).resolve().parent.parent
                         / "docs" / "scripts.md").read_text(
                             encoding="utf-8").splitlines()
             if l.startswith("| `--reputation-sources`"))
-        m = re.search(r"\| ([a-z0-9_,\-]+) \|$", line)
-        self.assertIsNotNone(m, "默认清单行解析失败")
-        assert m is not None
-        self.assertEqual(set(m.group(1).split(",")),
-                         set(qr.DEFAULT_REP_SOURCES))
-        self.assertEqual(len(qr.DEFAULT_REP_SOURCES), 54)
+        self.assertIn("--list-rep-sources", line)
+        for name in ("netcoffee", "greynoise", "wwuyi_blocked"):
+            self.assertNotIn(f",{name},", f",{line},")
+            self.assertFalse(line.rstrip().endswith(f",{name} |"))
 
     def test_list_rep_sources_output_r142(self):
         """R142可发现性：--list-rep-sources 输出权重表全量＋表头。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         import io
         from contextlib import redirect_stdout
         buf = io.StringIO()
@@ -623,6 +634,8 @@ class TestReputation(unittest.TestCase):
 
     def test_otx_cached_string_signal_tolerated(self):
         """缓存投毒韧性：otx 信号数值字段为非 int 字符串 → 不崩、按 0 计分。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {"otx": {"reputation": "abc", "pulse_count": "xyz"}}
         # 主路径 vote_reputation 内部连续罚分与 flag 判定均不抛 ValueError
         self.assertEqual(qc.compute_reputation(sigs, None, self.W), 100)
@@ -638,12 +651,16 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qr._as_int(True), 0)
 
     def test_trust_score_direct(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertEqual(
             qc.compute_reputation({"netcoffee": {"trust_score": 63}},
                                   None, self.W), 63
         )
 
     def test_trust_score_clamped(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertEqual(
             qc.compute_reputation({"netcoffee": {"trust_score": 150}},
                                   None, self.W), 100
@@ -654,6 +671,8 @@ class TestReputation(unittest.TestCase):
         )
 
     def test_netcoffee_flag_penalty(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         nc = {"netcoffee": {"is_abuser": True, "is_tor": True, "is_vpn": True}}
         # 共识标记：abuse 35 + tor 40 + vpn 22 = 97 → 3
         self.assertEqual(qc.compute_reputation(nc, None, self.W), 3)
@@ -732,6 +751,8 @@ class TestReputation(unittest.TestCase):
                  "suspicious": True}), 75)
 
     def test_weighted_merge(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         signals = {"netcoffee": {"trust_score": 80},
                    "ncgy": {"is_vpn": True}}
         score, sources = qc.weighted_reputation(signals, self.W)
@@ -739,6 +760,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(set(sources), {"netcoffee", "ncgy"})
 
     def test_weighted_merge_renormalizes(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         signals = {"netcoffee": {"trust_score": 50}}
         score, sources = qc.weighted_reputation(signals, self.W)
         self.assertEqual(score, 50)
@@ -749,6 +772,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.weighted_reputation({}, self.W), (None, []))
 
     def test_ipapi_only(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         # 共识一致：proxy 28 + hosting 10 → 62
         self.assertEqual(
             qc.compute_reputation(
@@ -758,6 +783,8 @@ class TestReputation(unittest.TestCase):
 
     def test_consensus_negation_vetoes_proxy(self):
         """单源报 proxy 但他人明确说非代理 → 共识否定，不扣分。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {
             "netcoffee": {"is_proxy": True},
             "ip-api": {"proxy": False},
@@ -770,6 +797,8 @@ class TestReputation(unittest.TestCase):
 
     def test_consensus_two_sources_agree_on_proxy(self):
         """多源一致报 proxy → 统一扣分。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {
             "netcoffee": {"is_proxy": True},
             "proxycheck": {"is_proxy": True},
@@ -780,6 +809,8 @@ class TestReputation(unittest.TestCase):
 
     def test_greynoise_abuse_not_double_penalized_with_noise(self):
         """同一 IP 恶意+噪音：abuse 特判即最高口径，不叠加 noise 二次罚分。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {
             "greynoise": {
                 "is_abuse": True, "is_noise": True,
@@ -793,6 +824,8 @@ class TestReputation(unittest.TestCase):
         self.assertNotIn("noise", flagged)
 
     def test_greynoise_riot_penalty(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {"greynoise": {"is_riot": True}}
         score, _r, flagged, _n = qc.vote_reputation(sigs, self.W)
         self.assertEqual(flagged, ["bot"])
@@ -800,6 +833,8 @@ class TestReputation(unittest.TestCase):
 
     def test_ipdata_threat_score_numeric(self):
         """ipdata threat_score 进入连续型罚分链。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {"ipdata": {"is_proxy": False, "threat_score": 40}}
         score, _r, _f, numeric = qc.vote_reputation(sigs, self.W)
         self.assertEqual(score, 60)
@@ -809,6 +844,8 @@ class TestReputation(unittest.TestCase):
         """OTX reputation 负=恶意（官方 -3..+3，负号幅值越大越脏）。数值罚分
         按负侧幅值计，正/零声誉不罚——与 _flag_opinions 的 listed 语义一致，
         纠正此前把正声誉当脏、负声誉当净的符号反转。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertEqual(qr._numeric_risk_penalty(
             "otx", {"reputation": -100, "pulse_count": 0}), 80)
         self.assertEqual(qr._numeric_risk_penalty(
@@ -842,6 +879,8 @@ class TestReputation(unittest.TestCase):
 
     def test_consensus_clean_source_abstains_on_unknown(self):
         """ncgy clean 只否定它检查过的家族；对无关家族不投票。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {
             "netcoffee": {"is_vpn": True, "is_tor": True},
             "ncgy": {"clean": True},
@@ -851,6 +890,8 @@ class TestReputation(unittest.TestCase):
         self.assertIn("tor", flagged)
 
     def test_consensus_disagreement_tie_benefit_of_doubt(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         # 权重相等的正负票打平 → 无结论，不扣分
         sigs = {
             "proxycheck": {"is_vpn": True, "is_proxy": True},
@@ -861,6 +902,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(score, 100)
 
     def test_ipwhois_source_score_and_vote(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertEqual(qc.source_score(
             "ipwhois", {"security": {"tor": True}}), 55)
         self.assertIsNone(qc.source_score(
@@ -873,6 +916,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(flagged, ["proxy"])
 
     def test_stopforumspam_source_score_and_vote(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertEqual(
             qc.source_score("stopforumspam", {"is_abuse": True}), 50)
         self.assertIsNone(qc.source_score("stopforumspam", {}))
@@ -912,6 +957,8 @@ class TestReputation(unittest.TestCase):
 
     def test_hackmyip_source_vote(self):
         """hackmyip hosting/proxy/mobile flags vote into the semantic dims."""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertIn("hackmyip", qc.DEFAULT_REP_SOURCES)
         self.assertIn("hackmyip", qc.REPUTATION_WEIGHTS)
         self.assertEqual(qr._flag_opinions(
@@ -929,6 +976,8 @@ class TestReputation(unittest.TestCase):
 
     def test_feodo_source_vote(self):
         """feodo 僵尸网络 C2 静态 IP 命中 → abuse 维度。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertIn("feodo", qc.DEFAULT_REP_SOURCES)
         self.assertIn("feodo", qc.REPUTATION_WEIGHTS)
         self.assertEqual(qr._flag_opinions(
@@ -1012,6 +1061,8 @@ class TestReputation(unittest.TestCase):
     def test_dnsbl_source_registered(self):
         """R251：dnsbl（Spamhaus ZEN via DoH）默认启用、权重 8、有 pacing、
         命中 → listed 维度，score 70。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertIn("dnsbl", qc.DEFAULT_REP_SOURCES)
         self.assertIn("dnsbl", qc.REPUTATION_WEIGHTS)
         self.assertEqual(qc.REPUTATION_WEIGHTS["dnsbl"], 8)
@@ -1039,6 +1090,8 @@ class TestReputation(unittest.TestCase):
     def test_dnsbl_family_registry_semantics(self):
         """R268/R269：名单与配额语义——dnsbl/spamcop/dronebl 入默认，
         iplocation 不入默认但有权重；各源权重/pacing 齐全。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         for name in ("dnsbl", "spamcop", "dronebl"):
             self.assertIn(name, qr.DEFAULT_REP_SOURCES)
         for name in ("iplocation", "spamrats", "sorbs", "uceprotect",
@@ -1299,19 +1352,16 @@ class TestReputation(unittest.TestCase):
                 f"docs/scripts.md 缺少信誉源 {name}")
 
     def test_default_sources_match_docs(self):
-        """R277：`--reputation-sources` 文档默认值必须与代码
-        `DEFAULT_REP_SOURCES` 集合全等。
-
-        防退默认（R270 whatismyip / R271 vpn_ips）只改代码漏改文档——
-        R256 枚举测试只查源名出现，拦不住默认集漂移。用集合比对，
-        opt-in 源（spamrats/sorbs/uceprotect/psbl 等）两边都不含。"""
+        """R277（M3 改写）：`--reputation-sources` 文档行不再内联默认集，
+        转指 `--list-rep-sources`（真相源在 PCB）；opt-in 关系断言保留
+        （运行时表对照）。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         root = Path(__file__).resolve().parents[1]
         scripts = (root / "docs" / "scripts.md").read_text(encoding="utf-8")
-        m = re.search(
-            r"\| `--reputation-sources` \|[^\n]*\| ([^|]+) \|", scripts)
-        self.assertIsNotNone(m, "docs 默认源清单行解析失败")
-        doc_default = set(m.group(1).strip().split(","))
-        self.assertEqual(doc_default, set(qr.DEFAULT_REP_SOURCES))
+        row = next(l for l in scripts.splitlines()
+                   if l.startswith("| `--reputation-sources`"))
+        self.assertIn("--list-rep-sources", row)
         for name in ("whatismyip", "vpn_ips", "spamrats", "sorbs",
                      "uceprotect", "psbl"):
             self.assertNotIn(name, qr.DEFAULT_REP_SOURCES, name)
@@ -1344,16 +1394,15 @@ class TestReputation(unittest.TestCase):
         派发分支，且每个静态分源都在权重表内。
 
         防「新增源只登记权重、忘接派发」→ 该源静默空转（永不查询/投票），
-        分数被悄悄拉低却无任何报错。以源码文本做静态不变量校验（权重半；
-        分值半 M2b 后改运行时表，真相源在 PCB，见 TestScoresParityR173）。"""
+        分数被悄悄拉低却无任何报错。权重半读运行时表（M3 后真相源在 PCB；
+        派发分支仍在源码文本内解析）。分值半见 TestScoresParityR173。"""
         root = Path(__file__).resolve().parents[1]
         src = (root / "scripts" / "quality_reputation.py").read_text(
             encoding="utf-8")
-        weights_match = re.search(
-            r"REPUTATION_WEIGHTS\s*=\s*\{(.*?)\n\}", src, re.S)
-        self.assertIsNotNone(weights_match)
-        weight_keys = re.findall(
-            r'"([a-z0-9_]+)"\s*:', weights_match.group(1))
+        weight_keys = [k for k in qr.REPUTATION_WEIGHTS
+                       if re.fullmatch(r"[a-z0-9_]+", k)]
+        # 注：旧源码正则字符集同为 [a-z0-9_]+，带横线名（如 ip-api，
+        # 走 `==` 特形分发）历来不在本锁内；M3 仅换真相源，不扩锁域。
         dispatched = set(re.findall(r'if "([a-z0-9_]+)" in sources', src))
         self.assertEqual(
             set(weight_keys) - dispatched, set(),
@@ -1366,6 +1415,8 @@ class TestReputation(unittest.TestCase):
     def test_parse_reputation_sources_unknown_warned(self):
         """R260：未知源名返回 unknown 供告警，合法源过滤保留；
         全错（无合法源）回退默认全集——typo 不再静默无提示。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         srcs, unknown = qc.parse_reputation_sources("dnsbl,dnslb, cins")
         self.assertEqual(srcs, ["dnsbl", "cins"])
         self.assertEqual(unknown, ["dnslb"])
@@ -1383,6 +1434,8 @@ class TestReputation(unittest.TestCase):
     def test_parse_reputation_weights_unknown_warned(self):
         """R261：权重覆盖对未知源名/无冒号片段告警并丢弃，
         不再静默新增 dict 键让 typo 权重悄悄不生效。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         base = dict(qr.REPUTATION_WEIGHTS)
         w, unknown = qc.parse_reputation_weights(
             "dnsbl:12, netoffee:40, ,foo:9, bare", base=dict(base))
@@ -1621,6 +1674,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(len(pruned), qc.REP_CACHE_MAX)
 
     def test_mobile_bonus_only_when_otherwise_clean(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         sigs = {"ip-api": {"proxy": False, "hosting": False, "mobile": True}}
         self.assertEqual(qc.compute_reputation(sigs, None, self.W), 100)
         sigs = {"ip-api": {"proxy": False, "hosting": True, "mobile": True}}
@@ -1637,6 +1692,8 @@ class TestReputation(unittest.TestCase):
         self.assertIsNone(qc.reputation_risk(None))
 
     def test_build_reputation_map(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         results = {
             "1.2.3.4:443#US": {
                 "key": "1.2.3.4:443#US", "ip": "1.2.3.4",
@@ -1653,6 +1710,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(rep["5.6.7.8:8443#JP"]["sources"], ["netcoffee"])
 
     def test_deep_speed_bonus(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         results = {"a": {"key": "a", "ip": "1.1.1.1"}}
         risk_data = {"1.1.1.1": {"netcoffee": {"trust_score": 70}}}
         deep = {"proxies": {
@@ -1664,6 +1723,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(rep["a"]["deep_bonus"], 10)
 
     def test_deep_speed_bonus_scales_and_caps(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         results = {"a": {"key": "a", "ip": "1.1.1.1"},
                    "b": {"key": "b", "ip": "2.2.2.2"},
                    "c": {"key": "c", "ip": "3.3.3.3"}}
@@ -1688,6 +1749,8 @@ class TestReputation(unittest.TestCase):
 
     def test_deep_speed_stale_produces_no_bonus(self):
         """read_fresh 判过期返回 None → 消费端整链无带宽加分（组合契约）。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         results = {"a": {"key": "a", "ip": "1.1.1.1"}}
         risk_data = {"1.1.1.1": {"netcoffee": {"trust_score": 70}}}
         rep = qc.build_reputation_map(results, risk_data, self.W, None)
@@ -1892,6 +1955,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(out["abuser_score"], 0.35)
 
     def test_maltiverse_source_score_and_vote(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         self.assertEqual(
             qc.source_score("maltiverse", {"classification": "malicious"}), 40)
         self.assertEqual(
@@ -1999,6 +2064,8 @@ class TestReputation(unittest.TestCase):
         self.assertNotIn("ip-api", signals)
 
     def test_collect_signals_skips_empty_sentinel(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         # R238 负缓存哨兵 {} 不得进入 signals（防御未来路径泄漏）
         signals = qc.collect_signals(
             "1.1.1.1", {},
@@ -2009,6 +2076,8 @@ class TestReputation(unittest.TestCase):
         self.assertIn("ncgy", signals)
 
     def test_vote_reputation_ignores_empty_sentinel(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         # 空哨兵不得虚增 responding（否则 source 计数/标签失真）
         signals = {"netcoffee": {}, "ncgy": {"is_proxy": True}}
         score, responding, _flagged, _numeric = qr.vote_reputation(
@@ -3456,6 +3525,8 @@ class TestNewReputationSources(unittest.TestCase):
             {"abuse": True})
 
     def test_vote_reputation_consensus_proxy(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         score, _r, flagged, _n = qr.vote_reputation({
             "freeipapi": {"is_proxy": True},
             "iplocation": {"is_proxy": True},
@@ -3464,6 +3535,8 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertIn("proxy", flagged)
 
     def test_vote_reputation_numeric_scamalytics(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         score, _r, flagged, _n = qr.vote_reputation(
             {"scamalytics": {"score": 30}}, qr.REPUTATION_WEIGHTS)
         self.assertEqual(score, 70)
@@ -3473,6 +3546,8 @@ class TestNewReputationSources(unittest.TestCase):
         """R265：dnsbl(ZEN SBL/XBL) 命中 listed → 共识扣 30（100→70，
         即 R252 所述 89→59 的同一口径），且与 cins/firehol_level1 等
         同维度源并存时仅计一次、不重复扣分。"""
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         score, _r, flagged, _n = qr.vote_reputation(
             {"dnsbl": {"is_listed": True, "dnsbl_code": 2}},
             qr.REPUTATION_WEIGHTS)
@@ -3487,6 +3562,8 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertEqual(flagged2.count("listed"), 1)
 
     def test_defaults_include_new_sources(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         for name in ("freeipapi", "scamalytics", "dronebl", "cins",
                      "et_compromised"):
             self.assertIn(name, qr.DEFAULT_REP_SOURCES)
@@ -3839,6 +3916,8 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
             self.skipTest("needs PCB _rep_sources bundle")
 
     def test_public_tables_are_pcb_objects(self):
+        if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         reg = self._reg()
         self.assertIs(qr.REPUTATION_WEIGHTS, reg.REPUTATION_WEIGHTS)
         self.assertIs(qr.DEFAULT_REP_SOURCES, reg.DEFAULT_REP_SOURCES)

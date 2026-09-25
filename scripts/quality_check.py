@@ -790,8 +790,7 @@ def main(argv: list[str] | None = None) -> int:
         "--reputation-sources",
         default=None,
         help="Comma list of sources for --reputation-provider multi "
-        "(default: all DEFAULT_REP_SOURCES，见 quality_reputation.py "
-        "常量与 docs/scripts.md『默认源与权重』表；如 netcoffee,ncgy,ip-api；"
+        "(default: all DEFAULT_REP_SOURCES，见 docs/scripts.md『默认源与权重』表；"
         "有效源名见 --list-rep-sources)",
     )
     parser.add_argument(

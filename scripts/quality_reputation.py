@@ -165,127 +165,13 @@ GREYNOISE_FLAG_PENALTIES = {
 # M2b：分值表已迁 PCB rep_static（经下方 _REP_STATIC_BUNDLE loader
 # 回绑 STATIC_LIST_SCORES；无包时为空表，source_score 对应信号计
 # None fail-open。原 37 项已删，见插件与 TestScoresParityR173）。
-REPUTATION_WEIGHTS = {
-    "netcoffee": 20,
-    "ncgy": 10,
-    "ip-api": 15,
-    "ipquery": 12,
-    "ffraud": 12,
-    "blackbox": 10,
-    "otx": 8,
-    "ipsum": 8,
-    "ipapi_is": 8,
-    "ipdata": 8,
-    "whatismyip": 3,
-    "dc_asn": 5,
-    "abuse_list": 5,
-    "getipintel": 5,
-    "proxycheck": 12,
-    "ip2location": 5,
-    "vpn_asn": 3,
-    "resproxy_asn": 2,
-    "ipwhois": 6,
-    "tor_exit": 5,
-    "spamhaus": 4,
-    "freeipapi": 6,
-    "hackmyip": 6,
-    "scamalytics": 8,
-    "stopforumspam": 4,
-    "maltiverse": 6,
-    "iplocation": 3,
-    "dnsbl": 8,
-    "spamcop": 5,
-    "dronebl": 5,
-    "spamrats": 5,
-    "sorbs": 5,
-    "uceprotect": 5,
-    "psbl": 5,
-    "cins": 5,
-    "et_compromised": 4,
-    "feodo": 4,
-    "blocklist_de": 4,
-    "blocklist_de_ssh": 3,
-    "bruteforceblocker": 3,
-    "dataplane_vncrfb": 3,
-    "drb_c2": 4,
-    "nordvpn_exits": 3,
-    "blackhole_monster": 4,
-    "myipms_blacklist": 4,
-    "ipnoise": 4,
-    "blocklist_de_apache": 3,
-    "danmeuk_tor": 5,
-    "tor_bulk": 4,
-    "greynoise": 8,
-    "urlhaus": 5,
-    "threatfox": 5,
-    "firehol_level1": 5,
-    "firehol_level2": 4,
-    "binarydefense": 4,
-    "c2_tracker": 4,
-    "botscout": 3,
-    "greensnow": 4,
-    "sslproxies": 3,
-    "socks_proxy": 3,
-    "vpn_ips": 3,
-    "dshield": 3,
-    "abuseipdb_public": 5,
-    "wwuyi_unreachable": 2,
-    "wwuyi_blocked": 2,
-}
-DEFAULT_REP_SOURCES = (
-    "netcoffee", "ncgy", "ip-api", "ipquery", "ffraud",
-    "blackbox", "otx", "ipsum",
-    "ipdata", "dc_asn",
-    "abuse_list", "vpn_asn", "resproxy_asn",
-    "proxycheck", "ip2location",
-    "tor_exit", "spamhaus",
-    "freeipapi", "scamalytics",
-    "hackmyip", "stopforumspam",
-    "spamcop", "dronebl",
-    "cins", "et_compromised", "feodo",
-    "blocklist_de", "blocklist_de_ssh", "blocklist_de_apache",
-    "danmeuk_tor", "tor_bulk",
-    "greynoise", "urlhaus", "threatfox",
-    "firehol_level1", "binarydefense",
-    "firehol_level2",
-    "c2_tracker", "botscout", "greensnow",
-    "sslproxies", "socks_proxy",
-    "bruteforceblocker", "dataplane_vncrfb", "drb_c2", "nordvpn_exits",
-    "blackhole_monster", "myipms_blacklist", "ipnoise",
-    "dshield", "abuseipdb_public",
-    "wwuyi_unreachable", "wwuyi_blocked",
-    "dnsbl",
-)
-SOURCE_PACING = {
-    "netcoffee": (10, 0.15),
-    "ncgy": (10, 0.15),
-    "blackbox": (8, 0.2),
-    "otx": (6, 0.3),
-    "ipapi_is": (8, 0.2),
-    "ipquery": (6, 0.2),
-    "ffraud": (6, 0.2),
-    "whatismyip": (6, 0.2),
-    "proxycheck": (8, 0.2),
-    "ip2location": (6, 0.2),
-    "ipwhois": (6, 0.2),
-    "freeipapi": (8, 0.15),
-    "hackmyip": (6, 0.2),
-    "scamalytics": (4, 0.5),
-    "iplocation": (8, 0.12),
-    "stopforumspam": (4, 0.3),
-    "maltiverse": (4, 0.3),
-    "greynoise": (6, 0.3),
-    "dnsbl": (6, 0.2),
-    "spamcop": (6, 0.15),
-    "dronebl": (6, 0.15),
-    "spamrats": (6, 0.15),
-    "sorbs": (6, 0.15),
-    "uceprotect": (6, 0.15),
-    "psbl": (6, 0.15),
-}
+# M3：权重/默认/PACING 三表已迁 PCB _rep_sources（经下方 loader 回绑；
+# 无包时依次为空表/空元组/空表，解析/打分天然降级为零源/零权 fail-open）。
+# 原 65+54+25 项已删，见插件与 TestRepSourcesRegistryWiring。
 
-# 信誉元数据 loader 优先（R14）：有包时上表三名字重绑为 PCB 对象
-# （`TestRepSourcesRegistryWiring` 锁同一性）；无包回退上表静态值。
+# 信誉元数据 loader 优先（R14）：有包时三名字重绑为 PCB 对象
+# （`TestRepSourcesRegistryWiring` 锁同一性）；无包为空表/空元组/空表
+# fail-open（解析零源、打分零权，见 M3）。
 _REP_SOURCES_BUNDLE = False
 try:
     from checks_bundle import load_plugin as _load_pcb_plugin
@@ -295,7 +181,9 @@ try:
     SOURCE_PACING = _rep.SOURCE_PACING
     _REP_SOURCES_BUNDLE = True
 except Exception:
-    pass
+    REPUTATION_WEIGHTS = {}
+    DEFAULT_REP_SOURCES = ()
+    SOURCE_PACING = {}
 
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
