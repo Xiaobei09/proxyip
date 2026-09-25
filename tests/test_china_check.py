@@ -31,7 +31,7 @@ CN_LINE = "1.2.3.4:2087#\U0001F1FA\U0001F1F8US-10ms-20.07MB/s-GPT-CF"
 US_LINE = "5.6.7.8:443#\U0001F1FA\U0001F1F8US-8ms-5.86MB/s"
 
 
-class TestCheckhostHttpMergeVerdict(unittest.TestCase):
+class TestSlot29HttpMergeVerdict(unittest.TestCase):
     """CN-32：cn29 并入单节点交叉（应用层第二确认）。"""
 
     def test_second_confirm_reachable_http(self):
@@ -58,7 +58,7 @@ class TestCheckhostHttpMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
 
-class TestCheckhostHttpWiring(unittest.TestCase):
+class TestSlot29HttpWiring(unittest.TestCase):
     """CN-32：http 只在 TCP-ok 且其余免额 0 ok 时猎取第二确认。"""
 
     def _args(self):
@@ -143,7 +143,7 @@ class TestCheckhostHttpWiring(unittest.TestCase):
                          entries["9.9.9.9:443#US"]["sources"])
 
 
-class TestCheckhostPingMergeVerdict(unittest.TestCase):
+class TestSlot28PingMergeVerdict(unittest.TestCase):
     """CN-31：cn28 并入单节点交叉（主机/端口死因消歧）。"""
 
     def test_tcp_fail_plus_ping_ok_uncertain(self):
@@ -181,7 +181,7 @@ class TestCheckhostPingMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "uncertain")
 
 
-class TestCheckhostPingWiring(unittest.TestCase):
+class TestSlot28PingWiring(unittest.TestCase):
     """CN-31：ping 只在 TCP fail 时追加（配额敏感），落 entries 源键。"""
 
     def _args(self):
@@ -388,7 +388,7 @@ class TestXxscanMergeVerdict(unittest.TestCase):
         self.assertEqual(cc.merge_verdict(sources)["verdict"], "unreachable")
 
 
-class TestJkapiIspMerge(unittest.TestCase):
+class TestSlot24IspMerge(unittest.TestCase):
     """L2 免额单节点源电信读数汇聚（merge 入口级，与多节点源同表）。"""
     def test_merge_isp_ms_picks_cn24(self):
         """merge 入口级汇聚收单节点电信读数（与多节点源同表）。"""
@@ -1453,13 +1453,73 @@ class TestHelpDocsFlagsR103(unittest.TestCase):
         got = set()
         for line in lines[start:stop]:
             got.update(re.findall(r"--([a-z0-9][a-z0-9\-]*)", line))
-        return {f for f in got if not f.endswith("-")}  # 排除 --cn- 类占位符
+        # 排除 --cn- 类占位符；并排除 argparse 内建的 --help（help 侧
+        # 已减 help，两边须对称——R217 新增的注册表子节说明里提到 --help，
+        # 会被本扫描误当成受文档化的脚本旗标）。
+        return {f for f in got
+                if not f.endswith("-") and f != "help"}
+
+    @staticmethod
+    def _registry_available() -> bool:
+        return cc._sources_registry() is not None
+
+    #: docs/scripts.md 里标记「私有注册表运行时安装」的子节标题。
+    _REGISTRY_HEADING = "#### 源特有参数（私有注册表运行时安装）"
+
+    def _split_registry_doc_flags(self, header):
+        """把该脚本文档节的旗标拆成（公开源码旗标, 注册表旗标）。
+
+        公开树不保存注册表旗标的定义副本（旗标名/默认值全在 PCB），故
+        无包环境 ``--help`` 合法地缺这一组。文档侧用固定子节标题标出，
+        测试据此在**两种环境**下都保持可判定的强断言：公开组双向对等；
+        注册表组仅在有注册表时对等（无包时其存在性由 docs↔注册表一致性
+        测试在有包环境覆盖）。
+        """
+        import re as _re
+        from pathlib import Path
+        lines = (Path(cc.__file__).resolve().parent.parent
+                 / "docs" / "scripts.md").read_text(
+                     encoding="utf-8").splitlines()
+        start = next(i for i, l in enumerate(lines) if l.strip() == header)
+        stop = next((i for i in range(start + 1, len(lines))
+                     if lines[i].startswith("### ")), len(lines))
+        head = next((i for i in range(start, stop)
+                     if lines[i].strip() == self._REGISTRY_HEADING), None)
+        if head is None:
+            got = set()
+            for line in lines[start:stop]:
+                got.update(_re.findall(r"--([a-z0-9][a-z0-9\-]*)", line))
+            return ({f for f in got if not f.endswith("-")}, set())
+        pub, reg, started = set(), set(), False
+        for line in lines[start:head]:
+            pub.update(_re.findall(r"--([a-z0-9][a-z0-9\-]*)", line))
+        for line in lines[head + 1:stop]:
+            if line.startswith("|"):
+                started = True
+                reg.update(_re.findall(r"--([a-z0-9][a-z0-9\-]*)", line))
+            elif not line.strip() and started:
+                continue
+            elif started:
+                break
+        return ({f for f in pub if not f.endswith("-")},
+                {f for f in reg if not f.endswith("-")})
 
     def test_help_docs_flags_match(self):
         for script, header in self.CASES:
             with self.subTest(script=script):
-                self.assertEqual(self._help_flags(script),
-                                 self._docs_flags(header))
+                help_flags = self._help_flags(script)
+                doc_flags = self._docs_flags(header)
+                if script == "china_check.py":
+                    pub_doc, reg_doc = self._split_registry_doc_flags(header)
+                    # 公开源码旗标：两种环境都必须双向对等。
+                    self.assertEqual(help_flags - reg_doc, pub_doc)
+                    if self._registry_available():
+                        self.assertEqual(help_flags, doc_flags)
+                        # 有包时注册表旗标也须与 help 严格一致。
+                        self.assertEqual(reg_doc,
+                                         help_flags & reg_doc)
+                    continue
+                self.assertEqual(help_flags, doc_flags)
 
 
 class TestBuildEntry(unittest.TestCase):
@@ -2475,7 +2535,7 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
         self.assertEqual(ping_res["status"], "error")  # 替身回 error，原样落地
 
 
-class TestBiupingPingSource(unittest.TestCase):
+class TestSlot10PingSource(unittest.TestCase):
     """CN-34：cn10（同站 ICMP，复用 port="" 分支）。"""
 
     def test_strong_reachable(self):
@@ -2528,7 +2588,7 @@ class TestBiupingPingSource(unittest.TestCase):
             entries["1.2.3.4:443#US"][cc.CN10_CODE]["status"], "ok")
 
 
-class TestAntpingPingSource(unittest.TestCase):
+class TestSlot15PingSource(unittest.TestCase):
     """CN-28：同站 ICMP，复用 code=3 分支。"""
 
     def test_strong_reachable(self):
@@ -2581,9 +2641,9 @@ class TestAntpingPingSource(unittest.TestCase):
             entries["1.2.3.4:443#US"][cc.CN15_CODE]["status"], "ok")
 
 
-class TestGlobalpingSource(unittest.TestCase):
-    """CN-46：Globalping 北京探针 ICMP（公开侧只留合并判定与默认 opt-in；
-    协议细节见 pcb/tests/test_cn36.py）。"""
+class TestSlot36PingSource(unittest.TestCase):
+    """CN-46：社区探针 ICMP（公开侧只留合并判定与默认 opt-in；
+    协议细节见私有包对应插件测试）。"""
 
     def test_single_vote_wiring(self):
         """单节点票：与同站 status 槽交叉即 reachable；孤证 uncertain；双 fail 定罪。"""
@@ -2608,8 +2668,8 @@ class TestGlobalpingSource(unittest.TestCase):
         self.assertEqual(reg.by_code("cn36")["concurrency"], 4)
 
 
-class TestGlobalpingTraceSource(unittest.TestCase):
-    """CN-47：Globalping 路由追踪（公开侧只留合并判定与默认 opt-in）。"""
+class TestSlot37TraceSource(unittest.TestCase):
+    """CN-47：同站路由追踪（公开侧只留合并判定与默认 opt-in）。"""
 
     def test_single_vote_wiring(self):
         ok = {"status": "ok", "ok": True, "ms": None, "level": "icmp"}
@@ -2635,8 +2695,8 @@ class TestGlobalpingTraceSource(unittest.TestCase):
         self.assertEqual(reg.by_code("cn37")["concurrency"], 4)
 
 
-class TestGlobalpingHttpSource(unittest.TestCase):
-    """CN-48：Globalping 应用层确认（公开侧只留合并判定与默认 opt-in）。"""
+class TestSlot38HttpSource(unittest.TestCase):
+    """CN-48：同站应用层确认（公开侧只留合并判定与默认 opt-in）。"""
 
     def test_single_vote_wiring(self):
         ok = {"status": "ok", "ok": True, "ms": 5.0, "level": "http"}
@@ -2662,8 +2722,8 @@ class TestGlobalpingHttpSource(unittest.TestCase):
         self.assertEqual(reg.by_code("cn38")["concurrency"], 4)
 
 
-class TestGlobalpingMtrSource(unittest.TestCase):
-    """CN-49：Globalping MTR（公开侧只留合并判定与默认 opt-in）。"""
+class TestSlot39MtrSource(unittest.TestCase):
+    """CN-49：同站 MTR（公开侧只留合并判定与默认 opt-in）。"""
 
     def test_single_vote_wiring(self):
         ok = {"status": "ok", "ok": True, "ms": None, "level": "icmp"}
@@ -2689,7 +2749,7 @@ class TestGlobalpingMtrSource(unittest.TestCase):
         self.assertEqual(reg.by_code("cn39")["concurrency"], 4)
 
 
-class TestTcptestHttpMergeVerdict(unittest.TestCase):
+class TestSlot32HttpMergeVerdict(unittest.TestCase):
     """CN-35：应用层复核并入多节点合成判定。"""
 
     def test_merge_strong_weak_fail(self):
@@ -2784,7 +2844,7 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
         self.assertIn("10.9.9.9:443#US", reachable)
 
 
-class TestTcptestPingMergeVerdict(unittest.TestCase):
+class TestSlot31PingMergeVerdict(unittest.TestCase):
     """CN-33：ICMP 复核并入多节点合成判定。"""
 
     def test_merge_strong_weak_fail(self):
@@ -2877,7 +2937,7 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
         self.assertIn("10.9.9.9:443#US", reachable)
 
 
-class TestTcptestTraceMergeVerdict(unittest.TestCase):
+class TestSlot33TraceMergeVerdict(unittest.TestCase):
     """CN-40：路由复核并入多节点合成判定。"""
 
     def test_merge_strong_weak_fail(self):
@@ -3167,7 +3227,7 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
         self.assertIn("10.10.0.2:80#US", reachable)
 
 
-class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
+class TestSlot40TargetsUnresolvedKeys(unittest.TestCase):
     """ping.pe 复核（贵、串行）只投当前尚未判 reachable 的键：
     已由 cn01 多点达标确认的键不再占用复核槽位。"""
 
@@ -3239,7 +3299,7 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
         self.assertEqual(set(reachable), {"1.1.1.1:80#US", "2.2.2.2:80#US"})
 
 
-class TestPingpeConcurrency(unittest.TestCase):
+class TestSlot40Concurrency(unittest.TestCase):
     """L3 ping.pe 有界并发：同槽位端到端耗时远小于串行（覆盖提升的点）。"""
 
     def _args(self):
@@ -3315,7 +3375,7 @@ class TestPingpeConcurrency(unittest.TestCase):
 
 
 @unittest.skipUnless(cc._CN01_BUNDLE, "needs PCB cn01 bundle")
-class TestCn01TcpingFallbackGuard(unittest.TestCase):
+class TestSlot01WsFallbackGuard(unittest.TestCase):
     """主通道节点获取失败（整站被墙/验证码墙）时，同一上游的 tcping
     兜底必然同样拿不到节点，应跳过而非再空转一轮。"""
 
@@ -3502,7 +3562,7 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(entries["a:443#US"]["ms"], 110.0)
 
 
-class TestCe98PingSource(unittest.TestCase):
+class TestSlot12PingSource(unittest.TestCase):
     """CN-12：同站 continuous-ping 通道（协议测试已迁 PCB），mock，不触网。"""
 
 
@@ -3613,7 +3673,7 @@ class TestWsBufferCaps(unittest.TestCase):
         self.assertLessEqual(len(ws.buf), wt.WS_MAX_BUF + 65536)
 
 
-class TestTcpingcnPingSource(unittest.TestCase):
+class TestSlot18PingSource(unittest.TestCase):
     """CN-18：cn18 merge/dispatch（mock，不触网）。"""
 
     def test_merge_strong_weak_fail(self):
@@ -3659,7 +3719,7 @@ class TestTcpingcnPingSource(unittest.TestCase):
             entries["1.2.3.4:443#US"][cc.CN18_CODE]["status"], "ok")
 
 
-class TestTcpingcnMtrSource(unittest.TestCase):
+class TestSlot19MtrSource(unittest.TestCase):
     """CN-19：cn19 merge/dispatch/CLI（mock，不触网）。"""
 
     def test_merge_and_threshold_wired(self):
@@ -3924,7 +3984,7 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(reg.by_code("cn12")["concurrency"], 6)
 
     def test_cli_default_stays_opt_in(self):
-        """CN-42：tcpping-ws 本地默认 opt-in（0/6），只在 CI 显式启用。"""
+        """CN-42：公开 WS 通道本地默认 opt-in（0/6），只在 CI 显式启用。"""
         reg = _registry_sources(self)
         self.assertEqual(reg.by_code("cn06")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn06")["concurrency"], 6)
@@ -4278,15 +4338,15 @@ class TestCnOptResolver(unittest.TestCase):
             self.assertIn("cn30", err)
 
     def test_generic_beats_legacy(self):
-        args = self._args(cn_limit={"cn30": 800}, tcptest_limit=150)
+        args = self._args(cn_limit={"cn30": 800}, slot30_limit=150)
         self.assertEqual(
-            cc.cn_opt(args, "cn30", "limit", legacy="tcptest_limit",
+            cc.cn_opt(args, "cn30", "limit", legacy="slot30_limit",
                       default=0), 800)
 
     def test_legacy_attr_used(self):
-        args = self._args(tcptest_limit=150)
+        args = self._args(slot30_limit=150)
         self.assertEqual(
-            cc.cn_opt(args, "cn30", "limit", legacy="tcptest_limit",
+            cc.cn_opt(args, "cn30", "limit", legacy="slot30_limit",
                       default=0), 150)
 
     def test_registry_default_with_fake_registry(self):
@@ -4549,29 +4609,21 @@ class TestNoStaleProtocolDefs(unittest.TestCase):
     重复定义复发：有 token 即 NameError，空 token 恰好行为一致而潜伏）；
     协议常量（*_URL）亦不得残留。纯 AST，CI 无包可跑。"""
 
-    STALE_DEFS = ("cn41_check", "cn41_parse", "cn40_check",
-                  "parse_pingpe_page", "parse_pingpe_results",
-                  "pingpe_verdict", "cn42_check", "cn43_check",
-                  "cn44_check", "cn34_check", "cn35_check",
-                  "cn30_check", "cn30_fetch_nodes",
-                  "cn30_pick_nodes", "cn07_check", "cn08_check",
-                  "cn14_check", "cn15_check", "cn16_check",
-                  "cn17_check", "cn18_check",
-                  "cn19_check", "cn11_check", "cn12_check",
-                  "cn09_check", "cn10_check", "cn04_check",
-                  "cn05_check", "cn27_check",
-                  "cn28_check", "cn29_check",
-                  "cn20_check", "cn21_check", "cn22_check",
-                  "cn23_check", "cn24_check", "cn25_check",
-                  "cn26_check", "cn36_check",
-                  "cn37_check", "cn38_check",
-                  "cn39_check", "cn13_check",
-                  "cn01_batch_run")
-    STALE_CONSTS = ("TCPPING_URL", "PINGPE_URL", "BOCE_URL",
-                    "SEVENTEEN_URL", "PING0_URL", "IPIP_URL")
+    STALE_DEF_RES = (
+        r"^cn\d\d_",              # 任一代号族的协议函数（cnXX_check/_parse/...）
+        r"^parse_.+_(page|results)$",   # 迁出的页面/结果解析器
+        r"^[a-z][a-z0-9]*_verdict$",   # 迁出的判定函数
+    )
+    # R217：原为 6 个真名常量名逐条列举，改为形状禁令——只允许代号作用域的
+    # 批量页 URL 常量（CN02_PAGE_URL/CN03_PAGE_URL，无 bundle 时为 None），
+    # 其余任何 ``*_URL`` 协议常量一律判残留。比逐条列举更强（新增真名常量
+    # 自动命中），且不携带任何来源身份。
+    STALE_CONST_RE = r"_(URL|ENDPOINT)$"
+    STALE_CONST_KEEP_RE = r"^CN\d\d_(PAGE_)?URL$"
 
     def test_no_stale_defs_or_consts(self):
         import ast
+        import re as _re
         src = (Path(__file__).resolve().parent.parent / "scripts"
                / "china_check.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
@@ -4579,8 +4631,13 @@ class TestNoStaleProtocolDefs(unittest.TestCase):
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
         consts = {t.id for t in ast.walk(tree)
                   if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)}
-        bad_defs = sorted(set(self.STALE_DEFS) & defs)
-        bad_consts = sorted(set(self.STALE_CONSTS) & consts)
+        bad_defs = sorted(d for d in defs
+                          if any(_re.search(p, d)
+                                 for p in self.STALE_DEF_RES))
+        bad_consts = sorted(
+            c for c in consts
+            if _re.search(self.STALE_CONST_RE, c)
+            and not _re.match(self.STALE_CONST_KEEP_RE, c))
         self.assertEqual(bad_defs, [], f"残留协议定义遮蔽 loader：{bad_defs}")
         self.assertEqual(bad_consts, [], f"残留协议常量：{bad_consts}")
 

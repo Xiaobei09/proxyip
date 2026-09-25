@@ -487,9 +487,9 @@ try:
     cn42_check = _cn42.check1
     cn43_check = _cn42.check2
     cn44_check = _cn42.check3
-    CN42_CODE = _cn42.CODE_BOCE
-    CN43_CODE = _cn42.CODE_17CE
-    CN44_CODE = _cn42.CODE_PING0
+    CN42_CODE = _cn42.CODE_SLOT_1
+    CN43_CODE = _cn42.CODE_SLOT_2
+    CN44_CODE = _cn42.CODE_SLOT_3
     _LEGACY_REVIEW_BUNDLE = True
 except Exception:
     cn42_check = None
@@ -1122,8 +1122,13 @@ def _build_slot_table(timeout):
 
     键为运行时代号（registry codes，无字面）；调用形态读条目 ``bind``
     （缺省标准三参；特形见 registry）。插件/函数缺失即 _bundle_missing
-    桩。无包时算法生成全代号桩（行1290先例），保旧回退语义。纯构造，
-    无网络。
+    桩。纯构造，无网络。
+
+    无注册表时（无 PCB 包）按代号区间算法铺满槽位，但**同族解析规则不放
+    松**：仍先取本模块已注册的 ``<code>_check`` 公开别名，取不到才落
+    fail-open 桩。插件安装后实现即以该别名挂在模块上，故此路径既保旧
+    回退语义（全槽位、缺实现即桩、不崩），又与有注册表路径的解析优先级
+    一致——否则注册表缺席时会把已就位的实现静默降级为桩（派发契约丢失）。
     """
     try:
         reg = _sources_registry()
@@ -1131,9 +1136,18 @@ def _build_slot_table(timeout):
     except Exception:
         entries = []
     if not entries:
-        return {f"cn{i:02d}": (lambda ip, port, _c=f"cn{i:02d}":
+        module = sys.modules[__name__]
+        table = {}
+        for i in range(1, 45):
+            code = f"cn{i:02d}"
+            fn = getattr(module, f"{code}_check", None)
+            if callable(fn):
+                table[code] = (lambda ip, port, _f=fn, _t=timeout:
+                               _f(ip, port, _t))
+            else:
+                table[code] = (lambda ip, port, _c=code:
                                _bundle_missing(_c))
-                for i in range(1, 45)}
+        return table
     table = {}
     mods = {}
     module = sys.modules[__name__]

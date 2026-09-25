@@ -164,9 +164,16 @@ class TestTrueNameForwardLeak(unittest.TestCase):
     """R91：CN 真名根不得前向泄漏进公开树（Phase A-2 改名前基线）。
 
     真名表与允许基线均存 PCB（经 loader 获取），本文件零真名字面。
-    扫描整词（大小写不敏感）；命中行须匹配同文件的允许模式，
-    否则即新增泄漏。允许项仅覆盖已评估类别（CLI 凭证契约/信誉
-    规范名/接入实证史/legacy 旗标）；新文件中的真名一律不豁免。
+    命中行须匹配同文件的允许模式，否则即新增泄漏。允许项仅覆盖已
+    评估类别（CLI 凭证契约/信誉规范名）；新文件中的真名一律不豁免。
+
+    R217：扫描从「整词边界」升级为「标识符分段」。原正则
+    ``(?<![A-Za-z0-9_])root(?![A-Za-z0-9_])`` 对 CamelCase 内嵌
+    完全失明——真名夹在 ``Test<真名>PingSource`` 这类标识符里时，
+    两侧都是字母，前后顾双双失败，故 20 个真名测试类长期零告警地
+    留在公开树。现改为先把标识符按大小写/下划线切成子段再整段比对，
+    既能命中内嵌真名，又不会像裸子串匹配那样把 ``ping``/``ip`` 之类
+    通用词打成一片误报。本文件自身零真名字面（举例外一律用合成词）。
     """
 
     def _metadata_roots(self):
@@ -179,13 +186,18 @@ class TestTrueNameForwardLeak(unittest.TestCase):
             self.skipTest("PCB _metadata 不可用")
         return meta.true_roots()
 
-    def test_true_roots_absent_except_allowlisted(self):
-        roots = self._metadata_roots()
-        word = [re.compile(r"(?<![A-Za-z0-9_])" + re.escape(r) +
-                           r"(?![A-Za-z0-9_])", re.IGNORECASE)
-                for r in roots]
-        allow = [(sfx, re.compile(pat))
-                 for sfx, pat in _GUARD.TRUE_ROOT_PUBLIC_ALLOW]
+    @staticmethod
+    def _segments(text: str) -> set:
+        """整词 + CamelCase 子段（小写集合）。"""
+        out = set()
+        for word in re.findall(r"[A-Za-z0-9]+", text):
+            out.add(word.lower())
+            for part in re.findall(
+                    r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+", word):
+                out.add(part.lower())
+        return out
+
+    def _targets(self):
         targets = []
         for d in ("scripts", "tests"):
             targets += sorted((ROOT / d).glob("*.py"))
@@ -193,18 +205,38 @@ class TestTrueNameForwardLeak(unittest.TestCase):
         targets.append(ROOT / "README.md")
         targets += sorted((ROOT / ".github" / "workflows").glob("*.yml"))
         targets += sorted((ROOT / ".github" / "scripts").glob("*.sh"))
+        return [f for f in targets if f.exists()]
+
+    def test_true_roots_absent_except_allowlisted(self):
+        roots = {r.lower() for r in self._metadata_roots()}
+        allow = [(sfx, re.compile(pat))
+                 for sfx, pat in _GUARD.TRUE_ROOT_PUBLIC_ALLOW]
         bad = []
-        for f in targets:
-            if not f.exists():
-                continue
+        for f in self._targets():
             rel = f.relative_to(ROOT).as_posix()
             pats = [p for sfx, p in allow if rel == sfx]
             for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(),
                                      1):
-                if any(rx.search(line) for rx in word):
-                    if not any(p.search(line) for p in pats):
-                        bad.append(f"{rel}:{i}: {line.strip()[:100]}")
+                hit = self._segments(line) & roots
+                if hit and not any(p.search(line) for p in pats):
+                    bad.append(f"{rel}:{i}: {sorted(hit)} {line.strip()[:80]}")
         self.assertEqual(bad, [])
+
+    def test_camelcase_segmentation_is_not_blind(self):
+        """R217 自证：分段扫描必须能命中 CamelCase 内嵌真名。
+
+        真名表来自 PCB，本文件零真名字面，故用一条**结构等价**的
+        合成根（自造词，非任何真实来源）验证分段逻辑本身有效——
+        若哪天分段退化成整词匹配，此用例即红。
+        """
+        probe = "Synthetic" + "Probe"
+        segs = self._segments(f"class Test{probe}Thing(unittest.TestCase):")
+        self.assertIn("synthetic", segs)
+        self.assertIn("probe", segs)
+        # 旧式整词边界对同一输入看不见内嵌子段（记录被替换的盲区）
+        legacy = re.compile(r"(?<![A-Za-z0-9_])synthetic(?![A-Za-z0-9_])",
+                            re.IGNORECASE)
+        self.assertIsNone(legacy.search(f"class Test{probe}Thing:"))
 
 
 class TestDocsLeakGuard(unittest.TestCase):

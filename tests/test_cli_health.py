@@ -96,7 +96,14 @@ class TestCliHealth(unittest.TestCase):
 
     def test_china_help_flags_match_docs(self):
         """R7：china_check --help 与 docs/scripts.md 表格双向对等
-        （flag-day 后只剩 generic＋基础旗标；防单边漂移）。"""
+        （flag-day 后只剩 generic＋基础旗标；防单边漂移）。
+
+        R217：源特有旗标由私有注册表在**运行时**装进 parser，公开树不
+        保存其定义副本，故无包环境（fork／5 个不检出 PCB 的 workflow）
+        下 ``--help`` 合法地少于文档。文档用固定子节标题标出该组，测试
+        据此拆分：公开源码旗标在**两种环境**下都双向对等；注册表组只在
+        有注册表时对等（其自身一致性由有包环境的 docs↔注册表测试覆盖）。
+        """
         import re
         proc = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "china_check.py"),
@@ -107,17 +114,57 @@ class TestCliHealth(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         help_flags = set(re.findall(r"--[a-z0-9-]+", proc.stdout))
+        text = self._china_doc_section()
+        pub_doc, reg_doc = self._split_registry_flags(text)
+        # 排除 --- 分隔线与 --cn- 类占位符（R103 同例；R99 docs 措辞引入）
+        pub_doc = {f for f in pub_doc
+                   if not f.endswith("-") and f != "--help"}
+        reg_doc = {f for f in reg_doc
+                   if not f.endswith("-") and f != "--help"}
+        self.assertEqual(help_flags - {"--help"} - reg_doc, pub_doc)
+        if self._registry_available():
+            self.assertEqual(help_flags - {"--help"}, pub_doc | reg_doc)
+
+    #: docs/scripts.md 里标记「私有注册表运行时安装」的子节标题。
+    _REGISTRY_HEADING = "#### 源特有参数（私有注册表运行时安装）"
+
+    def _china_doc_section(self) -> str:
         lines = (ROOT / "docs" / "scripts.md").read_text(
             encoding="utf-8").split("\n")
         start = next(i for i, l in enumerate(lines)
                      if l.startswith("### `scripts/china_check.py`"))
         end = next(i for i, l in enumerate(lines)
                    if l.startswith("### `scripts/exit_family.py`"))
-        doc_flags = set(re.findall(r"--[a-z0-9-]+",
-                                   "\n".join(lines[start:end])))
-        # 排除 --- 分隔线与 --cn- 类占位符（R103 同例；R99 docs 措辞引入）
-        doc_flags = {f for f in doc_flags if not f.endswith("-")}
-        self.assertEqual(help_flags - {"--help"}, doc_flags)
+        return "\n".join(lines[start:end])
+
+    def _split_registry_flags(self, text: str):
+        """按子节标题把文档旗标拆成（公开组, 注册表组）。
+
+        注册表组 = 标题之后**紧邻的连续表格行**（允许中间空行），遇到
+        第一个既非空行也非表格行的行即停——故紧随其后的第二张表仍算
+        公开组。
+        """
+        import re
+        head = text.find(self._REGISTRY_HEADING)
+        if head < 0:
+            return set(re.findall(r"--[a-z0-9-]+", text)), set()
+        pub = text[:head]
+        reg, started = [], False
+        for ln in text[head + len(self._REGISTRY_HEADING):].split("\n"):
+            if ln.startswith("|"):
+                started = True
+                reg.append(ln)
+            elif not ln.strip() and started:
+                continue
+            elif started:
+                break
+        return (set(re.findall(r"--[a-z0-9-]+", pub)),
+                set(re.findall(r"--[a-z0-9-]+", "\n".join(reg))))
+
+    def _registry_available(self) -> bool:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import china_check as cc
+        return cc._sources_registry() is not None
 
     def test_missing_data_dir_degrades_gracefully(self):
         """R286：缺输入目录时各链脚本须优雅降级（空映射/skip 文案、

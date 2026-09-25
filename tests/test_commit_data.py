@@ -186,6 +186,13 @@ class TestLoopCommitFormat(unittest.TestCase):
     # 前公约时代已知偏离（R93 全历史 218 提交审计：仅此两笔）。
     KNOWN_HISTORICAL_DEVIATIONS = ("[R19]", "[R21]")
 
+    # R217：历史 R121 提交 c8cde58d99 标题缺 [R121] 前的空格
+    # （"...修复[R121]"），而本门禁正则要求 ".+ \[R\d+\]$"，故被误判为
+    # 复合/无 type 偏离。该提交不可改写（禁 force-push），按 SHA 精确
+    # 豁免——非按轮次号放宽（那会让同轮后续提交一并失去门禁）。
+    # 同 lineage 的全角括号版 4680c8eee 已不在 main 祖先中，不在此列。
+    KNOWN_HISTORICAL_DEVIATION_SHAS = ("c8cde58d99",)
+
     def _allowed_types(self) -> set[str]:
         doc = (ROOT / "DEVELOPMENT.md").read_text(encoding="utf-8")
         found = set(re.findall(r"^- `([a-z]+)(?:\([^)]*\))?:", doc, re.M))
@@ -216,20 +223,25 @@ class TestLoopCommitFormat(unittest.TestCase):
 
         HEAD 门禁只看当下；本测试防历史重演（未来复合 type
         无论 HEAD 是否轮次提交一律变红）。改写历史被禁，旧偏离
-        由 KNOWN_HISTORICAL_DEVIATIONS 豁免。
+        由 KNOWN_HISTORICAL_DEVIATIONS（按轮次号）或
+        KNOWN_HISTORICAL_DEVIATION_SHAS（按 SHA 前缀，R217 起）豁免。
         """
         allowed = self._allowed_types()
         proc = subprocess.run(
-            ["git", "-C", str(ROOT), "log", "--format=%s"],
+            ["git", "-C", str(ROOT), "log", "--format=%H%x09%s"],
             capture_output=True,
             text=True,
             timeout=30,
         )
         if proc.returncode != 0:
             self.skipTest("无 git 环境")
+        sha_exempt = tuple(self.KNOWN_HISTORICAL_DEVIATION_SHAS)
         bad = []
-        for subject in proc.stdout.splitlines():
+        for line in proc.stdout.splitlines():
+            sha, _, subject = line.partition("\t")
             if not re.search(r"\[R\d+\]", subject):
+                continue
+            if sha_exempt and sha.startswith(sha_exempt):
                 continue
             m = re.match(r"^([a-z]+)(\([^)]+\))?: .+ \[R\d+\]$", subject)
             if m is None or m.group(1) not in allowed:

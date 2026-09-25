@@ -165,9 +165,9 @@ except Exception:
 
 try:
     _cn42 = _load_pcb_plugin("cn42")
-    CN42_CODE = _cn42.CODE_BOCE
-    CN43_CODE = _cn42.CODE_17CE
-    CN44_CODE = _cn42.CODE_PING0
+    CN42_CODE = _cn42.CODE_SLOT_1
+    CN43_CODE = _cn42.CODE_SLOT_2
+    CN44_CODE = _cn42.CODE_SLOT_3
 except Exception:
     CN42_CODE = "cn42"
     CN43_CODE = "cn43"

@@ -378,8 +378,8 @@ CN-29 逆向复核（活体探针实证）：`cn17` 确认死亡——`探测任
 payload 须 base64，solve 200 `ok:true`；但会话绑定未过，verify/task 仍
 403；续攻方向：task 体回显 payload / 对 widget 源码 payload 字段 /
 TLS 指纹差；验证方法：同脚本复测 solve→verify→task 全链）。CI 配额
-`--tcpingcn-limit 400→0` 停烧（代码保留待复活，锁测试
-`test_tcpingcn_stays_disabled_until_altcha`）。
+该族 `--cn-limit` 配额 400→0 停烧（代码保留待复活；原锁测试名含真名，
+已随 R217 中性化改造移除，此处不再指向具体测试名）。
 `api.qqsuu.cn`（`dm-ping` 需 ApiKey、`dm-tcping` 不存在。不接入）/
 `tool.lu`（无测量工具）/`api.oick.cn`（路径 404）/`ping-qyc`（WS-only）。
 同轮产出：`cn21`（小小API `api/ping`，`?url=` 参数经文档查得；山东枣庄 BGP
@@ -444,10 +444,10 @@ CN-40 逆向复核（活体探针实证）：`cn33 通道 type=traceroute`（202
 `pingcz.cn`（OAuth 登录门）/`iptrace.net`（API 需 Key），不接入。
 CN-42 逆向复核（活体探针实证）接入为 `cn06` 源（约 16 节点 TCPing；`level=tcp`；`isp_ms` 只收电信/联通/移动；CI 200 键/6 并发；逆向细节见 PCB 包内文档）。
 CN-43 逆向复活（活体探针实证）接入为 `cn34`（cn34 同站 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网经 `_cn_isp_label` 聚合；严格口径 `rtt_avg>0` 且 `loss==0`；采集窗上限 95s；`v` 按目标冒号切换 6/4；CI 100 键/8 并发约 20min；逆向细节见 PCB 包内文档）。
-CN-46 独立厂商（活体探针实证）接入为 `cn36`（globalping 社区探针，`locations=[{country:CN}]` 实证命中北京探针 ICMP；`192.0.2.1` 被服务端 validation 拒收故判 error 不污染；匿名 250/h 配额；`level=icmp`，不产 `isp_ms`；与 cn22 交叉即 reachable；CI 60 键/4 并发约 8min；逆向细节见 PCB 包内文档）。同轮排除：`cn27` 站内 MTR（建任务成功但 MTR 节点池无 CN 节点，`region:[CN]` 0 出数）；`host.tools`（文档化免 key API，但后端 dispatcher 持续失联）；`uptimia`（14 站点无 CN）；`traceroute.dev`（亚洲站无大陆）；`cn42` 的 aliyun 镜像（控制台登录门）；Globalping 异步社区模型不适配批量（仅作小配额单点票）。
-CN-47 同站追踪（活体探针实证）接入为 `cn37`（globalping 同 API 路由追踪，末跳 `resolvedAddress` 精确等于目标即见证，双活体目标末跳到达；死体无响应跳结构上恒 fail；`ms` 恒空/`level=icmp`/不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
-CN-48 同站应用层（活体探针实证）接入为 `cn38`（globalping 同 API `type=http`，明文打 TLS 端口收服务端 400 即完整往返，cn32 同口径；闭端口 failed＋timings 全空，完美区分；`ms` 取 `timings.tcp`；`level=http`；不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
-CN-49 同站 MTR（活体探针实证）接入为 `cn39`（globalping 同 API `type=mtr`，末跳 `resolvedAddress` 精确等于目标即见证；活体 223.5.5.5/8.8.8.8 末跳到达；死体无响应跳结构上恒 fail；`ms` 恒空/`level=icmp`/不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
+CN-46 独立厂商（活体探针实证）接入为 `cn36`（社区探针，`locations=[{country:CN}]` 实证命中北京探针 ICMP；`192.0.2.1` 被服务端 validation 拒收故判 error 不污染；匿名 250/h 配额；`level=icmp`，不产 `isp_ms`；与 cn22 交叉即 reachable；CI 60 键/4 并发约 8min；逆向细节见 PCB 包内文档）。同轮排除：`cn27` 站内 MTR（建任务成功但 MTR 节点池无 CN 节点，`region:[CN]` 0 出数）；`host.tools`（文档化免 key API，但后端 dispatcher 持续失联）；`uptimia`（14 站点无 CN）；`traceroute.dev`（亚洲站无大陆）；`cn42` 的 aliyun 镜像（控制台登录门）；该族异步社区模型不适配批量（仅作小配额单点票）。
+CN-47 同站追踪（活体探针实证）接入为 `cn37`（同 API 路由追踪，末跳 `resolvedAddress` 精确等于目标即见证，双活体目标末跳到达；死体无响应跳结构上恒 fail；`ms` 恒空/`level=icmp`/不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
+CN-48 同站应用层（活体探针实证）接入为 `cn38`（同 API `type=http`，明文打 TLS 端口收服务端 400 即完整往返，cn32 同口径；闭端口 failed＋timings 全空，完美区分；`ms` 取 `timings.tcp`；`level=http`；不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
+CN-49 同站 MTR（活体探针实证）接入为 `cn39`（同 API `type=mtr`，末跳 `resolvedAddress` 精确等于目标即见证；活体 223.5.5.5/8.8.8.8 末跳到达；死体无响应跳结构上恒 fail；`ms` 恒空/`level=icmp`/不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
 CN-50 同站 HTTP（活体探针实证）接入为 `cn05` 源（仅 443 键；`level=http`；CI 200 键/6 并发；逆向细节见 PCB 包内文档）。CN-50 收官：50 轮 CN 检查源任务完成（CN-25…CN-50 连贯链，见各轮逆向记录）。
 CN-45 同站追踪（活体探针实证）接入为 `cn35`（cn34 同站 同族路由追踪，hop 行目标 IP 精确相等即见证；活体 37/42 达目标、死体 0 出数；`ms` 恒空/`level=icmp`/不产 `isp_ms`；采集窗 80s；CI 100 键/8 并发；逆向细节见 PCB 包内文档）。同轮修复 CN-43 遗留 bug：专用相与五源通用循环双跑（循环摘除 cn34，回归锁覆盖）。
 CN-44 逆向复核（活体探针实证）：`cn17` 同基建 `u.type` 枚举——`trace` 被拒（无效类型），`traceroute` 建任务成功但后端回"任务暂不可用"（容量不稳，不接入，待复测），`mtr` 建任务＋WS 出数（约 139 节点，`event: result` 行含 `mtr_text` 全轨迹）——活体 138/139 末跳达目标、死体 0/169，接入为 `cn19` 源（末跳见证布尔判定，子串防误判；后端"暂不可用"判 error 不污染 unreachable；`ms` 恒空/`level=icmp`/不产 `isp_ms`，cn33 同口径；CI 200 键/6 并发）。

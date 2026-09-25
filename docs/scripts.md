@@ -298,6 +298,22 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | cn27 站 key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | cn41 复核 token（读 `TCPPING_CN_TOKEN`） | 空 |
+
+| `--dry-run` | 只输出计划（含sample/overrides），不发请求不写盘 | 关 |
+| `--list-cn` | 列出 PCB 注册表全部代号与默认（code/family/limit/concurrency，不含插件名与内部函数名；R100，无网络无写盘；无包时提示返回 2） | 关 |
+| `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
+| `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
+| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn；有效代号见 `--list-cn`） | 空 |
+| `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
+| `--cn-nodes` | 按代号覆盖每键采样节点数（可重复；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
+
+#### 源特有参数（私有注册表运行时安装）
+
+下列参数**不由公开源码定义**：旗标名、目标属性、类型、默认值与帮助文本
+全部由私有源注册表在运行时装入 parser（公开树不保存副本，R181/R216）。
+故无包环境（fork／不检出 PCB 的 workflow）`--help` 合法地不显示本组——
+help↔docs 对等门禁对本组只在有注册表时断言。
+
 | `--batch-nodes` | 批量通道每大陆运营商取节点数（×3 → 跨省等距采样） | 8 |
 | `--batch-size` | 批量通道每任务目标数（上限 5） | 5 |
 | `--batch-concurrency` | 批量通道并发任务数 | 8 |
@@ -306,13 +322,6 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--skip-batch` | 跳过批量主通道探测 | 关 |
 | `--skip-batch-fallback` | 跳过批量主源失败时的大节点池降级补测 | 关 |
 | `--carrier-probe-limit` | 每轮补测缺失三运营商读数的目标上限（0=关闭，-1=全部） | 1000 |
-| `--dry-run` | 只输出计划（含sample/overrides），不发请求不写盘 | 关 |
-| `--list-cn` | 列出 PCB 注册表全部代号与默认（code/family/limit/concurrency，不含插件名与内部函数名；R100，无网络无写盘；无包时提示返回 2） | 关 |
-| `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
-| `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
-| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn；有效代号见 `--list-cn`） | 空 |
-| `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
-| `--cn-nodes` | 按代号覆盖每键采样节点数（可重复；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
 
 缓存只复用三家运营商读数齐全的条目；缺失运营商的条目会重新进入探测，并按上述上限轮转补测，避免单运营商旧缓存造成三网统计失衡。
 
