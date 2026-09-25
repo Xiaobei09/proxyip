@@ -1380,19 +1380,27 @@ class TestWriteDiff(unittest.TestCase):
 
 class TestMirrorUrls(unittest.TestCase):
     def test_raw_url_yields_ordered_mirrors(self):
+        # M2a：精确期望值在 PCB test_fetch_mirror（字面仅存私有包）；
+        # 公开侧锁委托一致性＋结构（零字面，禁区可进）。
+        if not common._FETCH_MIRROR_BUNDLE:
+            self.skipTest("needs PCB fetch_mirror bundle")
+        from checks_bundle import load_plugin
+        plug = load_plugin("fetch_mirror")
         url = "https://raw.githubusercontent.com/example/demo/main/list.txt"
         mirrors = common.mirror_urls(url)
-        self.assertEqual(mirrors, [
-            "[REDACTED_PRIVATE_RESOURCE]" + url,
-            "[REDACTED_PRIVATE_RESOURCE]example/demo@main/list.txt",
-            "[REDACTED_PRIVATE_RESOURCE]example/demo/main/list.txt",
-        ])
+        self.assertEqual(mirrors, plug.mirror_urls(url))
+        self.assertEqual(len(mirrors), 3)
+        self.assertNotEqual(mirrors[0], url)
+        self.assertTrue(all(m != url for m in mirrors))
+        self.assertEqual(len(set(mirrors)), 3)
 
     def test_non_raw_url_has_no_mirrors(self):
         self.assertEqual(common.mirror_urls("https://zip.cm.edu.kg/all.json"), [])
         self.assertEqual(common.mirror_urls("https://example.com/raw.githubusercontent.com/x"), [])
 
     def test_fetch_with_mirror_falls_back(self):
+        if not common._FETCH_MIRROR_BUNDLE:
+            self.skipTest("needs PCB fetch_mirror bundle")
         calls = []
 
         class FakeResp:
@@ -1417,7 +1425,8 @@ class TestMirrorUrls(unittest.TestCase):
             )
         self.assertEqual(data, b"mirror-data")
         self.assertEqual(calls[0], "https://raw.githubusercontent.com/u/r/main/f.txt")
-        self.assertTrue(calls[1].startswith("[REDACTED_PRIVATE_RESOURCE]"))
+        self.assertNotEqual(calls[1], calls[0])
+        self.assertTrue(calls[1].endswith("/u/r/main/f.txt"))
 
     def test_fetch_with_mirror_reraises_last_error(self):
         import common as _c

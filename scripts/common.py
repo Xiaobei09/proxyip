@@ -522,27 +522,27 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-RAW_GITHUB_PREFIX = "https://raw.githubusercontent.com/"
+# M2a：镜像模板已迁 PCB fetch_mirror（经 _FETCH_MIRROR_BUNDLE loader
+# 回绑 mirror_urls；无包时返回 []，调用方单直连，与非 github 源一致）。
+_FETCH_MIRROR_BUNDLE = False
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin
+    _fetch_mirror = _load_pcb_plugin("fetch_mirror")
+    _mirror_urls_impl = _fetch_mirror.mirror_urls
+    _FETCH_MIRROR_BUNDLE = True
+except Exception:
+    _mirror_urls_impl = None
 
 
 def mirror_urls(url: str) -> list[str]:
     """Candidate mainland-reachable mirrors for a raw.githubusercontent.com URL.
 
-    raw.githubusercontent.com is blocked from mainland China, so local runs
-    there cannot fetch sources without a proxy.  Returns equivalent mirror
-    URLs (gh-proxy.com prefix proxy, jsDelivr CDN, gitmirror) in try order;
-    non-GitHub-raw URLs have no mirrors and yield ``[]``.
+    经 PCB ``fetch_mirror`` 回绑；无包时返回 ``[]``（单直连）。
+    模板字面仅存私有包（禁区已锁）。
     """
-    if not url.startswith(RAW_GITHUB_PREFIX):
+    if _mirror_urls_impl is None:
         return []
-    path = url[len(RAW_GITHUB_PREFIX):]
-    parts = path.split("/", 3)
-    out = ["[REDACTED_PRIVATE_RESOURCE]" + url]
-    if len(parts) == 4:
-        user, repo, branch, rest = parts
-        out.append(f"[REDACTED_PRIVATE_RESOURCE]{user}/{repo}@{branch}/{rest}")
-    out.append("[REDACTED_PRIVATE_RESOURCE]" + path)
-    return out
+    return _mirror_urls_impl(url)
 
 
 def err_name(e: Exception) -> str:
