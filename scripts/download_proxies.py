@@ -1008,7 +1008,7 @@ def write_source_attribution(
 ) -> None:
     """Persist per-IP download source attribution.
 
-    Builds a ``{ip:port#CC: source_label}`` mapping from the final merged
+    Builds a ``{ip:port#CC: source_origin}`` mapping from the final merged
     ``by_port`` structure and the per-source IP sets, then writes it to
     :data:`IP_SOURCES_FILE`.
 
