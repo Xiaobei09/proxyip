@@ -1539,10 +1539,19 @@ class TestMergeIspMs(unittest.TestCase):
         self.assertNotIn("isp_ms", entries["a:443#US"])
         self.assertNotIn("isp_speed", entries["a:443#US"])
 
-    def test_complete_cached_carriers_survive_without_source(self):
+    def test_unproven_cached_carriers_are_dropped(self):
         entries = {"a:443#US": {
             "isp_ms": {"中国电信": 40.0, "中国联通": 41.0, "中国移动": 42.0},
             "sources": {},
+        }}
+        cc.merge_isp_ms(entries)
+        self.assertNotIn("isp_ms", entries["a:443#US"])
+
+    def test_complete_carriers_with_source_evidence_survive(self):
+        entries = {"a:443#US": {
+            "sources": {"probe": {"isp_ms": {
+                "中国电信": 40.0, "中国联通": 41.0, "中国移动": 42.0,
+            }}},
         }}
         cc.merge_isp_ms(entries)
         self.assertEqual(set(entries["a:443#US"]["isp_ms"]),
@@ -1599,6 +1608,13 @@ class TestCarrierProbeR202(unittest.TestCase):
             SimpleNamespace(carrier_probe_limit=1),
         )
         self.assertEqual([item[1] for item in out], ["k1"])
+
+    def test_source_evidence_is_required_for_cache(self):
+        complete = {"中国电信": 1, "中国联通": 2, "中国移动": 3}
+        self.assertFalse(cc._has_complete_carrier_evidence(
+            {"isp_ms": complete, "sources": {}}))
+        self.assertTrue(cc._has_complete_carrier_evidence(
+            {"sources": {"probe": {"isp_ms": complete}}}))
 
     def test_zero_limit_disables_extra_probe(self):
         from types import SimpleNamespace
@@ -4030,9 +4046,11 @@ class TestCnCacheSplitMerge(unittest.TestCase):
         return (key, key, "1.2.3.4", "80", "US")
 
     def _prev(self, verdict="reachable", age=100, **kw):
+        carriers = {"中国电信": 40.0, "中国联通": 41.0, "中国移动": 42.0}
         e = {"verdict": verdict, "checked_at": self.NOW - age,
-             "streak": 3, "sources": {},
-             "isp_ms": {"中国电信": 40.0, "中国联通": 41.0, "中国移动": 42.0}}
+             "streak": 3,
+             "sources": {"probe": {"isp_ms": carriers.copy()}},
+             "isp_ms": carriers.copy()}
         e.update(kw)
         return e
 
@@ -4063,7 +4081,7 @@ class TestCnCacheSplitMerge(unittest.TestCase):
     def test_incomplete_carriers_reprobed(self):
         key = "1.2.3.4:80#US"
         prev = {key: self._prev("reachable", age=100,
-                                isp_ms={"中国电信": 40.0})}
+                                isp_ms={"中国电信": 40.0}, sources={})}
         cached, probe = cc.split_cn_cache([self._item(key)], prev, 3600,
                                            self.NOW)
         self.assertEqual(cached, {})

@@ -546,6 +546,21 @@ def _has_complete_carrier_data(entry) -> bool:
     )
 
 
+def _has_complete_carrier_evidence(entry) -> bool:
+    """是否在当前 sources 原始结果中覆盖三家运营商。"""
+    if not isinstance(entry, dict) or not isinstance(entry.get("sources"), dict):
+        return False
+    values: dict[str, float] = {}
+    for result in entry["sources"].values():
+        if not isinstance(result, dict) or not isinstance(result.get("isp_ms"), dict):
+            continue
+        for key in _CARRIER_KEYS:
+            value = result["isp_ms"].get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                values[key] = min(values.get(key, value), value)
+    return all(key in values for key in _CARRIER_KEYS)
+
+
 def _carrier_probe_limit(args=None) -> int:
     """从 PCB 注册表读取每轮缺失运营商补测上限（默认不额外补测）。"""
     if args is not None:
@@ -584,21 +599,11 @@ def merge_isp_ms(entries: dict) -> None:
     for e in entries.values():
         if not isinstance(e, dict):
             continue
-        cached_complete = _has_complete_carrier_data(e)
-        cached_values = e.get("isp_ms")
         e.pop("isp_ms", None)
         e.pop("isp_speed", None)
         sources = e.get("sources")
         merged: dict[str, float] = {}
-        if cached_complete:
-            merged.update({
-                key: float(cached_values[key]) for key in _CARRIER_KEYS
-            })
         if not isinstance(sources, dict):
-            if merged:
-                e["isp_ms"] = {
-                    key: round(value, 1) for key, value in merged.items()
-                }
             continue
         for _name, r in sources.items():
             if not isinstance(r, dict):
@@ -1199,8 +1204,8 @@ def _batch_ping_normalize(res: dict) -> dict:
 def split_cn_cache(sample, prev_entries, ttl, now=None):
     """按 TTL 把样本拆成（可复用缓存项，待复测样本）。
 
-    复用条件：上一轮同键 verdict 为 reachable/uncertain、三家运营商读数
-    齐全且 ``checked_at`` 未过期（``checked_at + ttl >= now``）。
+    复用条件：上一轮同键 verdict 为 reachable/uncertain、当前 sources
+    原始结果覆盖三家运营商且 ``checked_at`` 未过期（``checked_at + ttl >= now``）。
     ``ttl<=0`` 即关闭，全量复测。返回的缓存项为深拷贝（调用方并入后
     可随意改写，不污染上一轮基线）。
     """
@@ -1212,7 +1217,7 @@ def split_cn_cache(sample, prev_entries, ttl, now=None):
         prev = prev_entries.get(item[1])
         if (isinstance(prev, dict)
                 and prev.get("verdict") in ("reachable", "uncertain")
-                and _has_complete_carrier_data(prev)
+                and _has_complete_carrier_evidence(prev)
                 and isinstance(prev.get("checked_at"), (int, float))
                 and prev["checked_at"] + ttl >= now):
             cached[item[1]] = json.loads(json.dumps(prev))
