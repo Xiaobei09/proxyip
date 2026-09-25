@@ -1231,9 +1231,9 @@ def list_cn_sources() -> int:
         print("list-cn: PCB bundle missing (see docs/scripts.md 代号表)",
               file=sys.stderr)
         return 2
-    print("code plugin family limit concurrency")
+    print("code family limit concurrency")
     for e in reg.SOURCES:
-        print(f"{e['code']} {e['plugin']} {e['family']} "
+        print(f"{e['code']} {e['family']} "
               f"{e['limit_default']} {e['concurrency']}")
     return 0
 

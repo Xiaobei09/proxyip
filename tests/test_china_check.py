@@ -1235,7 +1235,7 @@ class TestListCnDiscoverability(unittest.TestCase):
             self.assertEqual(rc, 0)
         lines = buf.getvalue().splitlines()
         self.assertEqual(len(lines), 45)
-        self.assertTrue(lines[0].startswith("code plugin"))
+        self.assertTrue(lines[0].startswith("code family"))
         self.assertTrue(all(l.startswith("cn") for l in lines[1:]))
 
     def test_list_cn_without_bundle_r100(self):
@@ -1272,8 +1272,8 @@ class TestListCnDiscoverability(unittest.TestCase):
         self.assertEqual(sorted(rows), reg.codes())
         for e in reg.SOURCES:
             cols = rows[e["code"]]
-            self.assertEqual(cols[0], e["plugin"])
-            self.assertEqual(cols[1], e["family"])
+            self.assertEqual(cols[0], e["family"])
+            self.assertEqual(cols[1], str(e["limit_default"]))
 
     def test_list_cn_output_has_no_true_names_r105(self):
         """R105安全合规：--list-cn 输出不得含真名根（func 列已摘除）。"""
