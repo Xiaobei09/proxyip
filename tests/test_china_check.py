@@ -3791,14 +3791,27 @@ class TestMainExitCodes(unittest.TestCase):
     与 quality_check 缺源返回 1、health_alert 非 strict 下恒 0 的分工一致。"""
 
     def test_empty_source_exits_2_without_network(self):
+        import os
         with tempfile.TemporaryDirectory() as d:
             src = Path(d) / "empty.txt"
             src.write_text("", encoding="utf-8")
-            with mock.patch.object(
-                    cc, "request_follow",
-                    side_effect=AssertionError("no network in test")):
-                rc = cc.main(["--source", str(src)])
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("PROXYIP_REQUIRE_PCB", None)
+                with mock.patch.object(
+                        cc, "request_follow",
+                        side_effect=AssertionError("no network in test")):
+                    rc = cc.main(["--source", str(src)])
         self.assertEqual(rc, 2)
+
+    def test_ci_require_pcb_fails_before_data_work(self):
+        import os
+        with mock.patch.dict(os.environ, {"PROXYIP_REQUIRE_PCB": "1"}), \
+                mock.patch.object(
+                    cc, "_require_pcb_bundle",
+                    side_effect=RuntimeError("PCB bundle required")) as req:
+            with self.assertRaisesRegex(RuntimeError, "PCB bundle required"):
+                cc.main(["--source", "unused.txt"])
+        req.assert_called_once_with()
 
 
 class TestCiEnabledSources(unittest.TestCase):

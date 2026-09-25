@@ -7,9 +7,13 @@
 - 有 bundle 时经 ``checks_bundle.load_plugin("leak_guard")`` 取清单并扫描
   ``scripts/``/``tests/``/``docs/``；无 bundle（fork/公开 CI）时模式扫描
   测试跳过，仅保留不依赖数据的 loader 契约断言与迁移模块不存在断言。
-- loader 公开契约：``bundle_available/load_plugin/INTERFACE_VERSION``。
+- loader 公开契约：根目录定位/显式 require、manifest 校验、单插件与批量
+  载入，以及接口版本；这些断言不依赖私有模式清单，缺包环境也必须执行。
 """
+import json
+import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,6 +33,86 @@ def _guard_data():
 
 
 _GUARD = _guard_data()
+
+
+class TestLoaderLocations(unittest.TestCase):
+    """loader 定位/manifest/批量载入契约（无 PCB 也执行）。"""
+
+    def setUp(self):
+        import sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import checks_bundle as cb
+        self.cb = cb
+        self._old_root = os.environ.pop("PROXYIP_PCB_ROOT", None)
+        cb._BUNDLE_DIR = None
+        cb._MANIFEST = None
+        self.addCleanup(self._reset)
+
+    def _reset(self):
+        self.cb._BUNDLE_DIR = None
+        self.cb._MANIFEST = None
+        if self._old_root is None:
+            os.environ.pop("PROXYIP_PCB_ROOT", None)
+        else:
+            os.environ["PROXYIP_PCB_ROOT"] = self._old_root
+
+    def test_default_and_env_override(self):
+        self.assertEqual(self.cb.bundle_root(), ROOT / "pcb")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "plugins").mkdir()
+            os.environ["PROXYIP_PCB_ROOT"] = str(root)
+            self.cb._BUNDLE_DIR = None
+            self.assertEqual(self.cb.bundle_root(), root)
+            self.assertTrue(self.cb.bundle_available())
+            self.assertEqual(self.cb.bundle_dir(), root)
+            self.assertEqual(self.cb.require_bundle(), root)
+
+    def test_require_missing_fails_loud(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["PROXYIP_PCB_ROOT"] = d
+            self.cb._BUNDLE_DIR = None
+            self.assertFalse(self.cb.bundle_available())
+            self.assertEqual(self.cb.bundle_dir(), Path(d))
+            with self.assertRaisesRegex(RuntimeError, "required but missing"):
+                self.cb.require_bundle()
+
+    def test_manifest_validated_and_cached(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "plugins").mkdir()
+            (root / "manifest.json").write_text(json.dumps({
+                "interface_version": self.cb.INTERFACE_VERSION,
+                "plugins": ["sample"],
+            }), encoding="utf-8")
+            os.environ["PROXYIP_PCB_ROOT"] = str(root)
+            self.cb._BUNDLE_DIR = None
+            first = self.cb.load_manifest()
+            self.assertIs(first, self.cb.load_manifest())
+            (root / "manifest.json").write_text(json.dumps({
+                "interface_version": self.cb.INTERFACE_VERSION + 1,
+            }), encoding="utf-8")
+            self.cb._MANIFEST = None
+            with self.assertRaisesRegex(RuntimeError, "manifest interface"):
+                self.cb.load_manifest()
+
+    def test_batch_load_and_name_validation(self):
+        import sys
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            plugins = root / "plugins"
+            plugins.mkdir()
+            (plugins / "_loader_sample.py").write_text(
+                "PCB_INTERFACE_VERSION = 1\n", encoding="utf-8")
+            os.environ["PROXYIP_PCB_ROOT"] = str(root)
+            self.cb._BUNDLE_DIR = None
+            loaded = self.cb.load_plugins("_loader_sample")
+            self.assertEqual(loaded["_loader_sample"].PCB_INTERFACE_VERSION, 1)
+            sys.modules.pop("_loader_sample", None)
+            for bad in ("", "../x", "a.b", None):
+                with self.subTest(bad=bad):
+                    with self.assertRaises(ValueError):
+                        self.cb.load_plugin(bad)
 
 
 @unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
@@ -67,8 +151,10 @@ class TestPcbLeakGuard(unittest.TestCase):
         import sys
         sys.path.insert(0, str(ROOT / "scripts"))
         import checks_bundle as cb
-        self.assertTrue(hasattr(cb, "bundle_available"))
-        self.assertTrue(hasattr(cb, "load_plugin"))
+        for name in ("bundle_available", "bundle_root", "bundle_dir",
+                     "require_bundle", "load_manifest", "load_plugin",
+                     "load_plugins"):
+            self.assertTrue(hasattr(cb, name), name)
         self.assertEqual(cb.INTERFACE_VERSION, 1)
         self.assertIsInstance(cb.bundle_available(), bool)
 

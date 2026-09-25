@@ -27,6 +27,8 @@ jobs:
     env:
       CHINA_CHECK_API_KEY: ${{ secrets.CHINA_CHECK_API_KEY }}
       TCPPING_CN_TOKEN: ${{ secrets.TCPPING_CN_TOKEN }}
+      # CI 必须真实检出 PCB；缺失即失败，禁止静默写成空源证据。
+      PROXYIP_REQUIRE_PCB: "1"
       # 公开仓单 job 硬上限 6h；主探测最多占 4.5h，预留 1h 给回退与提交。
       CN_PRIMARY_TIMEOUT_SECONDS: 16200
       CN_FALLBACK_TIMEOUT_SECONDS: 3600

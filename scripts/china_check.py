@@ -115,6 +115,7 @@ from common import (
 from ws_transport import _WebSocket
 from ws_transport import WS_MAX_BUF as _WS_MAX_BUF
 from checks_bundle import load_plugin as _load_pcb_plugin
+from checks_bundle import require_bundle as _require_pcb_bundle
 
 # 批量通道协议细节已迁入私有包（PCB）：有 bundle 时从插件取，无 bundle 时
 # 该系源整段跳过（fail-open；调参回退为历史公开值，仅用于 CLI 默认展示）。
@@ -2316,6 +2317,11 @@ def main(argv=None) -> int:
                         "无网络无写盘")
     _add_registry_cli_options(parser)
     args = parser.parse_args(argv)
+
+    # CI 显式要求私有包：checkout/pin 缺失即 fail-fast，禁止 44 源静默
+    # fail-open 后写出看似成功的空证据数据；本地默认仍保留无包降级。
+    if os_environ("PROXYIP_REQUIRE_PCB") == "1":
+        _require_pcb_bundle()
 
     api_key = args.api_key or os_environ("CHINA_CHECK_API_KEY")
     cn41_token = args.tcpping_token or os_environ("TCPPING_CN_TOKEN")
