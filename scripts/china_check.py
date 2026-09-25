@@ -1084,6 +1084,50 @@ def _bundle_missing(source: str) -> dict:
             "ok_nodes": 0, "nodes": 0, "ratio": None}
 
 
+def _build_slot_table(timeout):
+    """注册表驱动的 slot 派发表（M4b-core；与 _run_raw_slots 内手写表同构）。
+
+    键为运行时代号（registry codes，无字面）；调用形态读条目 ``bind``
+    （缺省标准三参；特形见 registry）。插件/函数缺失即 _bundle_missing
+    桩。纯构造，无网络。旧手写表在切流后删除。
+    """
+    table = {}
+    try:
+        reg = _sources_registry()
+        entries = list(reg.SOURCES) if reg is not None else []
+    except Exception:
+        entries = []
+    mods = {}
+    for e in entries:
+        code = e["code"]
+        fn = None
+        try:
+            plugin = e["plugin"]
+            if plugin not in mods:
+                try:
+                    mods[plugin] = _load_pcb_plugin(plugin)
+                except Exception:
+                    mods[plugin] = None
+            mod = mods[plugin]
+            if mod is not None:
+                fn = getattr(mod, e["func"], None)
+        except Exception:
+            fn = None
+        bind = e.get("bind", "ip-port-timeout")
+        if fn is None:
+            table[code] = (lambda ip, port, _c=code: _bundle_missing(_c))
+        elif bind == "ip-timeout":
+            table[code] = (lambda ip, port, _f=fn, _t=timeout:
+                            _f(ip, _t))
+        elif bind == "ip-empty-timeout":
+            table[code] = (lambda ip, port, _f=fn, _t=timeout:
+                            _f(ip, "", _t))
+        else:
+            table[code] = (lambda ip, port, _f=fn, _t=timeout:
+                            _f(ip, port, _t))
+    return table
+
+
 def _run_raw_slots(
     candidates: list, entries: dict, timeout: float, source: str, concurrency: int
 ) -> None:
