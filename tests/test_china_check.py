@@ -1529,6 +1529,25 @@ class TestMergeIspMs(unittest.TestCase):
         cc.merge_isp_ms(entries)
         self.assertNotIn("isp_ms", entries["a:443#US"])
 
+    def test_stale_single_carrier_is_dropped(self):
+        entries = {"a:443#US": {
+            "isp_ms": {"中国电信": 40.0},
+            "isp_speed": {"中国电信": 1.0},
+            "sources": {},
+        }}
+        cc.merge_isp_ms(entries)
+        self.assertNotIn("isp_ms", entries["a:443#US"])
+        self.assertNotIn("isp_speed", entries["a:443#US"])
+
+    def test_complete_cached_carriers_survive_without_source(self):
+        entries = {"a:443#US": {
+            "isp_ms": {"中国电信": 40.0, "中国联通": 41.0, "中国移动": 42.0},
+            "sources": {},
+        }}
+        cc.merge_isp_ms(entries)
+        self.assertEqual(set(entries["a:443#US"]["isp_ms"]),
+                         {"中国电信", "中国联通", "中国移动"})
+
     def test_merge_four_isp_sources(self):
         """CN-08：cn01/cn30/cn11/cn09 四源 isp_ms 跨源取最小
         （词表由各生产侧保证，合并只过滤非正数值）。"""
@@ -1549,6 +1568,43 @@ class TestMergeIspMs(unittest.TestCase):
         entries = {"a:443#US": {"sources": {"cn01": {"isp_ms": {"电信": -1.0}}}}}
         cc.merge_isp_ms(entries)
         self.assertNotIn("isp_ms", entries["a:443#US"])
+
+
+class TestCarrierProbeR202(unittest.TestCase):
+    """三运营商补测：只选缺失读数目标，并遵守 PCB 上限。"""
+
+    def _items(self, n=3):
+        return [(f"k{i}", f"k{i}", "1.2.3.4", "443", "US")
+                for i in range(n)]
+
+    def test_limit_comes_from_registry(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        reg = SimpleNamespace(SOURCES=[{"extra": {"carrier_probe_limit": 2}}])
+        with mock.patch.object(cc, "_sources_registry", return_value=reg):
+            self.assertEqual(cc._carrier_probe_limit(), 2)
+        self.assertEqual(
+            cc._carrier_probe_limit(SimpleNamespace(carrier_probe_limit=7)), 7)
+
+    def test_selects_incomplete_and_caps(self):
+        from types import SimpleNamespace
+        items = self._items()
+        entries = {
+            "k0": {"isp_ms": {"中国电信": 1, "中国联通": 2, "中国移动": 3}},
+            "k1": {},
+            "k2": {},
+        }
+        out = cc._carrier_probe_items(
+            items, entries,
+            SimpleNamespace(carrier_probe_limit=1),
+        )
+        self.assertEqual([item[1] for item in out], ["k1"])
+
+    def test_zero_limit_disables_extra_probe(self):
+        from types import SimpleNamespace
+        out = cc._carrier_probe_items(
+            self._items(), {}, SimpleNamespace(carrier_probe_limit=0))
+        self.assertEqual(out, [])
 
 
 class TestMergeIspSpeed(unittest.TestCase):
@@ -3975,7 +4031,8 @@ class TestCnCacheSplitMerge(unittest.TestCase):
 
     def _prev(self, verdict="reachable", age=100, **kw):
         e = {"verdict": verdict, "checked_at": self.NOW - age,
-             "streak": 3, "sources": {}}
+             "streak": 3, "sources": {},
+             "isp_ms": {"中国电信": 40.0, "中国联通": 41.0, "中国移动": 42.0}}
         e.update(kw)
         return e
 
@@ -4002,6 +4059,15 @@ class TestCnCacheSplitMerge(unittest.TestCase):
                                            self.NOW)
         self.assertEqual(probe, [])
         self.assertIn(key, cached)
+
+    def test_incomplete_carriers_reprobed(self):
+        key = "1.2.3.4:80#US"
+        prev = {key: self._prev("reachable", age=100,
+                                isp_ms={"中国电信": 40.0})}
+        cached, probe = cc.split_cn_cache([self._item(key)], prev, 3600,
+                                           self.NOW)
+        self.assertEqual(cached, {})
+        self.assertEqual(probe, [self._item(key)])
 
     def test_expired_reprobed(self):
         key = "1.2.3.4:80#US"

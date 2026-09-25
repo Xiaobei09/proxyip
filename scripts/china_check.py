@@ -530,19 +530,71 @@ CN_TOKEN = "CN"
 
 # ------------------------------------------------------------ 判定合成
 
+_CARRIER_KEYS = ("中国电信", "中国联通", "中国移动")
+
+
+def _has_complete_carrier_data(entry) -> bool:
+    """是否同时有三家运营商的当前正延迟读数。"""
+    if not isinstance(entry, dict):
+        return False
+    values = entry.get("isp_ms")
+    if not isinstance(values, dict):
+        return False
+    return all(
+        isinstance(values.get(key), (int, float)) and values[key] > 0
+        for key in _CARRIER_KEYS
+    )
+
+
+def _carrier_probe_limit(args=None) -> int:
+    """从 PCB 注册表读取每轮缺失运营商补测上限（默认不额外补测）。"""
+    if args is not None:
+        override = getattr(args, "carrier_probe_limit", None)
+        return override if isinstance(override, int) else 0
+    reg = _sources_registry()
+    if reg is None:
+        return 0
+    for entry in getattr(reg, "SOURCES", ()):
+        extra = entry.get("extra", {})
+        value = extra.get("carrier_probe_limit")
+        if isinstance(value, int):
+            return value
+    return 0
+
+
+def _carrier_probe_items(sample, entries, args=None) -> list:
+    """挑选缺失三运营商读数的候选，按注册表上限截取。"""
+    incomplete = [
+        item for item in sample
+        if not _has_complete_carrier_data(entries.get(item[1]))
+    ]
+    limit = _carrier_probe_limit(args)
+    if limit == 0:
+        return []
+    return incomplete if limit < 0 else incomplete[:limit]
+
+
 def merge_isp_ms(entries: dict) -> None:
     """就地合并各源 ``isp_ms`` 到 per-key ``entry["isp_ms"]``（各运营商最小 RTT）。
 
-    源结果只需带 ``isp_ms``（``{运营商: ms}``，cn01/cn30/cn11/cn09/
-    cn04/cn32 多节点源与 cn24 单节点（宁波电信，CN-39）提供，
-    其他源缺省 {}-即贡献空），跨源按运营商取最小——显示口径=最快运营商视角。无任何
-    per-ISP 读数的条目不写该字段，下游回退 ``cn_display_ms`` 单值口径。
+    每次先丢弃旧顶层派生值，只接受当前 sources 的原始读数；这样缓存或
+    fallback 不会把过期/单运营商数据伪装成当前三运营商数据。源结果只需
+    带 ``isp_ms``，跨源按运营商取最小；无任何当前 per-ISP 读数则不写字段。
     """
     for e in entries.values():
         if not isinstance(e, dict):
             continue
+        cached_complete = _has_complete_carrier_data(e)
+        cached_values = e.get("isp_ms")
+        e.pop("isp_ms", None)
+        e.pop("isp_speed", None)
         sources = e.get("sources")
         if not isinstance(sources, dict):
+            if cached_complete:
+                e["isp_ms"] = {
+                    key: round(float(cached_values[key]), 1)
+                    for key in _CARRIER_KEYS
+                }
             continue
         merged: dict[str, float] = {}
         for _name, r in sources.items():
@@ -558,6 +610,11 @@ def merge_isp_ms(entries: dict) -> None:
             e["isp_ms"] = {
                 isp: round(v, 1) for isp, v in sorted(merged.items())
             }
+        elif cached_complete:
+            e["isp_ms"] = {
+                key: round(float(cached_values[key]), 1)
+                for key in _CARRIER_KEYS
+            }
 
 
 def merge_isp_speed(entries: dict) -> None:
@@ -571,6 +628,7 @@ def merge_isp_speed(entries: dict) -> None:
     for e in entries.values():
         if not isinstance(e, dict):
             continue
+        e.pop("isp_speed", None)
         sp = cn_isp_speed(e.get("isp_ms"))
         if sp:
             e["isp_speed"] = sp
@@ -1143,9 +1201,10 @@ def _batch_ping_normalize(res: dict) -> dict:
 def split_cn_cache(sample, prev_entries, ttl, now=None):
     """按 TTL 把样本拆成（可复用缓存项，待复测样本）。
 
-    复用条件：上一轮同键 verdict 为 reachable/uncertain 且 ``checked_at``
-    未过期（``checked_at + ttl >= now``）。``ttl<=0`` 即关闭，全量复测。
-    返回的缓存项为深拷贝（调用方并入后可随意改写，不污染上一轮基线）。
+    复用条件：上一轮同键 verdict 为 reachable/uncertain、三家运营商读数
+    齐全且 ``checked_at`` 未过期（``checked_at + ttl >= now``）。
+    ``ttl<=0`` 即关闭，全量复测。返回的缓存项为深拷贝（调用方并入后
+    可随意改写，不污染上一轮基线）。
     """
     if ttl <= 0 or not prev_entries:
         return {}, list(sample)
@@ -1155,6 +1214,7 @@ def split_cn_cache(sample, prev_entries, ttl, now=None):
         prev = prev_entries.get(item[1])
         if (isinstance(prev, dict)
                 and prev.get("verdict") in ("reachable", "uncertain")
+                and _has_complete_carrier_data(prev)
                 and isinstance(prev.get("checked_at"), (int, float))
                 and prev["checked_at"] + ttl >= now):
             cached[item[1]] = json.loads(json.dumps(prev))
@@ -1452,7 +1512,19 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         # 批量通道代价高（批任务端到端慢），只投仍未定论的键；已由
         # 双免额单节点源定论的键（≥2 ok / ≥2 fail）跳过其复核。
         # 无 PCB 时整段跳过（fail-open，公开 CI/无包环境不触批量通道）。
-        _cn01_cands = [item for item in sample if needs_probe(entries, item[1])]
+        _must_probe = [item for item in sample if needs_probe(entries, item[1])]
+        _must_keys = {item[1] for item in _must_probe}
+        _carrier_probe = [
+            item for item in _carrier_probe_items(sample, entries, args)
+            if item[1] not in _must_keys
+        ]
+        _cn01_cands = _must_probe + _carrier_probe
+        if _carrier_probe:
+            print(
+                f"carrier probe: {len(_carrier_probe)} targets "
+                f"(limit={_carrier_probe_limit(args)})",
+                file=sys.stderr,
+            )
         try:
             for key, res in cn01_batch_run(_cn01_cands, args).items():
                 entries.setdefault(key, {})[CN01_CODE] = res
