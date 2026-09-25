@@ -1381,11 +1381,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--extra-source", action="append", default=[], metavar="KIND,URL",
         help="Append an extra proxy source 'kind,url' "
-        "(kind: plain|ip|csv|json|ipnote|ipcsv|b64ip|colocsv|dccsv); repeatable",
+        "(kind: plain|ip|csv|json|ipnote|ipcsv|b64ip|colocsv|dccsv); repeatable "
+        "(see --list-extra-sources for the built-in list)",
     )
     parser.add_argument(
         "--no-extra-sources", action="store_true",
-        help="Skip the built-in extra CF reverse-proxy sources",
+        help="Skip the built-in extra CF reverse-proxy sources "
+        "(see --list-extra-sources)",
     )
     parser.add_argument(
         "--list-extra-sources", action="store_true",

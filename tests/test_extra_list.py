@@ -85,6 +85,17 @@ class TestListExtraSources(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         self.assertIn("--list-extra-sources", buf.getvalue())
 
+    def test_help_cross_references_list_flag_r159(self):
+        """R159功能查找：关联旗标 help 须互指发现口（R143 闭环的下载侧
+        对应；固定 COLUMNS 使断言宽度无关，否则窄终端会硬截长 token）。"""
+        import os
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {"COLUMNS": "120"}):
+            with redirect_stdout(buf):
+                with self.assertRaises(SystemExit):
+                    dp.main(["--help"])
+        self.assertGreaterEqual(buf.getvalue().count("--list-extra-sources"), 4)
+
     def test_extra_kinds_have_parse_branches_r158(self):
         """R158功能完整性：EXTRA kind 全有 parse_source 分支（防增源漏绑
         静默跳过；R130 绑定锁的下载侧对应）。分支集取自源码 AST（零硬编码
