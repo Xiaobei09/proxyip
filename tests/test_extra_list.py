@@ -136,6 +136,14 @@ class TestListExtraSources(unittest.TestCase):
                     dp.main(["--help"])
         self.assertGreaterEqual(buf.getvalue().count("--list-extra-sources"), 4)
 
+    def test_docs_cover_warn_and_redaction_r165(self):
+        """R165数据格式：R157 warn 与 R161 脱敏行为须落文档（R143 家族：
+        用户可见行为无文档即漂移）。"""
+        section = (Path(dp.__file__).resolve().parent.parent
+                   / "docs" / "scripts.md").read_text(encoding="utf-8")
+        self.assertIn("stderr Warning", section)
+        self.assertIn("userinfo→***@", section)
+
     def test_extra_kinds_have_parse_branches_r158(self):
         """R158功能完整性：EXTRA kind 全有 parse_source 分支（防增源漏绑
         静默跳过；R130 绑定锁的下载侧对应）。分支集取自源码 AST（零硬编码

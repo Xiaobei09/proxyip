@@ -13,9 +13,9 @@
 | `-u, --url` | 源地址（默认上游 `all.json`，失败回退 zip） | `zip.cm.edu.kg` |
 | `-t, --timeout` | 下载超时（秒） | 60 |
 | `--per-country-limit` | 限量版每国条数（0 = 不生成） | 20 |
-| `--extra-source KIND,URL` | 追加一个补充来源（`plain`/`ip`/`csv`/`json`，可重复；内置清单见 `--list-extra-sources`） | 无 |
+| `--extra-source KIND,URL` | 追加一个补充来源（`plain`/`ip`/`csv`/`json`，可重复；内置清单见 `--list-extra-sources`；畸形回显脱敏 `userinfo→***@`） | 无 |
 | `--no-extra-sources` | 跳过内置 CF 反代补充来源（内置清单由 PCB bundle 提供，无包时本就为空；清单见 `--list-extra-sources`） | 关 |
-| `--list-extra-sources` | 列出内置补充来源 origin 表（R156，无网络无写盘；无包时提示返回 2） | 关 |
+| `--list-extra-sources` | 列出内置补充来源 origin 表（R156，无网络无写盘；无包时提示返回 2；无包运行另有 stderr Warning，显式 `--no-extra-sources` 则静默） | 关 |
 
 #### CF 反代补充来源
 
