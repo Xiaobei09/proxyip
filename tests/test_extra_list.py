@@ -35,6 +35,48 @@ class TestListExtraSources(unittest.TestCase):
             self.assertEqual(out.getvalue(), "")
             self.assertIn("PCB bundle missing", err.getvalue())
 
+    def test_warns_when_builtin_empty_r157(self):
+        """R157用户侧体验：无包内置为空时 stderr warn（静默降级可见），
+        显式 --no-extra-sources 时保持静默（用户意图明确）。"""
+        patchers = [
+            mock.patch.object(
+                dp, "load_source",
+                return_value=({"443": {"US": ["1.1.1.1"]}}, None),
+            ),
+            mock.patch.object(dp, "load_extras", return_value=({}, set(), {})),
+            mock.patch.object(dp, "enrich_countries", return_value=0),
+            mock.patch.object(dp, "write_outputs", return_value=(
+                {"__total__": 1, "__unique__": 1, "__countries__": 1,
+                 "__ports__": 1, "__sets__": {}, "443": 1},
+                ["1.1.1.1:443#US"],
+            )),
+            mock.patch.object(dp, "write_source_attribution"),
+            mock.patch.object(dp, "_append_source_history"),
+            mock.patch.object(dp, "_build_source_stats", return_value={}),
+            mock.patch.object(dp, "write_text_if_changed"),
+            mock.patch.object(dp, "load_previous_all", return_value=[]),
+            mock.patch.object(dp, "write_diff", return_value=(0, 0)),
+            mock.patch.object(dp, "append_history"),
+            mock.patch.object(dp, "print_stats"),
+            mock.patch.object(dp, "write_upstream_meta"),
+        ]
+        for p in patchers:
+            p.start()
+        try:
+            with mock.patch.object(dp, "EXTRA_SOURCES", []):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    self.assertEqual(dp.main([]), 0)
+                self.assertIn("PCB bundle missing", err.getvalue())
+                self.assertIn("--list-extra-sources", err.getvalue())
+                err2 = io.StringIO()
+                with redirect_stderr(err2):
+                    self.assertEqual(dp.main(["--no-extra-sources"]), 0)
+                self.assertNotIn("Warning", err2.getvalue())
+        finally:
+            for p in patchers:
+                p.stop()
+
     def test_help_mentions_flag(self):
         buf = io.StringIO()
         with redirect_stdout(buf):

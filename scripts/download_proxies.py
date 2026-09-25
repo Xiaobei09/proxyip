@@ -1408,6 +1408,9 @@ def main(argv: list[str] | None = None) -> int:
             extra_sources.append((kind, url))
     if args.no_extra_sources:
         extra_sources = []
+    if not extra_sources and not args.no_extra_sources:
+        print("Warning: no built-in extra sources (PCB bundle missing? "
+              "see --list-extra-sources)", file=sys.stderr)
 
     try:
         try:
