@@ -121,25 +121,15 @@ from checks_bundle import load_plugin as _load_pcb_plugin
 _CN01_BUNDLE = False
 try:
     _cn01 = _load_pcb_plugin("cn01")
-    CN01_BATCH_SIZE = _cn01.BATCH_SIZE
-    CN01_CONCURRENCY = _cn01.CONCURRENCY
-    CN01_NODES_PER_ISP = _cn01.NODES_PER_ISP
-    CN01_PACING = _cn01.PACING
     CN03_NODES_PER_ISP = _cn01.PING_NODES_PER_ISP
     CN03_PAGE_URL = _cn01.PING_URL
-    CN01_TASK_TIMEOUT = _cn01.TASK_TIMEOUT
     CN02_NODES_PER_ISP = _cn01.TCPING_NODES_PER_ISP
     CN02_PAGE_URL = _cn01.TCPING_URL
     cn01_batch_run = _cn01.batch_run
     _CN01_BUNDLE = True
 except Exception:
-    CN01_BATCH_SIZE = 5
-    CN01_CONCURRENCY = 8
-    CN01_NODES_PER_ISP = 8
-    CN01_PACING = 0.5
     CN03_NODES_PER_ISP = 8
     CN03_PAGE_URL = None
-    CN01_TASK_TIMEOUT = 45.0
     CN02_NODES_PER_ISP = 8
     CN02_PAGE_URL = None
     cn01_batch_run = None
@@ -520,8 +510,8 @@ except Exception:
     cn13_check = None
     CN13_CODE = "cn13"
 
-# cn01 —— 无账号批量探活（每任务约 5 目标 × 3 运营商 × CN01_NODES_PER_ISP
-# 节点（默认 8 → 24），需走 WebSocket 收结果，任务级另出 per-ISP 最小 RTT）
+# 批量多节点探活的节点规模、任务大小、并发、节流和收结果上限均由 PCB
+# 注册表提供；任务级结果另出 per-ISP 最小 RTT。
 
 CN_TOKEN = "CN"
 
@@ -1083,25 +1073,22 @@ def _build_slot_table(timeout):
                                _bundle_missing(_c))
                 for i in range(1, 45)}
     table = {}
-    try:
-        reg = _sources_registry()
-        entries = list(reg.SOURCES) if reg is not None else []
-    except Exception:
-        entries = []
     mods = {}
+    module = sys.modules[__name__]
     for e in entries:
         code = e["code"]
-        fn = None
+        fn = getattr(module, f"{code}_check", None)
         try:
             plugin = e["plugin"]
-            if plugin not in mods:
-                try:
-                    mods[plugin] = _load_pcb_plugin(plugin)
-                except Exception:
-                    mods[plugin] = None
-            mod = mods[plugin]
-            if mod is not None:
-                fn = getattr(mod, e["func"], None)
+            if not callable(fn):
+                if plugin not in mods:
+                    try:
+                        mods[plugin] = _load_pcb_plugin(plugin)
+                    except Exception:
+                        mods[plugin] = None
+                mod = mods[plugin]
+                if mod is not None:
+                    fn = getattr(mod, e["func"], None)
         except Exception:
             fn = None
         bind = e.get("bind", "ip-port-timeout")
@@ -1217,6 +1204,22 @@ def _sources_registry():
         except Exception:
             _SOURCES_REG = False
     return _SOURCES_REG or None
+
+
+def _add_registry_cli_options(parser) -> int:
+    """从 PCB 注册表安装源特有 argparse 选项；返回安装数。
+
+    旗标、目标属性、类型、默认值和帮助文本均来自私有注册表。公开源码
+    不保存资源代号或调参副本；无包或旧注册表无该接口时零安装。
+    """
+    reg = _sources_registry()
+    getter = getattr(reg, "cli_options", None) if reg is not None else None
+    if not callable(getter):
+        return 0
+    specs = getter()
+    for spec in specs:
+        parser.add_argument(*spec["flags"], **spec["kwargs"])
+    return len(specs)
 
 
 def parse_cn_kv(pairs):
@@ -1442,10 +1445,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         file=sys.stderr,
     )
 
-    if not args.skip_cn01 and not _CN01_BUNDLE:
+    if not getattr(args, "skip_primary_batch", False) and not _CN01_BUNDLE:
         print("pcb bundle missing: batch-source phases skipped",
               file=sys.stderr)
-    if not args.skip_cn01 and _CN01_BUNDLE:
+    if not getattr(args, "skip_primary_batch", False) and _CN01_BUNDLE:
         # 批量通道代价高（批任务端到端慢），只投仍未定论的键；已由
         # 双免额单节点源定论的键（≥2 ok / ≥2 fail）跳过其复核。
         # 无 PCB 时整段跳过（fail-open，公开 CI/无包环境不触批量通道）。
@@ -1457,7 +1460,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             logging.debug("cn01 batch failed: %s", _err(exc))
             print(f"cn01 batch failed (skipped): {_err(exc)}", file=sys.stderr)
         # batch_http 失败/被限的 key 用 batch_tcping 补测（节点池更大，纯 TCP）
-        if not getattr(args, "skip_cn02", False):
+        if not getattr(args, "skip_fallback_batch", False):
             pending = [
                 item for item in _cn01_cands
                 if entries.get(item[1], {}).get(CN01_CODE, {}).get("status")
@@ -2215,20 +2218,6 @@ def main(argv=None) -> int:
                         help="cn27 站 API key（默认读 CHINA_CHECK_API_KEY，可选）")
     parser.add_argument("--tcpping-token", default="",
                         help="cn41 复核 token（默认读 TCPPING_CN_TOKEN env，缺则跳过）")
-    parser.add_argument("--cn01-nodes", type=int, default=CN01_NODES_PER_ISP,
-                        help=f"批量通道每大陆运营商取 N 节点（跨省等距采样；默认 {CN01_NODES_PER_ISP} → 共 {CN01_NODES_PER_ISP * 3}）")
-    parser.add_argument("--cn01-batch-size", type=int, default=CN01_BATCH_SIZE,
-                        help=f"批量通道每任务目标数（上限 {CN01_BATCH_SIZE}；默认 {CN01_BATCH_SIZE}）")
-    parser.add_argument("--cn01-concurrency", type=int, default=CN01_CONCURRENCY,
-                        help=f"批量通道并发任务数（默认 {CN01_CONCURRENCY}）")
-    parser.add_argument("--cn01-pacing", type=float, default=CN01_PACING,
-                        help=f"批量通道任务启动最小间隔秒（默认 {CN01_PACING}）")
-    parser.add_argument("--cn01-timeout", type=float, default=CN01_TASK_TIMEOUT,
-                        help=f"批量通道单任务收结果上限秒（默认 {CN01_TASK_TIMEOUT}）")
-    parser.add_argument("--skip-cn01", action="store_true",
-                        help="跳过批量通道探活 cn01（快速冒烟用）")
-    parser.add_argument("--skip-cn02", action="store_true",
-                        help="跳过 cn02 补测（cn01 失败时的大节点池降级）")
     parser.add_argument("--dry-run", action="store_true",
                         help="只输出计划，不做任何网络请求与写盘")
     parser.add_argument("--cn-latency-cap", type=float, default=CN_LATENCY_CAP_MS,
@@ -2250,6 +2239,7 @@ def main(argv=None) -> int:
                         help="列出 PCB 注册表全部代号与默认（code/plugin/"
                         "family/limit/concurrency；不含插件内部函数名），"
                         "无网络无写盘")
+    _add_registry_cli_options(parser)
     args = parser.parse_args(argv)
 
     api_key = args.api_key or os_environ("CHINA_CHECK_API_KEY")

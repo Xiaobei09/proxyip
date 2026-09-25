@@ -64,8 +64,8 @@ class TestCheckhostHttpWiring(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_cn01=True,
-            skip_cn02=True,
+            skip_primary_batch=True,
+            skip_fallback_batch=True,
                 
             workers=4,
             timeout=5,
@@ -187,8 +187,8 @@ class TestCheckhostPingWiring(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_cn01=True,
-            skip_cn02=True,
+            skip_primary_batch=True,
+            skip_fallback_batch=True,
                 
             workers=4,
             timeout=5,
@@ -1248,8 +1248,10 @@ class TestSlotTableBuilderR178(unittest.TestCase):
         if "ip-timeout" in by_bind:
             code = by_bind["ip-timeout"]
             e = reg.by_code(code)
-            mod = cc._load_pcb_plugin(e["plugin"])
-            with mock.patch.object(mod, e["func"],
+            alias = getattr(cc, f"{code}_check", None)
+            target = cc if callable(alias) else cc._load_pcb_plugin(e["plugin"])
+            name = f"{code}_check" if callable(alias) else e["func"]
+            with mock.patch.object(target, name,
                                    return_value={"ok": True}) as m:
                 table = cc._build_slot_table(9)
                 table[code]("1.2.3.4", "443")
@@ -1257,8 +1259,10 @@ class TestSlotTableBuilderR178(unittest.TestCase):
         if "ip-empty-timeout" in by_bind:
             code = by_bind["ip-empty-timeout"]
             e = reg.by_code(code)
-            mod = cc._load_pcb_plugin(e["plugin"])
-            with mock.patch.object(mod, e["func"],
+            alias = getattr(cc, f"{code}_check", None)
+            target = cc if callable(alias) else cc._load_pcb_plugin(e["plugin"])
+            name = f"{code}_check" if callable(alias) else e["func"]
+            with mock.patch.object(target, name,
                                    return_value={"ok": True}) as m:
                 table = cc._build_slot_table(9)
                 table[code]("1.2.3.4", "443")
@@ -1284,6 +1288,46 @@ class TestSlotTableBuilderR178(unittest.TestCase):
         code = next(iter(table))
         out = table[code]("1.2.3.4", "443")
         self.assertFalse(out.get("ok", True))
+
+
+class TestRegistryCliOptionsR181(unittest.TestCase):
+    """R181：源特有参数由 PCB 注册表安装，公开树不保存旗标/默认副本。"""
+
+    def _registry(self):
+        reg = cc._sources_registry()
+        if reg is None:
+            self.skipTest("needs PCB _sources bundle")
+        return reg
+
+    def test_installs_every_private_spec(self):
+        import argparse
+        reg = self._registry()
+        parser = argparse.ArgumentParser(add_help=False)
+        self.assertEqual(cc._add_registry_cli_options(parser), len(reg.cli_options()))
+        for spec in reg.cli_options():
+            kwargs = spec["kwargs"]
+            flag = spec["flags"][0]
+            argv = [flag]
+            if kwargs.get("action") != "store_true":
+                argv.append("3")
+            parsed = parser.parse_args(argv)
+            dest = kwargs.get("dest", flag[2:].replace("-", "_"))
+            expected = (True if kwargs.get("action") == "store_true"
+                        else type(kwargs["default"])(3))
+            self.assertEqual(getattr(parsed, dest), expected, spec)
+
+    def test_missing_registry_is_zero_install(self):
+        import argparse
+        from unittest import mock
+        parser = argparse.ArgumentParser(add_help=False)
+        with mock.patch.object(cc, "_sources_registry", return_value=None):
+            self.assertEqual(cc._add_registry_cli_options(parser), 0)
+
+    def test_batch_flags_and_defaults_absent_from_public_source(self):
+        import re
+        src = (Path(__file__).resolve().parent.parent / "scripts"
+               / "china_check.py").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r"--cn\d{2}(?:-|\b)", src), [])
 
 
 class TestListCnDiscoverability(unittest.TestCase):
@@ -1833,8 +1877,8 @@ class TestScarceQuotaAllocation(unittest.TestCase):
         from types import SimpleNamespace
 
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_cn01=True,
-            skip_cn02=True,
+            skip_primary_batch=True,
+            skip_fallback_batch=True,
                 
             workers=4,
             timeout=5,
@@ -2124,8 +2168,8 @@ class TestSlotRunnerCrashIsolation(unittest.TestCase):
         from types import SimpleNamespace
 
         return SimpleNamespace(cn_limit={"cn07": 1 if limits else 0, "cn08": 1 if limits else 0, "cn14": 1 if limits else 0, "cn16": 1 if limits else 0, "cn17": 1 if limits else 0, "cn30": 1 if limits else 0, "cn40": 1}, cn_concurrency={"cn07": 2, "cn08": 2, "cn14": 2, "cn16": 2, "cn17": 2, "cn30": 2}, cn_nodes={"cn30": 2}, 
-            skip_cn01=True,
-            skip_cn02=True,
+            skip_primary_batch=True,
+            skip_fallback_batch=True,
             
             workers=4,
             timeout=5,
@@ -2214,18 +2258,18 @@ class TestCn01RestrictedToUndecidedKeys(unittest.TestCase):
         from types import SimpleNamespace
 
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, 
-            skip_cn01=False,
-            skip_cn02=False,
+            skip_primary_batch=False,
+            skip_fallback_batch=False,
                 
             workers=4,
             timeout=5,
             api_key="",
             cn41_token="",
-            cn01_nodes=2,
-            cn01_batch_size=5,
-            cn01_concurrency=2,
-            cn01_pacing=0.0,
-            cn01_timeout=10,
+            batch_nodes=2,
+            batch_size=5,
+            batch_concurrency=2,
+            batch_pacing=0.0,
+            batch_timeout=10,
         )
 
     def test_cn01_sees_only_undecided_keys(self):
@@ -2612,7 +2656,7 @@ class TestTcptestHttpMergeVerdict(unittest.TestCase):
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn10": 0, "cn11": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 0, "cn32": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn10": 2, "cn30": 2, "cn31": 2, "cn32": 2}, cn_nodes={"cn30": 2}, 
-            skip_cn01=True, skip_cn02=True, 
+            skip_primary_batch=True, skip_fallback_batch=True,
             workers=4, timeout=5, api_key="", cn41_token="",
               
              
@@ -2708,7 +2752,7 @@ class TestTcptestPingMergeVerdict(unittest.TestCase):
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn11": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn30": 2, "cn31": 2}, cn_nodes={"cn30": 2}, 
-            skip_cn01=True, skip_cn02=True, 
+            skip_primary_batch=True, skip_fallback_batch=True,
             workers=4, timeout=5, api_key="", cn41_token="",
               
              
@@ -2800,7 +2844,7 @@ class TestTcptestTraceMergeVerdict(unittest.TestCase):
         from types import SimpleNamespace
 
         args = SimpleNamespace(cn_limit={"cn04": 0, "cn07": 0, "cn08": 0, "cn09": 0, "cn10": 0, "cn11": 0, "cn12": 0, "cn13": 0, "cn14": 0, "cn15": 0, "cn16": 0, "cn17": 0, "cn18": 0, "cn30": 0, "cn31": 0, "cn32": 0, "cn33": 1, "cn34": 0, "cn40": 0, "cn42": 0, "cn43": 0, "cn44": 0}, cn_concurrency={"cn04": 2, "cn10": 2, "cn12": 2, "cn30": 2, "cn31": 2, "cn32": 2, "cn33": 2}, cn_nodes={"cn30": 2}, 
-            skip_cn01=True, skip_cn02=True, 
+            skip_primary_batch=True, skip_fallback_batch=True,
             workers=4, timeout=5, api_key="", cn41_token="",
               
              
@@ -2938,8 +2982,8 @@ class TestCn01PingFallbackGuard(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, cn_concurrency={"cn40": 4}, 
-            skip_cn01=False,
-            skip_cn02=False,
+            skip_primary_batch=False,
+            skip_fallback_batch=False,
                 
             
             workers=4,
@@ -3058,8 +3102,8 @@ class TestPingpeTargetsUnresolvedKeys(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 10}, 
-            skip_cn01=False,
-            skip_cn02=True,
+            skip_primary_batch=False,
+            skip_fallback_batch=True,
                 
             workers=4,
             timeout=5,
@@ -3129,8 +3173,8 @@ class TestPingpeConcurrency(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 6}, cn_concurrency={"cn40": 4}, 
-            skip_cn01=True,
-            skip_cn02=True,
+            skip_primary_batch=True,
+            skip_fallback_batch=True,
                 
             
             workers=4,
@@ -3206,8 +3250,8 @@ class TestCn01TcpingFallbackGuard(unittest.TestCase):
     def _args(self):
         from types import SimpleNamespace
         return SimpleNamespace(cn_limit={"cn30": 0, "cn31": 0, "cn32": 0, "cn33": 0, "cn40": 0}, cn_concurrency={"cn40": 4}, 
-            skip_cn01=False,
-            skip_cn02=False,
+            skip_primary_batch=False,
+            skip_fallback_batch=False,
                 
             
             workers=4,
@@ -4451,7 +4495,7 @@ class TestSlotPhaseDispatchPerCode(unittest.TestCase):
         return SimpleNamespace(
             cn_limit={"cn30": 0, "cn40": 0, code: 1},
             cn_concurrency={code: 2},
-            skip_cn01=True, skip_cn02=True,
+            skip_primary_batch=True, skip_fallback_batch=True,
             workers=4, timeout=5, api_key="", tcpping_token="")
 
     def _boom(self, *a, **k):
@@ -4524,8 +4568,8 @@ class TestArgparseDestConsumed(unittest.TestCase):
     白名单三者居其一；死旗标（协议特有参数）即因此类
     审计发现，不再复发）。"""
 
-    PASSTHROUGH = {"cn01_nodes", "cn01_batch_size", "cn01_concurrency",
-                   "cn01_pacing", "cn01_timeout"}
+    PASSTHROUGH = {"batch_nodes", "batch_size", "batch_concurrency",
+                   "batch_pacing", "batch_timeout"}
 
     def test_all_dests_consumed(self):
         import ast
