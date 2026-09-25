@@ -983,6 +983,18 @@ class TestNormalizeExtResponse(unittest.TestCase):
         result = vp._normalize_ext_response({"name": "unknown"}, {})
         self.assertFalse(result["ok"])
 
+    def test_string_success_is_not_ok_r169(self):
+        """R169验证正确性：与 probe 侧同契约（字符串布尔非显式 True 不算
+        成功；两链同源同判，防 update/quality 链分叉）。"""
+        for name in ("090227", "cmliu"):
+            for bad in ("false", "true", 1, 0, None):
+                result = vp._normalize_ext_response({"name": name}, {
+                    "success": bad, "probe_results": {}})
+                self.assertIs(result["ok"], False, (name, bad))
+            result = vp._normalize_ext_response({"name": name}, {
+                "success": True, "probe_results": {}})
+            self.assertIs(result["ok"], True)
+
 
 class TestMergeExtVerdict(unittest.TestCase):
     def test_two_ok_sources_consensus(self):

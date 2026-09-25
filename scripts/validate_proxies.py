@@ -135,7 +135,9 @@ def _normalize_ext_response(source: dict, data: dict) -> dict:
         ipv6 = data.get("probe_results", {}).get("ipv6", {})
         return {
             "name": name,
-            "ok": bool(data.get("success")),
+            # R169：与 quality_probe.check_external_api 同契约——仅 JSON 布尔
+            # true 为成功（字符串 "false" 等 truthy 值不得漂移成成功）。
+            "ok": data.get("success") is True,
             "response_ms": data.get("responseTime"),
             "colo": data.get("colo"),
             "ipv4_ok": bool(ipv4.get("ok")),
