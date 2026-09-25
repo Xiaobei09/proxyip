@@ -104,6 +104,12 @@ class TestListExtraSources(unittest.TestCase):
         self.assertEqual(dp._redact_url_userinfo("https://example.com/a@b"),
                          "https://example.com/a@b")
         self.assertEqual(dp._redact_url_userinfo("notaurl"), "notaurl")
+        # R167网络健壮性：多 URL 同串＋10 万字符无 @ 病态输入（线性收敛）。
+        self.assertEqual(dp._redact_url_userinfo(
+            "https://a:b@h1/x https://c:d@h2/y"),
+            "https://***@h1/x https://***@h2/y")
+        big = "https://" + "a" * 100000
+        self.assertEqual(dp._redact_url_userinfo(big), big)
 
     def test_malformed_spec_echo_redacted_r161(self):
         """R161安全合规：畸形 --extra-source 回显须脱敏（凭证不进 CI 日志）；
