@@ -298,13 +298,13 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
 | `--api-key` | cn27 站 key（读 `CHINA_CHECK_API_KEY`） | 空 |
 | `--tcpping-token` | cn41 复核 token（读 `TCPPING_CN_TOKEN`） | 空 |
-| `--cn01-nodes` | cn01 每大陆运营商取节点数（`--cn01-nodes`×3 → 跨省等距采样） | 6 |
-| `--cn01-batch-size` | cn01 每任务目标数（上限 5） | 5 |
-| `--cn01-concurrency` | cn01 并发任务数 | 8 |
-| `--cn01-pacing` | cn01 两次任务启动最小间隔（秒） | 0.5 |
-| `--cn01-timeout` | cn01 单任务收结果上限（秒） | 45 |
-| `--skip-cn01` | 跳过 cn01 批量探测 | 关 |
-| `--skip-cn02` | 跳过 cn02 大节点池补测 | 关 |
+| `--batch-nodes` | 批量通道每大陆运营商取节点数（×3 → 跨省等距采样） | 8 |
+| `--batch-size` | 批量通道每任务目标数（上限 5） | 5 |
+| `--batch-concurrency` | 批量通道并发任务数 | 8 |
+| `--batch-pacing` | 批量通道两次任务启动最小间隔（秒） | 0.5 |
+| `--batch-timeout` | 批量通道单任务收结果上限（秒） | 45 |
+| `--skip-batch` | 跳过批量主通道探测 | 关 |
+| `--skip-batch-fallback` | 跳过批量主源失败时的大节点池降级补测 | 关 |
 | `--carrier-probe-limit` | 每轮补测缺失三运营商读数的目标上限（0=关闭，-1=全部） | 1000 |
 | `--dry-run` | 只输出计划（含sample/overrides），不发请求不写盘 | 关 |
 | `--list-cn` | 列出 PCB 注册表全部代号与默认（code/family/limit/concurrency，不含插件名与内部函数名；R100，无网络无写盘；无包时提示返回 2） | 关 |
@@ -626,12 +626,12 @@ cn01 批量大陆可达性探测已迁入私有检查包（PCB 私有仓，代�
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `--cn01-batch-size` | 每任务目标数 | 5 |
-| `--cn01-concurrency` | 同时批量任务数 | 见 china_check 表 |
-| `--cn01-nodes` | 抓取节点数 | 见 china_check 表 |
-| `--cn01-pacing` | 任务间隔节流（秒） | 见 china_check 表 |
-| `--skip-cn01` | 跳过 cn01 批量探测 | 关 |
-| `--skip-cn02` | 跳过 cn02 大节点池补测 | 关 |
+| `--batch-size` | 每任务目标数 | 5 |
+| `--batch-concurrency` | 同时批量任务数 | 见 china_check 表 |
+| `--batch-nodes` | 抓取节点数 | 见 china_check 表 |
+| `--batch-pacing` | 任务间隔节流（秒） | 见 china_check 表 |
+| `--skip-batch` | 跳过批量主通道探测 | 关 |
+| `--skip-batch-fallback` | 跳过批量主源失败时的大节点池降级补测 | 关 |
 
 ## `common.py` 共享模块：错误日志脱敏约定
 
