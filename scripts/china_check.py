@@ -19,37 +19,33 @@
 
 检测分层（均为无账号/免登录；每层通道身份/端点在 PCB 私有包中）：
 
-- L2 批量通道 cn01 实测（主源，全量，PCB 插件）：多节点、多运营商跨省
+- L2 批量通道实测（主源，全量，PCB 插件）：多节点、多运营商跨省
   等距采样，经 WebSocket 收结果，TCP 连通即判可达；节点返回 http_code>0
   时计应用层确认（level=http）——TLS 端口上明文探测收到的非 200 响应同样
   证明完整数据往返无 TCP 层干扰。
-- L2 cn02 补测（降级通道）：cn01 对某目标失败/被限时，改用纯 TCP 复测，
-  节点池更大（默认同口 8×3=24 节点），结果记为独立多节点源 ``cn02``。
-- L2 cn03 补测（ICMP 主机存活通道）：同上触发条件，改用 ICMP 复测——
-  结果记为独立多节点源 ``cn03``（``level`` 归一为 ``icmp`` 且不产
+- L2 补测（降级通道）：主源对某目标失败/被限时，改用纯 TCP 复测，
+  节点池更大（默认同口 8×3=24 节点），结果记为独立多节点源。
+- L2 补测（ICMP 主机存活通道）：同上触发条件，改用 ICMP 复测——
+  结果记为独立多节点源（``level`` 归一为 ``icmp`` 且不产
   ``isp_ms``，ICMP 不得进展示延迟，多节点 ICMP 源同口径）。
-- L2 单节点实测（并发）：`cn27`（单节点受限速）搭配 `cn20`（TCP）`、
-  `cn21`（ICMP，echo 校验防垃圾回显）、`cn22`（HTTP 状态码，`level="http"`）、
-  `cn23`（多端口扫描，仅授权端口产出证据）、`cn24`（TCP）、
-  `cn25`（ICMP 主机存活，不进延迟/不产 isp_ms）、`cn26`（TLS 握手，
-  `level="tcp"` 保守，只作布尔见证）、`cn28`（ICMP 消歧）、
-  `cn29`（HTTPS 应用层确认）——多只免额单节点源中任 2 ok 即双确认
-  （single_ok≥2→reachable），受限速的 cn27 不再是判定瓶颈。
-- L3 多节点复核（有界并发小样本）：`cn40`（约 13 个大陆节点，≥7/13 可达
-  即判可达）；`cn30`（免费 REST，大陆节点取子集做 TCP 探测，按节点成功率
-  判定）；`cn11`（持续 TCPing，多运营商节点）；`cn09`（多节点 TCPing，
-  HTTP SSE 测量单元）；`cn10`/`cn12`/`cn15`（ICMP，`level=icmp`，不产
-  `isp_ms`）；可选 `cn41`（多运营商，需站长签发 token，缺则自动跳过）；
-  `cn04`（独立运营商多城三网 TCPing，节点原生 per-ISP，端口直连）；
-  `cn32`（应用层确认，`status>0` 即确认，`level=http`，ms 取 connect_ms）；
-  `cn17`（多 TCP 节点 + 同通道 `cn18` ICMP、`cn19` MTR）。
+- L2 单节点实测（并发）：受限速单节点搭配 TCP、ICMP（echo 校验防垃圾
+  回显）、HTTP 状态码（`level="http"`）、多端口扫描（仅授权端口产出
+  证据）、TLS 握手（`level="tcp"` 保守，只作布尔见证）、ICMP 消歧、
+  HTTPS 应用层确认——多只免额单节点源中任 2 ok 即双确认
+  （single_ok≥2→reachable），受限速源不再是判定瓶颈。
+- L3 多节点复核（有界并发小样本）：大陆节点池（多数决可达即判可达）；
+  免费 REST（大陆节点取子集做 TCP 探测，按节点成功率判定）；持续
+  TCPing（多运营商节点）；多节点 TCPing（HTTP SSE 测量单元）；
+  ICMP（`level=icmp`，不产 `isp_ms`）；可选多运营商源（需站长签发
+  token，缺则自动跳过）；独立运营商多城三网 TCPing（节点原生
+  per-ISP，端口直连）；应用层确认（`status>0` 即确认，`level=http`，
+  ms 取 connect_ms）；多 TCP 节点＋同通道 ICMP/MTR。
 - 已于历史轮次评估并放弃若干通道（API 404 / 验证墙 / 路由迁移 / 无中国
   节点等）；完整身份与弃用记录见 PCB 文档，公开树不展开。
 
 保守判定逻辑（merge_verdict）：
-     多节点源（cn40/cn01/cn02/cn03/cn41/cn30/cn31/cn32/cn33/cn06/cn07/cn08/cn14/cn15/
-   cn17/cn18/cn19/cn16/cn11/cn12/cn09/cn10/cn04/cn05/cn42/cn34/cn35/cn43/cn44/cn13）任一 ok 且成功率达标 → reachable；
-   单节点源（cn27/cn28/cn29/cn20/cn21/cn22/cn23/cn24/cn25/cn26/cn36/cn37/cn38/cn39）≥2 个 ok → reachable；仅 1 个 ok → uncertain；
+     多节点源任一 ok 且成功率达标 → reachable；
+   单节点源 ≥2 个 ok → reachable；仅 1 个 ok → uncertain；
   单节点源 ≥2 个 fail → unreachable；
   多节点源 fail + 任一单节点源 fail → unreachable。
   证据分级（level）：任一成功源给出应用层确认 → "http"，仅传输层 → "tcp"，
@@ -120,8 +116,8 @@ from ws_transport import _WebSocket
 from ws_transport import WS_MAX_BUF as _WS_MAX_BUF
 from checks_bundle import load_plugin as _load_pcb_plugin
 
-# 批量通道（cn01 系）协议细节已迁入私有包（PCB）：有 bundle 时从插件取，无 bundle 时
-# cn01 系源整段跳过（fail-open；调参回退为历史公开值，仅用于 CLI 默认展示）。
+# 批量通道协议细节已迁入私有包（PCB）：有 bundle 时从插件取，无 bundle 时
+# 该系源整段跳过（fail-open；调参回退为历史公开值，仅用于 CLI 默认展示）。
 _CN01_BUNDLE = False
 try:
     _cn01 = _load_pcb_plugin("cn01")
@@ -150,7 +146,7 @@ except Exception:
 WS_MAX_BUF = _WS_MAX_BUF
 del _WS_MAX_BUF
 
-# cn04/cn05 双通道已迁入 PCB 插件 cn04：有 bundle 时取实现，
+# 双通道实现已迁入 PCB 私有插件：有 bundle 时取实现，
 # 无 bundle 时对应源 fail-open（_run_raw_slots 写 error 行，不崩）。
 _CN04_BUNDLE = False
 try:
@@ -161,7 +157,7 @@ try:
 except Exception:
     cn04_check = None
     cn05_check = None
-# cn06 已迁入 PCB 插件：有 bundle 时取实现，
+# 该通道实现已迁入 PCB 私有插件：有 bundle 时取实现，
 _CN06_BUNDLE = False
 try:
     _cn06 = _load_pcb_plugin("cn06")
@@ -172,7 +168,7 @@ except Exception:
     cn06_check = None
     CN06_CODE = "cn06"
 
-# cn07 已迁入 PCB 插件 cn07：有 bundle 时取实现（内部含快速重试），
+# 该通道实现已迁入 PCB 私有插件：有 bundle 时取实现（内部含快速重试），
 # 无 bundle 时 fail-open（_run_raw_slots 写 error 行）。
 _CN07_BUNDLE = False
 try:
@@ -202,9 +198,9 @@ TIMEOUT_DEFAULT = 10
 POLL_DEADLINE = 75.0
 POLL_INTERVAL = 3.0
 
-# cn27-cn29（呼和浩特阿里云单节点三端点：应用层 TCP/ICMP/HTTPS，免 key，
-# 匿名限速 5/10s + 250/h）已迁入 PCB 插件 cn27（协议细节见
-# pcb/docs/cn27.md）。名额由 run_measurements 用公共数值常量构造共享
+# 单节点三端点源族（应用层 TCP/ICMP/HTTPS，免 key，匿名限速）已迁入
+# PCB 私有插件（协议细节见私有包文档）。名额由 run_measurements
+# 用公共数值常量构造共享
 # 限速器；无 bundle 时三 check 为 None → 调用 TypeError → except → error
 # 行 fail-open。
 CN27_WINDOW_SEC = 10.0
@@ -232,8 +228,8 @@ except Exception:
     CN28_CODE = "cn28"
     CN29_CODE = "cn29"
 
-# cn20-cn23（北京 TCP / 枣庄 ICMP / 状态码 / 443 扫描，免 key JSON，
-# 单节点源族）已迁入 PCB 插件 cn20（协议细节见 pcb/docs/cn20.md）。
+# 单节点源族（TCP / ICMP / 状态码 / 端口扫描，免 key JSON）已迁入
+# PCB 私有插件（协议细节见私有包文档）。
 # 无 bundle 时 l2 循环写 fail-open（attr 为 None，except 兜底）。
 _CN20_BUNDLE = False
 try:
@@ -258,8 +254,8 @@ except Exception:
     CN23_CODE = "cn23"
 
 
-# cn24-cn26（TC ping / ICMP ping / TLS 握手，免 key 双镜像，
-# 宁波电信单节点源族）已迁入 PCB 插件 cn24（协议细节见 pcb/docs/cn24.md）。
+# 单节点源族（TC ping / ICMP ping / TLS 握手，免 key）已迁入
+# PCB 私有插件（协议细节见私有包文档）。
 # 无 bundle 时卡死源（None），L2 循环跳过。
 _CN24_BUNDLE = False
 try:
@@ -280,9 +276,8 @@ except Exception:
     CN26_CODE = "cn26"
 
 
-# cn40 —— 约 13 个大陆节点（antiflood + start_token 流程）已迁入
-# PCB 插件 cn40（协议细节见 pcb/docs/cn40.md）。无 bundle 时
-# _run_cn40_slots 写 fail-open。
+# 大陆节点池源（约 13 节点）已迁入 PCB 私有插件（协议细节见私有包文档）。
+# 无 bundle 时对应 runner 写 fail-open。
 _CN40_BUNDLE = False
 try:
     _cn40 = _load_pcb_plugin("cn40")
@@ -297,8 +292,8 @@ from china_engine import (
     merge_verdict, CN01_CODE, CN02_CODE, CN03_CODE,
     CN04_CODE, CN05_CODE, _cn_isp_label,
 )  # 判定引擎（拆分单向依赖；cc.* 名字保持可用）
-# cn41 —— 多运营商 TCPing，需站长签发的 token（缺则跳过）已迁入
-# PCB 插件 cn41（协议细节见 pcb/docs/cn41.md）。token 为运行期凭证，
+# 多运营商 TCPing 源（需站长签发的 token，缺则跳过）已迁入 PCB 私有插件
+# （协议细节见私有包文档）。token 为运行期凭证，
 # 仍由公开 CLI 注入（--tcpping-token / TCPPING_CN_TOKEN env），本站不藏 key。
 _CN41_BUNDLE = False
 try:
@@ -310,10 +305,10 @@ except Exception:
     cn41_check = None
     CN41_CODE = "cn41"
 
-# cn30-cn33（多节点 REST：TCP/ICMP/HTTP/路由，免 key，~146
-# 大陆节点取子集均衡采样）已迁入 PCB 插件 cn30（协议细节见
-# pcb/docs/cn30.md）。节点列表进程内缓存（插件内）；无 bundle 时
-# 三函数为 None → run_measurements 跳过节点拉取，_run_cn30_slots
+# 多节点 REST 源族（TCP/ICMP/HTTP/路由，免 key，大陆节点取子集均衡采样）
+# 已迁入 PCB 私有插件（协议细节见私有包文档）。节点列表进程内缓存
+# （插件内）；无 bundle 时三函数为 None → run_measurements 跳过节点拉取，
+# 对应 runner
 # 写 fail-open error 行。配置常量（NODES/CONCURRENCY/LIMIT_DEFAULT）
 # 由插件回绑，供 CLI 默认值与并发上界使用。
 _CN30_BUNDLE = False
@@ -342,11 +337,11 @@ except Exception:
     CN30_CONCURRENCY = 8
     CN30_LIMIT_DEFAULT = 150
 
-# cn07（大陆多节点 ICMP，REST+轮询）协议细节已迁入 PCB 插件；
+# 多节点 ICMP 源（REST+轮询）协议细节已迁入 PCB 私有插件；
 # 无 bundle 时该源 fail-open（_run_raw_slots 记 error 行）。
 
-# cn08 已迁入 PCB 插件 cn08：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
-# 协议细节见 pcb/docs/cn08.md），无 bundle 时 _run_cn08_slots 写 fail-open。
+# 该源实现已迁入 PCB 私有插件：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
+# 协议细节见私有包文档），无 bundle 时对应 runner 写 fail-open。
 _CN08_BUNDLE = False
 try:
     _cn08 = _load_pcb_plugin("cn08")
@@ -377,9 +372,8 @@ except Exception:
     cn16_check = None
     CN16_CODE = "cn16"
 
-# cn17/cn18/cn19（单键多节点 TCP 探测/同站 ICMP/同站 MTR）已迁入
-# PCB 插件 cn17（ALTCHA 会话 + SHA-256 PoW + WS 共享；协议细节见
-# pcb/docs/cn17.md）。无 bundle 时 _run_ws_source_slots 写 fail-open。
+# 单键多节点 TCP 探测源族（同站 ICMP/MTR；会话 + PoW + WS 共享）已迁入
+# PCB 私有插件（协议细节见私有包文档）。无 bundle 时对应 runner 写 fail-open。
 _CN17_BUNDLE = False
 try:
     _cn17 = _load_pcb_plugin("cn17")
@@ -397,9 +391,8 @@ except Exception:
     CN17_CODE = "cn17"
     CN18_CODE = "cn18"
     CN19_CODE = "cn19"
-# cn11 —— 免费大陆多节点持续 TCPing（socket.io v4 over WebSocket，零 key）：
-# cn11/cn12 已迁入 PCB 插件 cn11（socket.io-WS 多节点 TCPing/ICMP，零 key；
-# 协议细节见 pcb/docs/cn11.md）。无 bundle 时 _run_raw_slots 记 fail-open。
+# 免费大陆多节点持续 TCPing 源（WebSocket，零 key）已迁入 PCB 私有插件
+# （协议细节见私有包文档）。无 bundle 时对应 runner 记 fail-open。
 _CN11_BUNDLE = False
 try:
     _cn11 = _load_pcb_plugin("cn11")
