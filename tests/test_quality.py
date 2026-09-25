@@ -883,6 +883,8 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(sorted(flagged), ["abuse", "tor"])
 
     def test_static_list_sources_vote_and_score(self):
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         score, _r, flagged, _n = qc.vote_reputation(
             {"tor_exit": {"is_tor": True}}, self.W)
         self.assertEqual(score, 60)
@@ -938,6 +940,8 @@ class TestReputation(unittest.TestCase):
     def test_new_static_rep_sources_registered(self):
         """新增静态信誉源（blocklist.de 三类别 + dan.me.uk + Tor 出口冗余）
         全部默认启用、各有权重、能被 source_score 打分。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         for name in (
             "blocklist_de",
             "blocklist_de_ssh",
@@ -952,6 +956,8 @@ class TestReputation(unittest.TestCase):
 
     def test_blocklist_de_sources_vote_abuse(self):
         """blocklist.de 各类别命中 → abuse 维度。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         for name in ("blocklist_de", "blocklist_de_ssh", "blocklist_de_apache"):
             self.assertEqual(
                 qr._flag_opinions(name, {"is_abuse": True}), {"abuse": True})
@@ -969,6 +975,8 @@ class TestReputation(unittest.TestCase):
 
     def test_new_rep_static_sources_registered(self):
         """c2_tracker/botscout/greensnow/sslproxies/socks_proxy 默认启用。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         for name in ("c2_tracker", "botscout", "greensnow", "sslproxies",
                      "socks_proxy"):
             self.assertIn(name, qc.DEFAULT_REP_SOURCES)
@@ -979,6 +987,8 @@ class TestReputation(unittest.TestCase):
     def test_r214_rep_static_sources_registered(self):
         """R214：vpn_ips（X4BNet VPN 出口 CIDR）+ dshield（DShield /24
         攻击子网）        断言 vpn_ips 退默认（保留 opt-in 权重/派发），dshield 仍默认启用。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         for name in ("dshield",):
             self.assertIn(name, qc.DEFAULT_REP_SOURCES)
         for name in ("vpn_ips", "dshield"):
@@ -1058,6 +1068,8 @@ class TestReputation(unittest.TestCase):
 
     def test_abuseipdb_public_source_registered(self):
         """R251：abuseipdb_public 公共黑名单默认启用、有权重/静态分。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("abuseipdb_public", qc.DEFAULT_REP_SOURCES)
         self.assertIn("abuseipdb_public", qc.REPUTATION_WEIGHTS)
         self.assertIn("abuseipdb_public", qc.STATIC_LIST_SCORES)
@@ -1075,6 +1087,8 @@ class TestReputation(unittest.TestCase):
 
         温和口径：命中投 listed 票（非 abuse），静态 70，权重 2。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("wwuyi_unreachable", qc.DEFAULT_REP_SOURCES)
         self.assertIn("wwuyi_unreachable", qc.REPUTATION_WEIGHTS)
         self.assertIn("wwuyi_unreachable", qc.STATIC_LIST_SCORES)
@@ -1093,6 +1107,8 @@ class TestReputation(unittest.TestCase):
 
         口径略强于失联（静态 65），仍投 listed 票（非滥用定性）。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("wwuyi_blocked", qc.DEFAULT_REP_SOURCES)
         self.assertIn("wwuyi_blocked", qc.REPUTATION_WEIGHTS)
         self.assertIn("wwuyi_blocked", qc.STATIC_LIST_SCORES)
@@ -1111,6 +1127,8 @@ class TestReputation(unittest.TestCase):
 
         L1 超集（更广更噪）：listed 票，静态 50，权重 4。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("firehol_level2", qc.DEFAULT_REP_SOURCES)
         self.assertIn("firehol_level2", qc.REPUTATION_WEIGHTS)
         self.assertIn("firehol_level2", qc.STATIC_LIST_SCORES)
@@ -1129,6 +1147,8 @@ class TestReputation(unittest.TestCase):
 
         SSH 爆破榜（同 blocklist_de_ssh 信号族）：abuse 票，静态 45，权重 3。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("bruteforceblocker", qc.DEFAULT_REP_SOURCES)
         self.assertIn("bruteforceblocker", qc.REPUTATION_WEIGHTS)
         self.assertIn("bruteforceblocker", qc.STATIC_LIST_SCORES)
@@ -1147,6 +1167,8 @@ class TestReputation(unittest.TestCase):
 
         VNC 爆破榜（新信号族）：abuse 票，静态 45，权重 3。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("dataplane_vncrfb", qc.DEFAULT_REP_SOURCES)
         self.assertIn("dataplane_vncrfb", qc.REPUTATION_WEIGHTS)
         self.assertIn("dataplane_vncrfb", qc.STATIC_LIST_SCORES)
@@ -1165,6 +1187,8 @@ class TestReputation(unittest.TestCase):
 
         30 天审核 C2：abuse 票，静态 50，权重 4。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("drb_c2", qc.DEFAULT_REP_SOURCES)
         self.assertIn("drb_c2", qc.REPUTATION_WEIGHTS)
         self.assertIn("drb_c2", qc.STATIC_LIST_SCORES)
@@ -1183,6 +1207,8 @@ class TestReputation(unittest.TestCase):
 
         NordVPN 出口表（日更）：vpn 票，静态 55，权重 3。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("nordvpn_exits", qc.DEFAULT_REP_SOURCES)
         self.assertIn("nordvpn_exits", qc.REPUTATION_WEIGHTS)
         self.assertIn("nordvpn_exits", qc.STATIC_LIST_SCORES)
@@ -1201,6 +1227,8 @@ class TestReputation(unittest.TestCase):
 
         每日攻击者裸 IP（Maltrail 定性）：abuse 票，静态 50，权重 4。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("blackhole_monster", qc.DEFAULT_REP_SOURCES)
         self.assertIn("blackhole_monster", qc.REPUTATION_WEIGHTS)
         self.assertIn("blackhole_monster", qc.STATIC_LIST_SCORES)
@@ -1219,6 +1247,8 @@ class TestReputation(unittest.TestCase):
 
         10 天攻击源 htaccess：abuse 票，静态 50，权重 4。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("myipms_blacklist", qc.DEFAULT_REP_SOURCES)
         self.assertIn("myipms_blacklist", qc.REPUTATION_WEIGHTS)
         self.assertIn("myipms_blacklist", qc.STATIC_LIST_SCORES)
@@ -1237,6 +1267,8 @@ class TestReputation(unittest.TestCase):
 
         7 天蜜罐攻击者：abuse 票，静态 50，权重 4。
         """
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertIn("ipnoise", qc.DEFAULT_REP_SOURCES)
         self.assertIn("ipnoise", qc.REPUTATION_WEIGHTS)
         self.assertIn("ipnoise", qc.STATIC_LIST_SCORES)
@@ -1312,7 +1344,8 @@ class TestReputation(unittest.TestCase):
         派发分支，且每个静态分源都在权重表内。
 
         防「新增源只登记权重、忘接派发」→ 该源静默空转（永不查询/投票），
-        分数被悄悄拉低却无任何报错。以源码文本做静态不变量校验。"""
+        分数被悄悄拉低却无任何报错。以源码文本做静态不变量校验（权重半；
+        分值半 M2b 后改运行时表，真相源在 PCB，见 TestScoresParityR173）。"""
         root = Path(__file__).resolve().parents[1]
         src = (root / "scripts" / "quality_reputation.py").read_text(
             encoding="utf-8")
@@ -1325,11 +1358,7 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(
             set(weight_keys) - dispatched, set(),
             "REPUTATION_WEIGHTS 中的源缺派发分支")
-        static_match = re.search(
-            r"STATIC_LIST_SCORES\s*=\s*\{(.*?)\n\}", src, re.S)
-        self.assertIsNotNone(static_match)
-        static_keys = set(re.findall(
-            r'"([a-z0-9_]+)"\s*:', static_match.group(1)))
+        static_keys = set(qr.STATIC_LIST_SCORES)
         self.assertEqual(
             static_keys - set(weight_keys), set(),
             "STATIC_LIST_SCORES 含不在权重表内的源")
@@ -1513,6 +1542,8 @@ class TestReputation(unittest.TestCase):
 
     def test_new_rep_abuse_sources_vote_abuse(self):
         """c2_tracker/botscout/greensnow 命中 → abuse 维度。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         for name in ("c2_tracker", "botscout", "greensnow"):
             self.assertEqual(
                 qr._flag_opinions(name, {"is_abuse": True}), {"abuse": True})
@@ -1523,6 +1554,8 @@ class TestReputation(unittest.TestCase):
 
     def test_new_rep_proxy_sources_vote_proxy(self):
         """sslproxies/socks_proxy 命中 → proxy 维度（独立代理族证据）。"""
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         for name in ("sslproxies", "socks_proxy"):
             self.assertEqual(
                 qr._flag_opinions(name, {"is_proxy": True}), {"proxy": True})
@@ -1893,6 +1926,8 @@ class TestReputation(unittest.TestCase):
         self.assertIsNone(qc.norm_asn("Google LLC"))
 
     def test_source_score_new_sources(self):
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertEqual(qc.source_score("ipquery", {"risk_score": 20}), 80)
         self.assertEqual(qc.source_score("ipquery", {"is_vpn": True}), 70)
         self.assertEqual(
@@ -3395,6 +3430,8 @@ class TestNewReputationSources(unittest.TestCase):
         self.assertEqual(qr.source_score("iplocation", {"isp": "X"}), 100)
 
     def test_source_score_new_static_lists(self):
+        if not qr.STATIC_LIST_SCORES:
+            self.skipTest("needs PCB rep_static bundle")
         self.assertEqual(qr.source_score("cins", {"is_listed": True}), 50)
         self.assertIsNone(qr.source_score("cins", {}))
         self.assertEqual(qr.source_score("et_compromised", {"is_abuse": True}), 45)

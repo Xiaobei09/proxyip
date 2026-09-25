@@ -162,45 +162,9 @@ GREYNOISE_FLAG_PENALTIES = {
     "is_bot": 35,     # riot=true（僵尸网络成员）
     "is_noise": 15,   # 噪音扫描（低危但具干扰性）
 }
-STATIC_LIST_SCORES = {
-    "abuse_list": 60,   # is_abuse（历史滥用，强信号）
-    "ipsum": 55,        # is_listed（3+ 黑名单交叉确认）
-    "dc_asn": 85,       # is_hosting（机房/数据中心）
-    "vpn_asn": 70,      # is_vpn
-    "resproxy_asn": 75, # is_proxy（住宅代理骨干）
-    "tor_exit": 45,     # is_tor（Tor 出口节点实时列表）
-    "spamhaus": 55,     # is_listed（Spamhaus DROP/EDROP 端用户高风险网段）
-    "cins": 50,         # is_listed（CINS Army 活跃滥用/拒绝服务 IP）
-    "et_compromised": 45,  # is_abuse（EmergingThreats 被入侵主机回连）
-    "feodo": 40,         # is_abuse（Feodo 僵尸网络 C2）
-    "blocklist_de": 50,  # is_abuse（blocklist.de 僵尸/暴力破解滥用）
-    "blocklist_de_ssh": 45,  # is_abuse（SSH 暴力破解源）
-    "bruteforceblocker": 45,  # is_abuse（BruteForceBlocker SSH 爆破榜）
-    "dataplane_vncrfb": 45,  # is_abuse（dataplane.org VNC 爆破榜）
-    "drb_c2": 50,  # is_abuse（drb-ra 30 天审核 C2）
-    "nordvpn_exits": 55,  # is_vpn（drb-ra NordVPN 出口表，日更）
-    "blackhole_monster": 50,  # is_abuse（blackhole.monster 每日攻击者）
-    "myipms_blacklist": 50,  # is_abuse（myip.ms 10 天攻击源）
-    "ipnoise": 50,  # is_abuse（IPnoise 7 天蜜罐攻击者）
-    "blocklist_de_apache": 45,  # is_abuse（Web 探测/攻击源）
-    "danmeuk_tor": 40,   # is_tor（dan.me.uk Tor 节点，覆盖更全）
-    "tor_bulk": 35,      # is_tor（Tor 出口冗余源）
-    "urlhaus": 55,       # is_abuse（abuse.ch URLhaus 恶意软件分发托管）
-    "threatfox": 55,     # is_abuse（abuse.ch ThreatFox 恶意软件 IOC/C2）
-    "firehol_level1": 60,  # is_listed（FireHOL 最严封禁集）
-    "firehol_level2": 50,  # is_listed（L1 超集，更广更噪，口径略弱）
-    "binarydefense": 55,   # is_abuse（Binary Defense 恶意 IP 封禁集）
-    "c2_tracker": 55,      # is_abuse（C2 命令与控制基础设施）
-    "botscout": 45,        # is_abuse（僵尸网络/抓取机器人源）
-    "greensnow": 50,       # is_abuse（GreenSnow 活跃攻击/DDoS/扫描）
-    "sslproxies": 60,      # is_proxy（活跃 SSL 代理，独立代理族证据）
-    "socks_proxy": 60,     # is_proxy（活跃 SOCKS 代理，独立代理族证据）
-    "vpn_ips": 55,          # is_vpn（X4BNet VPN 出口 CIDR，覆盖面大）
-    "dshield": 50,          # is_abuse（DShield 社区封禁攻击 /24 子网）
-    "abuseipdb_public": 55,  # is_abuse（AbuseIPDB 近 30 天高置信滥用举报）
-    "wwuyi_unreachable": 70,  # is_listed（第三方实测不可达，非滥用，温和）
-    "wwuyi_blocked": 65,  # is_listed（同站维护者拉黑，略强，仍非滥用）
-}
+# M2b：分值表已迁 PCB rep_static（经下方 _REP_STATIC_BUNDLE loader
+# 回绑 STATIC_LIST_SCORES；无包时为空表，source_score 对应信号计
+# None fail-open。原 37 项已删，见插件与 TestScoresParityR173）。
 REPUTATION_WEIGHTS = {
     "netcoffee": 20,
     "ncgy": 10,
@@ -660,6 +624,7 @@ try:
     fetch_abuseipdb_public = _rep_static.fetch_abuseipdb_public
     fetch_wwuyi_unreachable = _rep_static.fetch_wwuyi_unreachable
     fetch_wwuyi_blocked = _rep_static.fetch_wwuyi_blocked
+    STATIC_LIST_SCORES = _rep_static.STATIC_LIST_SCORES
     _REP_STATIC_BUNDLE = True
 except Exception:
     fetch_cins_badguys = None
@@ -699,6 +664,7 @@ except Exception:
     fetch_abuseipdb_public = None
     fetch_wwuyi_unreachable = None
     fetch_wwuyi_blocked = None
+    STATIC_LIST_SCORES = {}
 
 
 _REP_FREEIPAPI_BUNDLE = False
