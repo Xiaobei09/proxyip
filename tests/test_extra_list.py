@@ -85,6 +85,64 @@ class TestListExtraSources(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
         self.assertIn("--list-extra-sources", buf.getvalue())
 
+    def test_redact_url_userinfo_r161(self):
+        """R161安全合规：userinfo 脱敏（正常 URL 原样，无 userinfo 不误伤）。"""
+        self.assertEqual(dp._redact_url_userinfo("https://u:p@example.com/x"),
+                         "https://***@example.com/x")
+        self.assertEqual(dp._redact_url_userinfo("plain,https://u:p@h/x"),
+                         "plain,https://***@h/x")
+        self.assertEqual(dp._redact_url_userinfo("https://example.com/a@b"),
+                         "https://example.com/a@b")
+        self.assertEqual(dp._redact_url_userinfo("notaurl"), "notaurl")
+
+    def test_malformed_spec_echo_redacted_r161(self):
+        """R161安全合规：畸形 --extra-source 回显须脱敏（凭证不进 CI 日志）；
+        未知 kind 回显同理（经 load_extras 真分支，fetch 已 mock）。"""
+        patchers = [
+            mock.patch.object(
+                dp, "load_source",
+                return_value=({"443": {"US": ["1.1.1.1"]}}, None),
+            ),
+            mock.patch.object(dp, "load_extras", return_value=({}, set(), {})),
+            mock.patch.object(dp, "enrich_countries", return_value=0),
+            mock.patch.object(dp, "write_outputs", return_value=(
+                {"__total__": 1, "__unique__": 1, "__countries__": 1,
+                 "__ports__": 1, "__sets__": {}, "443": 1},
+                ["1.1.1.1:443#US"],
+            )),
+            mock.patch.object(dp, "write_source_attribution"),
+            mock.patch.object(dp, "_append_source_history"),
+            mock.patch.object(dp, "_build_source_stats", return_value={}),
+            mock.patch.object(dp, "write_text_if_changed"),
+            mock.patch.object(dp, "load_previous_all", return_value=[]),
+            mock.patch.object(dp, "write_diff", return_value=(0, 0)),
+            mock.patch.object(dp, "append_history"),
+            mock.patch.object(dp, "print_stats"),
+            mock.patch.object(dp, "write_upstream_meta"),
+        ]
+        for p in patchers:
+            p.start()
+        try:
+            err = io.StringIO()
+            with redirect_stderr(err):
+                self.assertEqual(dp.main(
+                    ["--extra-source", "https://u:p@example.com/x"]), 0)
+            self.assertIn("Ignoring malformed", err.getvalue())
+            self.assertIn("***@", err.getvalue())
+            self.assertNotIn("u:p@", err.getvalue())
+        finally:
+            for p in patchers:
+                p.stop()
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(dp, "_fetch_extra_retry",
+                               return_value=b"1.1.1.1\n"):
+            with redirect_stderr(err):
+                by_port, _, _ = dp.load_extras(
+                    [("xmlbogus", "https://u:p@example.com/x")], timeout=1)
+        self.assertEqual(by_port, {})
+        self.assertIn("***@", err.getvalue())
+        self.assertNotIn("u:p@", err.getvalue())
+
     def test_help_cross_references_list_flag_r159(self):
         """R159功能查找：关联旗标 help 须互指发现口（R143 闭环的下载侧
         对应；固定 COLUMNS 使断言宽度无关，否则窄终端会硬截长 token）。"""

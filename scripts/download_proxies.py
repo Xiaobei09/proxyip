@@ -181,6 +181,12 @@ def list_extra_sources() -> int:
     return 0
 
 
+def _redact_url_userinfo(text: str) -> str:
+    """隐去文本中 URL 的 userinfo（防 ``user:pass@`` 随 stderr 进 CI 日志，
+    R161 安全合规；无 userinfo 的文本原样返回）。"""
+    return re.sub(r"(?<=://)[^/]*@", "***@", text)
+
+
 # ``all.json``/``all.zip``/``all.txt`` 等通用清单名会被多个镜像共用，仅取
 # 文件名主干会产生 ``all`` 碰撞（互覆 stats/归属/健康监控）。此时用
 # 注册域作前缀消歧（如 ``mirror-a/all``、``mirror-b/all``）；其余来源
@@ -1256,7 +1262,8 @@ def load_extras(
             return extract_json_extra(content)
         if kind == "ipnote":
             return extract_annotated_ports(content)
-        print(f"Skipping unknown extra source kind {kind!r} ({url})",
+        print(f"Skipping unknown extra source kind {kind!r} "
+              f"({_redact_url_userinfo(url)})",
               file=sys.stderr)
         return {}
 
@@ -1404,7 +1411,8 @@ def main(argv: list[str] | None = None) -> int:
         for spec in args.extra_source:
             kind, sep, url = spec.partition(",")
             if not sep or not url or not kind:
-                print(f"Ignoring malformed --extra-source {spec!r}",
+                print(f"Ignoring malformed --extra-source "
+                      f"{_redact_url_userinfo(spec)!r}",
                       file=sys.stderr)
                 continue
             extra_sources.append((kind, url))
