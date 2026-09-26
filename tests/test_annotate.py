@@ -379,9 +379,17 @@ class TestExitCountryConvergence(unittest.TestCase):
 
     ROOT = Path(__file__).resolve().parent.parent
 
-    #: 出口实测覆盖率地板（``geo_checked`` 占比）。实测 72.3%；留 12 个百分点
-    #: 余量吸收机器人重跑的自然波动，跌破则说明探测覆盖**退化**而非波动。
-    GEO_COVERAGE_FLOOR = 0.60
+    #: 出口实测覆盖率**防断地板**（``geo_checked`` 占比）。
+    #:
+    #: R237 修正：R231 曾把地板设为 **0.60**，理由是「实测 72.3%，留 12 个
+    #: 点余量」。那是**错的判据**——覆盖率并不度量数据质量，而是度量
+    #: **quality-check 这个 job 跑了多久**：ip-api 免费档限速 45 req/min，
+    #: 17342 条要 ~6.4h，而 job 有墙钟预算，早停即降覆盖。实测同一份代码在不同时
+    #: 长的 run 里得到 72.3% 与 26.8%，故 0.60 的地板必然被正常波动打穿。
+    #:
+    #: 现改为**防断地板 0.10**：只拦「geo 相位整体失效」这类真事故，不冒充
+    #: 覆盖率目标。真正的覆盖率治理属相位预算调参（cn/quality 侧），不在本门禁。
+    GEO_COVERAGE_FLOOR = 0.10
 
     def _published(self):
         d = self.ROOT / "data" / "quality"
@@ -471,9 +479,10 @@ class TestExitCountryConvergence(unittest.TestCase):
         ratio = checked / len(px)
         self.assertGreaterEqual(
             ratio, self.GEO_COVERAGE_FLOOR,
-            f"出口实测覆盖率 {ratio:.1%}（{checked}/{len(px)}）跌破地板 "
-            f"{self.GEO_COVERAGE_FLOOR:.0%}——探测覆盖退化，出口符合性将大面积"
-            f"无法判定")
+            f"出口实测覆盖率 {ratio:.1%}（{checked}/{len(px)}）跌破**防断**"
+            f"地板 {self.GEO_COVERAGE_FLOOR:.0%}——geo 相位疑似整体失效"
+            f"（注意：正常波动可低至 ~25%，因 ip-api 限速 45 req/min 撞墙钟"
+            f"预算早停；本门禁不度量覆盖率目标，只拦整体失效）")
 
     def test_multi_exit_ips_stay_a_small_minority(self):
         """多出口 IP（同一 IP 观测到 >1 个出口国）应始终是少数。

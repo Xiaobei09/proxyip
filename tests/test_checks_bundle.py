@@ -353,15 +353,22 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
     实测不一致——``abuse`` 24230、``static`` 2 处对不上，已弃用）。
 
     存量以**计数棘轮**表达：只许下降，不许上升；方向感知双向断言。
+
+    **R237 收尾**：``quality-check`` 带本轮去身份跑完（2026-09-26T10:12Z）后，
+    ``reputation_cache.json``（360826 → **0**）、``ipinfo.json``
+    （320824 → **0**）、``reputation.json``（308225 → **0**）全部归零，
+    连同 ``external_check`` / ``upstream_meta`` 共 5 个文件清零——即本族在
+    ``data/quality/`` 下已彻底迁移完毕。仅余 ``data/valid/`` 下两项
+    （14963 + 6054）属另一条产出路径，尚未接线。
     """
 
     ROOT = Path(__file__).resolve().parent.parent
 
     #: 各文件允许残留的「词表内真名」出现数上限（棘轮，只降不升）。
     BASELINES = {
-        "data/quality/reputation_cache.json": 360826,
-        "data/quality/ipinfo.json": 320824,
-        "data/quality/reputation.json": 308225,
+        "data/quality/reputation_cache.json": 0,
+        "data/quality/ipinfo.json": 0,
+        "data/quality/reputation.json": 0,
         "data/valid/reputation_cache.json": 14963,
         "data/valid/reputation.json": 6054,
         "data/quality/external_check.json": 0,
@@ -598,11 +605,11 @@ class TestDownloadVendorNamesInData(unittest.TestCase):
     #: 各文件允许的厂商名出现数上限（棘轮，只降不升）。**已归零的文件也列入**
     #: （基线 0）——否则它们会静默回退而无人察觉。
     BASELINES = {
-        "data/quality/ipinfo.json": 168,
-        "data/quality/reputation.json": 168,
+        "data/quality/ipinfo.json": 0,
+        "data/quality/reputation.json": 0,
         "data/quality/source_history.json": 117,
-        "data/quality/source_quality.json": 7,
-        "data/output/source_quality_report.txt": 7,
+        "data/quality/source_quality.json": 0,
+        "data/output/source_quality_report.txt": 0,
         "data/quality/ip_sources.json": 0,
         "data/quality/source_stats.json": 0,
     }
