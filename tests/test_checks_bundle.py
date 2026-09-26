@@ -342,7 +342,8 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
     ``reputation_cache.json`` 407227（每 IP 字典以**源名为键**）、
     ``ipinfo.json`` 323371、``reputation.json`` 310770、
     ``data/valid/reputation_cache.json`` 19871、
-    ``data/valid/reputation.json`` 6054、``external_check.json`` 8、
+    ``data/valid/reputation.json`` 6054（此二项已于 R238 查明为孤儿产物并删除）、
+    ``external_check.json`` 8、
     ``upstream_meta.json`` 3。这是本轮实测中**最大的一处泄漏面**。
 
     公开侧代码早已把三表迁入 PCB（公开树零字面），但真名是**运行时从私有包
@@ -358,8 +359,14 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
     ``reputation_cache.json``（360826 → **0**）、``ipinfo.json``
     （320824 → **0**）、``reputation.json``（308225 → **0**）全部归零，
     连同 ``external_check`` / ``upstream_meta`` 共 5 个文件清零——即本族在
-    ``data/quality/`` 下已彻底迁移完毕。仅余 ``data/valid/`` 下两项
-    （14963 + 6054）属另一条产出路径，尚未接线。
+    ``data/quality/`` 下已彻底迁移完毕。
+
+    **R238** 补清最后两项：``data/valid/reputation{,_cache}.json``（14963+6054）
+    经查是 **R452 脱敏压squash（2026-09-21）的孤儿产物**——**无任何脚本产出、
+    无任何脚本消费**（``data/valid/`` 下的 glob 只扫 ``*.txt``），且是
+    ``data/quality/`` 同名文件的**陈旧副本**（2454 / 905 条 vs 22662 / 17342 条）。
+    故直接删除而非迁移：当前数据在 ``data/quality/`` 且已去身份，删除不丢信息。
+    另加 ``test_orphan_valid_reputation_artifacts_stay_deleted`` 防复活。
     """
 
     ROOT = Path(__file__).resolve().parent.parent
@@ -369,8 +376,6 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
         "data/quality/reputation_cache.json": 0,
         "data/quality/ipinfo.json": 0,
         "data/quality/reputation.json": 0,
-        "data/valid/reputation_cache.json": 14963,
-        "data/valid/reputation.json": 6054,
         "data/quality/external_check.json": 0,
         "data/quality/upstream_meta.json": 0,
     }
@@ -447,6 +452,24 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
                     self.fail(
                         f"{rel}：词表内信誉数据源名降至 {found.get(rel, 0)}"
                         f"（基线 {b}）——**该下调 BASELINES**")
+
+    def test_orphan_valid_reputation_artifacts_stay_deleted(self):
+        """R238：``data/valid/`` 下那两个孤儿产物**不得复活**。
+
+        它们是 R452 脱敏压squash 的遗留：无生产者、无消费者，且是
+        ``data/quality/`` 同名文件的陈旧副本，却仍带 21017 处信誉数据源
+        真名。加此断言是为了在**写出的当轮**就抓住回归——若将来有人新增脚本
+        往 ``data/valid/`` 写信誉 JSON（那本身就是错位置：信誉产物属
+        ``data/quality/``），而不是又攒出一批真名等下一轮清理。
+        """
+        for rel in ("data/valid/reputation.json",
+                    "data/valid/reputation_cache.json"):
+            with self.subTest(path=rel):
+                self.assertFalse(
+                    (self.ROOT / rel).exists(),
+                    f"{rel} 复活了——它无生产者无消费者，且是 data/quality/ "
+                    f"同名文件的陈旧副本；信誉产物应只写 data/quality/ "
+                    f"（并经 rep_public_id 去身份）")
 
     def test_scan_actually_detects_injected_name(self):
         """自证：判据必须真能命中（注入一个词表内真名 → 计数上升）。"""
