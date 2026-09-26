@@ -763,38 +763,35 @@ class TestCnCodenamesRatchetedDown(unittest.TestCase):
 
     ROOT = Path(__file__).resolve().parent.parent
 
-    #: 代码/文档/CI 各文件允许的 CNXX 命中**行数**上限（棘轮，只降不升）。
+    #: 代码/文档/CI 各文件允许的**通道代号**命中**行数**上限（棘轮，只降不升）。
+    #:
+    #: R242 依 ``_rx()`` 的精确判据（``cn01``–``cn44``）重算。**7 个文件归零**，
+    #: 它们的旧计数**全部**来自视图家族后缀（``cn``/``cn4``/``cn6``/``cn46``）
+    #: 的假阳性：``tests/test_validate.py``(14)、``scripts/validate_proxies.py``(6)、
+    #: ``README.md``(5)、``docs/data-spec.md``(4)、``docs/scripts.md``(1)、
+    #: ``scripts/export_json.py``(1)、``scripts/quality_check.py``(1)、
+    #: ``tests/test_export_json.py``(1)。归零后转为**绝对断言**。
+    #: 另有两处因 help 文本/断言改写小幅下降：``tests/test_china_check.py``
+    #: 243→241、``tests/test_build_good.py`` 4→4（本轮无改动，维持）。
     CODE_BASELINES = {
-        # R241：250 → 243。CI 行的 26 行调参表改用不透明 id 后，两条指名锁
-        # （CN-01 大陆省运营商节点 TCPing 通道、CN-02 同级预算通道）并入既有
-        # 表驱动测试，rationale 一并迁入其 docstring；表由「只锁复核条数」扩为
-        # 「条数＋并发」双列并加**通道集合等长**断言（覆盖只增不减）。
-        "tests/test_china_check.py": 243,
-        # R241：173 → 172。``--cn-limit`` 的 help 文本原带示例代号
-        # ``--cn-limit cn30=800``，已泛化为 ``<id>=800`` 并在同串说明
-        # 「键可为注册表代号或不透明 id，推荐后者——见 --list-cn」。
+        "tests/test_china_check.py": 241,
         "scripts/china_check.py": 172,
         "scripts/china_engine.py": 64,
-        # R241：26 → **0**。``--cn-limit``/``--cn-concurrency`` 自 R240 起
-        # 接受不透明 id，故 china-check.yml 的 26 行批量通道调参表整体改为
-        # ``--cn-limit src_…=N``（**52 处**出现：每行 limit+concurrency 两个
-        # flag）。等价性已机械验证：经生产入口 ``parse_cn_kv`` 解回的
-        # ``{code: int}`` 与原表**逐项全等**。归零后本行转为绝对断言。
         ".github/workflows/china-check.yml": 0,
         "tests/test_common.py": 25,
-        "tests/test_validate.py": 14,
-        "scripts/validate_proxies.py": 6,
-        "README.md": 5,
+        "tests/test_validate.py": 0,
+        "scripts/validate_proxies.py": 0,
+        "README.md": 0,
         "tests/test_build_good.py": 4,
-        "docs/data-spec.md": 4,
+        "docs/data-spec.md": 0,
         "scripts/common.py": 2,
         "scripts/generate_stats.py": 2,
         "scripts/health_alert.py": 2,
-        "scripts/export_json.py": 1,
-        "scripts/quality_check.py": 1,
-        "tests/test_export_json.py": 1,
+        "scripts/export_json.py": 0,
+        "scripts/quality_check.py": 0,
+        "tests/test_export_json.py": 0,
         "tests/test_stats.py": 1,
-        "docs/scripts.md": 1,
+        "docs/scripts.md": 0,
     }
 
     #: data/ 各文件允许的 CNXX **出现次数**上限（棘轮，只降不升）。
@@ -810,11 +807,59 @@ class TestCnCodenamesRatchetedDown(unittest.TestCase):
 
     @classmethod
     def _rx(cls):
+        r"""**通道代号**的精确判据：``cn01``–``cn44``（R242）。
+
+        R242 修正一个**系统性假阳性**：原判据是 ``cn\d{1,2}``，它把
+        **视图家族后缀** ``cn``/``cn4``/``cn6``/``cn46`` 一并当成通道代号
+        （``cn`` = 大陆可达、``cn4`` = 大陆可达且 IPv4 出口，是公开的清单
+        命名，不是来源身份）。实测两族与注册表**零交集**（注册表 44 个通道
+        全为两位补零 ``cn01``–``cn44``），旧判据因此虚高 **32 行 / 6%**。
+
+        后果不只是数字不准：真代号清零后旧判据**永远归不了零**
+        （``README.md``/``docs`` 的家族后缀会一直计数），门禁会永久
+        「狼来了」——按 R227 的教训，那比没有门禁更糟。
+
+        精确范围由**注册表实测**得出（``cn01``…``cn44``，44 个），
+        并由 ``test_fallback_range_matches_registry`` 在注册表可得时
+        **逐个校验**，防止硬编码范围与真相源漂移。
+        """
         if cls._RX is None:
             import re
-            cls._RX = re.compile(r"(?<![A-Za-z0-9_])cn\d{1,2}(?![A-Za-z0-9_])",
-                                re.IGNORECASE)
+            cls._RX = re.compile(
+                r"(?<![A-Za-z0-9_])cn(?:0[1-9]|[1-3]\d|4[0-4])(?![A-Za-z0-9_])",
+                re.IGNORECASE)
         return cls._RX
+
+    def test_fallback_range_matches_registry(self):
+        """R242：``_rx()`` 里硬编码的通道范围必须**等于**注册表真相。
+
+        精确判据是「无 PCB 包时也能用」的**降级路径**（硬性约束 5：缺依赖
+        须跳过/降级，不得让门禁在无包环境硬失败）。降级路径天然有漂移风险——
+        注册表将来新增 ``cn45`` 时，硬编码的 ``4[0-4]`` 会**静默漏掉**它。
+
+        故在注册表可得时**逐个双向核对**：注册表里的每个代号必须被 ``_rx()``
+        命中，且 ``_rx()`` 不得命中注册表之外的任何 ``cnNN`` 形态。
+        无包时跳过（fail-open）。
+        """
+        import china_engine as ce
+        try:
+            reg = ce._load_pcb_plugin("_sources")
+        except Exception:
+            self.skipTest("私有注册表不可得：降级判据无法对账（fail-open）")
+        rx = self._rx()
+        codes = set(reg.codes())
+        self.assertTrue(codes, "注册表返回空代号集")
+        missed = sorted(c for c in codes if not rx.search(c))
+        self.assertEqual(
+            missed, [],
+            "注册表里的通道未被降级判据覆盖——将来新增通道会**静默漏检**，"
+            f"须同步 _rx() 的范围：{missed}")
+        # 反向：降级判据不得命中注册表之外的 cnNN 形态
+        extra = sorted({f"cn{i:02d}" for i in range(0, 100)} - codes)
+        hit_extra = [t for t in extra if rx.search(t)]
+        self.assertEqual(
+            hit_extra, [],
+            f"降级判据命中了注册表之外的形态（范围写宽了）：{hit_extra}")
 
     def test_cn_codenames_in_code_ratcheted_down(self):
         rx = self._rx()
