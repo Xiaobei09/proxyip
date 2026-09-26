@@ -466,6 +466,116 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
                          f"注入 {probe!r} 后判据未命中——门禁失效")
 
 
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，权威表不可用")
+class TestStaticFetchBindingNames(unittest.TestCase):
+    """R235：静态表取数函数的**绑定面**不得在公开树按名硬写（安全合规）。
+
+    为什么按「代码形态」而非「词表」判定：词表判定会**误报**——本族源名里
+    ``abuse``（158 处）、``static``（50 处）既是源名又是通用英文词，
+    ``ip-api``/``dnsbl`` 兼作类别词。R227 的教训是**不可靠判据不能进门禁**
+    （漏报或误报都给假信心，比没门禁更糟）。故本门禁以私有包
+    ``rep_static._static_fetch_attrs()``（**自派生**，与模块实际导出严格
+    一致，有测试自证）为权威，只匹配**完整属性名** ``fetch_<源名>``——
+    ``fetch_abuseipdb_public`` 整体匹配，故 ``abuse`` 一词不构成误报。
+
+    实测基线：``quality_reputation.py`` 185 处（37 处 ``_rep_static.fetch_x``
+    属性 + 148 处裸名 ``fetch_x``）、``test_quality.py`` 53 处（字符串字面量
+    形式），合计 238——这才是该面在代码层的真实规模（R230 棘轮只统计了
+    「下载厂商名」，完全没覆盖本族）。
+
+    存量以**计数棘轮**表达，方向感知双向断言。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    #: 各文件允许的绑定引用数上限（棘轮，只降不升）。
+    BASELINES = {
+        "scripts/quality_reputation.py": 185,
+        "tests/test_quality.py": 53,
+    }
+
+    @staticmethod
+    def _attrs():
+        """经 ``checks_bundle`` 取权威表（**不做直接 import**）。
+
+        直接 ``import rep_static`` 会被 ``test_zero_dependency`` 判为第三方
+        依赖泄漏——其 ``PCB_PLUGINS`` 白名单是**类定义时**从 ``pcb/plugins/``
+        扫出来的，无私有包时为空集，故该写法只在带包环境成立。
+        ``checks_bundle.load_plugin`` 是本项目唯一认可的私有包访问器。
+        """
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import checks_bundle as cb
+        try:
+            return set(cb.load_plugin("rep_static")._static_fetch_attrs())
+        except Exception:
+            return None
+
+    def _count(self, attrs):
+        import ast
+        out = {}
+        for rel in self.BASELINES:
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            tree = ast.parse(f.read_text(encoding="utf-8"), filename=rel)
+            n = 0
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) and node.attr in attrs:
+                    n += 1
+                elif isinstance(node, ast.Name) and node.id in attrs:
+                    n += 1
+                elif (isinstance(node, ast.Constant)
+                      and isinstance(node.value, str)
+                      and node.value in attrs):
+                    n += 1
+            if n:
+                out[rel] = n
+        return out
+
+    def test_static_fetch_bindings_ratcheted_down(self):
+        attrs = self._attrs()
+        if attrs is None:
+            self.skipTest("私有 rep_static 不可得：无法派生权威表，跳过（fail-open）")
+        self.assertGreaterEqual(len(attrs), 30, "权威表异常偏小，判据可能失效")
+        found = self._count(attrs)
+        for rel, n in sorted(found.items()):
+            with self.subTest(file=rel):
+                if n > self.BASELINES.get(rel, 0):
+                    self.fail(
+                        f"{rel}：静态表取数函数名绑定 {n} 处 > 棘轮基线 "
+                        f"{self.BASELINES.get(rel, 0)}——**出现新增泄漏**。"
+                        f"绑定面应改为按私有包权威表遍历，不逐个硬写名字")
+        for rel, b in self.BASELINES.items():
+            if found.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：绑定引用降至 {found.get(rel, 0)}（基线 {b}）"
+                        f"——**该下调 BASELINES**")
+
+    def test_gate_detects_a_new_binding(self):
+        """自证：注入一个权威表内的绑定名 → 计数必须上升。"""
+        import ast
+        attrs = self._attrs()
+        if not attrs:
+            self.skipTest("权威表不可得")
+        probe = sorted(attrs)[0]
+        src = f"import x\nx = _rep_static.{probe}\ny = {probe}\nz = {probe!r}\n"
+        tree = ast.parse(src)
+        n = 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in attrs:
+                n += 1
+            elif isinstance(node, ast.Name) and node.id in attrs:
+                n += 1
+            elif (isinstance(node, ast.Constant)
+                  and isinstance(node.value, str)
+                  and node.value in attrs):
+                n += 1
+        self.assertEqual(n, 3, f"三种引用形态各应计 1，判据漏计：{probe}")
+
+
 class TestDocsLeakGuard(unittest.TestCase):
     def test_docs_source_endpoints_absent(self):
         if _GUARD is None:
