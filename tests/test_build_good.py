@@ -462,6 +462,55 @@ class TestWriteGoodFiles(unittest.TestCase):
         self.assertEqual(common.note_tier("1.1.1.1:80#US-x-fast"), "fast")
         self.assertIsNone(common.note_tier("1.1.1.1:80#US-x"))
 
+    def test_published_tier_token_matches_its_directory_r244(self):
+        """R244：``data/valid/tiers/<tier>/all.txt`` 里每行的档位记号必须
+        就是 ``<tier>``。
+
+        这是「国内速度是否有不符合的情况」唯一**可机械判定**的那一半：档位
+        目录是按行备注里的档位记号分发的（``build_good`` 的
+        ``note_tier(ln) == tier``），所以两者若不一致，说明分发与内容脱节
+        ——消费方按目录名取「快/中/慢」清单却拿到别的档位。
+
+        另一半（CN 视图速度是否可信）**不可由本门禁判定**：``to_cn_view``
+        把速度换成大陆口径，有实测时写实测、无实测才写估算（记号带 ``≈``）。
+        实测覆盖仅 380/14365 ≈ 2.6%，其余无任何独立校验手段——故只锁档位
+        一致性，不对速度值本身下断言（那会是假安慰）。
+
+        判据是纯谓词（读已提交数据、比对行内记号），**零假阳性**；目录或
+        文件不存在则跳过（数据链未跑过）。
+        """
+        import re
+        root = Path(__file__).resolve().parent.parent
+        tiers = root / "data" / "valid" / "tiers"
+        if not tiers.is_dir():
+            self.skipTest("no data/valid/tiers（数据链未跑过）")
+        tok = re.compile(r"-(fast|mid|slow)-")
+        checked = 0
+        bad = []
+        for tier_dir in sorted(tiers.iterdir()):
+            if not tier_dir.is_dir():
+                continue
+            tier = tier_dir.name
+            path = tier_dir / "all.txt"
+            if not path.exists():
+                continue
+            for ln in path.read_text(encoding="utf-8").splitlines():
+                if not ln or "#" not in ln:
+                    continue
+                checked += 1
+                m = tok.search(ln.split("#", 1)[1])
+                got = m.group(1) if m else "（无记号）"
+                if got != tier:
+                    key = ln.split("#", 1)[0]
+                    if len(bad) < 5:
+                        bad.append(f"{tier}/{key} 记号={got}")
+        if not checked:
+            self.skipTest("tiers/ 下无 all.txt（数据链未跑过）")
+        self.assertEqual(
+            bad, [],
+            f"已发布档位清单的记号与所在目录不符（共 {checked} 行，"
+            f"首条 {bad}）——按目录取用会拿到错档速度")
+
     def test_cn_view_applied_to_all_good_outputs(self):
         """good 全部输出（全局/国家/集合）都是仅含 CN 行的列表 → 统一 CN 视图。"""
         pool = (
