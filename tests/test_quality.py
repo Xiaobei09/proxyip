@@ -449,26 +449,43 @@ class TestRegistryLocksR148(unittest.TestCase):
     """R148可维护性：注册表/契约锁内聚（自 TestReputation 迁出，纯移动）。"""
 
     def test_docs_pacing_table_matches_impl_r112(self):
-        """R112源接入：docs 并发/间隔表与消费端 pacing 全量一致（防腐烂）。
+        """R237 改写 R112：节流表**移入私有包**，公开文档不得再有重复副本。
 
-        表格为手维护分组（`a/b` 同值），任一值漂移即红；以 qr 消费视图
-        为准（含 PCB 回绑与静态回退）。
+        R112 的原契约是「docs 的并发/间隔表必须与消费端 pacing 全量一致
+        （防腐烂）」。但那张表逐行列信誉数据源名，与用户要求冲突（同 R256，
+        已按 R113/M3 的既有先例处理过一遍）。
+
+        按**仓库里已有的先例**（``test_docs_default_sources_match_impl_r113``
+        即 R113/M3 把「默认清单行不再内联 54 名，转指 --list-rep-sources」）
+        改写为同一形态：文档只留指针，防腐烂由**结构性保证**接管——
+        重复表会漂移，指向唯一权威源则不可能漂移。
+
+        本用例改断言两件事：
+        （a）``docs/scripts.md`` **不再含**节流表副本（正则扫到 0 行），
+            且指向权威来源；
+        （b）``SOURCE_PACING`` 的每个键都是已知信誉数据源——这是原先靠
+            「表 vs 实现」间接兜住的那类腐烂（打错一个源名）现在直接兜住。
         """
         if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
             self.skipTest("needs PCB rep bundles")
         import re
         from pathlib import Path
-        rows: dict[str, tuple[int, float]] = {}
-        for line in (Path(qr.__file__).resolve().parent.parent
-                     / "docs" / "scripts.md").read_text(
-                         encoding="utf-8").splitlines():
-            m = re.match(r"^\|\s*`([^`]+)`\s*\|\s*(\d+) worker、([\d.]+)s",
-                         line)
-            if not m:
-                continue
-            for s in m.group(1).split("/"):
-                rows[s.strip()] = (int(m.group(2)), float(m.group(3)))
-        self.assertEqual(rows, dict(qr.SOURCE_PACING))
+        doc = (Path(qr.__file__).resolve().parent.parent
+               / "docs" / "scripts.md").read_text(encoding="utf-8")
+        dupes = [ln for ln in doc.splitlines()
+                 if re.match(r"^\|\s*`[^`]+`\s*\|\s*\d+ worker、", ln)]
+        self.assertEqual(
+            dupes, [],
+            "docs/scripts.md 仍留节流表副本（逐行列源名）——应只留指针，"
+            f"副本会与实现漂移：{dupes[:2]}")
+        self.assertIn("--list-rep-sources", doc,
+                      "docs/scripts.md 必须指向权威清单")
+        known = set(qr.REPUTATION_WEIGHTS) | set(qr.STATIC_LIST_SCORES)
+        unknown = sorted(set(qr.SOURCE_PACING) - known)
+        self.assertEqual(
+            unknown, [],
+            f"SOURCE_PACING 含 {len(unknown)} 个未知源键——"
+            f"节流配置打错源名不会生效")
 
     def test_docs_default_sources_match_impl_r113(self):
         """R113验证正确性（M3 改写）：docs 默认清单行不再内联 54 名，转指
@@ -1137,7 +1154,7 @@ class TestReputation(unittest.TestCase):
         self.assertIsNone(qc.source_score("abuseipdb_public", {}))
 
     def test_wwuyi_unreachable_source_registered(self):
-        """REP-1：wwuyi_unreachable 第三方失联表默认启用、有权重/静态分。
+        """REP-1：某第三方失联表默认启用、有权重/静态分（键名见私有包注册表）。
 
         温和口径：命中投 listed 票（非 abuse），静态 70，权重 2。
         """
@@ -1157,7 +1174,7 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.STATIC_LIST_SCORES["wwuyi_unreachable"], 70)
 
     def test_wwuyi_blocked_source_registered(self):
-        """REP-2：wwuyi_blocked 维护者拉黑表默认启用、有权重/静态分。
+        """REP-2：某维护者拉黑表默认启用、有权重/静态分（键名见私有包注册表）。
 
         口径略强于失联（静态 65），仍投 listed 票（非滥用定性）。
         """
@@ -1337,20 +1354,48 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.STATIC_LIST_SCORES["ipnoise"], 50)
 
     def test_docs_enumerate_all_sources(self):
-        """R256：docs/logic.md 与 docs/scripts.md 必须命名每个信誉源。
+        """R237 改写 R256：文档**不得**再逐条命名信誉数据源，但**必须**指向
+        唯一权威清单，且该清单须机械覆盖每一个源。
 
-        防新增源（权重/静态）时漏同步文档；loop-state 认为「可发现性」是
-        文档契约的一部分。源名以字面出现即通过（含 per-IP 表与静态表）。"""
+        R256 的原契约是「docs 必须逐条命名每个信誉数据源」，目的是**防新增源时
+        漏同步文档**。但逐条命名与本轮用户要求（「来源真名不得留在公开树」）
+        直接冲突——R256 恰恰把真名钉进了文档。
+
+        换一种**更强**的满足方式：枚举搬到 ``--list-rep-sources``，而它是由
+        与 ``REPUTATION_WEIGHTS`` **同一张活表**生成的，故**机械上不可能
+        漂移**；R256 的文本匹配反而只能发现「已经写进文档的名字」，新增源
+        若压根没写就漏判。因此本用例改为断言两件事：
+        （a）两份文档都指向 ``--list-rep-sources`` 这一权威清单；
+        （b）该命令的输出**逐条覆盖** ``REPUTATION_WEIGHTS`` 的每个源。
+
+        同一个目的（可发现性是文档契约的一部分），且判据从「文本里找名字」
+        换成「活表与清单一致」——后者无法被手改绕过。
+        """
+        if not qr.REPUTATION_WEIGHTS:
+            self.skipTest("needs PCB rep bundles")
         root = Path(__file__).resolve().parents[1]
         logic = (root / "docs" / "logic.md").read_text(encoding="utf-8")
         scripts = (root / "docs" / "scripts.md").read_text(encoding="utf-8")
-        for name in qr.REPUTATION_WEIGHTS:
-            self.assertIn(
-                name, logic,
-                f"docs/logic.md 缺少信誉源 {name}")
-            self.assertIn(
-                name, scripts,
-                f"docs/scripts.md 缺少信誉源 {name}")
+        for label, text in (("docs/logic.md", logic),
+                            ("docs/scripts.md", scripts)):
+            with self.subTest(doc=label):
+                self.assertIn(
+                    "--list-rep-sources", text,
+                    f"{label} 必须指向权威清单 --list-rep-sources"
+                    f"（源真名不再逐条列于文档）")
+        # (b) 权威清单逐条覆盖活表
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            qc.main(["--list-rep-sources"])
+        listed = {ln.split()[0] for ln in buf.getvalue().splitlines()[1:]
+                  if ln.split()}
+        missing = sorted(set(qr.REPUTATION_WEIGHTS) - listed)
+        self.assertEqual(
+            missing, [],
+            f"--list-rep-sources 未覆盖 {len(missing)} 个信誉数据源——"
+            f"权威清单与权重表漂移了")
 
     def test_default_sources_match_docs(self):
         """R277（M3 改写）：`--reputation-sources` 文档行不再内联默认集，

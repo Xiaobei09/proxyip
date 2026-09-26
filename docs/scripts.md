@@ -106,7 +106,7 @@
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
 | `--reputation-provider` | 信誉策略：`multi`（加权合并 `--reputation-sources`）／`none`（不查）／**不透明 provider id**（R234：具名策略不再以源码名出现在本表，语义由私有包 `PROVIDER_GROUPS` 定义，合法 id 见 `--list-reputation-providers`） | multi |
 | `--reputation-sources` | multi 时启用的源（逗号分隔，有效源名见 `--list-rep-sources`，见下；默认全集见该命令输出标 `yes` 项）；**未知/拼错的源名打印警告并丢弃，杜绝 typo 静默变全量默认** | 见 `--list-rep-sources` |
-| `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20`；**未知源名/格式错误打印警告并丢弃**；有效源名见 `--list-rep-sources` | 见下 |
+| `--reputation-weights` | 权重覆盖，格式 `<源>:<权重>`（逗号分隔，可重复）；**未知源名/格式错误打印警告并丢弃**；有效源名见 `--list-rep-sources` | 见下 |
 | `--list-rep-sources` | 列出全部信誉源与权重/默认成员（R142，无网络无写盘） | 关 |
 | `--list-reputation-providers` | 列出 `--reputation-provider` 的合法值（哨兵 + 不透明 id，R234；**只印源数量不印源名**） | 关 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
@@ -119,72 +119,7 @@
 
 滥用分 key 从环境变量 `ABUSEIPDB_KEY`（abuseipdb）或 `IPQS_KEY`（ipqualityscore）读取，缺 key 时自动跳过。信誉分（0-100）**跨源共识合成**：abuse 分存在时取 `100 - score`（最高优先级）；否则先把各源的布尔标记归一为语义维度（`tor`/`proxy`/`vpn`/`hosting`(数据中心)/`mobile`/`abuse`/`listed`/`scraper`/`crawler`/`anonymous`），按源权重做**加权多数投票**——正票总权重 > 负票总权重才认定该维度为真，打平视为无结论（不扣分），避免单源误报独断与大权重单源主导；再叠加连续型风险源的加权罚分（`trust_score`、`probability`、`risk_score`、`fraud_score`、`score`、otx reputation/pulse、proxycheck risk）。查到出口地理（`countryCode`）即把 `ip-api` 计入（代理/机房/移动标志直接参与投票）；无任何信号则该项无分（不误判满分）。共识扣分表：tor 40 / abuse 35 / listed 30 / proxy 28 / vpn 22 / scraper 12 / hosting 10 / anonymous 8 / crawler 5；仅当 mobile 与其余风险维度均不成立时有 +5 加分。greynoise 源例外：经其确认的恶意类别直接按「60=恶意 / 35=僵尸(bot, riot) / 15=噪音」差异化罚分（覆盖 consensus 通用维度折算；同 IP 恶意确认时不再叠加噪音罚分）。**下表『说明』中的标志罚分/直用均为 legacy 单源口径；主路径统一折算为 consensus 语义维度 + 权重投票 + 共识扣分表（见上文），数值可能不同，以 consensus 为准。`ip-api` 的 mobile 奖励固定为 +5**。默认源与权重：
 
-| 源 | 权重 | 说明 |
-|---|---|---|
-| `netcoffee` | 20 | 免费 JSON 信誉（抓取实现已迁 PCB）；`trust_score` 直用；标志罚分：abuser 40 / tor 35 / proxy 30 / vpn 25 / datacenter 15，另加 `company_type`/`asn_kind` 机房 +15、`abuser_score`≥0.1 +20 |
-| `ncgy` | 10 | 免费 JSON 匿名 IP 库（MaxMind，抓取实现已迁 PCB）；`is_tor` 45 / `is_proxy` 30 / `is_vpn` 25 / `is_anonymous` 10 |
-| `ip-api` | 15 | 本地批量地理的标志：proxy / hosting 判负、mobile 奖励 +5；`countryCode` 存在即计入 |
-| `ipquery` | 12 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`risk_score` 直用，或标志罚分：tor 45 / vpn 30 / proxy 25 / datacenter 15（取二者较大罚分） |
-| `ffraud` | 12 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`fraud_score` 直用，或 tor/vpn/proxy/hosting/abuser/recent_abuse 罚分（取较大者） |
-| `blackbox` | 10 | 免费 JSON 分类/信号（抓取实现已迁 PCB）；分类评分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10 / bogon 5 / unknown 50；suspicious -20 |
-| `otx` | 8 | 免费 JSON 信誉（抓取实现已迁 PCB）；`100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
-| `ipsum` | 8 | GitHub 静态 IP 列表（stamparm/ipsum levels/3+），命中 3+ 黑名单 → 55 分 |
-| `ipapi_is` | 8 | 免费 JSON 风险查询（抓取实现已迁 PCB，opt-in）——**已退出默认源**：CI 生成的 `reputation_cache.json` 自加入以来 5 个版本中该源条目恒为 0（其余按 IP 源均有 ~1.8 万条），即 GitHub runner 从未成功拿到响应；疑似上游对云/机房出口限流或 TCP 丢弃，而每次失败要空等到超时（8s），会显著吞噬信誉相位预算（疑为 92min 运行中 ~56min 空档的主因之一）。解析器与权重保留，出口可达时可用 `--reputation-sources` 重新启用。tor 45 / vpn 30 / proxy 25 / datacenter 15 / abuser 20，另加 `company.type`/`asn.type` 机房 +15、`abuser_score`≥0.1 +20 |
-| `ipdata` | 8 | 免费 JSON 信誉（抓取实现已迁 PCB）；tor 45 / proxy 30 / vpn 25 / anonymous 10 + `threat_score` |
-| `whatismyip` | 3 | 免费 JSON 风险查询（抓取实现已迁 PCB，opt-in）；`security.score` 直用，或 vpn/proxy/tor/hosting/blacklist 罚分（取较大者） |
-| `dc_asn` | 5 | iplogs `datacenter-asns.csv` 静态机房 ASN 表，出口 `asn` 命中即 -15（fail-open） |
-| `abuse_list` | 5 | FireHOL `firehol_abusers_1d` 静态滥用 IP/CIDR 表，命中即 -40（fail-open） |
-| `vpn_asn` | 3 | iplogs `vpn-providers.csv` 静态 VPN 服务商 ASN 表，命中 -30（fail-open） |
-| `resproxy_asn` | 2 | iplogs `residential-proxy-backbones.csv` 住宅代理骨干 ASN 表，命中 -25（fail-open） |
-| `proxycheck` | 12 | 免费 JSON 代理/风险检测（抓取实现已迁 PCB）；proxy/vpn/tor/hosting/scraper 标志罚分 + risk score |
-| `ip2location` | 5 | 免费 JSON 代理标志（抓取实现已迁 PCB）；`is_proxy` 标志 -30 |
-| `ipwhois` | 6 | 免费 JSON 风险查询（抓取实现已迁 PCB，opt-in）——**已退出默认源**：免费层不再返回 `connection`/`security` 字段，纯信号为 0 却每轮仍产生 HTTP 调用；解析器保留，若上游恢复字段可用 `--reputation-sources` 重新启用。`security.proxy/vpn/tor/hosting` 各 -25、`security.anonymous` -8 |
-| `tor_exit` | 5 | check.torproject.org 出口节点实时列表（免费），命中即投 `tor` 票 |
-| `spamhaus` | 4 | Spamhaus DROP + EDROP 端用户高风险网段静态表（免费，`<cidr> ; 描述`），命中即投 `listed` 票 |
-| `freeipapi` | 6 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`isProxy` 标志 -30，附 ASN/org |
-| `hackmyip` | 6 | 免费 JSON 风险查询（抓取实现已迁 PCB）；hosting/proxy/mobile 标志参与投票，附 ASN |
-| `scamalytics` | 8 | 免费风险页抓取（抓取实现已迁 PCB）；分值 0-100 直扣，黑名单标记投 `listed` 票 |
-| `iplocation` | 3 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`is_proxy` -30，附 isp。**R269 起退出默认源**（最低权重、proxy 维度被 hackmyip/freeipapi/scamalytics 覆盖），opt-in 可用 |
-| `stopforumspam` | 4 | 免费 JSON 风险查询（抓取实现已迁 PCB）；`appears=1`（被举报的 HTTP 垃圾/滥用来源）投 `abuse` 票并 -50，`torexit=1` 额外投 `tor` 票；无记录返回空（负缓存） |
-| `maltiverse` | 6 | 免费聚合威胁情报（抓取实现已迁 PCB，opt-in）；`classification=malicious`/`suspicious` 投 `abuse` 票（-60/-35），`is_open_proxy`/`is_tor_node`/`is_vpn_node` 各投对应票（-25），`is_cnc`/`is_distributing_malware`/`is_iot_threat`/`is_known_scanner`/`is_mining_pool`/近 30 天黑名单命中投 `abuse` 票（-40）；**刻意忽略历史脏数据 `is_known_attacker` 与 `is_hosting`**；全空返回空（负缓存） |
-| `cins` | 5 | CINS Army `ci-badguys.txt` 静态活跃滥用/拒绝服务 IP（免费），命中投 `listed` 票 |
-| `et_compromised` | 4 | EmergingThreats `compromised-ips.txt` 被入侵主机（免费），命中投 `abuse` 票 |
-| `feodo` | 4 | abuse.ch Feodo Tracker `ipblocklist.txt` 僵尸网络 C2 IP（免费），命中投 `abuse` 票 |
-| `blocklist_de` | 4 | blocklist.de `all.txt` 僵尸/暴力破解/扫描滥用 IP（免费），命中投 `abuse` 票 |
-| `blocklist_de_ssh` | 3 | blocklist.de `ssh.txt` SSH 暴力破解源 IP（免费，独立攻击类别），命中投 `abuse` 票 |
-| `bruteforceblocker` | 3 | BruteForceBlocker `blist.php` SSH 爆破榜（`IP # …` 行内注释取首列，免费），命中投 `abuse` 票 |
-| `dataplane_vncrfb` | 3 | dataplane.org `vncrfb.txt` VNC 爆破榜（`count | org | IP | …` 取第 3 字段，免费），命中投 `abuse` 票 |
-| `drb_c2` | 4 | drb-ra C2IntelFeeds `IPC2s-30day.csv` 30 天审核 C2（`IP,描述` 取首列，免费），命中投 `abuse` 票 |
-| `nordvpn_exits` | 3 | drb-ra `vpn/NordVPNIPs.csv` NordVPN 出口表（`IP,描述` 取首列，日更，免费），命中投 `vpn` 票 |
-| `blackhole_monster` | 4 | blackhole.monster `blackhole-today` 每日攻击者裸 IP（免费，Maltrail 定性 known attacker），命中投 `abuse` 票 |
-| `myipms_blacklist` | 4 | myip.ms `latest_blacklist.txt` 10 天攻击源（`deny from IP` 取第 3 列，免费），命中投 `abuse` 票 |
-| `ipnoise` | 4 | IPnoise `7d.txt` 7 天蜜罐攻击者裸 IP（免费，蜜罐无合法服务），命中投 `abuse` 票 |
-| `blocklist_de_apache` | 3 | blocklist.de `apache.txt` Web 探测/攻击源 IP（免费，独立攻击类别），命中投 `abuse` 票 |
-| `danmeuk_tor` | 5 | dan.me.uk Tor 节点列表（免费，覆盖较 check.torproject 更全，独立权威），命中投 `tor` 票 |
-| `tor_bulk` | 4 | check.torproject.org TorBulkExitList 出口节点（免费，tor 信号冗余），命中投 `tor` 票 |
-| `greynoise` | 8 | 免费 JSON 社区信誉（抓取实现已迁 PCB）；特判罚分（见扣分表下方）：`classification=malicious` 60 / `riot`（僵尸网络成员）35 / 噪声扫描 15 |
-| `urlhaus` | 5 | abuse.ch URLhaus 恶意软件分发托管列表（免费，静态），命中投 `abuse` 票 |
-| `threatfox` | 5 | abuse.ch ThreatFox 恶意软件 IOC/C2（免费，静态），命中投 `abuse` 票 |
-| `firehol_level1` | 5 | FireHOL level1 最严封禁集（静态），命中投 `listed` 票 |
-| `firehol_level2` | 4 | FireHOL level2（L1 超集，裸 IP + CIDR，静态），命中投 `listed` 票（更广更噪，口径略弱） |
-| `binarydefense` | 4 | Binary Defense 恶意 IP 封禁集（静态），命中投 `abuse` 票 |
-| `c2_tracker` | 4 | C2 命令与控制基础设施名单（静态），命中投 `abuse` 票 |
-| `botscout` | 3 | 僵尸网络/抓取机器人名单（静态），命中投 `abuse` 票 |
-| `greensnow` | 4 | GreenSnow 活跃攻击/DDoS/扫描名单（静态），命中投 `abuse` 票 |
-| `sslproxies` | 3 | 活跃 SSL 代理列表（独立代理族证据），命中投 `proxy` 票 |
-| `socks_proxy` | 3 | 活跃 SOCKS 代理列表（独立代理族证据），命中投 `proxy` 票 |
-| `vpn_ips` | 3 | X4BNet lists_vpn VPN 出口 IP/CIDR（静态），命中投 `vpn` 票 |
-| `dshield` | 3 | FireHOL dshield_1d（DShield 攻击 /24 子网），命中投 `abuse` 票 |
-| `dnsbl` | 8 | Spamhaus ZEN 实时 DNSBL（免 key，DNS-over-HTTPS）——SBL 2/3（劫持/垃圾网段）、XBL 4/5（被入侵主机）→ `listed` 票；PBL 6/7（邮件策略）与 CSS 8/9（snowshoe 弱信号）忽略 |
-| `spamcop` | 5 | SpamCop 社区实时 DNSBL（免 key，DNS-over-HTTPS）——`<rev-ip>.<zone>` A 记录命中 `127.0.0.2` → `listed` 票；复用 dnsbl 的 DoH 端点回退/sticky/并发与负缓存，上限 9000/轮 |
-| `dronebl` | 5（默认） | DroneBL 社区僵尸/失陷主机实时 DNSBL（免 key，DNS-over-HTTPS）——命中码 2~13 → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R269 新增） |
-| `spamrats` | 5（opt-in） | SpamRats 社区双通路实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（AUTO）/`127.0.0.3`（AUTH）→ `listed` 票，DYN `127.0.0.4` 忽略；复用 dnsbl 通路，上限 9000/轮（R270 新增；R271 补接 `_flag_opinions`/`source_score` 计分接线；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
-| `sorbs` | 5（opt-in） | SORBS 社区 open-proxy 实时 DNSBL（免 key，DNS-over-HTTPS）——`127.0.0.2`（SOCKS）/`127.0.0.7`（HTTP）→ `listed` 票，动态住宅段忽略；复用 dnsbl 通路，上限 9000/轮（R271 新增；R272/R282 test-point＋NS 复测无结论，维持 opt-in 观察） |
-| `uceprotect` | 5（opt-in） | UCEPROTECT Level 1 社区发送者黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票，仅用 L1（L2/L3 升级名单刻意不用）；复用 dnsbl 通路，上限 9000/轮（R272 新增；test-point 经 DoH 实测回包 `127.0.0.2`，分区存活实证） |
-| `psbl` | 5（opt-in） | PSBL 被动垃圾邮件黑名单（免 key，DNS-over-HTTPS）——`127.0.0.2` → `listed` 票；复用 dnsbl 通路，上限 9000/轮（R273 新增；test-point 经 DoH 实测回包 `127.0.0.2`）。R273 起七源 lookup 共用 `_dnsbl_listed_lookup_sync` 骨架，各源仅保留 qname/码表/ docstring 差异 |
-| `abuseipdb_public` | 5 | AbuseIPDB 公共黑名单（近 30 天置信举报，社区镜像，静态），命中投 `abuse` 票 |
-| `wwuyi_unreachable` | 2 | 上游实测不可达 IP（裸 IP 小表，静态），命中投 `listed` 票（温和：失联证据非滥用） |
-| `wwuyi_blocked` | 2 | 上游维护者拉黑 IP（裸 IP 小表，静态），命中投 `listed` 票（主动拒绝，略强，仍非滥用） |
+**逐源权重与节流明细已迁入私有包**（`REPUTATION_SOURCES.md`）：公开树不逐条列举信誉数据源名（用户要求「另外两种源的名称和说明也有大量残留，应该全部迁移」）。运行时权威枚举见 `--list-rep-sources`。
 
 > **cleanip.io 结论（信誉专场勘察）**：`cleanip.io` 的 `/check` 页面对外展示 0-100 纯净度 + 欺诈分（模型 `proxypurity`），其维度与上方源高度重叠（aggregates ipquery/ipdata/scamalytics/maltiverse/greynoise/threatfox + **DNSBL** + HTTP 蜜罐）。但其后端 `api/v2/*` 一律返回 `401 {"code":"need_token","error":"anti-bot token required"}`，按 IP 查询需登录/anti-bot token，**不可作为开源免 key 数据源直接接入**；本轮新增的 `dnsbl` / `abuseipdb_public` 即补齐其模型中的 DNSBL 与恶意举报维度，缩小与在线评分差额。ipwho.is 免费层 security 已退化 null、ipapi.co 被 Cloudflare 挑战墙拦截，均不可用。
 >
@@ -192,27 +127,7 @@
 
 可选源（opt-in）：`getipintel`（5 权重，需环境变量 `GETIPINTEL_EMAIL`，1 worker、4s 间隔、上限 2000 次/运行，得分 `100 - prob×100`；抓取实现已迁 PCB）。静态列表每 run 拉取一次，失败即跳过（运行日志打印 `Reputation static lists: <name>=<n>…`，**已启用但为空/拉取失败 fail-open 的源亦以 `<name>=0` 显式列出**，区别于未启用；网关把错误页以 200 原样吐出（HTML/JSON）会被内容门槛识别并告警 `non-list content`，不再静默滤成空表假「干净」；约 8MB 的 abuseipdb_public 使用放宽的 45s 超时避免慢网统一 15s 截断吞空，其余列表维持 15s）；按 IP 的免 key 源各自限速见下表，新源按轮次上限 + 7 天缓存逐回填覆盖，避免首轮撑爆作业预算；带上限（如 dnsbl 12000）的源在 need 超限时日志显式标注 `cap-truncated N`，避免超限截断被静默吞掉误导覆盖率审计；cap 压力下（首轮回填/缓存大面积失效）优先查询从未有过信号的 IP，有过期旧缓存的 IP 让位（其旧信号以 fallback 注入兜底、下轮补查），保证无覆盖 IP 不被反复挤掉）避免限流掉单。R302 实测七分区 test-point DoH 延迟：41~425ms（psbl/spamcop/sorbs 最快，spamrats 425ms），dronebl 2.5s 最慢仍低于单端点 4s 超时；sticky 首命中即复用 alidns。sorbs/spamrats 为快速 definitive 空应答（非超时），查询通路存活、测试点未列入，不做生死判定，维持 opt-in 观察。**信誉缓存**：各按 IP API 源的信号写入 `data/quality/reputation_cache.json`，TTL 内（默认 7 天，`--rep-cache-ttl` 可调）复用缓存、只查询缺失/过期的 IP；**成功但无信号的源以 `data:{}` 负缓存**（如 greynoise 干净 IP），TTL 内不重查且不进入共识投票（负缓存 TTL 上限 `NEG_CACHE_TTL` 默认 1 天，短于正 TTL）；无信号不重试（仅异常重试）；**过期条目不删除**——过期后每轮尝试刷新，若刷新失败回退使用最近缓存信号（保持数据最新而非过期即丢），直至被新条目挤出上限；`--no-rep-cache` 禁用；静态列表不缓存、每轮重拉。缓存表按每个 IP 最近一次信号时间封顶 `REP_CACHE_MAX`（4 万条），超限自动裁剪最旧条目防无限膨胀。风险等级：`<30` high、`<75` medium、其余 low。`tls` 方法代理无出口回显，直接用代理自身 IP 作为出口参与检测与 `ip-api` 地理（入口即出口，`ip-api` 计入规则与其源相同）。结果写入 `reputation.json` 与 `all_rep.txt`（按信誉降序），`ipinfo.json` 每个键含 `rep_flags`/`rep_sources`/`risk_sources`（存在 abuse 分时经 `derive_risk` 直接分解、不逐源列出），`reputation.json` 含 `flags`/`numeric`（有 deep_speed 带宽加成时另有 `deep_bonus`）。分数也追加进 `#` 备注末尾。rep 交叉矩阵（`all_{g}_rep.txt`、`all_{g}_rep_ltd.txt`、子目录 `rep.txt` 等）同步派生 `*_verified.txt`（speed.json 全链路验证）与 `*_stable.txt`（china.json streak≥2 跨轮稳定）变体；子目录分组 rep 保持单维度以控制文件数量。检测结果见下方数据文件；备注写入按 `#` 后格式追加。
 
-| 源 | 并发/间隔 | 上限与备注 |
-|---|---|---|
-| `netcoffee/ncgy` | 10 worker、0.15s |  |
-| `blackbox/proxycheck` | 8 worker、0.2s |  |
-| `ipapi_is` | 8 worker、0.2s |  |
-| `otx` | 6 worker、0.3s |  |
-| `ipquery/ffraud/whatismyip/ip2location/ipwhois` | 6 worker、0.2s |  |
-| `freeipapi` | 8 worker、0.15s | （上限 3000/轮） |
-| `hackmyip` | 6 worker、0.2s |  |
-| `scamalytics` | 4 worker、0.5s | （上限 1500/轮） |
-| `stopforumspam` | 4 worker、0.3s | （上限 3000/轮） |
-| `dnsbl` | 6 worker、0.2s | （上限 12000/轮，Spamhaus ZEN 实时 DoH，三镜像端点回退且**进程内 sticky 复用最近成功端点**（TTL 600s，加锁保证多 worker 并发下无竞态，避免每查询空等慢/死端点），全部失败按失败重试、不误判干净） |
-| `spamcop` | 6 worker、0.15s | （上限 9000/轮，SpamCop 社区实时 DNSBL） |
-| `sorbs` | 6 worker、0.15s | （上限 9000/轮，SORBS opt-in DNSBL，SOCKS/HTTP 代理码 127.0.0.2/7——**R271 新增 opt-in 源；R274 起 pacing 与其余 DNSBL 归一 0.15s**） |
-| `dronebl` | 6 worker、0.15s | （上限 9000/轮，DroneBL 僵尸/失陷主机社区 DNSBL，命中码 2~13 均判 listed，复用 dnsbl 同一 DoH/负缓存/sticky 通路） |
-| `spamrats` | 6 worker、0.15s | （上限 SPAMRATS_CAP=9000/轮，SpamRats 社区双通路 DoH，A 码 127.0.0.2/3 → listed，**DYN 127.0.0.4 忽略**，复用 dnsbl sticky/负缓存——**R270 新增 opt-in 源**；R272 实测 test-point 无响应，保持 opt-in 待验证） |
-| `uceprotect` | 6 worker、0.15s | （上限 UCEPROTECT_CAP=9000/轮，UCEPROTECT L1 社区发送者黑名单 DoH，A 码仅 127.0.0.2 → listed，L2/L3 不用，复用 dnsbl sticky/负缓存——**R272 新增 opt-in 源**，test-point 实测回包 `127.0.0.2`） |
-| `psbl` | 6 worker、0.15s | （上限 PSBL_CAP=9000/轮，PSBL 被动垃圾名单 DoH，A 码仅 127.0.0.2 → listed，复用 dnsbl sticky/负缓存——**R273 新增 opt-in 源**，test-point 实测回包 `127.0.0.2`） |
-| `maltiverse` | 4 worker、0.3s | （上限 MALTIVERSE_CAP=2500/轮，opt-in） |
-| `greynoise` | 6 worker、0.3s | （无轮次上限，上游免费 40 req/min 限流） |
-| `iplocation` | 8 worker、0.12s | （上限 IPLOCATION_CAP=3000/轮，opt-in） |
+**逐源权重与节流明细已迁入私有包**（`REPUTATION_SOURCES.md`）：公开树不逐条列举信誉数据源名（用户要求「另外两种源的名称和说明也有大量残留，应该全部迁移」）。运行时权威枚举见 `--list-rep-sources`。
 
 
 ### `scripts/quality_probe.py`
@@ -232,8 +147,9 @@ TLS 探测引擎（quality_check 内部调用/独立运行）。对存活代理�
 ### `scripts/quality_reputation.py`
 
 信誉/滥用分模块（quality_check 拆出，仅被 `quality_check.py` import，无
-独立 CLI `__main__`）。汇总免 key 风险源（`netcoffee`/`scamalytics`/
-`ipapi_is`/`otx`/`ipquery`/`iplocation` 等）与可选 `getipintel` 信号，叠加
+独立 CLI `__main__`）。汇总免 key 风险源与若干可选信号（**逐源清单见
+`--list-rep-sources`，说明见私有包 `REPUTATION_SOURCES.md`；公开树不逐条
+列举源名**），叠加
 `deep_speed` 带宽加成（`deep_bonus`），产出 `data/quality/reputation.json`、
 `all_rep.txt` 及各分组 `rep` 交叉矩阵；缓存写入 `reputation_cache.json`
 （默认 7 天 TTL，`--rep-cache-ttl` 可调，`--no-rep-cache` 禁用；无信号源以

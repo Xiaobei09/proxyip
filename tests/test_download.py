@@ -1032,15 +1032,21 @@ class TestProxyMirrorSources(unittest.TestCase):
 
     def test_non_cf_cloud_pools_excluded(self):
         # 策略：代理源只收「自称 CF 第三方反代 proxyip」。非 CF 云池
-        # （阿里/谷歌/Edge 等 BestAli/BestGC/BestEDG）不得入池。
+        # （阿里/谷歌/Edge 等 BestAli/BestGC/BestEDG 路径）不得入池。
+        #
+        # R237：原断言逐条点名 4 个被排除的**完整 URL**——那等于把来源地址
+        # （含仓库作者段，即来源真名）留在公开树。改为按**路径标记**判定：
+        # 意图（这些云池路径一个都不得入池）完全不变，且覆盖面更广
+        # （原先只挡 4 条具体 URL，标记判定挡住该类全部），断言强度不降。
+        banned_markers = ("BestAli/", "BestGC/", "BestEDG/")
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
-        for u in (
-            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestAli/bestaliv4.txt",
-            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv4.txt",
-            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestGC/bestgcv6.txt",
-            "https://raw.githubusercontent.com/ymyuuu/IPDB/master/BestEDG/bestedgv4.txt",
-        ):
-            self.assertNotIn(u, urls)
+        if not urls:
+            self.skipTest("needs PCB dl_sources bundle（无内置清单可判）")
+        for u in urls:
+            for marker in banned_markers:
+                self.assertNotIn(
+                    marker, u,
+                    f"非 CF 云池路径不得入池（{marker}）——清单里出现了 {u}")
 
     def test_all_mirrors_are_disambiguated_by_host(self):
         # 不同 all.json 镜像必须得到不同标签，避免 stats/归属互覆

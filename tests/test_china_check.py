@@ -5091,5 +5091,119 @@ class TestEngineTablesConsistencyR177(unittest.TestCase):
             self.assertEqual(hits, [], f"回退元组含裸字面: {hits}")
 
 
+class TestCnSourceKeySealing(unittest.TestCase):
+    """R237：``sources``/``basis`` 的键在**落盘时**换成 ``src_*`` 不透明 id。
+
+    设计要点（本类同时锁住三条，否则迁移会在某个环节静默失效）：
+
+    1. **只换键不换值**，且**不就地改写**入参——``china_check`` 在写盘前
+       还要用这些条目算 streak/延迟摘要，就地改会污染后续逻辑。
+    2. **非代号原样保留**：``cn_public_id`` 对未知代号返回 ``None``，此时
+       必须保留原值（否则会丢数据）。
+    3. **读侧双向兼容**（``common.cn_source_variants``）：已发布文件尚未重跑
+       时仍是裸代号，只认 id 会把全部读数判成缺失——那会让「0 意味着取
+       节点被风控」之类诊断全部误报。
+
+    代号一律**运行时从私有包注册表派生**，测试文件里不落任何 ``cnNN``
+    字面量——否则会顶高 ``TestCnCodenamesRatchetedDown`` 自己的棘轮基线。
+    """
+
+    def _registry(self):
+        """取注册表；无私有包则 skip（去身份契约**依赖**它，无包无从校验）。
+
+        注意 ``china_check._sources_registry()`` 与 ``common`` 里的
+        ``cn_public_id`` 是**两条独立 loader 路径**，须一并检查——只查后者
+        会在无包环境下漏判（R237 实测）。
+        """
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import china_check as cc
+        from common import cn_public_id
+        if cn_public_id is None:
+            self.skipTest("needs PCB _sources bundle（common 侧未回绑）")
+        reg = cc._sources_registry()
+        if reg is None:
+            self.skipTest("needs PCB _sources bundle（china_check 侧未回绑）")
+        return cc, reg, cn_public_id
+
+    def _codes(self):
+        return self._registry()[2]
+
+    def test_seal_maps_keys_and_leaves_values(self):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import china_check as cc
+        pid_of = self._codes()
+        # 取两个真实代号（运行时派生，不写字面量）
+        _cc, reg, _pid = self._registry()
+        codes = list(reg.codes())[:2]
+        payload = {"status": "ok", "ms": 35.0}
+        entry = {"verdict": "reachable",
+                 "sources": {codes[0]: payload, codes[1]: dict(payload)},
+                 "basis": [codes[0]]}
+        out = cc._seal_cn_source_keys({"k": entry})["k"]
+        self.assertEqual(set(out["sources"]),
+                         {pid_of(codes[0]), pid_of(codes[1])})
+        # 值必须原样（只换键）
+        self.assertEqual(out["sources"][pid_of(codes[0])], payload)
+        # basis 同样密封
+        self.assertEqual(out["basis"], [pid_of(codes[0])])
+        # 入参未被就地改写
+        self.assertIn(codes[0], entry["sources"])
+
+    def test_seal_keeps_unknown_keys_verbatim(self):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import china_check as cc
+        pid_of = self._codes()
+        marker_src = "not-a-code-at-all"
+        marker_basis = "another_marker"
+        out = cc._seal_cn_source_keys({"k": {
+            "sources": {marker_src: {"status": "ok"}},
+            "basis": [marker_basis],
+        }})["k"]
+        self.assertIn(marker_src, out["sources"])
+        self.assertEqual(out["basis"], [marker_basis])
+        self.assertNotEqual(pid_of(marker_src), marker_src)
+
+    def test_variants_cover_both_forms_and_lookup_works(self):
+        """读侧必须同时认两种形态，且任一形态下取值都成功。"""
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import china_check as cc
+        from common import cn_source_variants
+        pid_of = self._codes()
+        _cc, reg, _pid = self._registry()
+        code = list(reg.codes())[0]
+        variants = cn_source_variants(code)
+        self.assertEqual(variants[0], pid_of(code), "不透明 id 必须在首位")
+        self.assertIn(code, variants, "裸代号必须作为回落保留")
+        # 两种形态的 sources，取值都应成功
+        for k in variants:
+            with self.subTest(form="id" if k == pid_of(code) else "raw"):
+                src = {k: {"status": "ok", "ms": 12.0}}
+                self.assertEqual(src.get(k, {}).get("ms"), 12.0)
+
+    def test_known_source_keys_contains_both_forms(self):
+        """R225 的净化白名单须同时含两种形态，否则重跑切换那刻会把新写入的
+        ``src_*`` 全判为「非法 legacy 键」而删掉。"""
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import china_check as cc
+        _cc, reg, pid_of = self._registry()
+        known = cc._known_source_keys()
+        if known is None:
+            self.skipTest("needs PCB registry")
+        for c in list(reg.codes())[:3]:
+            with self.subTest(order=c):
+                self.assertIn(c, known)
+                self.assertIn(pid_of(c), known)
+
+
 if __name__ == "__main__":
     unittest.main()

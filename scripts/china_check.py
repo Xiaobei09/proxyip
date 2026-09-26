@@ -102,6 +102,7 @@ from common import (
     rewrite_latency,
     clear_note_buckets,
     cn_fastest_ms,
+    cn_public_id,
     cn_best_isp,
     cn_isp_speed,
     cn_l2_ms,
@@ -2278,9 +2279,17 @@ def _known_source_keys() -> set | None:
     if not callable(codes):
         return None
     try:
-        return set(codes())
+        ks = set(codes())
     except Exception:
         return None
+    # R237：``sources``/``basis`` 的键形态可能是裸代号（旧文件）或
+    # ``src_*`` 不透明 id（新文件）。净化白名单须**同时**含两者，否则重跑
+    # 切换那一刻会把新写入的 id 全判为「非法 legacy 键」而删掉。
+    for c in list(ks):
+        pid = cn_public_id(c)
+        if pid:
+            ks.add(pid)
+    return ks
 
 
 def _drop_legacy_source_keys(entry: dict) -> dict:
@@ -2320,6 +2329,42 @@ def _drop_legacy_source_keys(entry: dict) -> dict:
             else:
                 entry.pop("basis", None)
     return entry
+
+
+def _seal_cn_source_keys(entries: dict) -> dict:
+    """把 ``entries`` 各条目的 ``sources`` 键由代号换成不透明 id（R237）。
+
+    **只换键、不换值**，也不改 ``basis``/``verdict`` 等其余字段——那些字段
+    的键空间另有归属（``basis`` 的真名问题见 R225/R232）。无 PCB 包时
+    ``cn_public_id`` 恒返回 ``None``，此时**原样返回**（fail-open：宁可
+    落裸代号，也不得因为缺包而丢数据或崩流程）。
+    """
+    out = {}
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            out[key] = entry
+            continue
+        src = entry.get("sources")
+        if not isinstance(src, dict):
+            out[key] = entry
+            continue
+        sealed = {}
+        for k, v in src.items():
+            pid = cn_public_id(k) if isinstance(k, str) else None
+            sealed[pid or k] = v
+        new_entry = dict(entry)
+        new_entry["sources"] = sealed
+        # ``basis`` 是同一族的另一个载体（实测 1227 处代号，占 0.8%）：
+        # 语义为「本条判定依据了哪些通道」。只换**能换的**——``cn_public_id``
+        # 对非代号（理论上已被 R225 的净化剔除）返回 None，原样保留。
+        basis = entry.get("basis")
+        if isinstance(basis, (list, tuple)):
+            new_entry["basis"] = [
+                (cn_public_id(b) or b) if isinstance(b, str) else b
+                for b in basis
+            ]
+        out[key] = new_entry
+    return out
 
 
 def build_cn_best(entries: dict) -> dict:
@@ -2514,7 +2559,12 @@ def main(argv=None) -> int:
         CHINA_FILE,
         {
             "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "proxies": entries,
+            # R237：落盘前把每条目 ``sources`` 子字典的**键**由代号换成
+            # ``src_*`` 不透明 id（值原样）。内存侧全程用代号，故本函数之前
+            # 的所有逻辑零改动；只在此处做序列化边界映射。读侧经
+            # ``common.cn_source_variants()`` 同时接受两种形态，故未重跑的
+            # 旧文件仍被正确读取。
+            "proxies": _seal_cn_source_keys(entries),
         },
     )
 

@@ -114,81 +114,18 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 
 ### 4.3 各源评分逻辑
 
-#### API 源（per-IP 查询）
+#### 逐源评分明细
 
-| 源 | 权重 | 评分逻辑 |
-|---|---|---|
-| netcoffee | 20 | 直接取 `trust_score`（0-100）；无 score 时按标志罚分：abuser -40 / tor -35 / proxy -30 / vpn -25 / datacenter -15，机房 ASN/公司类型再 -15，abuser_score≥0.1 再 -20 |
-| ncgy | 10 | MaxMind 标志罚分：tor -45 / proxy -30 / vpn -25 / anonymous -10 |
-| ip-api | 15 | 本地批量地理：proxy -25 / hosting -10 / mobile +5（与共识 `_mobile_clean_bonus` 一致）；有 `countryCode` 即计入 |
-| ipquery | 12 | `risk_score` 直用或标志罚分（取较大者）：tor -45 / vpn -30 / proxy -25 / datacenter -15 |
-| ffraud | 12 | `fraud_score` 直用或标志罚分（取较大者）：tor -45 / vpn -30 / proxy -25 / hosting -15 / abuser -20 / recent_abuse -15 |
-| blackbox | 10 | 按分类给分：residential 95 / mobile 90 / business 85 / hosting 60 / vpn 55 / privacy_relay 50 / tor 10 / bogon 5 / unknown 50；suspicious -20 |
-| otx | 8 | `100 - (min(reputation×5,80) + min(pulse_count×2,20))` |
-| ipapi_is | 8 | 标志罚分：tor -45 / vpn -30 / proxy -25 / datacenter -15 / abuser -20，机房 ASN/公司类型 -15，abuser_score≥0.1 -20 |
-| ipdata | 8 | 标志罚分 + `threat_score`：tor -45 / proxy -30 / vpn -25 / anonymous -10 |
-| whatismyip | 3（opt-in） | `security.score` 直用或标志罚分（取较大者）：vpn -30 / proxy -25 / tor -45 / hosting -15 / blacklisted -30。**R270 起退出默认源**（一增一减轮换，保留权重/派发作 opt-in；`--reputation-sources` 显式启用仍可用） |
-| getipintel | 5 | `100 - probability×100`（opt-in，需邮箱） |
-| proxycheck | 12 | `risk` score 直用或标志罚分（取较大者）：proxy -45 / vpn -45 / tor -45 / hosting -30 / scraper -20 |
-| ip2location | 5 | `is_proxy` 标志 -30 |
-| freeipapi | 6 | `isProxy` 标志 -30（附 ASN/org，全免费免 key） |
-| scamalytics | 8 | 免费风险页 `Fraud Score`（0-100）直扣；`is_blacklisted_external` 投 listed 票 |
-| iplocation | 3（opt-in） | `is_proxy` 标志 -30（附 isp，全免费免 key）。**R269 起退出默认源**：权重最低（3）且 proxy 维度被 hackmyip(6)/freeipapi(6)/scamalytics(8) 全超集覆盖，属重复低置信信号；`--reputation-sources` 显式启用仍可用 |
-| dnsbl | 8 | Spamhaus ZEN 实时 DNSBL，DNS-over-HTTPS 免 key：`<rev-ip>.<zone>` A 记录返回 SBL 2/3、XBL 4/5 码 → `listed` 扣 30；PBL 6/7 与 CSS 8/9 忽略；未列出/解析失败返回 None 进负缓存；三个 DoH 镜像失败回退且进程内 sticky 复用最近成功端点（TTL 600s），全部失败按失败重试、不误判干净 |
-| spamcop | 5 | SpamCop 社区实时 DNSBL（独立权威、与 Spamhaus 互补），复用 dnsbl 的 DoH/sticky/并发与负缓存：`<rev-ip>.<zone>` A 记录命中 `127.0.0.2` → `listed` 扣 30；其余返回视为未列出；上限 SPAMCOP_CAP=9000/轮 |
-| sorbs | 5 | SORBS 社区 open-proxy 实时 DNSBL：SOCKS/HTTP 代理码 `127.0.0.2`/`127.0.0.7` → `listed` 扣 30；动态住宅段 `127.0.0.4/8/9` 忽略（与 spamhaus PBL 同口径）；复用 dnsbl 的 DoH/sticky/并发与负缓存；opt-in 不入默认；上限 SORBS_CAP=9000/轮。**R271 新增**。**R272 实测**：test-point `<rev-ip>.<zone>` 经 DoH 无响应（不断言死亡，保持 opt-in 待验证；若长期零命中且确认停服则注释停用）。**R282 复测**：test-point 仍无响应；zone NS 查询亦空——但对照 spamcop 有响应而无 NS，NS 空不能证伪，维持 opt-in 观察 |
-| dronebl | 5 | DroneBL 社区僵尸/失陷主机实时 DNSBL（独立权威，命中多为被控主机/开代理人），复用 dnsbl 通路：`<rev-ip>.<zone>` A 记录命中码 `127.0.0.2~13`（abuse/爆破/垃圾/重犯/模糊等）→ `listed` 扣 30；上限 DRONEBL_CAP=9000/轮 |
-| spamrats | 5 | SpamRats 社区双通路实时 DNSBL（第四独立权威，与 Spamhaus/SpamCop/DroneBL 四家同构为免 key 社区派对）。复用 dnsbl 通路：`<rev-ip>.<zone>` A 记录命中码 `127.0.0.2`（AUTO 自动化自录）与 `127.0.0.3`（AUTH 社区人工确认）→ `listed` 扣 30；**`127.0.0.4`（DYN 动态住宅线）刻意忽略**——与 spamhaus PBL/iplocation 同口径：动态住宅段是正常合法用户基线，不按代理罪证处理；上限 SPAMRATS_CAP=9000/轮。**R270 新增，opt-in**（默认不进 DEFAULT，`--reputation-sources` 显式启用）。**R271 补接**：`_flag_opinions`/`source_score` 缺分支导致命中零扣分，现已与 spamcop/dronebl 同口径。**R272/R282 实测**：test-point 经 DoH 无响应，zone NS 查询亦空（对照组 spamcop 有响应无 NS，故不断言死亡），保持 opt-in 待验证 |
-| uceprotect | 5 | UCEPROTECT Level 1 社区发送者黑名单（第五独立权威，UCEPROTECT-Network 运营）：`<rev-ip>.<zone>` A 记录命中 `127.0.0.2` → `listed` 扣 30；**仅用 L1**（具体发送 IP），L2/L3 升级名单（整段/AS 列入）争议大、刻意不用；复用 dnsbl 的 DoH/sticky/并发与负缓存；opt-in 不入默认；上限 UCEPROTECT_CAP=9000/轮。**R272 新增**（test-point `127.0.0.2` 经 DoH 实测回包，分区存活实证） |
-| psbl | 5 | PSBL 被动垃圾邮件黑名单（第六独立权威，陷阱网络运营）：`<rev-ip>.<zone>` A 记录命中 `127.0.0.2` → `listed` 扣 30；复用 dnsbl 的 DoH/sticky/并发与负缓存；opt-in 不入默认；上限 PSBL_CAP=9000/轮。**R273 新增**（test-point `127.0.0.2` 经 DoH 实测回包，分区存活实证；同轮 DNSBL 查询骨架去重为通用 helper，七源行为零变更） |
-| ipwhois | 6 | `security` 块标志罚分：tor -45 / vpn -30 / proxy -25 / hosting -15 / anonymous -10；`connection.type` 命中机房类另投 hosting；无罚分且无 ASN 则 None |
-| maltiverse | 6（opt-in） | `classification`（malicious/suspicious）或结构布尔（open_proxy / tor_node / vpn_node / cnc / malware 分发 / iot / scanner / mining）+ 近 MALTIVERSE_RECENT_DAYS 天黑名单；刻意忽略 `is_known_attacker` 与 `is_hosting`（防叠噪）；全空 → None。**R268 起退出默认源**：实域 18127 出口的 `rep_sources` 中参与共识仅 3 次（每轮 cap 2500 查询），判识增量近零而调用成本不低，故降级为 opt-in（`--reputation-sources` 显式启用） |
-| stopforumspam | 4 | `is_abuse` → abuse -35、Tor exit → tor -40（HTTP 垃圾评论/僵尸出口） |
-| hackmyip | 6 | `data.privacy` 块：hosting / proxy / mobile（附 ASN）；全空 payload → None |
-| greynoise | 8 | `is_abuse` -60（恶意扫描）/ `is_riot` bot -35 / `is_noise` -15；免费 40 req/min 限流 |
+**逐源权重、评分逻辑、opt-in 关系与历次审计结论已迁入私有包**
+（`REPUTATION_SOURCES.md`），公开树不再逐条列举信誉数据源名——用户要求
+「另外两种源的名称和说明也有大量残留，应该全部迁移」，且已授权不可公开
+数据统一放 PCB。
 
-#### 静态列表源（每 run 重拉）
-
-| 源 | 权重 | 命中分数 | 信号旗 | 说明 |
-|---|---|---|---|---|
-| ipsum | 8 | 55 | `is_listed` | 命中 3+ 黑名单 |
-| abuse_list | 5 | 60 | `is_abuse` | 历史滥用 |
-| abuseipdb_public | 5 | 55 | `is_abuse` | AbuseIPDB 近 30 天高置信滥用举报（社区镜像） |
-| wwuyi_unreachable | 2 | 70 | `is_listed` | 上游实测不可达（第三方失联证据，非滥用，温和） |
-| wwuyi_blocked | 2 | 65 | `is_listed` | 上游维护者拉黑（主动拒绝，略强，仍非滥用） |
-| cins | 5 | 50 | `is_listed` | CINS 活跃滥用/拒绝服务 IP |
-| danmeuk_tor | 5 | 40 | `is_tor` | Dan.me.uk Tor 出口 |
-| dc_asn | 5 | 85 | `is_hosting` | 机房/数据中心 ASN |
-| firehol_level1 | 5 | 60 | `is_listed` | FireHOL 最严封禁集 |
-| firehol_level2 | 4 | 50 | `is_listed` | FireHOL L1 超集（更广更噪，口径略弱） |
-| threatfox | 5 | 55 | `is_abuse` | ThreatFox IOC |
-| tor_exit | 5 | 45 | `is_tor` | Tor 出口节点 |
-| urlhaus | 5 | 55 | `is_abuse` | URLhaus 恶意软件分发 |
-| binarydefense | 4 | 55 | `is_abuse` | Binary Defense 蜜罐 |
-| blocklist_de | 4 | 50 | `is_abuse` | Blocklist.de 全量滥用 |
-| c2_tracker | 4 | 55 | `is_abuse` | C2 Tracker 命令控制 |
-| et_compromised | 4 | 45 | `is_abuse` | EmergingThreats 被入侵主机回连 |
-| feodo | 4 | 40 | `is_abuse` | Feodo Tracker 银行木马 C2 |
-| greensnow | 4 | 50 | `is_abuse` | GreenSnow 蜜罐 |
-| spamhaus | 4 | 55 | `is_listed` | Spamhaus DROP/EDROP 高风险网段 |
-| tor_bulk | 4 | 35 | `is_tor` | Tor 批量出口 |
-| blocklist_de_apache | 3 | 45 | `is_abuse` | Blocklist.de Apache 攻击 |
-| blocklist_de_ssh | 3 | 45 | `is_abuse` | Blocklist.de SSH 暴力破解 |
-| bruteforceblocker | 3 | 45 | `is_abuse` | BruteForceBlocker SSH 爆破榜（同信号族） |
-| dataplane_vncrfb | 3 | 45 | `is_abuse` | dataplane.org VNC 爆破榜（新信号族） |
-| drb_c2 | 4 | 50 | `is_abuse` | drb-ra 30 天审核 C2（单研究员，口径略弱） |
-| nordvpn_exits | 3 | 55 | `is_vpn` | drb-ra NordVPN 出口表（日更） |
-| blackhole_monster | 4 | 50 | `is_abuse` | blackhole.monster 每日攻击者（Maltrail 定性） |
-| myipms_blacklist | 4 | 50 | `is_abuse` | myip.ms 10 天攻击源（自家基础设施扫描/机器人） |
-| ipnoise | 4 | 50 | `is_abuse` | IPnoise 7 天蜜罐攻击者（无合法服务，连即敌对） |
-| botscout | 3 | 45 | `is_abuse` | BotScout 机器人 |
-| dshield | 3 | 50 | `is_abuse` | DShield 攻击源 |
-| socks_proxy | 3 | 60 | `is_proxy` | SOCKS 代理 |
-| sslproxies | 3 | 60 | `is_proxy` | SSL 代理 |
-| vpn_asn | 3 | 70 | `is_vpn` | VPN 服务商 ASN |
-| vpn_ips | 3（opt-in） | 55 | `is_vpn` | X4BNet VPN 出口 CIDR。**R271 起退出默认源**：静态 VPN 出口表与 `vpn_asn` 机房 ASN 判据高度重叠，属重复低增益信号；`--reputation-sources` 显式启用仍可用 |
-| resproxy_asn | 2 | 75 | `is_proxy` | 住宅代理骨干 ASN |
-
+公开侧保留**方法论**（本节其余部分：合成规则、证据分级、负缓存、相位门控），
+这些不指名任何来源。运行时权威枚举见 `--list-rep-sources`——它由与
+`REPUTATION_WEIGHTS` **同一张活表**生成，故机械上不可能与实现漂移
+（这一点强于旧契约：旧 R256 只要求文档里「出现这些名字」，新增源若压根
+没写进文档反而漏判）。
 未命中 → 该项不计入合分（不误判满分）。
 
 ### 4.4 缓存机制

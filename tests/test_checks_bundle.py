@@ -256,13 +256,13 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
 
     #: 各文件允许的厂商名命中行数上限（棘轮，只降不升）。
     BASELINES = {
-        "tests/test_quality.py": 27,
-        "scripts/quality_reputation.py": 19,
-        "tests/test_download.py": 7,
+        "tests/test_quality.py": 25,
+        "scripts/quality_reputation.py": 18,
+        "tests/test_download.py": 3,
         "tests/test_validate.py": 9,
         "docs/data-spec.md": 2,
-        "docs/scripts.md": 2,
-        "docs/logic.md": 2,
+        "docs/scripts.md": 0,
+        "docs/logic.md": 0,
         "scripts/validate_proxies.py": 1,
     }
 
@@ -319,13 +319,13 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
 
     def test_baselines_not_raised(self):
         floor = {
-            "tests/test_quality.py": 27,
-            "scripts/quality_reputation.py": 19,
-            "tests/test_download.py": 7,
+            "tests/test_quality.py": 25,
+            "scripts/quality_reputation.py": 18,
+            "tests/test_download.py": 3,
             "tests/test_validate.py": 9,
             "docs/data-spec.md": 2,
-            "docs/scripts.md": 2,
-            "docs/logic.md": 2,
+            "docs/scripts.md": 0,
+            "docs/logic.md": 0,
             "scripts/validate_proxies.py": 1,
         }
         for rel, b in self.BASELINES.items():
@@ -785,6 +785,105 @@ class TestCnCodenamesRatchetedDown(unittest.TestCase):
         # 边界：不得把普通单词里的 cn+数字误判
         self.assertEqual(len(rx.findall("scn0123 acn01_ xcn1")), 0)
         self.assertEqual(len(rx.findall("cn")), 0)
+
+
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
+class TestReputationSourceNamesInDocs(unittest.TestCase):
+    """R237：信誉数据源名不得留在**公开文档**里（安全合规 / 私有源隔离）。
+
+    用户要求：「另外两种源的**名称和说明**也有大量残留，应该全部迁移」。
+
+    这一面此前**从未被测量**：R230 的厂商名词表只含 44 个下载源短标签，
+    不覆盖普通信誉数据源名。R237 实测起点＝**279 处 / 146 个表格行 / 59–60 个
+    不同源名**（``docs/logic.md`` §4.3 两张逐源评分表 75 行 +
+    ``docs/scripts.md`` 权重表 66 行与节流表 21 行）——是公开树里最大的
+    一处「说明」泄漏。
+
+    处置：逐源明细**迁入 PCB**（``REPUTATION_SOURCES.md``，信息不丢），
+    公开文档只留方法论 + 指向 ``--list-rep-sources`` 的指针。同时按仓库既有
+    先例（R113/M3）把两条文档契约（R256「须逐条命名」、R112「节流表须与实现
+    一致」）改写为**更强**的形态：重复表会漂移，指针不会。
+
+    **本门禁的已知假阳性**（刻意保留并记录，不假装词表完美）：剩余命中里
+    ``ip-api`` 指公开地理服务 ip-api.com（本仓多处公开使用，非私有源身份）、
+    ``abuse`` 指**语义标志**维度、``dnsbl`` 指**机制类别**。故本门禁按
+    **计数棘轮**表达存量而非「必须为 0」——它锁的是「不再增长」，不是
+    「已清零」。彻底归零需先把这三类通用词从判据里排除（PCB 侧标注哪些
+    条目是类别/通用词而非来源身份），单独立项。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    #: 各文件允许的信誉数据源名出现数上限（棘轮，只降不升）。
+    BASELINES = {
+        "docs/scripts.md": 63,
+        "docs/logic.md": 13,
+    }
+
+    @staticmethod
+    def _pattern():
+        import re
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import checks_bundle as cb
+        try:
+            names = sorted(cb.load_plugin("leak_guard")
+                           .reputation_source_names())
+        except Exception:
+            return None
+        if not names:
+            return None
+        return re.compile(r"(?<![A-Za-z0-9_])(?:"
+                          + "|".join(re.escape(t) for t in names)
+                          + r")(?![A-Za-z0-9_])")
+
+    def test_reputation_source_names_in_docs_ratcheted_down(self):
+        pat = self._pattern()
+        if pat is None:
+            self.skipTest("私有 leak_guard 不可得：无法派生词表，跳过（fail-open）")
+        found = {}
+        for rel in self.BASELINES:
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            n = len(pat.findall(f.read_text(encoding="utf-8")))
+            if n:
+                found[rel] = n
+        for rel, n in sorted(found.items()):
+            with self.subTest(file=rel):
+                if n > self.BASELINES.get(rel, 0):
+                    self.fail(
+                        f"{rel}：信誉数据源名 {n} 处 > 棘轮基线 "
+                        f"{self.BASELINES.get(rel, 0)}——**出现新增泄漏**。"
+                        f"逐源明细只放私有包，公开文档只留指针")
+        for rel, b in self.BASELINES.items():
+            if found.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：信誉数据源名降至 {found.get(rel, 0)}（基线 {b}）"
+                        f"——**该下调 BASELINES**")
+
+    def test_no_source_enumerating_table_left_in_docs(self):
+        """结构性判据（**零假阳性**）：文档里不得再有「逐源枚举」的表格行。
+
+        这比词表判定可靠得多——它不关心源叫什么，只要求**文档不再持有一份
+        可漂移的副本**。R237 前 ``docs/scripts.md`` 有 83 行、``logic.md``
+        有 63 行这样的表。
+        """
+        import re
+        for rel in ("docs/scripts.md", "docs/logic.md"):
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            rows = [ln for ln in f.read_text(encoding="utf-8").splitlines()
+                    if ln.strip().startswith("|")
+                    and re.match(r"^\|\s*`?[A-Za-z0-9_.-]+`?\s*\|\s*\d+\s*\|", ln)]
+            with self.subTest(doc=rel):
+                self.assertEqual(
+                    rows, [],
+                    f"{rel} 仍留「源 | 权重 | 说明」式枚举表 {len(rows)} 行——"
+                    f"副本会与实现漂移，且逐行列出了源名")
 
 
 class TestDocsLeakGuard(unittest.TestCase):

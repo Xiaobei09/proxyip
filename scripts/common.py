@@ -810,6 +810,44 @@ CN_ISP_SHORT = {"中国移动": "移动", "中国电信": "电信", "中国联�
 # ms 语义不一、常回 1ms 噪声，只适合佐证可达，不够格当大陆延迟证据。
 _CHINA_VANTAGE_SOURCES = ("cn20", "cn24", "cn27")
 
+# ---- CN 源代号的不透明公开 id（R237）-------------------------------------
+# 用户要求清除 CN 代号（cnNN）。已发布 ``data/quality/china.json`` 里每条
+# 条目的 ``sources`` 子字典**以代号为键**（实测 159 989 处），故写侧改落
+# 不透明 ``src_*``（PCB ``_sources.public_id``，R236 已迁到可逆编解码器）。
+#
+# 内存侧**一律仍用代号**：``cn_fastest_ms`` / ``_drop_legacy_source_keys`` /
+# ``merge_verdict`` 等按代号过滤的逻辑零改动。读侧因此必须**同时接受两种
+# 形态**——已发布文件尚未重跑时仍是裸代号，若只认 id 会把全部读数判成缺失
+# （那会让「0 意味着取节点被风控」之类的诊断全部误报）。故统一经
+# ``cn_source_variants()`` 取键：先试不透明 id，再回落裸代号。
+_CN_PUBLIC_ID = None
+try:
+    from checks_bundle import load_plugin as _load_pcb_plugin_cn
+    _CN_PUBLIC_ID = getattr(_load_pcb_plugin_cn("_sources"), "public_id", None)
+except Exception:
+    _CN_PUBLIC_ID = None
+
+
+def cn_public_id(code: str) -> str | None:
+    """CN 源代号→不透明公开 id；无包 / 未知代号返回 ``None``。"""
+    if _CN_PUBLIC_ID is None or not code:
+        return None
+    try:
+        return _CN_PUBLIC_ID(code)
+    except Exception:
+        return None
+
+
+def cn_source_variants(code: str) -> tuple:
+    """``sources`` 子字典取键用的候选形态：**不透明 id 在前、代号在后**。
+
+    顺序要紧：重跑后的新文件只有 id，而未重跑的旧文件只有代号；两者取并集
+    即双向兼容，无需在每个读取点插入还原调用（那些点分散在 build_good /
+    build_premium / annotate_classify 等 8 个脚本里，逐个改必漂移）。
+    """
+    pid = cn_public_id(code)
+    return (pid, code) if pid else (code,)
+
 # 有一族为 **纯 ICMP ping**（proxyip 不可达的"到 IP 边缘路由"延迟，常说 1~8ms，
 # 与真实代理/隧道延迟无关，反直觉地极小）；另一族同为大陆节点探测且结果
 # 不带 level 字段，只能按名称剔除（名单存私有包）。其余源若带 ``level="icmp"``
@@ -831,7 +869,13 @@ def cn_l2_ms(entry) -> float | None:
         return ms if isinstance(ms, (int, float)) and ms > 0 else None
     best = None
     for src in _CHINA_VANTAGE_SOURCES:
-        r = sources.get(src)
+        # R237：键形态可能是裸代号（旧文件）或 src_* 不透明 id（新文件），
+        # 两者取并集——否则重跑切换的那一刻会把全部读数判成缺失。
+        r = None
+        for k in cn_source_variants(src):
+            r = sources.get(k)
+            if r is not None:
+                break
         if isinstance(r, dict) and r.get("status") == "ok":
             m = r.get("ms")
             if isinstance(m, (int, float)) and m > 0:
