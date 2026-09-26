@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Xiaobei09/PCB
-          ref: 917cbb05b4426980e02e24fb7a834adc68fdc4fd
+          ref: 046755322387a7af2d5969f9cbedd2e6d1c32570
           token: ${{ secrets.BUNDLE_PAT }}
           path: pcb
 
@@ -97,4 +97,43 @@ jobs:
               echo "- 私有包：**缺 BUNDLE_PAT** → 模式清单不可得，仅公开侧断言生效"
             fi
             echo "- 门禁用例：\`tests/test_checks_bundle\`（11 例；无包时 8 例 skip）"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # R235：提交格式门禁的**专职执行点**。
+  #
+  # 事故：R235 的一次提交标题末尾漏了空格（"……[R235]"，门禁要求 `[` 前有
+  # 空格），本地 `tests.test_commit_data` 报红——但我**先 push 后看测试**，
+  # 且 push 时 CI 全绿。原因：`test_commit_data` 只被 update-proxies /
+  # china-check / quality-check 的全量「Run tests」覆盖，而那三个 workflow
+  # 并**不保证在每次 push 上跑**（各自 schedule / workflow_run 触发）。
+  # 于是「每次 push 都跑」的 leak-guard 当时只跑 `test_checks_bundle`，
+  # 对提交格式**完全无感**——门禁的覆盖面与它宣称的不符（R219 审计同一类
+  # 问题：名义覆盖 vs 实际覆盖）。
+  #
+  # 修法：独立 job 承载，`fetch-depth: 0` 以便历史检查能遍历提交
+  # （浅克隆下 `git log` 只有 1 条，历史用例会平凡通过）。**不需任何
+  # secret**，故零 secret 环境下也能生效——与 guard job 的降级策略无关。
+  commit-format:
+    name: Commit message format guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+
+      - name: Verify loop-commit message format
+        run: python -m unittest tests.test_commit_data -v
+
+      - name: Summarize
+        run: |
+          {
+            echo "### 提交格式门禁"
+            echo ""
+            echo "- 断言：轮次提交须为 \`<type>(<scope>): <摘要> [R<n>]\`"
+            echo "- 执行点：**每次 push**（本 workflow），不再依赖全量 job 碰巧跑到"
           } >> "$GITHUB_STEP_SUMMARY"

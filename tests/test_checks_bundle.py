@@ -576,6 +576,217 @@ class TestStaticFetchBindingNames(unittest.TestCase):
         self.assertEqual(n, 3, f"三种引用形态各应计 1，判据漏计：{probe}")
 
 
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
+class TestDownloadVendorNamesInData(unittest.TestCase):
+    """R236：下载来源**厂商名**不得留在已发布 data/ 里（安全合规 / 私有源隔离）。
+
+    R229 起 ``source_origin()`` 就把私有表来源换成不透明 ``dsrc_*``，R230 又
+    补了**代码层**门禁——但 **data 层**一直没有门禁，于是接线对不对只能靠人工
+    看文件。R236 实测：``data/quality/ip_sources.json`` 等确实在 R229 接线
+    **之前**生成，一直带明文标签；``update-proxies`` 首次带 R229 跑完
+    （2026-09-26T09:19Z）后该族从 3220 处降到 467 处，``ip_sources.json`` 与
+    ``source_stats.json`` **归零**。本门禁把这条曲线锁住。
+
+    判据与代码层门禁同源（``leak_guard.download_vendor_tokens()``，44 词由私有
+    包三张表**权威派生**），合并为单条正则避免 44 次全串扫描——实测 7.1s。
+
+    存量以**计数棘轮**表达，方向感知双向断言。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    #: 各文件允许的厂商名出现数上限（棘轮，只降不升）。**已归零的文件也列入**
+    #: （基线 0）——否则它们会静默回退而无人察觉。
+    BASELINES = {
+        "data/quality/ipinfo.json": 168,
+        "data/quality/reputation.json": 168,
+        "data/quality/source_history.json": 117,
+        "data/quality/source_quality.json": 7,
+        "data/output/source_quality_report.txt": 7,
+        "data/quality/ip_sources.json": 0,
+        "data/quality/source_stats.json": 0,
+    }
+
+    @staticmethod
+    def _pattern():
+        import re
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import checks_bundle as cb
+        try:
+            toks = sorted(cb.load_plugin("leak_guard").download_vendor_tokens())
+        except Exception:
+            return None
+        if not toks:
+            return None
+        return re.compile(r"(?<![A-Za-z0-9])(?:"
+                          + "|".join(re.escape(t) for t in toks)
+                          + r")(?![A-Za-z0-9])", re.IGNORECASE)
+
+    def test_download_vendor_names_in_data_ratcheted_down(self):
+        pat = self._pattern()
+        if pat is None:
+            self.skipTest("私有 leak_guard 不可得：无法派生厂商集，跳过（fail-open）")
+        found = {}
+        for rel in self.BASELINES:
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            n = len(pat.findall(
+                f.read_text(encoding="utf-8", errors="ignore")))
+            if n:
+                found[rel] = n
+        for rel, n in sorted(found.items()):
+            with self.subTest(file=rel):
+                if n > self.BASELINES.get(rel, 0):
+                    self.fail(
+                        f"{rel}：厂商名 {n} 处 > 棘轮基线 "
+                        f"{self.BASELINES.get(rel, 0)}——**出现新增泄漏**。"
+                        f"私有表来源只许落 dsrc_* 不透明 id")
+        for rel, b in self.BASELINES.items():
+            if found.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：厂商名降至 {found.get(rel, 0)}（基线 {b}）"
+                        f"——**该下调 BASELINES**")
+
+    def test_migrated_files_stay_at_zero(self):
+        """已归零的两个文件必须保持 0（专项断言，给出更明确的失败信息）。"""
+        pat = self._pattern()
+        if pat is None:
+            self.skipTest("权威词表不可得")
+        for rel in ("data/quality/ip_sources.json",
+                    "data/quality/source_stats.json"):
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            n = len(pat.findall(f.read_text(encoding="utf-8", errors="ignore")))
+            self.assertEqual(n, 0,
+                             f"{rel} 重新出现 {n} 处厂商名——来源键空间回退了")
+
+
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
+class TestCnCodenamesRatchetedDown(unittest.TestCase):
+    """R236：CN 源**代号**（``cnNN``）须从公开树与 data/ 清除（安全合规）。
+
+    用户在 R236 明确指出：「远程仍然可以找到大量的 cnxx」——据此**推翻**了
+    R218–R224 的判断（我当时按「``china.json`` 已发布键、数据契约 E『只增不改
+    不删』」把代号层判为有意保留）。口径统一到「全部换成不透明 id」。
+
+    实测基线（清退起点）：
+    - **data/ 159 989 处**，全在 ``data/quality/china.json``（单行 JSON）；
+    - **代码/文档/CI 582 行 / 17 文件**——``tests/test_china_check.py`` 250、
+      ``scripts/china_check.py`` 173、``scripts/china_engine.py`` 64、
+      **``.github/workflows/china-check.yml`` 26**（``--cn-limit cnNN=`` 批量
+      通道调参表）、``tests/test_common.py`` 25、``tests/test_validate.py`` 14、
+      ``scripts/validate_proxies.py`` 6、``README.md`` 5 等。
+
+    不透明 id 的基础设施早已就绪（PCB ``_sources.public_id``，``src_`` 前缀），
+    R236 已把它从单向哈希迁到与另两族同构的**可逆**编解码器。公开侧接线
+    （含 ``--cn-limit`` 调参表改为不透明 id + ``--list-cn-channels`` 发现
+    路径）是机械替换，随本棘轮基线逐轮下调直至归零。
+
+    计数棘轮，方向感知双向断言。**已归零的文件也列入**（基线 0）防回退。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    #: 代码/文档/CI 各文件允许的 CNXX 命中**行数**上限（棘轮，只降不升）。
+    CODE_BASELINES = {
+        "tests/test_china_check.py": 250,
+        "scripts/china_check.py": 173,
+        "scripts/china_engine.py": 64,
+        ".github/workflows/china-check.yml": 26,
+        "tests/test_common.py": 25,
+        "tests/test_validate.py": 14,
+        "scripts/validate_proxies.py": 6,
+        "README.md": 5,
+        "tests/test_build_good.py": 4,
+        "docs/data-spec.md": 4,
+        "scripts/common.py": 2,
+        "scripts/generate_stats.py": 2,
+        "scripts/health_alert.py": 2,
+        "scripts/export_json.py": 1,
+        "scripts/quality_check.py": 1,
+        "tests/test_export_json.py": 1,
+        "tests/test_stats.py": 1,
+        "docs/scripts.md": 1,
+    }
+
+    #: data/ 各文件允许的 CNXX **出现次数**上限（棘轮，只降不升）。
+    DATA_BASELINES = {
+        "data/quality/china.json": 159989,
+    }
+
+    _RX = None
+
+    @classmethod
+    def _rx(cls):
+        if cls._RX is None:
+            import re
+            cls._RX = re.compile(r"(?<![A-Za-z0-9_])cn\d{1,2}(?![A-Za-z0-9_])",
+                                re.IGNORECASE)
+        return cls._RX
+
+    def test_cn_codenames_in_code_ratcheted_down(self):
+        rx = self._rx()
+        found = {}
+        for rel, base in self.CODE_BASELINES.items():
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            n = sum(1 for line in f.read_text(encoding="utf-8").splitlines()
+                    if rx.search(line))
+            if n:
+                found[rel] = n
+        for rel, n in sorted(found.items()):
+            with self.subTest(file=rel):
+                if n > self.CODE_BASELINES.get(rel, 0):
+                    self.fail(
+                        f"{rel}：CN 代号 {n} 行 > 棘轮基线 "
+                        f"{self.CODE_BASELINES.get(rel, 0)}——**出现新增泄漏**。"
+                        f"源代号须换成 src_* 不透明 id（发现路径见 --list-cn-channels）")
+        for rel, b in self.CODE_BASELINES.items():
+            if found.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：CN 代号降至 {found.get(rel, 0)} 行（基线 {b}）"
+                        f"——**该下调 CODE_BASELINES**")
+
+    def test_cn_codenames_in_data_ratcheted_down(self):
+        rx = self._rx()
+        found = {}
+        for rel in self.DATA_BASELINES:
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            n = len(rx.findall(f.read_text(encoding="utf-8", errors="ignore")))
+            if n:
+                found[rel] = n
+        for rel, n in sorted(found.items()):
+            with self.subTest(file=rel):
+                if n > self.DATA_BASELINES.get(rel, 0):
+                    self.fail(
+                        f"{rel}：CN 代号 {n} 处 > 棘轮基线 "
+                        f"{self.DATA_BASELINES.get(rel, 0)}——**出现新增泄漏**")
+        for rel, b in self.DATA_BASELINES.items():
+            if found.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：CN 代号降至 {found.get(rel, 0)} 处（基线 {b}）"
+                        f"——**该下调 DATA_BASELINES**")
+
+    def test_gate_detects_an_injected_codename(self):
+        """自证：注入一个 CN 代号 → 计数必须上升（两个口径都验）。"""
+        rx = self._rx()
+        self.assertEqual(len(rx.findall("x cn01 y")), 1)
+        self.assertEqual(len(rx.findall("cn01 cn44")), 2)
+        # 边界：不得把普通单词里的 cn+数字误判
+        self.assertEqual(len(rx.findall("scn0123 acn01_ xcn1")), 0)
+        self.assertEqual(len(rx.findall("cn")), 0)
+
+
 class TestDocsLeakGuard(unittest.TestCase):
     def test_docs_source_endpoints_absent(self):
         if _GUARD is None:
