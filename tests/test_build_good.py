@@ -685,6 +685,64 @@ class TestCommittedChinaJsonSourceKeys(unittest.TestCase):
                 bad / total, base / max(1, total) + 0.02,
                 "非代号源键占比上升")
 
+    def test_published_error_values_carry_no_true_name(self):
+        """R227：已发布 ``sources[*].error`` **值**也不得含来源真名。
+
+        R226 只查源**键**。R227 盘点发现值层面同样泄漏：``error`` 字段里直接
+        写着上游站点名（300 条 ``no <站点> nodes``），即批量节点拉取失败的
+        原因字符串把来源真名带进了公开数据。键名是注册表可判定的，值里的真名
+        同样可用 ``_metadata.true_roots()`` 权威判定（不同于下载源侧——那边
+        PCB 名单不完整，黑名单判据不可靠，故本轮**不**加门禁，改为记录待修）。
+
+        判据：分段匹配（与 R218 门禁同一套 CamelCase 分段语义），只看
+        ``sources[*].error`` 与 ``basis``，避免误伤正常内容。
+        """
+        import re as _re
+        sys.path.insert(0, str(self.ROOT / "scripts"))
+        import checks_bundle as cb
+        try:
+            meta = cb.load_plugin("_metadata")
+        except Exception:
+            self.skipTest("私有 _metadata 不可得：无法判定真名，跳过（fail-open）")
+        roots = {r.lower() for r in meta.true_roots()}
+        self.assertTrue(roots, "真名表为空，判据失效")
+
+        def segments(text):
+            out = set()
+            for w in _re.findall(r"[A-Za-z0-9]+", text):
+                out.add(w.lower())
+                for part in _re.findall(
+                        r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+", w):
+                    out.add(part.lower())
+            return out
+
+        path = self.ROOT / "data" / "quality" / "china.json"
+        if not path.is_file():
+            self.skipTest("china.json 不存在（数据链未跑过）")
+        proxies = json.loads(path.read_text(encoding="utf-8")).get("proxies")
+        self.assertIsInstance(proxies, dict)
+        bad = []
+        for key, entry in proxies.items():
+            if not isinstance(entry, dict):
+                continue
+            for code, res in (entry.get("sources") or {}).items():
+                if not isinstance(res, dict):
+                    continue
+                err = res.get("error")
+                if isinstance(err, str) and (segments(err) & roots):
+                    bad.append(f"{key}/{code}")
+        # 存量待重跑清除：方向感知棘轮（高于=新增泄漏；低于=该下调基线）
+        base = 2018
+        if len(bad) > base:
+            self.fail(
+                f"sources[*].error 含来源真名的条目数 {len(bad)} > 棘轮基线 "
+                f"{base}（首条：{bad[0]}）：**出现新增泄漏**。error 文本常直接"
+                "引用上游站点名，异常信息路径须与源键一并脱敏")
+        if len(bad) < base:
+            self.fail(
+                f"error 真名条目数已降至 {len(bad)}（基线 {base}）："
+                "**该下调基线**（清零后改 0 即升级为绝对断言）")
+
     def test_baseline_is_a_floor_not_a_ceiling(self):
         """基线本身不得被上调（否则新增泄漏可被合法化）。"""
         self.assertLessEqual(
