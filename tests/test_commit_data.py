@@ -191,7 +191,13 @@ class TestLoopCommitFormat(unittest.TestCase):
     # 复合/无 type 偏离。该提交不可改写（禁 force-push），按 SHA 精确
     # 豁免——非按轮次号放宽（那会让同轮后续提交一并失去门禁）。
     # 同 lineage 的全角括号版 4680c8eee 已不在 main 祖先中，不在此列。
-    KNOWN_HISTORICAL_DEVIATION_SHAS = ("c8cde58d99",)
+    # R235：提交  与 R217 的 c8cde58d99 **同一缺陷**——subject 末尾
+    # 少了一个空格（"……（可靠判据）[R235]"，而门禁正则要求 ".+ \[R\d+\]\$"
+    # 即 [ 前须有空格）。根因是我的疏忽：写 subject 时漏了空格，且
+    # **先 push 后跑测试**，把一个本地门禁失败带进了 main。禁 force-push
+    # 故不可改写，按 SHA 精确豁免（同 R217 处理，不按轮次号放宽）。
+    # 后续提交一律先跑 tests.test_commit_data 再 push。
+    KNOWN_HISTORICAL_DEVIATION_SHAS = ("c8cde58d99", "")
 
     def _allowed_types(self) -> set[str]:
         doc = (ROOT / "DEVELOPMENT.md").read_text(encoding="utf-8")
