@@ -938,12 +938,31 @@ def entry_cn_mainland(entry, cap: float | None = None) -> bool:
 _CN_SPEED_RAW_RE = re.compile(r"-(\d+(?:\.\d+)?)MB/s")
 
 
+def _fmt_cn_speed(value: float) -> str:
+    """渲染 CN 视角估算速度，**杜绝假零**（R221）。
+
+    CN 视图的估算值是 ``min(海外实测, RTT 推算上限)``，其中海外实测
+    可以低到 0.01MB/s（极慢节点的真实读数）。原实现一律
+    ``round(v, 1)``，于是 0.01 → ``0.0``：把一个真实低速节点发布成
+    「速度为零」，同时违反数据契约 A「测速失败省略速度段**不写 0**」
+    ——实测成功却写出 0，比省略更糟（下游会当成不可用节点）。
+
+    规则：正数若一位小数会归零，则退到两位小数（0.01 → ``0.01``），
+    既保住量级又不谎报零；其余保持原有一位小数展示约定。真正为 0 的
+    输入仍走删除路径（见 :func:`_rewrite_cn_speed`）。
+    """
+    if value > 0 and round(value, 1) == 0:
+        return f"{value:.2f}"
+    return f"{round(value, 1):.1f}"
+
+
 def _rewrite_cn_speed(line: str, cn_ms: dict | None) -> str:
     """CN 视图专用：把海外实测速度替换为大陆视角估算上限 ``≈XMB/s``。
 
     - 无海外速度 → 删除该 token（无数据来源，宁缺勿假）
     - 无大陆 RTT → 速度语义不明，删除（不再展示海外值）
     - 有两者 → ``min(海外实测, 以 cn_ms 推算的单流参考上限)``，标记 ``≈``
+    - 估算值为 0（上游实测就是 0）→ 删除 token，不发布零速度（R221）
     """
     if "#" not in line:
         return line
@@ -960,8 +979,11 @@ def _rewrite_cn_speed(line: str, cn_ms: dict | None) -> str:
     if not cn_rtt or cn_rtt <= 0:
         return _CN_SPEED_RAW_RE.sub("", line, count=1)
     cap = max(CN_SPEED_FLOOR, CN_SPEED_BASE_CAP * (CN_SPEED_REF_MS / cn_rtt))
-    est = round(min(mbps, cap), 1)
-    return _CN_SPEED_RAW_RE.sub(f"-≈{est}MB/s", line, count=1)
+    est = min(mbps, cap)
+    # 真零（上游实测就是 0）不是有效读数，删 token 而非发布 0（R221）
+    if est <= 0:
+        return _CN_SPEED_RAW_RE.sub("", line, count=1)
+    return _CN_SPEED_RAW_RE.sub(f"-≈{_fmt_cn_speed(est)}MB/s", line, count=1)
 
 
 # ------------------------------------------------------- 备注段规范（唯一出口）

@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from common import (
     _cn_fallback_ms,
+    _fmt_cn_speed,
     _note,
     _rewrite_cn_speed,
     cn_display_ms,
@@ -255,6 +256,76 @@ class TestNormalizeNote(unittest.TestCase):
                     _rewrite_cn_speed(line, {"8.8.8.8:443#US": bad}),
                     "8.8.8.8:443#US-42ms-fast-90",
                 )
+
+    def test_rewrite_cn_speed_never_publishes_zero(self):
+        """R221：CN 视图不得发布零速度（契约 A「测速失败省略速度段不写 0」）。
+
+        事故实录：CN 估算值 = ``min(海外实测, RTT 推算上限)``，海外实测
+        低至 0.01MB/s（极慢节点的真实读数），而渲染一律 ``round(v, 1)``
+        → 0.01 被压成 ``0.0``。实测产物中 ``all_cn.txt`` 78 行、全部 CN
+        视图合计 3888 行写着 ``≈0.0MB/s``：把「实测成功但极慢」发布成
+        「速度为零」，下游会当成不可用节点——比省略更糟。
+
+        本测试锁三件事：① 一位小数会归零的正数退到两位小数（保住量级）；
+        ② 上游实测真为 0 时删 token 而非写 0；③ 已发布视图零命中。
+        """
+        cn = {"1.2.3.4:443#US": 21.0}
+        # ① 低位正数不被压成 0
+        for raw, want in (("0.01", "0.01"), ("0.03", "0.03"), ("0.04", "0.04")):
+            with self.subTest(raw=raw):
+                out = _rewrite_cn_speed(
+                    f"1.2.3.4:443#US-42ms-{raw}MB/s-fast-90", cn)
+                self.assertIn(f"-≈{want}MB/s", out)
+                self.assertNotIn("≈0.0MB/s", out)
+        # 正常量级仍保持原有一位小数展示约定（不无谓改动既有格式）
+        self.assertIn("-≈0.4MB/s", _rewrite_cn_speed(
+            "1.2.3.4:443#US-42ms-0.44MB/s-fast-90", cn))
+        # ② 上游实测真为 0 → 删 token，不写 0
+        out = _rewrite_cn_speed("1.2.3.4:443#US-42ms-0MB/s-fast-90", cn)
+        self.assertEqual(out, "1.2.3.4:443#US-42ms-fast-90")
+        self.assertNotIn("MB/s", out)
+        # ③ 对已发布 CN 视图逐行做**推导式**校验：把行内既有速度 token 去掉
+        #    后交回本函数重渲染，断言永不产生假零。这既立刻可跑（不依赖 CI
+        #    重跑数据），又真锁住数据面——若有人改回 round(v,1)，此用例即红。
+        #    注：已提交字节里的历史假零由 china_check 重跑自然清除（all_cn.txt
+        #    需联网探测，禁手改 data/）；字节级锁在数据重跑后随
+        #    TestCommittedCnViewInvariant 一并收口。
+        import glob
+        import re
+        root = Path(__file__).resolve().parent.parent
+        line_re = re.compile(r"^([\d.]+:\d+#\S+?)(-\d+(?:\.\d+)?ms)?"
+                             r"(-\d+(?:\.\d+)?MB/s)")
+        checked = derived_zero = 0
+        for f in glob.glob(str(root / "data" / "valid" / "**" / "*.txt"),
+                           recursive=True):
+            try:
+                text = Path(f).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for raw in text.splitlines():
+                m = line_re.match(raw)
+                if not m:
+                    continue
+                key = m.group(1)
+                cn = {key: 21.0}
+                out = _rewrite_cn_speed(
+                    f"{key}-42ms{m.group(3)}", cn)
+                checked += 1
+                if "-≈0.0MB/s" in out:
+                    derived_zero += 1
+        if checked:
+            self.assertEqual(
+                derived_zero, 0,
+                f"重渲染 {checked} 行已发布 CN 视图，{derived_zero} 行产出假零")
+
+    def test_fmt_cn_speed_precision_ladder(self):
+        """R221：渲染精度阶梯本身（不经整行 rewrite，便于定位）。"""
+        self.assertEqual(_fmt_cn_speed(0.01), "0.01")
+        self.assertEqual(_fmt_cn_speed(0.04), "0.04")
+        self.assertEqual(_fmt_cn_speed(0.05), "0.1")
+        self.assertEqual(_fmt_cn_speed(0.44), "0.4")
+        self.assertEqual(_fmt_cn_speed(7.24), "7.2")
+        self.assertEqual(_fmt_cn_speed(12.53), "12.5")
 
     def test_rewrite_cn_speed_idempotent_on_estimated(self):
         # 已含 ≈ 估算 token 的行再经 rewrite（重入/CN 视图文件二次处理）——
