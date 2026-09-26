@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Xiaobei09/PCB
-          ref: b03dd6177adbeca511bbe9184a781127a76cf91b
+          ref: e72b560eb9f6232f9517bd5b319167e96677efcc
           token: ${{ secrets.BUNDLE_PAT }}
           path: pcb
 
@@ -77,7 +77,16 @@ jobs:
 
       - name: Run tests
         if: steps.gate.outputs.skip != 'true'
-        run: python -m unittest discover -s tests -v
+        # R246：同时跑 **pcb/tests**。跨仓对账（``pcb/tests/test_public_plan.py``：
+        # 公开工作流的 CI 配额 vs 私有 ``CI_OVERRIDES``）此前**在 CI 里从不
+        # 执行**——所有工作流的测试目标都是 ``discover -s tests``（纯公开测试），
+        # 它只在有人手动同时挂两棵树时才跑。R241 把工作流改成不透明 id 后，
+        # 那道对账立刻失配却**潜伏了整整一轮**无人发现。
+        # ``-t .`` 让顶层包解析到仓库根，pcb/tests 内部按 ``pcb.plugins.*``
+        # 导入插件（它自己会把 ``pcb/plugins`` 塞进 sys.path）。
+        run: |
+          python -m unittest discover -s tests -v
+          python -m unittest discover -s pcb/tests -t . -v
 
       - name: China reachability check
         id: china
