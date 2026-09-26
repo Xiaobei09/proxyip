@@ -935,21 +935,34 @@ class TestWriteSourceAttribution(unittest.TestCase):
         }
         dp.write_source_attribution(by_port, main_ips, source_ip_sets)
         data = json.loads(dp.IP_SOURCES_FILE.read_text())
-        self.assertEqual(data["sources"]["1.1.1.1:443#US"], "proxy")
+        # R229：归属值是不透明公开 id（不再是文件名主干）。期望值经
+        # source_origin() 推导而非硬编码 id —— 硬编码会把新键空间抄进测试、
+        # 让本用例退化成"id 长这样"的同义反复，salt 一换即假红。
+        url = "https://raw.githubusercontent.com/x/BestProxy/proxy.txt"
+        self.assertEqual(data["sources"]["1.1.1.1:443#US"],
+                         dp.source_origin(url))
 
     def test_same_origin_urls_share_one_attribution_label(self):
         # IP-OPT-1：同源多文件只记一个归属标签（同站重复不再判 multi）。
         by_port = {"443": {"ALL": ["2.2.2.2", "3.3.3.3"]}}
         if not dp.EXTRA_SOURCES:
             self.skipTest("needs PCB dl_sources bundle")
-        pair = [u for u in (u for _k, u in dp.EXTRA_SOURCES)
-                if dp.source_origin(u) == "wanwu"][:2]
-        self.assertEqual(len(pair), 2)
+        # R229：来源键是不透明 id，且**不硬编码**——按「某来源的 URL 数量最多」
+        # 动态挑出同源多文件的那一族，再验证它们共享同一个归属值。写死标签
+        # 会把厂商名抄回公开测试树（正是本轮要消除的东西）。
+        pairs = {}
+        for _k, u in dp.EXTRA_SOURCES:
+            pairs.setdefault(dp.source_origin(u), []).append(u)
+        fam = max(pairs.values(), key=len)
+        self.assertGreaterEqual(len(fam), 2, "找不到同源多文件族")
+        self.assertEqual(len({dp.source_origin(u) for u in fam}), 1)
+        pair = fam[:2]
         source_ip_sets = {pair[0]: {"2.2.2.2"}, pair[1]: {"2.2.2.2", "3.3.3.3"}}
         dp.write_source_attribution(by_port, set(), source_ip_sets)
         data = json.loads(dp.IP_SOURCES_FILE.read_text())
-        self.assertEqual(data["sources"]["2.2.2.2:443#ALL"], "wanwu")
-        self.assertEqual(data["sources"]["3.3.3.3:443#ALL"], "wanwu")
+        same = dp.source_origin(pair[0])
+        self.assertEqual(data["sources"]["2.2.2.2:443#ALL"], same)
+        self.assertEqual(data["sources"]["3.3.3.3:443#ALL"], same)
 
 
 class TestProxyMirrorSources(unittest.TestCase):
@@ -1073,29 +1086,40 @@ class TestProxyMirrorSources(unittest.TestCase):
         # IP-OPT-1 同源合并：Wwuyi123（4 文件）→ wwuyi，
         # wanwushequ 地区榜（18 文件）→ wanwu；文件仍逐个抓取，
         # 储存只记一个来源。
+        # R229：origin 现为不透明 id，且**不硬编码任何标签**。改为按
+        # 「同源合并」这一结构不变量断言：每个 origin 恰好对应一个标签、
+        # 多文件族被合并为单 origin、来源总数与 EXTRA_SOURCES 去重后一致。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
-        wwuyi = [u for u in urls if dp.source_origin(u) == "wwuyi"]
-        self.assertEqual(len(wwuyi), 5)
-        wanwu = [u for u in urls if dp.source_origin(u) == "wanwu"]
-        self.assertEqual(len(wanwu), 18)
         origins = {}
         for _kind, u in dp.EXTRA_SOURCES:
             origins.setdefault(dp.source_origin(u), []).append(u)
-        for origin in ("wentao", "ymyuuu", "leilao_cfproxy", "svip_cfip",
-                       "afr", "wangallen", "farel", "cmliu"):
-            self.assertTrue(origins.get(origin), origin)
-        labels = {}
-        for u, label in dp.SOURCE_LABELS.items():
-            labels.setdefault(label, []).append(u)
-        for label in ("leilao_cfproxy", "svip_cfip", "ymyuuu_proxy_csv"):
-            self.assertTrue(labels.get(label), label)
+        self.assertEqual(sum(len(v) for v in origins.values()), len(urls))
+        # 存在至少两个「多文件合并为一」的族（原设计的核心不变量）
+        merged = [o for o, us in origins.items() if len(us) > 1]
+        self.assertGreaterEqual(len(merged), 2, "同源合并失效")
+        self.assertEqual(
+            len({dp.source_origin(u) for u in dp.SOURCE_LABELS}), len(
+                {dp.source_origin(u) for u in dp.SOURCE_LABELS}),
+            "origin 派生不确定")
+        # 私有表来源的 origin 必为不透明 id（不得回落成明文标签）。
+        # 非私有表的 URL 走文件名主干回落（用户自带 --extra-source 或通用
+        # 清单名消歧），那是用户自有输入、不构成本仓泄漏，故不在此断言范围。
+        import re as _re
+        private_urls = set(dp.SOURCE_LABELS) | set(dp.SOURCE_ORIGIN_MAP)
+        for u in urls:
+            if u in private_urls:
+                self.assertRegex(
+                    dp.source_origin(u), _re.compile(r"^dsrc_[0-9a-f]{12}$"),
+                    "私有表来源回落成明文标签")
 
     def test_same_origin_urls_merge_into_one_stats_row(self):
         if not dp.EXTRA_SOURCES:
             self.skipTest("needs PCB dl_sources bundle")
         # 同源多文件 → stats 只有一行 origin；同站重复不算交叉 overlap。
-        pair = [u for u in (u for _k, u in dp.EXTRA_SOURCES)
-                if dp.source_origin(u) == "wanwu"][:2]
+        pairs = {}
+        for _k, u in dp.EXTRA_SOURCES:
+            pairs.setdefault(dp.source_origin(u), []).append(u)
+        pair = max(pairs.values(), key=len)[:2]
         self.assertEqual(len(pair), 2)
         stats = dp._build_source_stats(
             {"1.1.1.1"},
@@ -1103,9 +1127,9 @@ class TestProxyMirrorSources(unittest.TestCase):
             {"1.1.1.1", "2.2.2.2", "3.3.3.3"},
         )
         self.assertEqual(
-            [k for k in stats if k != "main (zip.cm.edu.kg)"], ["wanwu"])
-        self.assertEqual(stats["wanwu"]["total"], 2)
-        self.assertEqual(stats["wanwu"]["overlap"], 0)
+            [k for k in stats if k != "main (zip.cm.edu.kg)"], [dp.source_origin(pair[0])])
+        self.assertEqual(stats[dp.source_origin(pair[0])]["total"], 2)
+        self.assertEqual(stats[dp.source_origin(pair[0])]["overlap"], 0)
 
     def test_r215_proxyip_source_policy_compliant(self):
         if not dp.EXTRA_SOURCES:
@@ -1656,10 +1680,25 @@ class TestExtraSourcesCountMatchesReadme(unittest.TestCase):
         self.assertIsNotNone(m, "README 补充源计数句式丢失")
         self.assertEqual(int(m.group(1)), len(dp.extra_source_origins()))
 
-    def test_dataspec_lists_all_origins(self):
-        # IP-OPT-5：data-spec 的 ip_sources 节须列出全部当前来源（防文档漂移）。
+    def test_dataspec_points_at_discovery_instead_of_duplicating(self):
+        """R229 反向锁：data-spec **不得**复制来源清单，且须指向唯一发现入口。
+
+        原 IP-OPT-5 锁要求 data-spec 逐条列出全部 origin。R229 把 origin 换成
+        不透明 id 后这条锁有两个问题：① 文档要跟着私有 salt 变动（salt 一换
+        全表文档 churn）；② 更本质的是——文档**不该**持有清单副本，副本天然与
+        真相源二次漂移（这与 R223 处理 CN 注册表表是同一条结论：副本即漂移源）。
+
+        故改为两条不变量：① data-spec 的 ip_sources 节不含任何 origin 值；
+        ② 它必须把读者指向 ``--list-extra-sources``（唯一发现入口）。
+        """
         spec = (Path(__file__).resolve().parent.parent / "docs" / "data-spec.md"
                 ).read_text(encoding="utf-8")
+        section = spec[spec.index("### `data/quality/ip_sources.json`"):]
+        section = section[:section.index("\n### ")]
         for origin in dp.extra_source_origins():
-            self.assertIn(f"`{origin}`", spec,
-                          f"data-spec.md 缺来源 {origin}")
+            self.assertNotIn(
+                f"`{origin}`", section,
+                "data-spec.md 又出现了来源清单副本（应指向 --list-extra-sources）")
+        self.assertIn(
+            "--list-extra-sources", section,
+            "data-spec.md 须给出唯一发现入口 --list-extra-sources")

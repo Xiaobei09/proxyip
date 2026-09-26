@@ -360,7 +360,7 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/quality/source_history.json`
 
-每次 download 运行向该文件**追加**一轮各上游源的 `unique` 数快照：`{"runs": [{"ts": <ISO-8601>, "counts": {<源标签>: 去重数}}]}`，保留最近 14 轮（`SOURCE_HISTORY_MAX`），内容不变不重写。供 `health_alert.check_sources` 检测上游源覆盖率骤降（相对近 8 轮中位数下降 > 55% 且历史规模 ≥ 500 触发告警）。
+每次 download 运行向该文件**追加**一轮各上游源的 `unique` 数快照：`{"runs": [{"ts": <ISO-8601>, "counts": {<来源标识>: 去重数}}]}`，保留最近 14 轮（`SOURCE_HISTORY_MAX`），内容不变不重写。来源标识口径同 `ip_sources.json`（内置补充源为不透明公开 id）。**注意**：键空间切换（标签→不透明 id）后的 14 轮内，新旧标识互不相交，`health_alert.check_sources` 的跨轮中位数在存量标识上仍有足够样本，故骤降告警不失效。供 `health_alert.check_sources` 检测上游源覆盖率骤降（相对近 8 轮中位数下降 > 55% 且历史规模 ≥ 500 触发告警）。
 
 ### `data/quality/upstream_meta.json`
 
@@ -368,7 +368,15 @@ china-check CI 派生的两个可靠性子集（均按大陆实测延迟升序�
 
 ### `data/quality/ip_sources.json`
 
-逐 IP 下载源归属（由 `download_proxies.py` 生成）。键为 `ip:port#CC`，值为来源标签：`"main"`（主源 zip.cm.edu.kg）、补充源按上游**来源**归并（IP-OPT-1 起：`wentao`/`list`/`ymyuuu`/`leilao_cfproxy`/`proxyip`/`wwuyi`/`wanwu`/`svip_cfip`；IP-OPT-6 起加 `afr`；IP-OPT-7 起加 `wangallen`/`farel`；IP-OPT-8 起摘除零独占的 `ipdb_api` 镜像；IP-OPT-9 起加 `cmliu`；同站多文件只记一个来源，同站重复不判 `multi`）、镜像注册域前缀标签（通用清单名如 `all.json` 会记为 `mirror-*/all` 消歧）、`"multi"`（多来源重叠）或 `"unknown"`。供 `analyze_sources.py` 消费。
+逐 IP 下载源归属（由 `download_proxies.py` 生成）。键为 `ip:port#CC`，值为**来源标识**：
+- `"main"`（主源）、`"multi"`（多来源重叠）、`"unknown"`、`mirror-*/all`（通用清单名消歧）——
+  这些是**语义哨兵**，可读；
+- 内置补充来源一律记为其**不透明公开 id**（`dsrc_` + 12 位十六进制）。id 由私有包加盐派生，
+  与来源标签无可逆关系，公开侧与本文档均不出现来源真名。同站多文件只记一个 id（同源合并），
+  故一个 id 可对应多个抓取 URL。
+
+来源 id 全集**不在本文档逐条列举**（会与私有清单二次漂移）；运行时用
+`python scripts/download_proxies.py --list-extra-sources` 查看。供 `analyze_sources.py` 消费。
 
 ### `data/quality/source_quality.json`
 

@@ -129,11 +129,16 @@ try:
     EXTRA_SOURCES = _dl_sources.EXTRA_SOURCES
     SOURCE_LABELS = _dl_sources.SOURCE_LABELS
     SOURCE_ORIGIN_MAP = _dl_sources.SOURCE_ORIGIN_MAP
+    SOURCE_PUBLIC_ID = getattr(_dl_sources, "source_public_id", None)
     _DL_SOURCES_BUNDLE = True
 except Exception:
     EXTRA_SOURCES = []
     SOURCE_LABELS = {}
     SOURCE_ORIGIN_MAP = {}
+    SOURCE_PUBLIC_ID = None
+# SOURCE_PUBLIC_ID 由上方 loader 回绑（无包时 except 分支置 None，
+# source_origin 随之回落标签）。见 source_origin 的 R229 说明。
+
 # Cloudflare 边缘常用端口（非 AS13335 反代/IP 直连时常用）。
 # 全链路输出只保留这些端口，其余桶一律丢弃。
 CF_EDGE_PORTS = frozenset({"443", "8443", "2053", "2083", "2087", "2096"})
@@ -148,8 +153,40 @@ MAX_EXTRA_SOURCE_BYTES = 4_000_000  # 单源体积上限：超出则跳过解析
 
 
 def source_origin(url: str) -> str:
-    """URL 所属上游来源：映射命中取 origin，否则回落为 ``source_label``。"""
-    return SOURCE_ORIGIN_MAP.get(url, source_label(url))
+    """URL 所属上游来源的**不透明公开 id**（R229 接线）。
+
+    映射命中取 origin，否则回落为 ``source_label``；两者都是厂商可识别的
+    短标签，而本函数是**唯一漏斗**——返回值会流进
+    ``data/quality/ip_sources.json``、``source_history.json``、
+    ``source_stats.json`` 三份**已发布产物**，以及 ``--list-extra-sources``
+    的 stdout。R227 实测：ip_sources 有 12 个去重厂商名键 / 3046 处。
+
+    故统一经私有包**加盐**派生换不透明 id（与 CN 侧 ``public_id`` 同构）：
+    id 与标签无可逆关系、无 salt 不可反查；按**标签**派生而非按 URL，以保住
+    「同一来源的多个 URL 合并为一个来源」语义（否则同源会被算成多个独立来源，
+    破坏 stats/归属/健康监控口径）。
+
+    无包降级：``source_public_id`` 不可得时原样返回标签——此时无内置来源
+    （``EXTRA_SOURCES`` 为空），标签只可能来自**用户自带的** ``--extra-source``
+    URL 文件名，属用户自有输入而非本仓来源清单，不构成本仓泄漏。
+    """
+    idder = SOURCE_PUBLIC_ID
+    if idder is None:
+        return SOURCE_ORIGIN_MAP.get(url, source_label(url))
+    # 只对**私有表来源**的标签换不透明 id：
+    #   · SOURCE_ORIGIN_MAP 命中 → 私有标签（厂商可识别）→ 换 id；
+    #   · SOURCE_LABELS 命中   → 同上；
+    #   · 其余是 URL 文件名主干（用户自带 --extra-source，或通用清单名消歧）
+    #     —— 那是**用户自有输入**而非本仓来源清单，哈希它既无泄漏可防、
+    #     又会抹掉「哪个文件」的可追溯性，故原样保留。
+    # 另：``main``/``multi`` 是主源与多源重叠的**语义哨兵**，由
+    # write_source_attribution 直接写入，不经本函数，天然不受影响。
+    origin = SOURCE_ORIGIN_MAP.get(url)
+    if origin is not None:
+        return idder(origin) or origin
+    if url in SOURCE_LABELS:
+        return idder(SOURCE_LABELS[url]) or SOURCE_LABELS[url]
+    return source_label(url)
 
 
 def extra_source_origins(
