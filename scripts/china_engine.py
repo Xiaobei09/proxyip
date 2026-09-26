@@ -194,7 +194,7 @@ CN06_MIN_RATIO = DEFAULT_MIN_RATIO
 CN19_MIN_RATIO = DEFAULT_MIN_RATIO
 CN35_MIN_RATIO = DEFAULT_MIN_RATIO
 # 各多节点源可独立判 reachable 的最小节点成功率（strong_valid 的单一入口）。
-# 原实现只特判多节点 ICMP 源/cn16，cn11/cn09/cn42/cn34/cn43/cn44/cn13 的
+# 原实现只特判多节点 ICMP 源、纯 ICMP 单源，以及若干 socket.io/SSE/WS 族的
 # 阈值常量定义了却从未被读取——调高任意一个都会被静默回退到 DEFAULT_MIN_RATIO。
 # 这里统一接线，让每源的阈值真正生效；改动某个常量即按比例收紧/放宽该源。
 def _build_verdict_tables():
@@ -253,8 +253,8 @@ else:
         CN19_CODE: CN19_MIN_RATIO,
         CN35_CODE: CN35_MIN_RATIO,
     }
-# cn41（token 搭车相）失败不计入 multi_failed（旧行为原样保留：其 skipped/
-# fail 语义由 cn40 相内部消化，不参与多节点失败联动）。
+# 需签发 token 的搭车复核相失败不计入 multi_failed（旧行为原样保留：其 skipped/
+# fail 语义由宿主相内部消化，不参与多节点失败联动）。
 _MULTI_FAILED = tuple(s for s in _MULTI_OK if s != CN41_CODE)
 _SINGLE_FAILED = _SINGLE_OK
 def merge_verdict(sources: dict) -> dict:
@@ -264,8 +264,8 @@ def merge_verdict(sources: dict) -> dict:
       ≥2 个单节点源（交叉）→ reachable；仅 1 个单节点源或弱多节点
       （无强多节点）→ uncertain（单点/弱证据不可靠）
     - 多节点源（见 _MULTI_OK）单独确认 → reachable，
-      但**要求该源节点成功率达阈值**（cn01 系列按 ``ratio``≥0.5；
-      cn40/cn41 内部已是多数/60% 规则，视作满足）；比率过低的单源
+      但**要求该源节点成功率达阈值**（批量系列按 ``ratio``≥0.5；
+      部分复核相内部已是多数/60% 规则，视作满足）；比率过低的单源
       判定 → uncertain（单节点假阳性抑制）
     - 单节点源 ≥2 个失败 → unreachable（源集合见 single_failed 表）
     - 多节点源失败且所有单节点源也失败 → unreachable
@@ -287,7 +287,7 @@ def merge_verdict(sources: dict) -> dict:
     ]
     ms = round(min(ms_values), 1) if ms_values else None
     # 证据分级：任一成功源给出应用层确认 → "http"；仅传输层 → "tcp"；
-    # 仅 ICMP 主机存活源（多节点 ICMP/cn16）→ "icmp"（如实标注，不冒充 TCP）
+    # 仅 ICMP 主机存活源（多节点或单节点 ICMP）→ "icmp"（如实标注，不冒充 TCP）
     if any(sources[s].get("level") == "http" for s in ok_sources):
         level = "http"
     elif ok_sources and all(
@@ -306,7 +306,7 @@ def merge_verdict(sources: dict) -> dict:
         """该多节点源是否能独立支撑 reachable（成功率+最低报告节点数达标）。"""
         ratio = sources[source].get("ratio")
         if ratio is None:
-            return True  # cn40/cn41 内部已实施多数/60% 规则
+            return True  # 多节点复核相内部已实施多数/60% 规则
         if (sources[source].get("nodes") or 0) < MULTI_MIN_NODES:
             return False  # 残缺样本（限流/连接中断）不作强确认，防退化为单点假阳性
         return ratio >= _SOURCE_MIN_RATIO.get(source, DEFAULT_MIN_RATIO)

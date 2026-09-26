@@ -762,8 +762,8 @@ def rewrite_latency(line: str, ms: float | int | None) -> str:
 
 
 # ------------------------------------------------------- CN 视角速度估算
-# CN 清单的 ``MB/s`` 必须语义一致=大陆视角。免费大陆拨测（cn01/cn40/
-# cn27 等单节点/多节点源）只给 TCP 建连延迟、不提供吞吐量，故无法实测大陆
+# CN 清单的 ``MB/s`` 必须语义一致=大陆视角。免费大陆拨测（批量通道与各
+# 单节点/多节点复核源）只给 TCP 建连延迟、不提供吞吐量，故无法实测大陆
 # 速度——任何数值都必然是估算。为避免把海外 runner 实测速度冒充大陆体验
 # （两者路径不同，数值无代表性），CN 清单改用显式标记 ``≈XMB/s`` 的估算
 # 上限：以大陆 RTT 为参照推算单流 TCP 吞吐参考值，再与海外实测速度取小
@@ -774,7 +774,7 @@ CN_SPEED_BASE_CAP = 8.0  # cn_ms≈60ms 时的估算上限（MB/s）
 CN_SPEED_FLOOR = 0.4     # 估算下限（MB/s），防极端高延迟给出夸张小值
 
 # CN 清单延迟门槛（单一事实来源，china_check 与 build_good 共用）：
-# 可达 ≠ 大陆——大陆节点实测 cn24/cn20 扫描的可达池中位 ~218ms，大头是
+# 可达 ≠ 大陆——大陆节点实测扫描的可达池中位 ~218ms，大头是
 # 海外/边缘机房（大陆节点能 TCP 连通而已）。CN 清单 ``ms`` 语义 = 大陆使用者
 # 实测延迟，故 CN 清单每行只应展示大陆视角读数。注意：此门槛与 cn_mainland
 # 打标只是"信息性/可选"——CN 清单保持完整（全可达集≥1万），不加 gating 精简。
@@ -782,21 +782,21 @@ CN_SPEED_FLOOR = 0.4     # 估算下限（MB/s），防极端高延迟给出夸�
 CN_LATENCY_CAP_MS = 150.0
 CN_ISP_SHORT = {"中国移动": "移动", "中国电信": "电信", "中国联通": "联通"}
 
-# 可作大陆延迟证据的探测源：cn20（北京）/ cn24（宁波）/ cn27（呼市）
-# 三处大陆视角。L3 复核源（cn30/cn14/cn40/cn17/cn16/cn07）的
+# 可作大陆延迟证据的探测源：三个大陆视角单节点源（节点地域见私有包）。
+# L3 复核源的
 # ms 语义不一、常回 1ms 噪声，只适合佐证可达，不够格当大陆延迟证据。
 _CHINA_VANTAGE_SOURCES = ("cn20", "cn24", "cn27")
 
-# cn16 为 **纯 ICMP ping**（proxyip 不可达的"到 IP 边缘路由"延迟，常说 1~8ms，
-# 与真实代理/隧道延迟无关，反直觉地极小）；cn40 同为大陆节点探测且结果
-# 不带 level 字段，只能按名称剔除。其余源若带 ``level="icmp"`` 由
-# ``_cn_fallback_ms`` 按 level 过滤，防止 cn07/cn08 等复用站点
+# 有一族为 **纯 ICMP ping**（proxyip 不可达的"到 IP 边缘路由"延迟，常说 1~8ms，
+# 与真实代理/隧道延迟无关，反直觉地极小）；另一族同为大陆节点探测且结果
+# 不带 level 字段，只能按名称剔除（名单存私有包）。其余源若带 ``level="icmp"``
+# 由 ``_cn_fallback_ms`` 按 level 过滤，防止复用站点
 # 的 ICMP RTT 冒充大陆延迟（曾理论可漏入 US-4ms 式失真行）。
 _CN_ICMP_ONLY_SOURCES = ("cn16", "cn40")
 
 
 def cn_l2_ms(entry) -> float | None:
-    """大陆视角探测的最小 ok RTT（cn20/cn24/cn27）。
+    """大陆视角探测的最小 ok RTT（三个大陆视角单节点源）。
 
     取三者中状态 ok 且 ms>0 的最小值；无 sources 的旧条目回退 entry["ms"]；
     全无读数返回 None（无法证明大陆性）。"""
@@ -819,9 +819,9 @@ def cn_l2_ms(entry) -> float | None:
 def _cn_fallback_ms(entry, sources: dict) -> float | None:
     """无大陆 L2 读数时的回退延迟：在**非 ICMP** 的 ok 源中取最小可信 RTT。
 
-    排除 cn16 等纯 ICMP 源——其 1~8ms 只是到国内 IP 边缘的 ping 假象，
+    排除纯 ICMP 源——其 1~8ms 只是到国内 IP 边缘的 ping 假象，
     远低于真实代理/隧道延迟，用它会产出 ``US-2ms`` 之类失真行。仅传输层以外
-    的 TCP/TLS 源（cn30/cn07/cn17 等）才是真实代理延迟的上界证据。
+    的 TCP/TLS 源才是真实代理延迟的上界证据。
     """
     best = None
     for name, r in sources.items():
@@ -854,14 +854,14 @@ def cn_display_ms(entry) -> float | None:
         return best
     m = entry.get("ms")
     # 回退 entry 合并 ms 时同样拒绝 ≤2ms（strict > 2.0）：该值可能是被
-    # ICMP/噪声源污染的合并结果（唯一 ok 是 cn16 2ms 时 entry.ms 也被
+    # ICMP/噪声源污染的合并结果（唯一 ok 是纯 ICMP 源 2ms 时 entry.ms 也被
     # 算成 2），宁缺勿假——真实大陆代理延迟不可能低到 2ms。
     return m if isinstance(m, (int, float)) and m > 2.0 else None
 
 
 def cn_fastest_ms(entry) -> float | None:
     """最快运营商视角的大陆 RTT：``entry["isp_ms"]``（``{运营商: ms}``，
-    china-check 由 cn01 等 per-ISP 节点汇聚写入）的各运营商最小 RTT 中取
+    china-check 由按 ISP 布点的通道汇聚写入）的各运营商最小 RTT 中取
     全局最小；无 per-ISP 读数时回退 :func:`cn_display_ms`。
 
     消费方：CN 清单的展示延迟与 ``≈XMB/s`` 速度估算——"最快运营商"即大陆
@@ -883,7 +883,7 @@ def cn_best_isp(entry) -> tuple[str, float] | None:
     """最快运营商 ``(短名, ms)``：``isp_ms`` 各运营商最小 RTT 里取全局最小者。
 
     用于 CN 清单后缀标记"表现最好的运营商的名字与其数据"（如 ``-移动=57ms``）。
-    无 per-ISP 读数（cn01 未启用/被风控）或全读数 ≤2ms（ICMP 噪声）时返回
+    无 per-ISP 读数（通道未启用/被风控）或全读数 ≤2ms（ICMP 噪声）时返回
     ``None``——调用方据此不追加后缀，绝不伪造运营商。
     """
     if not isinstance(entry, dict):
@@ -906,7 +906,7 @@ def cn_isp_speed(isp_ms) -> dict:
     ``max(CN_SPEED_FLOOR, CN_SPEED_BASE_CAP * (CN_SPEED_REF_MS / ms))``。
 
     语义同为**估算上限**（非实测吞吐——免费大陆拨测不提供吞吐量，唯一
-    例外 cn32 ``speed_mbps`` 实为 48 字节错误页 fetch 速率≈RTT 倒数，
+    有一通道的 ``speed_mbps`` 实为 48 字节错误页 fetch 速率≈RTT 倒数，
     无带宽意义，CN-41 已实证排除）；≤2.0ms 读数按 ICMP 噪声剔除（与
     :func:`cn_fastest_ms` 同门）。无有效读数返回 {}，调用方不写字段。
     """

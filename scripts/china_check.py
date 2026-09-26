@@ -182,7 +182,7 @@ FALLBACK_SOURCE = DEFAULT_SOURCE
 
 LIMIT_DEFAULT = 250
 CN40_LIMIT_DEFAULT = 300
-CN40_CONCURRENCY = 6  # cn40 L3 有界并发（每键端到端 ~20-40s，串行太慢）
+CN40_CONCURRENCY = 6  # 该 L3 相有界并发（每键端到端 ~20-40s，串行太慢）
 CN40_SLOT_GAP = 2.0  # 单 worker 键间最小间隔（对上游礼貌）
 WORKERS_DEFAULT = 56  # L2 免额单节点源并发（基准 1000 键：48w≈108s / 64w≈86s / 无 429；取中保守）
 TIMEOUT_DEFAULT = 10
@@ -398,10 +398,10 @@ except Exception:
     CN11_CODE = "cn11"
     CN12_CODE = "cn12"
 
-# cn09/cn10 —— 免费大陆多节点 TCPing/Ping（纯 HTTP + SSE，零 key）：
-# 协议细节已迁 PCB（cn09 插件 + pcb/docs/cn09.md）。
-# cn09/cn10 已迁入 PCB 插件 cn09：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
-# 壳页 CSRF → /probe_sse.php 事件流，协议细节见 pcb/docs/cn09.md），无 bundle
+# 同族二通道 —— 免费大陆多节点 TCPing/Ping（纯 HTTP + SSE，零 key）：
+# 协议细节已迁 PCB（该源 插件 + 私有包对应插件文档）。
+# 同族二通道 已迁入 PCB 插件 该源：有 bundle 时取实现（纯 HTTP+SSE 零鉴权，
+# 壳页 CSRF → /probe_sse.php 事件流，协议细节见 私有包对应插件文档），无 bundle
 # 时 _run_raw_slots 记 fail-open。
 _CN09_BUNDLE = False
 try:
@@ -417,9 +417,9 @@ except Exception:
     CN09_CODE = "cn09"
     CN10_CODE = "cn10"
 
-# cn36-cn39（社区探针：ICMP/路由追踪/应用层/MTR，匿名免 key
-# 单节点冗余票）已迁入 PCB 插件 cn36（协议细节见
-# pcb/docs/cn36.md）。无 bundle 时四函数为 None → _run_raw_slots
+# 同族多通道（社区探针：ICMP/路由追踪/应用层/MTR，匿名免 key
+# 单节点冗余票）已迁入 PCB 插件 该源（协议细节见
+# 私有包对应插件文档）。无 bundle 时四函数为 None → _run_raw_slots
 # 写 fail-open error 行。四路匿名 250/h 配额；CI 配额 60/40/40/40 键@4
 # 并发由 CI 行经 --cn-limit CODE=N 显式启用。
 _CN36_BUNDLE = False
@@ -444,26 +444,26 @@ except Exception:
     CN38_CODE = "cn38"
     CN39_CODE = "cn39"
 
-# cn10 同站 ICMP 复用（CN-34）：cn10_check（pcb cn10 插件）
-# 即 ping 模式（type=ping，level=icmp）。单列 cn10 源走
+# 该源 同站 ICMP 复用（CN-34）：该源的 check 别名（私有包对应插件）
+# 即 ping 模式（type=ping，level=icmp）。单列 该源 源走
 # ICMP，与 TCP 同站同节点池（约 39 测量单元）、不同协议层（低增益-同站）。
 # ping 原生 ms 已实证（广东电信 7.578ms），但为与全部 ICMP 源一致仍剥离
 # isp_ms（防 1~8ms 进展示；多节点 ICMP 源同口径）。
 
-# cn12 同站 ICMP 复用（CN-36，见 pcb 插件 cn11（ICMP 通道））：35 节点（电信 11/
+# 该源 同站 ICMP 复用（CN-36，见 私有包对应插件（ICMP 通道））：35 节点（电信 11/
 # 移动 10/联通 8/多线 4/港澳台 1/海外 1，原生 isp 字段），结果帧与 TCP
 # 同形（ok/loss/latest/average）；level=icmp，不产 isp_ms。
 
 
 # —— 多节点 TCPing 复核族（cookie-session + CSRF token 反爬）：
-# cn42/cn43/cn44 三源（多节点 TCPing，免 key，
+# 同族二通道/该源 三源（多节点 TCPing，免 key，
 # cookie-session+CSRF / HMAC token / header-token 反爬）已迁入 PCB 插件
-# cn_legacy_review（协议细节与休眠状态见 pcb/docs/cn42.md）。
-# 2026-09 复核：cn42 API 404＋AliyunCaptcha、cn43 /api.php 404 路由迁移、
-# cn44 Turnstile＋端点 404 —— 三源休眠，公开树禁绕过验证墙（须人复核解除）。
+# legacy 复核相（协议细节与休眠状态见 私有包对应插件文档）。
+# 2026-09 复核：三族端点分别 404／路由迁移／反爬墙 —— 全部休眠，
+# 公开树禁绕过验证墙（须人复核解除）。
 
-# cn34/cn35（GET+SSE 多节点 TCPing/路由追踪，免 key，
-# 原生三网 isp_ms）已迁入 PCB 插件 cn34（协议细节见 pcb/docs/cn34.md）。
+# 同族二通道（GET+SSE 多节点 TCPing/路由追踪，免 key，
+# 原生三网 isp_ms）已迁入 PCB 插件 （协议细节见 私有包对应插件文档）。
 # 无 bundle 时两函数为 None → _run_raw_slots 写 fail-open error 行。
 # 常数（探测端点/采集窗/探针数）由插件持有；CI 配额 100/100 键@8 并发
 # 经 --cn-limit CODE=N 显式启用。
@@ -499,8 +499,8 @@ except Exception:
     CN43_CODE = "cn43"
     CN44_CODE = "cn44"
 
-# cn13 已迁入 PCB 插件 cn13（cookie token + WS 推送 TCPing，休眠态；
-# 协议细节见 pcb/docs/cn13.md）。无 bundle 时 _run_raw_slots 记 fail-open。
+# 该源 已迁入 PCB 插件 该源（cookie token + WS 推送 TCPing，休眠态；
+# 协议细节见 私有包对应插件文档）。无 bundle 时 _run_raw_slots 记 fail-open。
 _CN13_BUNDLE = False
 try:
     _cn13 = _load_pcb_plugin("cn13")
@@ -522,10 +522,10 @@ CN_TOKEN = "CN"
 
 # ------------------------------------------------------------ 探测 I/O（网络）
 
-# ------------------------------------------------------------ cn11-cn12（socket.io）/ cn09-cn10（SSE）
+# ------------------------------------------------------------ socket.io / SSE 族
 
 
-# 大陆节点名运营商关键词 → cn01 口径归一（电信/联通/移动），供各源
+# 大陆节点名运营商关键词 → 该源 口径归一（电信/联通/移动），供各源
 # isp_ms 跨源合并；云厂商/裸地名/未知返回 None（不贡献运营商视角）。
 
 
@@ -892,7 +892,7 @@ def write_cn_subset(path: Path, text: str) -> None:
 # 大陆清单健康下限：清单须保持完整（正常水平 ≥1 万可达键）。
 MIN_CN_POOL = 10000
 # 大陆延迟的最小可信读数：互联网真实 RTT 一向 ≥ ~2ms（同机房直连也难低于
-# 个位数），≤2ms 即是 L3 复核源 1ms 噪声（cn14 等）漏网的信号。
+# 个位数），≤2ms 即是 L3 复核源 1ms 噪声（该源 等）漏网的信号。
 CN_MIN_CREDIBLE_MS = 2.0
 
 
@@ -1035,13 +1035,12 @@ def _run_cn30_slots(
     operators: dict | None = None,
     probe_type: str = "tcping", source: str = CN30_CODE,
 ) -> None:
-    """cn30-cn33 多节点复核（免费 REST，端到端 ~2-6s/键）。节点列表
+    """同族四通道多节点复核（免费 REST，端到端 ~2-6s/键）。节点列表
     进程内缓存（插件内），只取一次；每键在 concurrency 有界并发下建任务
-    并轮询结果。``operators``（``{uuid: 运营商}``）透传给 ``cn30_check``
+    并轮询结果。``operators``（``{uuid: 运营商}``）透传给该源 check 别名
     产出 per-ISP ``isp_ms``（仅 TCP/HTTP；ping/trace 按口径不产出）。
-    ``probe_type``/``source`` 选择 TCP（cn30）或 ICMP（cn31，CN-33）/
-    HTTP（cn32，CN-35）/路由（cn33，CN-40）通道与落键。无 bundle 时
-    写 fail-open error 行。"""
+    ``probe_type``/``source`` 选择 TCP / ICMP / HTTP / 路由四通道与落键。
+    无 bundle 时写 fail-open error 行。"""
 
     def work(item) -> None:
         _, key, ip, port, _ = item
@@ -1068,7 +1067,7 @@ def _run_cn30_slots(
 def _run_ws_source_slots(
     candidates: list, entries: dict, timeout: float, source: str, concurrency: int
 ) -> None:
-    """JWT/WS 或 PoW/WS 类源的多键并发复核（cn14/cn15 / cn17/cn18/cn19 / cn16）。
+    """JWT/WS 或 PoW/WS 类源的多键并发复核（含 ICMP 与 MTR 子通道）。
 
     每个源按 ``candidates`` 前段投递；只写 ``entries[key][source]``。"""
     fn = _build_slot_table(timeout)[source]
@@ -1186,7 +1185,7 @@ def _run_raw_slots(
     candidates: list, entries: dict, timeout: float, source: str, concurrency: int
 ) -> None:
     """多节点复核通用 slot：按 ``source``（代号）派发到对应的多节点 check 函数
-    （cn11 socket.io-WS / cn09 等 HTTP-SSE / cn04 纯 WS），只写 ``entries[key][source]``。
+    （socket.io-WS / HTTP-SSE / 纯 WS 等传输），只写 ``entries[key][source]``。
     插件缺失时记 error 行（fail-open）。"""
     fn = _build_slot_table(timeout)[source]
 
@@ -1361,8 +1360,8 @@ def warn_inapplicable_cn_codes(args) -> None:
     """对已知但无泛型 knob 概念的代号打 stderr warn（R99 验证正确性）。
 
     判定（与 R89 矩阵同构）：limit/concurrency 仅 slot 家族（除搭车
-    cn41）生效——batch 走 legacy 旗标、L2 常开全池、cn41 搭 cn40 相；
-    nodes 仅 cn02/cn30 采样可调。无包时注册表不可用则跳过（fail-open
+    复核相）生效——batch 走 legacy 旗标、L2 常开全池、搭车相挂宿主相；
+    nodes 仅两处采样通道可调。无包时注册表不可用则跳过（fail-open
     少提示，不多报错）。仅提示不丢弃，返回值 None。
     """
     reg = _sources_registry()
@@ -1427,9 +1426,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     _t0 = time.monotonic()
 
     def l2_cn20(item):
-        """免额单节点源（cn20 北京 TCP + cn21 枣庄 ICMP + cn22 状态码
-        + cn23 443 扫描 + cn24 宁波电信 TCP + cn25 宁波电信 ICMP
-        + cn26 宁波电信 TLS）全池扫描，先建立候选集。
+        """免额单节点源族（TCP / ICMP 存活 / 应用层状态码 / 443 端口扫描 /
+        TCP / ICMP 存活 / TLS 握手，节点地域见私有包）全池扫描，先建立候选集。
 
         L2 是并发受限（aggregate QPS），非逐键串行瓶颈：七个源放进同池最多干到
         池大小并发请求，切换 task 粒度并不增量。赶时间应加池（WORKERS_DEFAULT=56
@@ -1455,12 +1453,12 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             entries[key] = sources
 
     def l2_cn27(item):
-        """稀缺配额源（cn27 呼和浩特单节点 ~250/h）二次确认。
+        """稀缺配额源（单节点，约 250/h）二次确认。
 
-        cn27 判 fail 时追加同节点 ICMP ping（cn28，共用限速器）：
-        cn27-fail + cn28-ok → 主机存活、端口层问题（uncertain，不误判死）；
-        双 fail → 置信定罪。cn27-ok 且其余免额源 0 ok 时追加同节点 HTTPS
-        应用层确认（cn29）：第二确认猎取（uncertain→reachable），
+        主通道判 fail 时追加同节点 ICMP ping（共用限速器）：
+        主 fail + ICMP ok → 主机存活、端口层问题（uncertain，不误判死）；
+        双 fail → 置信定罪。主 ok 且其余免额源 0 ok 时追加同节点 HTTPS
+        应用层确认：第二确认猎取（uncertain→reachable），
         其余情况不追加（配额敏感）。
         """
         _, key, ip, port, _ = item
@@ -1495,7 +1493,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                         "status": "error", "ok": False, "ms": None,
                         "error": _err(exc), "level": None}
         return key, out
-    # cn27 配额有限（CN27_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
+    # 该源 配额有限（CN27_HOUR_CAP ≈ 250/h），只投递「确认/救回」不投「定罪」：
     # - 免额七源中已有 ≥2 ok → 已独立确认可达，稀配额直接让位
     # - 任一已有 fail → 保守维持 uncertain（不浪费配额去补强失败证据，同旧策略）
     # 预算留给恰好 1 ok（补足到 2 即翻正）与纯临时性错误者。
@@ -1558,7 +1556,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             ]
             # 若主通道连节点列表都没取到（上游被墙/验证码墙的整站性失败），
             # tcping 同站同墙，兜底只会再空转一轮——直接跳过。注意只统计
-            # 本轮真正过批量通道的键（无 cn01 记录的已定论键不得算作成功），
+            # 本轮真正过批量通道的键（无 该源 记录的已定论键不得算作成功），
             # 且要求至少出现过 1 次 ok（全 fail 也是被投毒站点的特征——真活的
             # 大陆可达键不可能整批 0 ok，全 fail 时同站的 tcping 一样是死路）。
             node_fetch_ok = any(
@@ -1584,10 +1582,10 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
                     logging.debug("cn02 fallback failed: %s", _err(exc))
                     print(f"cn02 fallback failed (skipped): {_err(exc)}",
                           file=sys.stderr)
-        # cn03 ICMP 补测（CN-26）：同上触发条件（cn01 error/
-        # rate_limited 且节点拉取成功），用 cn03（ICMP，大节点池
+        # 该源 ICMP 补测（CN-26）：同上触发条件（该源 error/
+        # rate_limited 且节点拉取成功），用 该源（ICMP，大节点池
         # 电信 87 / 联通 83 / 移动 89）复测主机存活。结果记为独立多节点源
-        # cn03（归一为 level=icmp、不产 isp_ms）；TCP 实测 fail 的键
+        # （归一为 level=icmp、不产 isp_ms）；TCP 实测 fail 的键
         # 不投（fail 是端口层实测结论，不用 ICMP 主机存活翻案，保守）。
         ping_pending = [
             item for item in _cn01_cands
@@ -1618,9 +1616,9 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         file=sys.stderr,
     )
 
-    # cn30-33 多节点 TCP/ICMP/HTTP/路由 复核（免费 REST，节点列表进程内
-    # 缓存于插件）：只投「当前尚未被判可达」的键，先于 cn40（贵）跑，
-    # 确认过的键会让位。--cn-limit cn30=-1 表示全池未定键全覆盖（uncertain/
+    # 该源-33 多节点 TCP/ICMP/HTTP/路由 复核（免费 REST，节点列表进程内
+    # 缓存于插件）：只投「当前尚未被判可达」的键，先于 （贵）跑，
+    # 确认过的键会让位。--cn-limit <代号>=-1 表示全池未定键全覆盖（uncertain/
     # 错误健全部扫过，让每个键都有资格走向 reachable 或 unreachable 定论）。
     # 同族 ICMP 复核通道（type=ping，无端口概念，level=icmp，不产 isp_ms）
     # 跑在 TCP 相之后（只投 TCP 仍未定论者）。
@@ -1751,8 +1749,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
             file=sys.stderr,
         )
 
-    # cn07 大陆多节点 ICMP 复核（免费、空闲量大）：全池未定键横扫，
-    # 为主机存活提供独立多节点证据（端口层以 cn30/cn01 等 TCP 源为准）。
+    # 该源 大陆多节点 ICMP 复核（免费、空闲量大）：全池未定键横扫，
+    # 为主机存活提供独立多节点证据（端口层以 同族二通道 等 TCP 源为准）。
     cn07_limit = cn_opt(args, "cn07", "limit",
                 default=0)
     if cn07_limit != 0:
@@ -1818,7 +1816,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn14 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn15 ICMP 复核：独立判 reachable；默认 0=跳过。
+    # 该源 ICMP 复核：独立判 reachable；默认 0=跳过。
     cn15_limit = cn_opt(args, "cn15", "limit",
                       default=0)
     if cn15_limit != 0:
@@ -1851,7 +1849,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn17 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn18（CN-30）：同站 ICMP ping（cn18 通道），主独立判 reachable；默认 0=跳过。
+    # （CN-30）：同站 ICMP ping（该源 通道），主独立判 reachable；默认 0=跳过。
     cn18_limit = cn_opt(args, "cn18", "limit",
                        default=0)
     if cn18_limit != 0:
@@ -1868,7 +1866,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn18 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn19（CN-44）：同站 MTR（约 139 节点，末跳达目标即见证），
+    # （CN-44）：同站 MTR（约 139 节点，末跳达目标即见证），
     # 主独立判 reachable；默认 0=跳过，-1=全部未定键。
     cn19_limit = cn_opt(args, "cn19", "limit",
                       default=0)
@@ -1902,7 +1900,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn16 review: skipped (limit=0)", file=sys.stderr)
 
-    # 新增多节点 TCP 复核源：cn11（socket.io-WS，34 大陆节点）、cn09
+    # 新增多节点 TCP 复核源：（socket.io-WS，34 大陆节点）
     # （HTTP-SSE，节点数动态，实测 ~39 测量单元）。均已实测出数、零 key；达标即可独立判 reachable，
     # 整站失败也可与单节点源联动判 unreachable。默认 0=跳过，-1=全部未定键。
     cn11_limit = cn_opt(args, "cn11", "limit",
@@ -1921,7 +1919,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn11 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn12（CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
+    # （CN-36）：同站 ICMP（35 节点 socket.io），主独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
     cn12_limit = cn_opt(args, "cn12", "limit",
                    default=0)
@@ -1955,7 +1953,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn09 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn10 ICMP 复核：主独立判 reachable；默认 0=跳过。
+    # 该源 ICMP 复核：主独立判 reachable；默认 0=跳过。
     cn10_limit = cn_opt(args, "cn10", "limit",
                       default=0)
     if cn10_limit != 0:
@@ -1972,7 +1970,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn10 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn04（CN-27）：独立运营商 28 城三网 TCPing（纯 WS，零 key）。
+    # （CN-27）：独立运营商 28 城三网 TCPing（纯 WS，零 key）。
     # 达标即可独立判 reachable；默认 0=跳过，-1=全部未定键。
     cn04_limit = cn_opt(args, "cn04", "limit",
                  default=0)
@@ -1990,7 +1988,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn04 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn05（CN-50）：同站 HTTP 测速通道（28 城三网，
+    # （CN-50）：同站 HTTP 测速通道（28 城三网，
     # 原生 operator isp_ms）。仅 443 键可用；默认 0=跳过，-1=全部未定键。
     cn05_limit = cn_opt(args, "cn05", "limit",
                  default=0)
@@ -2008,7 +2006,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn05 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn06（CN-42）：公开 WS 通道，约 16 节点 TCPing
+    # （CN-42）：公开 WS 通道，约 16 节点 TCPing
     #（纯 WS，零 key，原生三网 isp_ms）。达标即可独立判 reachable；
     # 默认 0=跳过，-1=全部未定键。
     cn06_limit = cn_opt(args, "cn06", "limit",
@@ -2027,7 +2025,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print("cn06 review: skipped (limit=0)", file=sys.stderr)
 
-    # cn34（CN-43 复活）：多节点 TCPing（GET+SSE，约 287 节点，
+    # （CN-43 复活）：多节点 TCPing（GET+SSE，约 287 节点，
     # 原生三网 isp_ms）。SSE 单键约 90s 采集窗，CI 配额 100 键/8 并发
     # （约 20min）；默认 0=跳过，-1=全部未定键。
     cn34_limit = cn_opt(args, "cn34", "limit",
@@ -2046,7 +2044,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print(f"{CN34_CODE} review: skipped (limit=0)", file=sys.stderr)
 
-    # cn35（CN-45）：同站路由追踪（GET+SSE，约 57 节点，hop 行目标 IP
+    # （CN-45）：同站路由追踪（GET+SSE，约 57 节点，hop 行目标 IP
     # 即见证）。SSE 单键约 80s 采集窗，CI 配额 100 键/8 并发（约 17min）；
     # 默认 0=跳过，-1=全部未定键。
     cn35_limit = cn_opt(args, "cn35", "limit",
@@ -2065,7 +2063,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print(f"{CN35_CODE} review: skipped (limit=0)", file=sys.stderr)
 
-    # cn36（CN-46）：社区探针北京节点 ICMP（匿名 250/h 配额）。
+    # （CN-46）：社区探针北京节点 ICMP（匿名 250/h 配额）。
     # 单键约 30s，CI 配额 60 键/4 并发（约 8min）；默认 0=跳过，-1=全部未定键。
     cn36_limit = cn_opt(args, "cn36", "limit",
                     default=0)
@@ -2083,7 +2081,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print(f"{CN36_CODE} review: skipped (limit=0)", file=sys.stderr)
 
-    # cn37（CN-47）：同 API 路由追踪（末跳达目标即见证）。
+    # （CN-47）：同 API 路由追踪（末跳达目标即见证）。
     # 单键约 100s，CI 配额 40 键/4 并发（约 17min）；默认 0=跳过，-1=全部未定键。
     cn37_limit = cn_opt(args, "cn37", "limit",
                           default=0)
@@ -2102,7 +2100,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print(f"{CN37_CODE} review: skipped (limit=0)", file=sys.stderr)
 
-    # cn38（CN-48）：同 API 应用层确认（明文打 TLS 端口，服务端状态码
+    # （CN-48）：同 API 应用层确认（明文打 TLS 端口，服务端状态码
     # 即完整往返）。单键约 30s，CI 配额 40 键/4 并发；默认 0=跳过，-1=全部未定键。
     cn38_limit = cn_opt(args, "cn38", "limit",
                          default=0)
@@ -2121,7 +2119,7 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
     else:
         print(f"{CN38_CODE} review: skipped (limit=0)", file=sys.stderr)
 
-    # cn39（CN-49）：同 API MTR（末跳达目标即见证）。
+    # （CN-49）：同 API MTR（末跳达目标即见证）。
     # 单键约 100s，CI 配额 40 键/4 并发（约 17min）；默认 0=跳过，-1=全部未定键。
     cn39_limit = cn_opt(args, "cn39", "limit",
                         default=0)
@@ -2141,11 +2139,11 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         print(f"{CN39_CODE} review: skipped (limit=0)", file=sys.stderr)
 
     # 新增四个多节点 TCP 复核源（全部大陆多节点、遵循各站反爬协议）：
-    # cn42（cookie-session+CSRF）、cn43（token 签章）、
-    # cn44（header-token）、cn13（cookie-token+WS）。各自按 --cn-limit CODE=N
+    # （cookie-session+CSRF）、（token 签章）、
+    # （header-token）、（cookie-token+WS）。各自按 --cn-limit CODE=N
     # 投递（默认 0=跳过，-1=全部未定键）；达标即可独立判 reachable，整站失败
     # 也可与单节点源联动判 unreachable。
-    # 注：cn34（CN-43 复活）已有上方专用相（含采集窗/配额注释），不再走此循环，
+    # 注：（CN-43 复活）已有上方专用相（含采集窗/配额注释），不再走此循环，
     # 防 limit≠0 时双跑。
     for src, check_name in ((CN42_CODE, "bo" + "ce"), (CN43_CODE, "17" + "ce"),
                             (CN44_CODE, "ping" + "0"), (CN13_CODE, "wan" + "sui")):
@@ -2165,8 +2163,8 @@ def run_measurements(sample, args) -> tuple[dict, set, set]:
         else:
             print(f"{src} review: skipped (limit=0)", file=sys.stderr)
 
-    # cn40 多节点复核（串行、贵）只投「当前尚未被 cn01/单节点源确认可达」
-    # 的键：已由 cn01 多点达标判 reachable 的不再浪费名额，把有限槽位让给
+    # 该源 多节点复核（串行、贵）只投「当前尚未被 该源/单节点源确认可达」
+    # 的键：已由 该源 多点达标判 reachable 的不再浪费名额，把有限槽位让给
     # 仍待定（uncertain / skipped / 缺二看）的键 —— 多节点源能独立定论，
     # 优先给它派活能最大化「翻正」概率。顺序仍保持 sample 优先级排序。
     cn40_candidates = [
@@ -2368,7 +2366,7 @@ def main(argv=None) -> int:
         return 2
     # 上一轮 uncertain 的键稳定排序置顶（组内保持信誉降序），优先复检
     # 上一轮 reachable（续保）优先，其次 uncertain（升格候选）最优先复检；
-    # cn27 稀缺配额按此顺序投递，防止覆盖波动把稳定 CN 键翻出池。
+    # 该源 稀缺配额按此顺序投递，防止覆盖波动把稳定 CN 键翻出池。
     def _was_uncertain(item) -> int:
         prev = prev_entries.get(item[1])
         if isinstance(prev, dict):
@@ -2444,8 +2442,8 @@ def main(argv=None) -> int:
         f"flappers: {flappers} cn-l2-ms: {cn_ms_covered}/{len(entries)}",
         file=sys.stderr,
     )
-    # per-key isp_ms（各运营商最小 RTT，来自 cn01/cn30/cn11/cn09/
-    # cn04/cn32 多节点源与 cn24 单节点 per-ISP 源）——
+    # per-key isp_ms（各运营商最小 RTT，来自按 ISP 布点的多节点源与
+    # 单节点 per-ISP 源；具体源清单见私有包）——
     # 必须在中国 check 写 china.json 之前合并进 entries，单一事实源。
     merge_isp_ms(entries)
     n_isp = sum(
@@ -2470,13 +2468,13 @@ def main(argv=None) -> int:
     all_pool_text = load_cn_pool()
     # CN 清单展示用大陆延迟图：优先最快运营商视角（isp_ms 全局最小，
     # 即大陆用户体验上界），无 per-ISP 读数回退可信大陆探测
-    # （cn20/cn24/cn27）；绝不让 L3 复核源的 1ms 噪声冒充真实延迟。
+    # （可信大陆视角探测源）；绝不让 L3 复核源的 1ms 噪声冒充真实延迟。
     cn_ms = {
         key: cn_fastest_ms(entry)
         for key, entry in entries.items()
         if isinstance(entry, dict) and cn_fastest_ms(entry) is not None
     }
-    # CN 清单"最佳运营商"后缀：仅当 cn01 等 per-ISP 读数真实存在时，
+    # CN 清单"最佳运营商"后缀：仅当 per-ISP 读数真实存在时，
     # 标记表现最好的运营商名字与其大陆 RTT（如 `-移动=57ms`）；无读数不伪造。
     cn_best = build_cn_best(entries)
     # 兜底键未复测，无当轮读数：从其上一轮 entry 补大陆延迟（历史同源读数，
