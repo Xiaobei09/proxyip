@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from annotate_classify import reconcile_views, verify_country_split
 from annotate_classify import _build_rep_map, _build_family_map
 from annotate_classify import _build_ip_type_map
+from common import line_to_key
 
 
 class TestReconcileViews(unittest.TestCase):
@@ -283,6 +284,221 @@ class TestRepMapContract(unittest.TestCase):
             "6.6.6.6:443#DE": {},
         }}
         self.assertEqual(_build_ip_type_map(ipt), {"1.2.3.4:443#US": "hosting"})
+
+
+class TestExitCountryConvergence(unittest.TestCase):
+    """R231：出口国汇聚（``build_exit_cc_map``）的优先级与「→出口」标注保真。
+
+    调研背景（用户清单③「出口是否有不符合的情况」）：已发布数据上
+    「标签国 ≠ 实测出口国」706 条（4.05%）。逐条归因后结论是——
+    **648 条（91.8%）属同一 IP 多出口**（同一 IP 在不同轮次观测落到不同国家，
+    用户已明确指出这批存在且属正常），真正标签错仅 58 条（0.33%）。
+    而「``→出口`` 标注 vs ``ipinfo.country_code``」的 648 条分歧中，
+    **98.15% 落在多出口族群内**，非代码缺陷。
+
+    本类门禁经**反证校准**（每次收紧都因反证未咬住而被迫重做，记录在案）：
+      反证 1（首咬未中）：把 ipinfo 循环改内容但仍留在末尾，``setdefault``
+        对已置值键空转 → 属空操作，非有效反证；改为**真的前移**后咬住。
+      反证 2（首咬未中）：给 family 注入 ``"ipv4"``，被 ``_norm_cc`` 拒掉
+        → 注入**合法 CC** 后咬住（``_norm_cc`` 是第二道防线，不该被当作
+        门禁有效性的证据）。
+      反证 3（连咬两次未中）：自造正则 ``#\\S+?(?:→(\\S+?))?(-|$)`` 的
+        ``\\S+?`` 可回溯全量，无备注后缀行整段被吞、捕获组恒 ``None``
+        → 比对集被静默清空；改用 :func:`common.read_exit_region` 后咬住。
+      反证 3（第二次未中）：判据写成 ``emap[k] not in v``（集合**含**汇聚值
+        即通过），而同一 ``ip:port`` 同现于 ``all.txt``/``all_ltd.txt``，
+        改一份仍绿 → 收紧为「**每处**标注都必须相等」+ 比对集规模地板后咬住。
+
+    本类把三条不变量固化，防止它们静默退化：
+      1. 汇聚优先级 external_check > upstream_meta(裸 IP) > ipinfo 不变；
+      2. ``exit_family.json`` 只并入键候选，**不**作为出口国值来源；
+      3. 已发布清单里的 ``→出口`` 标注 **100% 忠实**于对同一批数据重算的
+         汇聚结果（标注无自身漂移）。
+    """
+
+    # ---- 1. 优先级 ----
+
+    def test_priority_external_beats_upstream_and_ipinfo(self):
+        from common import build_exit_cc_map
+        ec = {"proxies": {"1.2.3.4:443#US": {"exit_geo": {"country": "JP"}}}}
+        um = {"proxies": {"1.2.3.4": {"country": "DE"}}}
+        ip = {"proxies": {"1.2.3.4:443#US": {"country_code": "FR"}}}
+        out = build_exit_cc_map(ip, ec, um)
+        self.assertEqual(out.get("1.2.3.4:443#US"), "JP",
+                         "external_check 是第一优先级，应压过 upstream/ipinfo")
+
+    def test_upstream_matches_by_bare_ip_and_beats_ipinfo(self):
+        """``upstream_meta`` 以**裸 IP** 为键，按行键裸 IP 部分匹配。"""
+        from common import build_exit_cc_map
+        um = {"proxies": {"1.2.3.4": {"country": "DE"}}}
+        ip = {"proxies": {"1.2.3.4:8443#US": {"country_code": "FR"}}}
+        out = build_exit_cc_map(ip, None, um)
+        self.assertEqual(out.get("1.2.3.4:8443#US"), "DE",
+                         "upstream_meta 观测应按裸 IP 命中并压过 ipinfo 兜底")
+
+    def test_ipinfo_is_last_resort_only(self):
+        from common import build_exit_cc_map
+        ip = {"proxies": {"1.2.3.4:443#US": {"country_code": "FR"}}}
+        self.assertEqual(build_exit_cc_map(ip, None, None).get("1.2.3.4:443#US"),
+                         "FR", "无更高优先级源时，ipinfo 应兜底")
+
+    def test_blank_and_nonstr_cc_never_enter_map(self):
+        from common import build_exit_cc_map
+        ip = {"proxies": {
+            "1.1.1.1:443#US": {"country_code": ""},
+            "2.2.2.2:443#US": {"country_code": None},
+            "3.3.3.3:443#US": {"country_code": 42},
+            "4.4.4.4:443#US": {"country_code": "us"},
+        }}
+        out = build_exit_cc_map(ip, None, None)
+        self.assertNotIn("1.1.1.1:443#US", out)
+        self.assertNotIn("2.2.2.2:443#US", out)
+        self.assertNotIn("3.3.3.3:443#US", out)
+        self.assertEqual(out.get("4.4.4.4:443#US"), "US",
+                         "大小写应归一为大写 CC")
+
+    # ---- 2. exit_family 不作为值来源 ----
+
+    def test_family_data_only_adds_candidate_keys(self):
+        """``exit_family`` 是 family 级历史聚合，非本键的出口观测证据。"""
+        from common import build_exit_cc_map
+        fam = {"proxies": {"1.2.3.4:443#US": {"family": "ipv4"}}}
+        out = build_exit_cc_map(None, None, None, fam)
+        self.assertEqual(out.get("1.2.3.4:443#US"), None,
+                         "仅存在于 exit_family 的键不得被赋出口国值")
+
+    def test_family_data_still_enables_upstream_hit(self):
+        """但它并入的键候选须让 upstream_meta 的观测能被命中。"""
+        from common import build_exit_cc_map
+        fam = {"proxies": {"1.2.3.4:443#US": {"family": "ipv4"}}}
+        um = {"proxies": {"1.2.3.4": {"country": "DE"}}}
+        out = build_exit_cc_map(None, None, um, fam)
+        self.assertEqual(out.get("1.2.3.4:443#US"), "DE")
+
+    # ---- 3. 已发布标注保真（数据面）----
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    #: 出口实测覆盖率地板（``geo_checked`` 占比）。实测 72.3%；留 12 个百分点
+    #: 余量吸收机器人重跑的自然波动，跌破则说明探测覆盖**退化**而非波动。
+    GEO_COVERAGE_FLOOR = 0.60
+
+    def _published(self):
+        d = self.ROOT / "data" / "quality"
+        # 与 audit_entry_cc.audit 的四源加载口径一致（少一个源会让重算结果
+        # 与已发布标注不可比——R231 首次实现漏了 upstream_meta，门禁立刻报出
+        # 484 条假漂移，正是它把「源集不一致」显性化）。
+        need = ("ipinfo.json", "external_check.json", "upstream_meta.json",
+                "exit_family.json")
+        if not all((d / n).exists() for n in need):
+            self.skipTest("已发布 quality 产物缺失（首次提交前）")
+        from common import read_json
+        return {n: read_json(d / n) for n in need}
+
+    def test_published_exit_annotations_are_faithful(self):
+        """清单里的 ``→出口`` 标注须与对同一批已发布数据重算的汇聚结果一致。
+
+        R231 实测：12599/12599 = 100% 一致。标注若漂移，此处立即变红。
+
+        读侧必须用 :func:`common.read_exit_region`（``upsert_exit_region`` 的精确
+        逆操作），**不得自造正则**：``#\\S+?(?:→(\\S+?))?(-|$)`` 的 ``\\S+?`` 可回溯
+        到全量，对无备注后缀的行会把整段 ``US→DE`` 吞掉、捕获组恒为 ``None``，
+        比对集被静默清空——R231 反证 3 实测「篡改 3 行标注后门禁仍 OK」。
+        """
+        import collections
+        from common import build_exit_cc_map, read_exit_region
+        pub = self._published()
+        emap = build_exit_cc_map(pub["ipinfo.json"], pub["external_check.json"],
+                                 pub["upstream_meta.json"],
+                                 pub["exit_family.json"])
+        ann = collections.defaultdict(set)
+        for f in ("all.txt", "all_ltd.txt"):
+            fp = self.ROOT / "data" / "valid" / f
+            if not fp.exists():
+                continue
+            for line in fp.read_text(encoding="utf-8").splitlines():
+                got = read_exit_region(line)
+                if got:
+                    key = line_to_key(line)
+                    if key:
+                        ann[key].add(got)
+        self.assertTrue(ann, "清单中未见任何 →出口 标注，无法校验保真度")
+        # 判据须是「**每一处**标注都等于汇聚值」，而非「集合里含汇聚值即通过」：
+        # 同一 ip:port 常同时出现在 all.txt 与 all_ltd.txt，用 `in` 判据时
+        # 篡改其中一份仍会绿——R231 反证 3 实测（连咬两次才定位）。
+        bad = [(k, c, emap[k]) for k, v in ann.items() if k in emap
+               for c in v if c != emap[k]]
+        total = sum(len(v) for v in ann.values())
+        self.assertEqual(
+            bad[:5], [], f"{len(bad)}/{total} 处已发布 →出口 标注与重算汇聚"
+            f"结果不符（标注漂移）")
+        self.assertGreater(
+            total, 1000,
+            f"只读到 {total} 处标注，远低于已发布清单规模——读侧口径退化，"
+            f"本门禁会因比对集过小而给出假信心")
+
+    def test_read_exit_region_is_inverse_of_upsert(self):
+        """``read_exit_region`` 须与写入侧严格互逆（往返属性）。"""
+        from common import read_exit_region, upsert_exit_region
+        lines = [
+            "1.2.3.4:443#US",
+            "1.2.3.4:443#US-DE",
+            "1.2.3.4:443#\U0001F1FA\U0001F1F8US-12ms",
+            "5.6.7.8:8443#\U0001F1E9\U0001F1EA\U0001F1F8DE-3.2MB/s-88ms",
+            "9.9.9.9:443#ALL",
+        ]
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertIsNone(read_exit_region(line),
+                                  "无 → 标记的行必须读出 None")
+                for cc in ("DE", "US", "ALL"):
+                    self.assertEqual(
+                        read_exit_region(upsert_exit_region(line, cc)), cc,
+                        f"往返失败：{line!r} ↔ {cc}")
+
+    def test_published_exit_geo_coverage_floor(self):
+        """出口实测覆盖率不得跌破地板。
+
+        现状：``geo_checked`` 72.3%（12599/17422），27.7% 的条目**无出口实测**，
+        其出口符合性**无法判定**——这是出口侧唯一实质短板。
+        """
+        pub = self._published()
+        px = pub["ipinfo.json"].get("proxies") or {}
+        if not px:
+            self.skipTest("ipinfo.json 无条目")
+        checked = sum(1 for v in px.values()
+                      if isinstance(v, dict) and v.get("geo_checked"))
+        ratio = checked / len(px)
+        self.assertGreaterEqual(
+            ratio, self.GEO_COVERAGE_FLOOR,
+            f"出口实测覆盖率 {ratio:.1%}（{checked}/{len(px)}）跌破地板 "
+            f"{self.GEO_COVERAGE_FLOOR:.0%}——探测覆盖退化，出口符合性将大面积"
+            f"无法判定")
+
+    def test_multi_exit_ips_stay_a_small_minority(self):
+        """多出口 IP（同一 IP 观测到 >1 个出口国）应始终是少数。
+
+        R231 实测：键级 164/14143 = 1.16%，裸 IP 级 599/13927 = 4.30%，
+        全部恰好 2 国。若该比例大幅上升，说明出口数据质量在退化
+        （IP 池被更激进地轮转），届时「标签≠实测」将失去可解释性。
+        """
+        pub = self._published()
+        px = pub["ipinfo.json"].get("proxies") or {}
+        if not px:
+            self.skipTest("ipinfo.json 无条目")
+        obs = {}
+        for key, v in px.items():
+            cc = v.get("country_code") if isinstance(v, dict) else None
+            if not cc:
+                continue
+            bare = key.split("#")[0].rsplit(":", 1)[0]
+            obs.setdefault(bare, set()).add(cc)
+        multi = [b for b, s in obs.items() if len(s) > 1]
+        ratio = len(multi) / len(obs)
+        self.assertLessEqual(
+            ratio, 0.25,
+            f"多出口裸 IP 占比 {ratio:.1%}（{len(multi)}/{len(obs)}）超过 25%——"
+            f"出口观测大面积自相矛盾，「标签≠实测」将无法归因")
 
 
 if __name__ == "__main__":

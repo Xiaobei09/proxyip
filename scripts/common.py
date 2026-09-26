@@ -436,6 +436,29 @@ def upsert_exit_region(line: str, exit_region: str) -> str:
     return f"{head}→{exit_region}{tail}"
 
 
+def read_exit_region(line: str) -> str | None:
+    """``upsert_exit_region`` 的精确逆操作：读出行上的 ``→<exit>``，无则 ``None``。
+
+    复用 :data:`EXIT_REGION_RE` 定位入口国码段之后的位置，因此与写入侧
+    ``upsert_exit_region`` / :func:`insert_exit_region` 严格互逆——``read_exit_region(
+    upsert_exit_region(line, cc)) == cc`` 对任何合法 ``line`` 成立。
+
+    此前出口国保真度校验只能自造正则（``#\\S+?(?:→(\\S+?))?(-|$)``），
+    而 ``\\S+?`` 可回溯到全量：对无备注后缀的行（``ip:port#US→DE``）会把整段
+    ``US→DE`` 吞掉，捕获组恒为 ``None``——**比对集被静默清空，门禁形同虚设**
+    （R231 反证实测：篡改 3 行标注后门禁仍报 OK）。故改为复用本函数。
+    """
+    m = EXIT_REGION_RE.match(line)
+    if not m:
+        return None
+    rest = line[m.end(1):]
+    if not rest.startswith("\u2192"):
+        return None
+    tail = rest[1:]
+    end = tail.find("-")
+    return (tail if end < 0 else tail[:end]) or None
+
+
 # ------------------------------------------------------- 出口国多源汇聚
 # →CC 标记的数据源优先级（高→低）。所有需要出口国的工作流必须经由此构建器，
 # 禁止各自只读单一 JSON（历史上 reorg/annotate 只认 ipinfo.country_match，
