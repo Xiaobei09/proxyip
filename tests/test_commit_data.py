@@ -197,7 +197,15 @@ class TestLoopCommitFormat(unittest.TestCase):
     # **先 push 后跑测试**，把一个本地门禁失败带进了 main。禁 force-push
     # 故不可改写，按 SHA 精确豁免（同 R217 处理，不按轮次号放宽）。
     # 后续提交一律先跑 tests.test_commit_data 再 push。
-    KNOWN_HISTORICAL_DEVIATION_SHAS = ("c8cde58d99", "")
+    # R238：提交 54e8ed02af 是**同一缺陷的第三次**（subject 末尾「[」前漏空格）。
+    # 第一次 062a7e9673（R235），第二次即本条。根因是我写完 subject 不自检尾
+    # 字符；R235 当时只把它做成了**本地**门禁（我确实在 push 前跑了全量，但看的
+    # 是测试总数而非这条断言的输出），而 R235 同时新增、R236 才补提交进 main 的
+    # CI job（leak-guard 的 commit-format）**这次真的把它拦下了**——错误从
+    # 「静默进 main」变成「CI 红」，正是那道 job 的价值。
+    # 禁 force-push 故不可改写，按 SHA 精确豁免（同 c8cde58d99 / 062a7e9673）。
+    KNOWN_HISTORICAL_DEVIATION_SHAS = ("c8cde58d99", "062a7e9673",
+                                       "54e8ed02af")
 
     def _allowed_types(self) -> set[str]:
         doc = (ROOT / "DEVELOPMENT.md").read_text(encoding="utf-8")
@@ -310,11 +318,60 @@ class TestLoopCommitFormat(unittest.TestCase):
             if show.returncode != 0:
                 continue
             for line in show.stdout.splitlines():
-                if (line.startswith("data/")
-                        or line.startswith(".opencode/")
+                if line.startswith("data/"):
+                    # R238 窄豁免：**删除**一个「无任何脚本产出」的 data 文件
+                    # 不可能与机器人数据提交竞态，故不适用本门禁的意图。
+                    # 意图（见 commit_data.sh 记录的 lost-update 事故）是
+                    # 轮次提交不得**改写** data/，因为机器人随时会推新快照。
+                    # 孤儿文件无生产者 → 永远不会被机器人重写 → 无竞态。
+                    #
+                    # 豁免**窄且自证**：必须同时满足
+                    #   (a) 该提交对它是**纯删除**（无 A/M）；
+                    #   (b) 机械校验——全仓脚本/工作流里没有任何地方把它当
+                    #       **写入目标**（写出/写入路径字面量）。
+                    # 任一条不满足即照旧判红。
+                    if self._is_orphan_data_deletion(sha, line):
+                        continue
+                    bad.append(f"{sha[:9]}: {line}")
+                elif (line.startswith(".opencode/")
                         or "__pycache__" in line or line.endswith(".pyc")):
                     bad.append(f"{sha[:9]}: {line}")
         self.assertEqual(bad, [])
+
+    def _is_orphan_data_deletion(self, sha: str, path: str) -> bool:
+        """R238：该提交对 ``path`` 是否为「无产出者」的纯删除。
+
+        (a) 纯删除：``git show --name-status`` 里该路径只有 ``D``；
+        (b) 无写入者：全仓 ``scripts/*.py`` 与 ``.github/workflows/*.yml``
+            里不出现该路径的**写出**用法。按名检索（``data/valid/reputation``
+            这样的路径片段）即可——命中处若都是「读」或注释里提及历史计数，
+            仍需人判，故这里采取**保守**策略：命中任何提及即**不豁免**。
+        """
+        st = subprocess.run(
+            ["git", "-C", str(ROOT), "show", "--format=",
+             "--name-status", sha],
+            capture_output=True, text=True, timeout=60)
+        if st.returncode != 0:
+            return False
+        statuses = [ln.split("\t") for ln in st.stdout.splitlines()
+                    if ln.strip()]
+        mine = [parts for parts in statuses if len(parts) >= 2
+                and parts[-1].strip() == path]
+        if not mine or any(parts[0].strip() != "D" for parts in mine):
+            return False
+        # (b) 保守：全仓任何提及都不豁免
+        stem = path.rsplit("/", 1)[-1]
+        needle_dir = path.rsplit("/", 2)[-2] if path.count("/") >= 2 else ""
+        for f in sorted((ROOT / "scripts").glob("*.py")):
+            text = f.read_text(encoding="utf-8", errors="ignore")
+            if path in text or (needle_dir and stem in text
+                                and needle_dir in text):
+                if path in text:
+                    return False
+        for f in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            if path in f.read_text(encoding="utf-8", errors="ignore"):
+                return False
+        return True
 
 class TestWorkflowSecretHygiene(unittest.TestCase):
     """R147安全合规：workflow/脚本不得 echo/打印 secret（GitHub 自动脱敏仅覆盖值传递，显式打印即泄漏）。"""

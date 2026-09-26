@@ -453,6 +453,47 @@ class TestReputationSourceNamesDeidentified(unittest.TestCase):
                         f"{rel}：词表内信誉数据源名降至 {found.get(rel, 0)}"
                         f"（基线 {b}）——**该下调 BASELINES**")
 
+    def test_cache_attribution_keys_are_all_opaque(self):
+        """R238：**正向**断言——缓存的归属键必须**全部**是不透明 id。
+
+        比「计数真名」更强：不依赖任何词表，也不受假阳性影响。
+
+        为什么要正向断言：正则全量普查在本族仍会报出 ~5.2 万处命中，但逐条
+        归因后**全部**是**载荷内部的归一化信号维度名**（``data.signals`` 的
+        ``bogon``/``cloud``/``hosting``/``proxy``/``tor``/``vpnasn``/…），
+        其中只有 ``spamhaus`` 与源名撞词，语义是「该 IP 在 Spamhaus 被列出」
+        的**信号标签**、不是归属。把它哈希掉会摧毁载荷含义（那是评分器的
+        输出字段名）。故「计数真名」在该处不可作为判据，正向断言才是。
+
+        归属面则相反：``reputation_cache.json`` 每 IP 字典的**顶层键**就是
+        「该 IP 的信号来自哪个源」，那才是必须去身份的东西——R238 实测
+        全部为 ``rsrc_*``，本用例把它锁住。
+        """
+        import json
+        f = self.ROOT / "data" / "quality" / "reputation_cache.json"
+        if not f.exists():
+            self.skipTest("已发布缓存缺失")
+        try:
+            doc = json.loads(f.read_text(encoding="utf-8"))
+        except ValueError:
+            self.skipTest("已发布缓存不可解析")
+        proxies = doc.get("proxies") if isinstance(doc, dict) else None
+        if not isinstance(proxies, dict) or not proxies:
+            self.skipTest("已发布缓存无条目")
+        bad = []
+        total = 0
+        for ip, entry in proxies.items():
+            if not isinstance(entry, dict):
+                continue
+            for k in entry:
+                total += 1
+                if not (isinstance(k, str) and k.startswith("rsrc_")):
+                    bad.append((ip, k))
+        self.assertEqual(
+            bad[:5], [],
+            f"{len(bad)}/{total} 个缓存归属键不是 rsrc_* 不透明 id——"
+            f"归属面回退了（载荷内 data.signals 的维度名不在此列）")
+
     def test_orphan_valid_reputation_artifacts_stay_deleted(self):
         """R238：``data/valid/`` 下那两个孤儿产物**不得复活**。
 
