@@ -4901,7 +4901,9 @@ class TestCiChainDefinition(unittest.TestCase):
     """R20：CI 链定义锁（文件名/cron/concurrency 组/contents 权限；
     防误删改名与调度丢失；cancel-in-progress 调优不在此列）。"""
 
-    WORKFLOWS = (
+    #: 参与数据链的 workflow：产出 data/ 并经 commit_data.sh 提交，
+    #: 故一律需要 contents: write。名单变更＝数据链拓扑变更，须显式授权。
+    DATA_WORKFLOWS = (
         "annotate-classify.yml",
         "build-good.yml",
         "china-check.yml",
@@ -4911,6 +4913,10 @@ class TestCiChainDefinition(unittest.TestCase):
         "stats.yml",
         "update-proxies.yml",
     )
+    #: 只读 workflow：R220 新增的防泄漏门禁。不产出 data/、不提交，
+    #: 故只需 contents: read（最小权限；见 test_commit_data 同名锁）。
+    READONLY_WORKFLOWS = ("leak-guard.yml",)
+    WORKFLOWS = DATA_WORKFLOWS + READONLY_WORKFLOWS
     CRONS = {
         "china-check.yml": "11 * * * *",
         "deep-speed.yml": "7 3 * * 6",
@@ -4933,9 +4939,20 @@ class TestCiChainDefinition(unittest.TestCase):
     def test_schedules_and_permissions(self):
         import re
         d = Path(__file__).resolve().parent.parent / ".github" / "workflows"
-        for name in self.WORKFLOWS:
+        # R220：改为**块内**匹配而非全文子串。旧写法 `assertIn("contents:
+        # write", text)` 会被注释里的一句"本工作流不需要 contents: write"
+        # 满足——即声明成 contents: read 的只读工作流照样绿灯。此处按
+        # 顶层 permissions 块取值（禁第三方 YAML 依赖，用正则），两个
+        # 方向同时锁死：数据链必须 write，只读链必须 read 且不得 write。
+        for name, want in [(n, "write") for n in self.DATA_WORKFLOWS] + \
+                          [(n, "read") for n in self.READONLY_WORKFLOWS]:
             text = (d / name).read_text(encoding="utf-8")
-            self.assertIn("contents: write", text, f"{name} 缺写权限")
+            m = re.search(r"^permissions:\s*\n((?:  \w+: \w+\n)+)", text, re.M)
+            self.assertIsNotNone(m, f"{name} 缺顶层 permissions 块")
+            got = re.findall(r"^  (\w+): (\w+)$", m.group(1), re.M)
+            self.assertEqual(
+                got, [("contents", want)],
+                f"{name} 权限应恰为 contents: {want}，实得 {got}")
         for name, cron in self.CRONS.items():
             text = (d / name).read_text(encoding="utf-8")
             self.assertIn(f'cron: "{cron}"', text, f"{name} 调度丢失")

@@ -383,6 +383,13 @@ class TestWorkflowPermissions(unittest.TestCase):
     逐一解析顶层 permissions 块，全等断言。"""
 
     def test_permissions_minimal(self):
+        """按「是否产出数据」判最小权限，两向锁死。
+
+        R220：新增只读 workflow（防泄漏门禁）后，「全部 contents: write」
+        的旧前提不再成立。改按**能否判定地**区分——经 commit_data.sh
+        提交 data/ 的工作流必须 write，其余必须恰为 read。双向都比旧锁
+        强：旧锁只管数据链的 write 方向，"只读工作流握着写权限"无人拦。
+        """
         wf_dir = ROOT / ".github" / "workflows"
         files = sorted(wf_dir.glob("*.yml"))
         self.assertTrue(files, "workflows 目录为空，扫描器失效")
@@ -394,9 +401,10 @@ class TestWorkflowPermissions(unittest.TestCase):
                     text, re.M)
                 self.assertIsNotNone(
                     m, f"{wf.name} 缺顶层 permissions 块")
+                want = ("write" if "commit_data.sh" in text else "read")
                 self.assertEqual(
-                    m.group(1), "  contents: write\n",
-                    f"{wf.name} 权限超出最小集")
+                    m.group(1), f"  contents: {want}\n",
+                    f"{wf.name} 权限应恰为 contents: {want}（最小集）")
 
 
 class TestWorkflowSchedules(unittest.TestCase):
@@ -464,7 +472,14 @@ class TestWorkflowConcurrency(unittest.TestCase):
                     text, re.M)
                 self.assertIsNotNone(
                     m, f"{wf.name} 缺 concurrency 块")
-                want = (wf.name == "update-proxies.yml")
+                text = wf.read_text(encoding="utf-8")
+                # R220：主更新（唯一提交 data/ 且周期最长者）保持唯一抢占者。
+                # 只读快检（不产数据、耗时秒级）允许抢占——被后续 run 取代
+                # 无成本；数据链长任务抢占会连环取消，故一律 false。
+                if "commit_data.sh" in text:
+                    want = (wf.name == "update-proxies.yml")
+                else:
+                    want = True
                 self.assertEqual(
                     m.group(2) == "true", want,
                     f"{wf.name} cancel-in-progress 应为 {want}")
@@ -512,6 +527,59 @@ class TestPrivateBundlePinConsistency(unittest.TestCase):
         for name, sha in self._pins().items():
             with self.subTest(workflow=name):
                 self.assertRegex(sha, r"^[0-9a-f]{40}$")
+
+
+class TestLeakGuardWorkflowShape(unittest.TestCase):
+    """R220：防泄漏门禁的专职 workflow 形状锁（安全合规 / CI 与提交合规）。
+
+    R219 审计结论：8 个 workflow 仅 3 个检出私有包，公开测试里的防泄漏
+    门禁 11 例在无包环境**静默跳过 8 例** → 5 条链路的「Run tests」对泄漏
+    完全无感。故新增专职 `leak-guard.yml`。本锁防它被悄悄削弱：
+
+    - 不得被删除（否则门禁覆盖面退回 3/8）；
+    - 不得改用 `continue-on-error` 把泄漏放行（硬性约束明禁）；
+    - 不得缺 concurrency 组（并发 run 会互相踩工件）；
+    - 不得写 data/ 或需要 contents: write（只读定位，防插入数据链）；
+    - 必须仍以 40 位 SHA pin 私有包（由 pin 一致性锁交叉验证）。
+    """
+
+    WF = "leak-guard.yml"
+
+    def _text(self):
+        p = ROOT / ".github" / "workflows" / self.WF
+        self.assertTrue(p.exists(), f"{self.WF} 被删除：门禁覆盖面退回 3/8")
+        return p.read_text(encoding="utf-8")
+
+    def test_workflow_present_and_runs_the_guard_suite(self):
+        t = self._text()
+        self.assertIn("tests.test_checks_bundle", t)
+        self.assertIn("unittest", t)
+
+    def test_no_continue_on_error(self):
+        self.assertNotIn("continue-on-error", self._text())
+
+    def test_concurrency_group_present(self):
+        t = self._text()
+        self.assertRegex(
+            t, r"(?m)^concurrency:\s*\n\s*group:\s*\S+",
+            "缺 concurrency 块：并发 run 会互相踩工件")
+
+    def test_read_only_and_data_untouched(self):
+        t = self._text()
+        self.assertRegex(t, r"(?m)^permissions:\s*\n\s*contents:\s*read\s*$",
+                         "只读定位：不得声明 contents: write")
+        self.assertNotIn("commit_data.sh", t, "只读 workflow 不参与数据提交链")
+        self.assertNotIn(".jobstart", t, "只读 workflow 无 data 产出，不需 mtime 标记")
+        self.assertNotIn("git push", t)
+
+    def test_graceful_degradation_when_secret_absent(self):
+        """硬性约束 5：缺 BUNDLE_PAT 必须降级，不得让 checkout 硬失败。"""
+        t = self._text()
+        self.assertIn("BUNDLE_PAT", t)
+        # 检出步须挂在探测结果上，而非无条件执行
+        self.assertRegex(
+            t, r"if:\s*steps\.detect\.outputs\.has_bundle",
+            "私有包检出未按 secret 探测结果设条件：缺 secret 会把 checkout 变成硬失败")
 
 
 if __name__ == "__main__":

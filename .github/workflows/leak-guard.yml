@@ -1,0 +1,100 @@
+name: Leak guard
+
+# 私有包防泄漏门禁的**唯一专职执行点**。
+#
+# 背景（R219 审计）：8 个 workflow 里只有 3 个检出私有包
+# （china-check / quality-check / update-proxies），而公开测试中的
+# 防泄漏门禁（tests/test_checks_bundle.py，共 11 例）在**无包环境会
+# 静默跳过 8 例**。即 5 个 workflow（annotate-classify / build-good /
+# deep-speed / exit-family / stats）的「Run tests」对泄漏完全无感——
+# 真名/端点字面可以无声回归而 CI 全绿。R218 修好的分段扫描门禁因此
+# 只在 3 条链路上生效，覆盖面与它宣称的不符。
+#
+# 设计取舍：不给那 5 个 workflow 逐个加检出。actions/checkout 检出私有
+# 仓依赖 BUNDLE_PAT；secret 缺失时该步会硬失败，把「缺 secret」变成
+# 红 job（违反硬性约束 5：缺 secret 必须降级而非崩溃），且 5 处重复
+# 配置易漂移（正是 R219 pin 部分推进那类事故的温床）。故独立成 job：
+# 单一配置、失败域隔离、零 secret 时显式降级。
+#
+# 本工作流**只读**：不写 data/、不提交、不需要 contents: write，
+# 因此不参与 workflow_run 链，不影响既有顺序与 concurrency 组。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "tests/**"
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/**"
+      - ".github/scripts/**"
+  schedule:
+    # 与数据链的每小时 tick 对齐（错开整点，取 47 分避开机器人拥塞）。
+    - cron: "47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leak-guard
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Private-source leak guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 显式探测而非在 checkout 上挂 if：把「有没有 secret」变成可读的
+      # job 输出，降级路径对人和日志都可见，杜绝又一次静默跳过。
+      - name: Detect bundle token
+        id: detect
+        env:
+          BUNDLE_PAT_PRESENT: ${{ secrets.BUNDLE_PAT != '' }}
+        run: |
+          if [ "$BUNDLE_PAT_PRESENT" = "true" ]; then
+            echo "has_bundle=true" >> "$GITHUB_OUTPUT"
+            echo "bundle token present: guard will run in full"
+          else
+            echo "has_bundle=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::BUNDLE_PAT 未配置——防泄漏门禁降级为仅公开侧断言（端点/真名模式清单在私有包内，无包不可得）"
+          fi
+
+      # pin 必须与另外三个检出私有包的 workflow 完全一致
+      # （tests/test_commit_data.py::TestPrivateBundlePinConsistency 锁定）。
+      - name: Checkout PCB bundle (read-only, pinned)
+        if: steps.detect.outputs.has_bundle == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: Xiaobei09/PCB
+          ref: cff69fc95e6c37bd2bf3a74d9f72f5eb4f48569a
+          token: ${{ secrets.BUNDLE_PAT }}
+          path: pcb
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run leak guard
+        run: python -m unittest tests.test_checks_bundle -v
+
+      - name: Summarise guard coverage
+        env:
+          HAS_BUNDLE: ${{ steps.detect.outputs.has_bundle }}
+        run: |
+          {
+            echo "### 私有源泄漏门禁"
+            echo ""
+            if [ "$HAS_BUNDLE" = "true" ]; then
+              echo "- 私有包：**已检出**（pinned）→ 端点/真名/文档三类禁区全量生效"
+            else
+              echo "- 私有包：**缺 BUNDLE_PAT** → 模式清单不可得，仅公开侧断言生效"
+            fi
+            echo "- 门禁用例：\`tests/test_checks_bundle\`（11 例；无包时 8 例 skip）"
+          } >> "$GITHUB_STEP_SUMMARY"
