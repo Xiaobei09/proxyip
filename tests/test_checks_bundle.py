@@ -678,10 +678,36 @@ class TestDownloadVendorNamesInData(unittest.TestCase):
         # 归零后转为**绝对断言**。
         "data/quality/source_history.json": 0,
         "data/quality/source_quality.json": 0,
-        "data/output/source_quality_report.txt": 0,
+        # R245：``data/output/source_quality_report.txt`` 已从 BASELINES 移除——
+        # 用户决策「不发布该文件」，该文件已删除（见
+        # ``test_source_quality_report_stays_unpublished_r245``）。防复活由那条
+        # 断言负责，不靠「缺失即跳过」的棘轮条目。
         "data/quality/ip_sources.json": 0,
         "data/quality/source_stats.json": 0,
     }
+
+    def test_source_quality_report_stays_unpublished_r245(self):
+        """R245：``data/output/source_quality_report.txt`` 不得存在（不发布）。
+
+        用户决策（R244 末）：该文件**不发布**。它虽是纯排版产物、内容已去身份
+        （实测 0 处真名、全用 ``dsrc_*`` 不透明 id），但作为「来源质量」的人类
+        可读汇总，属外部来源相关信息的可读面，去身份后价值有限、风险不对称。
+
+        ``analyze_sources.py`` 已把落点从 ``data/output/`` 改为仓库根
+        ``.cache/``（R233 为无包缓存确立的同一约定：已 gitignore，且在
+        ``data/`` 之外，发布链路够不着）。**信息不丢**：
+        ``data/quality/source_quality.json`` 含同样字段且已发布。
+
+        本断言把该决策变成**提交前可判定**——否则「改回旧落点」不会有任何
+        门禁反应，而它会一路静默回到发布链路。
+        """
+        path = (Path(__file__).resolve().parent.parent
+                / "data" / "output" / "source_quality_report.txt")
+        self.assertFalse(
+            path.exists(),
+            "source_quality_report.txt 回到发布路径 data/output/ ——"
+            "用户已决定不发布；生产者应写入 .cache/（未发布），"
+            "机器可读等价物在 data/quality/source_quality.json")
 
     @staticmethod
     def _pattern():

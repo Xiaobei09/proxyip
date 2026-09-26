@@ -448,7 +448,9 @@ python3 scripts/build_premium.py --data-dir /path/to/data
 
 输出文件：
 - `data/quality/source_quality.json`：逐源质量指标 JSON
-- `data/output/source_quality_report.txt`：人类可读汇总表
+- `data/quality/source_quality.json`：源质量汇总（机器可读，入库）
+  - 人类可读排版表**不发布**（用户 R244 决策）：`analyze_sources.py` 把它写到
+    仓库根 `.cache/source_quality_report.txt`（已 gitignore，发布链路够不着）
 
 ```bash
 python3 scripts/analyze_sources.py

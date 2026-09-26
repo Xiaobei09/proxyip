@@ -227,6 +227,38 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("可达", svg)
         self.assertIn("uncertain", svg)
 
+    def test_cn_chart_lists_carriers_without_data_explicitly_r245(self):
+        """R245：三家运营商**都必须出现在图上**，无读数的显式标注「暂无」。
+
+        用户决策（R244 末）：「接受现状，只用一家」——但「只用一家」不等于
+        「把另两家从图上抹掉」。原实现对无 per-ISP 读数的运营商是 ``continue``：
+        只剩一家时，读者无法区分「另两家没采到读数」与「另两家可达数为 0」，
+        而这两种含义天差地别（前者是采集缺口、后者是质量结论）。
+
+        本断言锁住「显式标注而不留空」。用 ``&amp;`` 而非 ``>`` 之外的裸 ``>``
+        比较：SVG 文本里标签已被转义，故按可辨子串断言。
+        """
+        data = {
+            "proxies": {
+                "a:443#US": {"verdict": "reachable",
+                             "isp_ms": {"中国电信": 88.0}},
+            }
+        }
+        svg = gs.build_cn(data)
+        svg_ok(svg)
+        self.assertIn("中国电信", svg)
+        for isp in ("中国联通", "中国移动"):
+            self.assertIn(
+                isp, svg,
+                f"{isp} 无读数时必须显式出现在图上（标注「暂无」），"
+                "不得静默跳过——否则读者无法区分采集缺口与可达数为 0")
+            self.assertIn(
+                "暂无", svg,
+                "无读数的运营商标签须写明「暂无 per-ISP 读数（未采到）」")
+        # 有读数的那家仍须带完整指标
+        self.assertIn("中国电信  可达 1/1", svg)
+        self.assertIn("MB/s", svg)
+
     def test_cn_chart_carrier_view(self):
         data = {
             "proxies": {

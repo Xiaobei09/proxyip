@@ -885,7 +885,13 @@ def build_cn(china_data: dict) -> str:
     items = []
     for isp in ("中国电信", "中国联通", "中国移动"):
         st = per.get(isp)
-        if not st:
+        if not st or not st["ms"]:
+            # R245（用户决策「接受现状，只用一家」）：无 per-ISP 读数的运营商
+            # **显式列出**而非静默跳过。原先是 `continue`——图上只有一家时，
+            # 读者无法区分「另两家没采到数据」与「另两家可达数为 0」，两种
+            # 含义天差地别。零值条目会渲染出标签但不画条（``plot_hbars`` 的
+            # ``max_v … or 1`` 已兜底），正是「标注而不留空」。
+            items.append((f"{isp}  暂无 per-ISP 读数（未采到）", 0))
             continue
         lat = sorted(st["ms"])
         med = lat[len(lat) // 2]

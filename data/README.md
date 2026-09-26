@@ -46,7 +46,7 @@ data/
 | `badge.json` | `generate_stats.py` | 徽章数值 | data-spec.md §`badge.json` |
 | `country_speed.json` | `generate_stats.py` | 国别速度分布 | data-spec.md §`country_speed.json` |
 | `chart_*.svg`（16+） | `generate_stats.py` | 图表：combo/country/port/churn/latency_speed/sets/cn/cn_7d/family/exit/entry_audit/ip_type/country_speed/speed_spread/source_avail/source_stats/rep | 图表列见 README 顶栏 |
-| `source_quality_report.txt` | `analyze_sources.py` | 源质量报告 | — |
+| （无） | `analyze_sources.py` | 人类可读排版表**不发布**，写 `.cache/` | 见 `../quality/source_quality.json` |
 
 ### 3.2 `data/valid/`（发布层）
 

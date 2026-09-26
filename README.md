@@ -317,7 +317,8 @@ data/quality/upstream_meta.json          上游 all.json 逐 IP 元数据（真�
 data/quality/source_stats.json           下载源统计（各源 IP 数与重叠）
 data/quality/source_history.json         各源逐轮 unique 覆盖快照（告警基线，最多 14 轮）
 data/quality/source_quality.json         源质量分析（来源依赖关系与来源质量打分）
-data/output/source_quality_report.txt    源质量人类可读汇总表
+data/quality/source_quality.json         源质量汇总（机器可读，逐源存活/延迟/速度/信誉/CN 率）
+                                       人类可读排版表不发布：analyze_sources.py 写到 .cache/（未入库）
 data/quality/entry_audit.json            入口国标签三方交叉审计结果
 data/quality/good_meta.json              good 候选镜像（good CI 构建用 IP 元数据）
 data/quality/premium_meta.json           premium 候选镜像（premium CI 构建用）

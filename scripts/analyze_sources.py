@@ -278,10 +278,22 @@ def main(argv: list[str] | None = None) -> int:
     report = _format_report(result)
     print(f"\n{report}")
 
-    report_file = data_dir / "output" / "source_quality_report.txt"
-    report_file.parent.mkdir(parents=True, exist_ok=True)
+    # R245：**不再发布**这张人类可读汇总表（用户决策「不发布该文件」）。
+    #
+    # 落点从 ``data/output/``（入库、随发布链路可见）改为仓库根 ``.cache/``
+    # ——沿用 R233 为无 PCB 包缓存确立的同一约定：``.cache/`` 已 gitignore，
+    # 且在 ``data/`` 之外，发布链路完全够不着。
+    #
+    # **信息不丢**：``data/quality/source_quality.json``（本函数上方刚写出）
+    # 含同样字段——alive / avg_latency / median_latency / avg_speed /
+    # avg_reputation / china_reachable_count / china_reachable_rate /
+    # country_dist / family_dist，机器可读且已发布。丢的只是排版。
+    cache_dir = Path(__file__).resolve().parent.parent / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    report_file = cache_dir / "source_quality_report.txt"
     write_text_if_changed(report_file, report + "\n")
-    print(f"\nReport saved to {report_file}")
+    print(f"\nReport saved to {report_file} (unpublished; see "
+          f"data/quality/source_quality.json for the published form)")
 
     return 0
 

@@ -365,11 +365,43 @@ class TestLoopCommitFormat(unittest.TestCase):
                     # 任一条不满足即照旧判红。
                     if self._is_orphan_data_deletion(sha, line):
                         continue
+                    if self._is_hand_maintained_doc(sha, line):
+                        continue
                     bad.append(f"{sha[:9]}: {line}")
                 elif (line.startswith(".opencode/")
                         or "__pycache__" in line or line.endswith(".pyc")):
                     bad.append(f"{sha[:9]}: {line}")
         self.assertEqual(bad, [])
+
+    def _is_hand_maintained_doc(self, sha: str, path: str) -> bool:
+        """R245：``data/`` 下的**文档**（``.md``）不适用 R107。
+
+        R107 的意图是「轮次提交不得改写 data/，因为机器人随时会推新快照」
+        ——本质是防 lost-update 竞态。``data/`` 里唯一的 ``.md`` 是手写的
+        ``data/README.md``（数据目录说明），**没有任何脚本或工作流写它**
+        （机械核实：全仓 ``scripts/*.py``、``.github/workflows/*.yml``、
+        ``.github/scripts/*.sh`` 中无任何以该路径为**写出目标**的用法）。
+        没有写入者 ⇒ 永不会被机器人重写 ⇒ 无竞态 ⇒ 不适用本门禁的意图。
+
+        与 R238 的孤儿删除豁免同构：**窄且自证**——须同时满足
+          (a) 路径在 ``data/`` 下且后缀为 ``.md``；
+          (b) 保守机械校验：全仓脚本与工作流里**不出现**该路径的任何
+              提及（与孤儿豁免同策略——命中任何提及即不豁免，宁可误判红）。
+        任一条不满足即照旧判红。
+        """
+        if not (path.startswith("data/") and path.endswith(".md")):
+            return False
+        for f in sorted((ROOT / "scripts").glob("*.py")):
+            if path in f.read_text(encoding="utf-8", errors="ignore"):
+                return False
+        for pat in (ROOT / ".github" / "workflows", ROOT / ".github" / "scripts"):
+            if not pat.is_dir():
+                continue
+            for f in sorted(pat.iterdir()):
+                if f.is_file() and path in f.read_text(
+                        encoding="utf-8", errors="ignore"):
+                    return False
+        return True
 
     def _is_orphan_data_deletion(self, sha: str, path: str) -> bool:
         """R238：该提交对 ``path`` 是否为「无产出者」的纯删除。
