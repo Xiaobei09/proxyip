@@ -268,6 +268,39 @@ class TestLoopCommitFormat(unittest.TestCase):
     # R121 全角事故提交（不可改写，禁 force-push；唯一已知偏离）。
     KNOWN_FULLWIDTH_DEVIATION = ("4680c8eee",)
 
+    def test_every_data_file_on_disk_is_tracked_r241(self):
+        """R241：``data/`` 下的文件若存在，就必须已被 git 跟踪。
+
+        R240 的教训（**本门禁的直接由来**）：``.gitignore`` 第 1 行是
+        ``data/``，故入库必须显式 ``git add -f``。收敛流水线**会新建文件**
+        （``reorg_country.py`` 的 "pruned N orphan country dirs" 之后
+        ``annotate_classify.py`` 会按新观测重建 ``countries/<CC>/all.txt``）。
+        我那次用 ``git add -u data/``——**只暂存已跟踪文件**——于是三个新建的
+        ``countries/{EC,SC,TJ}/all.txt`` 留在盘上却没进提交。后果是提交态树
+        **内部不自洽**（``all.txt``/``ports`` 里有它们的条目，国别文件却缺失），
+        ``test_sum_equals_all_txt`` 因此在**任何干净 checkout** 里恒红——
+        而我的本地工作树因为有那份残留文件一直是绿的，CI 端到端才暴露。
+
+        本门禁把该类错误变成**提交前**可判定的：盘上有、git 未跟踪 = 判红。
+        零假阳性（判据是 git 自身的索引状态，不依赖任何词表或启发式）。
+        """
+        root = ROOT / "data"
+        if not root.is_dir():
+            self.skipTest("无 data/ 目录（数据链未跑过）")
+        untracked = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "--others",
+             "--ignored", "--exclude-standard", "--", "data"],
+            capture_output=True, text=True, timeout=120)
+        if untracked.returncode != 0:
+            self.skipTest("无 git 环境")
+        paths = [ln.strip() for ln in untracked.stdout.splitlines()
+                 if ln.strip()]
+        self.assertEqual(
+            paths, [],
+            "以下 data 文件存在于盘上但未被 git 跟踪（提交后会在干净 checkout "
+            "里缺失，导致视图一致性门禁恒红）——须 git add -f 后再提交："
+            f"{paths[:10]}")
+
     def test_no_fullwidth_brackets_in_subjects_r135(self):
         """R135：提交标题禁全角括号（R121 误用［R121]致门禁 skip 的教训）。"""
         proc = subprocess.run(

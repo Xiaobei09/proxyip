@@ -87,32 +87,32 @@ jobs:
           timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
             python scripts/china_check.py \
             --source data/valid/all.txt --limit 0 \
-            --cn-limit cn30=800 --cn-concurrency cn30=20 \
-            --cn-limit cn31=400 --cn-concurrency cn31=20 \
-            --cn-limit cn32=200 --cn-concurrency cn32=8 \
-            --cn-limit cn33=200 --cn-concurrency cn33=6 \
-            --cn-limit cn07=1200 --cn-concurrency cn07=40 \
-            --cn-limit cn08=600 --cn-concurrency cn08=12 \
-            --cn-limit cn14=500 --cn-concurrency cn14=8 \
-            --cn-limit cn15=200 --cn-concurrency cn15=8 \
-            --cn-limit cn17=400 --cn-concurrency cn17=8 \
-            --cn-limit cn18=200 --cn-concurrency cn18=6 \
-            --cn-limit cn19=200 --cn-concurrency cn19=6 \
-            --cn-limit cn16=200 --cn-concurrency cn16=8 \
-            --cn-limit cn11=200 --cn-concurrency cn11=6 \
-            --cn-limit cn12=200 --cn-concurrency cn12=6 \
-            --cn-limit cn09=200 --cn-concurrency cn09=8 \
-            --cn-limit cn10=200 --cn-concurrency cn10=8 \
-            --cn-limit cn04=200 --cn-concurrency cn04=6 \
-            --cn-limit cn05=200 --cn-concurrency cn05=6 \
-            --cn-limit cn06=200 --cn-concurrency cn06=6 \
-            --cn-limit cn34=100 --cn-concurrency cn34=8 \
-            --cn-limit cn35=100 --cn-concurrency cn35=8 \
-            --cn-limit cn36=60 --cn-concurrency cn36=4 \
-            --cn-limit cn37=40 --cn-concurrency cn37=4 \
-            --cn-limit cn38=40 --cn-concurrency cn38=4 \
-            --cn-limit cn39=40 --cn-concurrency cn39=4 \
-            --cn-limit cn40=300 --cn-concurrency cn40=6 \
+            --cn-limit src_2vIN9qi30DaRHJDtIR8zxw=800 --cn-concurrency src_2vIN9qi30DaRHJDtIR8zxw=20 \
+            --cn-limit src_aAjqGkeptP-Fc9Vk2o0bBw=400 --cn-concurrency src_aAjqGkeptP-Fc9Vk2o0bBw=20 \
+            --cn-limit src_kuveKnlgATFu4bT1vaavdQ=200 --cn-concurrency src_kuveKnlgATFu4bT1vaavdQ=8 \
+            --cn-limit src_l_ifdbxx-IXHJGo5vZz2bw=200 --cn-concurrency src_l_ifdbxx-IXHJGo5vZz2bw=6 \
+            --cn-limit src_VppzWrVKeanuwc20xQHV5w=1200 --cn-concurrency src_VppzWrVKeanuwc20xQHV5w=40 \
+            --cn-limit src_auWhVNnk2BHJqQkixylvnQ=600 --cn-concurrency src_auWhVNnk2BHJqQkixylvnQ=12 \
+            --cn-limit src_rbNxV-AzA5vWhXU2ex0Hig=500 --cn-concurrency src_rbNxV-AzA5vWhXU2ex0Hig=8 \
+            --cn-limit src_yNl_hUrcFERKbVfruEd7bQ=200 --cn-concurrency src_yNl_hUrcFERKbVfruEd7bQ=8 \
+            --cn-limit src_se0UGS5K317N6_dd1tbmiQ=400 --cn-concurrency src_se0UGS5K317N6_dd1tbmiQ=8 \
+            --cn-limit src_urfBWidA4mIIdDF5bCmkLg=200 --cn-concurrency src_urfBWidA4mIIdDF5bCmkLg=6 \
+            --cn-limit src_tYewH0QHze90tsMUm9ytaw=200 --cn-concurrency src_tYewH0QHze90tsMUm9ytaw=6 \
+            --cn-limit src_zJZRP1CmcQ_JLqNrNXVsiQ=200 --cn-concurrency src_zJZRP1CmcQ_JLqNrNXVsiQ=8 \
+            --cn-limit src_lp8y2sH8a0G-9EKTlmPq6A=200 --cn-concurrency src_lp8y2sH8a0G-9EKTlmPq6A=6 \
+            --cn-limit src_1hR0HtwyaXBY-rGBpLeDjw=200 --cn-concurrency src_1hR0HtwyaXBY-rGBpLeDjw=6 \
+            --cn-limit src_8PKN4eJiV9APK0Vg7q6Sxw=200 --cn-concurrency src_8PKN4eJiV9APK0Vg7q6Sxw=8 \
+            --cn-limit src_m5aHuhSQrxDlNEgOW6cAkw=200 --cn-concurrency src_m5aHuhSQrxDlNEgOW6cAkw=8 \
+            --cn-limit src_2sO2moK5b7pQd4502btrRw=200 --cn-concurrency src_2sO2moK5b7pQd4502btrRw=6 \
+            --cn-limit src_9O6S275HTghlv7FPmYj7HQ=200 --cn-concurrency src_9O6S275HTghlv7FPmYj7HQ=6 \
+            --cn-limit src_Epl17m7olCxkvJTwFuD3dA=200 --cn-concurrency src_Epl17m7olCxkvJTwFuD3dA=6 \
+            --cn-limit src_hdgS1C-xTzGi7biGFUHc5A=100 --cn-concurrency src_hdgS1C-xTzGi7biGFUHc5A=8 \
+            --cn-limit src_8oube2-h3tkjK1YX_0v5Cw=100 --cn-concurrency src_8oube2-h3tkjK1YX_0v5Cw=8 \
+            --cn-limit src_Edo4D2FehI3pJ6hfmJE_OA=60 --cn-concurrency src_Edo4D2FehI3pJ6hfmJE_OA=4 \
+            --cn-limit src_PAN_q6nWfOGJQ6vLdFhAuw=40 --cn-concurrency src_PAN_q6nWfOGJQ6vLdFhAuw=4 \
+            --cn-limit src_6q1Z2RD8NKi4dCSPP5c2kA=40 --cn-concurrency src_6q1Z2RD8NKi4dCSPP5c2kA=4 \
+            --cn-limit src_ctChfPd9-63mtRo9AC3Fjw=40 --cn-concurrency src_ctChfPd9-63mtRo9AC3Fjw=4 \
+            --cn-limit src_JPE-jB2QHsfMOeSkzUuWXQ=300 --cn-concurrency src_JPE-jB2QHsfMOeSkzUuWXQ=6 \
             --cn-cache-ttl 21600
           rc=$?
           set -e

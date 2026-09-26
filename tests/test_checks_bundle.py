@@ -765,10 +765,22 @@ class TestCnCodenamesRatchetedDown(unittest.TestCase):
 
     #: 代码/文档/CI 各文件允许的 CNXX 命中**行数**上限（棘轮，只降不升）。
     CODE_BASELINES = {
-        "tests/test_china_check.py": 250,
-        "scripts/china_check.py": 173,
+        # R241：250 → 243。CI 行的 26 行调参表改用不透明 id 后，两条指名锁
+        # （CN-01 大陆省运营商节点 TCPing 通道、CN-02 同级预算通道）并入既有
+        # 表驱动测试，rationale 一并迁入其 docstring；表由「只锁复核条数」扩为
+        # 「条数＋并发」双列并加**通道集合等长**断言（覆盖只增不减）。
+        "tests/test_china_check.py": 243,
+        # R241：173 → 172。``--cn-limit`` 的 help 文本原带示例代号
+        # ``--cn-limit cn30=800``，已泛化为 ``<id>=800`` 并在同串说明
+        # 「键可为注册表代号或不透明 id，推荐后者——见 --list-cn」。
+        "scripts/china_check.py": 172,
         "scripts/china_engine.py": 64,
-        ".github/workflows/china-check.yml": 26,
+        # R241：26 → **0**。``--cn-limit``/``--cn-concurrency`` 自 R240 起
+        # 接受不透明 id，故 china-check.yml 的 26 行批量通道调参表整体改为
+        # ``--cn-limit src_…=N``（**52 处**出现：每行 limit+concurrency 两个
+        # flag）。等价性已机械验证：经生产入口 ``parse_cn_kv`` 解回的
+        # ``{code: int}`` 与原表**逐项全等**。归零后本行转为绝对断言。
+        ".github/workflows/china-check.yml": 0,
         "tests/test_common.py": 25,
         "tests/test_validate.py": 14,
         "scripts/validate_proxies.py": 6,

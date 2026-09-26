@@ -2492,7 +2492,7 @@ def main(argv=None) -> int:
                         "reachable/uncertain 键并跳过复测；如 21600=6 小时）")
     parser.add_argument("--cn-limit", action="append", default=[],
                         metavar="CODE=N",
-                        help="按代号覆盖复核条数（可重复；如 --cn-limit cn30=800），优先于 "
+                        help="按通道覆盖复核条数（可重复；如 --cn-limit <id>=800；键可为注册表代号或不透明 id，推荐后者——见 --list-cn），优先于 "
                         "PCB 注册表默认（有效代号见 --list-cn）")
     parser.add_argument("--cn-concurrency", action="append", default=[],
                         metavar="CODE=N",

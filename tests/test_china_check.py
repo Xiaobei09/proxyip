@@ -3923,30 +3923,41 @@ class TestCiEnabledSources(unittest.TestCase):
     `--cn-limit cn11=200 --cn-concurrency cn11=6`（同级预算）；
     注册表默认仍 0（本地按需显式启用）。"""
 
-    def test_ci_enables_cn11(self):
-        wf = (Path(__file__).resolve().parent.parent / ".github"
-              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
-        self.assertIn("--cn-limit cn11=200", wf)
-        self.assertIn("--cn-concurrency cn11=6", wf)
+    def _wf_cn_quotas(self) -> dict:
+        r"""把 ``china-check.yml`` 的 ``--cn-<kind> <key>=N`` 解析为
+        ``{注册表代号: {kind: N}}``（R241）。
 
-    def test_ci_enables_cn09(self):
-        """CN-02：cn09 毕业（约 39 ISP×节点，活体 21 单元出数）
-        与 cn11 同级预算；CLI 默认仍 0。"""
-        wf = (Path(__file__).resolve().parent.parent / ".github"
-              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
-        self.assertIn("--cn-limit cn09=200", wf)
-        self.assertIn("--cn-concurrency cn09=8", wf)
+        CI 行的键自本轮起改用**不透明 id**——代号本身是要清除的泄漏面。
+        故凡「CI 是否给某通道配了额度 / 配了多少」的断言都必须**形态无关**：
+        统一经 ``china_check.cn_code_of`` 归一回注册表代号再比对。两种形态
+        都接受（存量 CI 配置尚未迁移完时不至于把门禁打红），但**未知键仍原样
+        透传**、在下游「必须存在于注册表」那道锁上判红，故**漂移防线（拼错
+        即失效）一点没削弱**，反而多了一道：id 写错也解不回代号。
+        """
+        import re
+        root = Path(__file__).resolve().parent.parent
+        wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
+            encoding="utf-8")
+        out: dict = {}
+        for kind, key, val in re.findall(
+                r"--cn-(limit|concurrency|nodes)\s+([^\s=]+)=(\d+)", wf):
+            out.setdefault(cc.cn_code_of(key), {})[kind] = int(val)
+        return out
 
     def test_cn44_stays_disabled_for_captcha(self):
         """CN-03：cn44 源有 captcha 墙（活体实证），启用即须绕过
         反爬——合规禁区。CI 不得启用；若对方撤销验证墙，本锁须由人
         复核后同步解除（改测试即改决策）。"""
-        import re
-        wf = (Path(__file__).resolve().parent.parent / ".github"
-              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
-        self.assertIsNone(
-            re.search(r"--cn-limit cn44=([1-9]\d*)", wf),
+        # R241：原判据是「工作流文本里没有 ``--cn-limit cn44=N``」。CI 行改用
+        # 不透明 id 后该正则**永远匹配不上** → 本锁会**真空通过**（形同虚设，
+        # 比没有门禁更糟）。故改为在**解码后**的额度表上判定。
+        q = self._wf_cn_quotas()
+        self.assertNotIn(
+            "cn44", q,
             "cn44 在 captcha 墙移除前不得进 CI")
+        self.assertLessEqual(
+            q.get("cn44", {}).get("limit", 0), 0,
+            "cn44 在 captcha 墙移除前不得被分配正配额")
 
     def test_cn11_cli_default_stays_opt_in(self):
         reg = _registry_sources(self)
@@ -3977,9 +3988,13 @@ class TestCiEnabledSources(unittest.TestCase):
         pairs = re.findall(r"--cn-(?:limit|concurrency|nodes) (\w+)=(\d+)",
                            wf)
         self.assertTrue(pairs, "CI 未发现任何按代号配额，锁已失效")
-        for code, val in pairs:
+        for key, val in pairs:
+            code = cc.cn_code_of(key)
             with self.subTest(code=code):
-                self.assertIn(code, known, f"CI 配额引用未知代号：{code}")
+                self.assertIn(
+                    code, known,
+                    f"CI 配额引用未知通道（R241：键须是注册表代号或可解回代号"
+                    f"的不透明 id）：{key}")
                 self.assertGreater(int(val), 0, f"{code} 配额须为正整数")
         readme = (root / "README.md").read_text(encoding="utf-8")
         dup = re.findall(r"\bcn\d{2}\b（\d+ 键/\d+ 并发", readme)
@@ -4043,23 +4058,41 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(reg.by_code("cn06")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn06")["concurrency"], 6)
 
+    #: CI 行的 ``{代号: (复核条数, 并发)}`` 真相表。R241 起 CI 用不透明 id，
+    #: 故断言经 ``_wf_cn_quotas()`` **解码后**逐项比对——形态无关；拼错的 id
+    #: 解不回代号，仍会在「必须属于注册表」那道锁上判红，漂移防线不削弱。
+    #: 原两条指名锁已并入本表（覆盖只增不减）：**CN-01** 34 大陆省运营商节点
+    #: TCPing 通道毕业为 CI 默认启用（注册表默认仍 0，本地按需显式启用）、
+    #: **CN-02** 约 39 ISP×节点通道活体 21 单元出数后与 CN-01 同级预算。
+    CI_QUOTAS = (
+        ("cn30", 800, 20), ("cn07", 1200, 40), ("cn08", 600, 12),
+        ("cn14", 500, 8), ("cn17", 400, 8), ("cn16", 200, 8),
+        ("cn40", 300, 6), ("cn11", 200, 6), ("cn09", 200, 8),
+        ("cn04", 200, 6), ("cn15", 200, 8), ("cn18", 200, 6),
+        ("cn31", 400, 20), ("cn10", 200, 8), ("cn32", 200, 8),
+        ("cn12", 200, 6), ("cn33", 200, 6), ("cn06", 200, 6),
+        ("cn34", 100, 8), ("cn35", 100, 8), ("cn36", 60, 4),
+        ("cn37", 40, 4), ("cn38", 40, 4), ("cn39", 40, 4),
+        ("cn05", 200, 6), ("cn19", 200, 6),
+    )
+
     def test_all_enabled_l3_limits_present(self):
-        """CN-12：CI 启用的全部 L3 复核源配额原地锁定（cn30/cn07/
-        cn08/cn14/cn17/cn16/cn40/cn11/cn12/cn04），防 CI 行
-        误删某源致覆盖无声缩水。"""
-        wf = (Path(__file__).resolve().parent.parent / ".github"
-              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
-        for code, lim in (("cn30", 800), ("cn07", 1200), ("cn08", 600),
-                            ("cn14", 500), ("cn17", 400), ("cn16", 200),
-                            ("cn40", 300), ("cn11", 200), ("cn09", 200),
-                            ("cn04", 200), ("cn15", 200), ("cn18", 200),
-                            ("cn31", 400), ("cn10", 200), ("cn32", 200),
-                            ("cn12", 200), ("cn33", 200), ("cn06", 200),
-                            ("cn34", 100), ("cn35", 100), ("cn36", 60),
-                            ("cn37", 40), ("cn38", 40), ("cn39", 40),
-                            ("cn05", 200), ("cn19", 200)):
-            flag = f"--cn-limit {code}={lim}"
-            self.assertIn(flag, wf, f"CI 缺复核配额：{flag}")
+        """CN-12：CI 启用的全部 L3 复核源配额原地锁定，防 CI 行
+        误删某源致覆盖无声缩水。R241 起复核条数与并发**一并**锁定。"""
+        q = self._wf_cn_quotas()
+        for code, lim, con in self.CI_QUOTAS:
+            got = q.get(code, {})
+            self.assertEqual(
+                got.get("limit"), lim,
+                f"CI 缺复核配额或额度漂移：{code} 应为 {lim}")
+            self.assertEqual(
+                got.get("concurrency"), con,
+                f"CI 缺并发配额或漂移：{code} 应为 {con}")
+        # 通道集合须与真相表**等长**：多出来的是未经审查就上了 CI 的通道。
+        self.assertEqual(
+            set(q), {c for c, _, _ in self.CI_QUOTAS},
+            "CI 配额的通道集合与真相表不一致（有通道未经审查即被启用，"
+            "或有通道的配额被误删）")
 
     def _china_step_script(self) -> str:
         """提取 China reachability 步的 ``run: |`` shell 块。"""
@@ -4195,15 +4228,9 @@ class TestCiEnabledSources(unittest.TestCase):
     def test_cn17_limit_restored_after_altcha(self):
         """CN-30：cn17 ALTCHA 打通后复活——CI 配额恢复 400，
         同通道 ping 200 并行（停烧锁已解除，复活验证见本轮活体）。"""
-        import re
-        wf = (Path(__file__).resolve().parent.parent / ".github"
-              / "workflows" / "china-check.yml").read_text(encoding="utf-8")
-        m = re.search(r"--cn-limit cn17=(\d+)", wf)
-        self.assertIsNotNone(m, "cn17 配额丢失")
-        self.assertEqual(int(m.group(1)), 400)
-        m = re.search(r"--cn-limit cn18=(\d+)", wf)
-        self.assertIsNotNone(m, "cn18 配额丢失")
-        self.assertEqual(int(m.group(1)), 200)
+        q = self._wf_cn_quotas()
+        self.assertEqual(q.get("cn17", {}).get("limit"), 400, "cn17 配额丢失")
+        self.assertEqual(q.get("cn18", {}).get("limit"), 200, "cn18 配额丢失")
 
     def test_ci_flags_all_defined(self):
         """CN-13：CI 传给 china_check.py 的每个 flag 必须在 argparse 中
@@ -4736,7 +4763,9 @@ class TestWorkflowCodesInRegistry(unittest.TestCase):
               / "workflows" / "china-check.yml").read_text(encoding="utf-8")
         used = set(re.findall(r"--cn-(?:limit|concurrency|nodes) ([A-Za-z0-9_]+)=", wf))
         self.assertTrue(used, "workflow 未见通用配额")
-        unknown = sorted(c for c in used if c not in known)
+        # R241：CI 行的键是不透明 id，须经 ``cn_code_of`` 归一回注册表代号
+        # 再比对（未知键原样透传 → 仍判红，漂移防线不削弱）。
+        unknown = sorted(c for c in used if cc.cn_code_of(c) not in known)
         self.assertEqual(unknown, [], f"workflow 引用未知代号：{unknown}")
 
 
