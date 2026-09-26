@@ -4060,5 +4060,79 @@ class TestRepSourcesRegistryWiring(unittest.TestCase):
         self.assertEqual(qr.GETIPINTEL_CAP, 2000)
 
 
+class TestStaticSourceDispatchCoverageR249(unittest.TestCase):
+    """R249：私有侧注册的静态源，公开侧**必须**都有取数分派（AST 判定）。
+
+    起因是一次**我自己制造的假结论**：我用正则从 ``quality_reputation.py``
+    里提取「``if "<源名>" in sources and fetch_* is not None:`` →
+    ``mapping.append(...)``」这一种分派形态，据此报告「``ipsum`` 注册了、计入
+    权重了、有分值，却没有分派分支 → 默认启用却永不产出信号的死源」。**结论是
+    错的**——``ipsum`` 走的是**第三种形态**（``await fetch_ipsum_list()``，结果
+    直接当 IP 集合用），正则没匹配上。改用 ``ast`` 解析后核实：**37 个取数器
+    全部被调用、37 个 ``STATIC_LIST_SCORES`` 键全部有分派、零缺口**。
+
+    这是本次会话里第三次「正则探针给出假结论」（前两次：R245 把 stash 丢失
+    误当无事、R248 的反证变异根本没发生而脚本仍打印成功）。故本门禁**一律用
+    AST**、不用正则——正则对代码形态变化极度脆弱，而「注册了却漏接线」这类
+    问题恰恰静默无声、后果是覆盖率悄悄归零。
+
+    两条不变量：
+      (1) 私有插件暴露的每个 ``fetch_*`` 都必须被公开聚合器**调用**（无死源）；
+      (2) ``STATIC_LIST_SCORES`` 的每个键都必须有一条 ``if "<键>" in sources``
+          分派分支（无漏接线）。
+    无 PCB 包时 fail-open 跳过（硬性约束 5）。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def _ast_facts(self):
+        import ast
+        import sys
+        sys.path.insert(0, str(self.ROOT / "scripts"))
+        sys.path.insert(0, str(self.ROOT / "pcb" / "plugins"))
+        try:
+            import rep_static
+        except Exception:
+            self.skipTest("私有 rep_static 不可得：无法判定（fail-open）")
+        src = (self.ROOT / "scripts" / "quality_reputation.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        called = {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                  and n.func.id.startswith("fetch_")}
+        covered = set()
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.If):
+                continue
+            t = n.test
+            if (isinstance(t, ast.BoolOp) and t.values
+                    and isinstance(t.values[0], ast.Compare)):
+                c = t.values[0]
+                if isinstance(c.left, ast.Constant) and isinstance(
+                        c.left.value, str):
+                    covered.add(c.left.value)
+        return rep_static, called, covered
+
+    def test_no_dead_static_fetcher(self):
+        rep_static, called, _ = self._ast_facts()
+        fetchers = {n for n in dir(rep_static) if n.startswith("fetch_")}
+        self.assertTrue(fetchers, "私有插件未暴露任何 fetch_*（判据失效）")
+        dead = sorted(fetchers - called)
+        self.assertEqual(
+            dead, [],
+            "私有侧暴露的取数器在公开聚合器里**从未被调用**——该源静默死掉，"
+            f"注册与计权重都在、却永不产出信号：{dead}")
+
+    def test_every_registered_static_source_is_dispatched(self):
+        rep_static, _, covered = self._ast_facts()
+        keys = set(rep_static.STATIC_LIST_SCORES)
+        self.assertTrue(keys, "STATIC_LIST_SCORES 为空（判据失效）")
+        miss = sorted(keys - covered)
+        self.assertEqual(
+            miss, [],
+            "已注册的静态源没有分派分支——默认启用却不生效，"
+            f"覆盖率悄悄归零：{miss}")
+
+
 if __name__ == "__main__":
     unittest.main()
