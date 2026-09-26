@@ -127,10 +127,20 @@ _TLS_CTX.verify_mode = ssl.CERT_NONE
 
 
 def _normalize_ext_response(source: dict, data: dict) -> dict:
-    """Normalize raw API response to standard format."""
-    name = source["name"]
+    """Normalize raw API response to standard format.
 
-    if name in ("090227", "cmliu"):
+    R248：按源定义下发的 ``schema`` **结构种类**分派，不再按 ``name`` if。
+    此前这里是 ``if name in (...):`` / ``if name == ...:``——把三个外部来源
+    真名硬编码在公开仓。结构是源的**属性**而非公开仓该知道的事，故随私有包的
+    源定义一起下发（``plugins/ext_api.py`` 的 ``schema`` 字段）。
+
+    未知/缺失 ``schema`` → 与原先的兜底分支同行为（``ok=False``），**fail-closed**：
+    缺包或源定义未升级时不会把未知结构误判成成功。
+    """
+    name = source["name"]
+    schema = source.get("schema")
+
+    if schema == "probe_dict":
         ipv4 = data.get("probe_results", {}).get("ipv4", {})
         ipv6 = data.get("probe_results", {}).get("ipv6", {})
         success = data.get("success")
@@ -150,7 +160,7 @@ def _normalize_ext_response(source: dict, data: dict) -> dict:
             "exit_geo": ipv4.get("exit"),
         }
 
-    if name == "toicf":
+    if schema == "probe_list":
         return {
             "name": name,
             "ok": bool(data.get("ok")),
@@ -160,14 +170,14 @@ def _normalize_ext_response(source: dict, data: dict) -> dict:
             "ipv6_ok": bool(data.get("supports_ipv6")),
             "dual_stack": bool(data.get("dual_stack")),
             "inferred_stack": data.get("inferred_stack"),
-            "exit_geo": _extract_toicf_exit_geo(data),
+            "exit_geo": _extract_list_probe_exit_geo(data),
         }
 
     return {"name": name, "ok": False}
 
 
-def _extract_toicf_exit_geo(data: dict) -> dict | None:
-    """Extract exit_geo from ToiCF probe_results format."""
+def _extract_list_probe_exit_geo(data: dict) -> dict | None:
+    """Extract exit_geo from the list-shaped ``probe_results`` format."""
     for probe in data.get("probe_results", []):
         if probe.get("ok") and probe.get("exit_ip"):
             return {

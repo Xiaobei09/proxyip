@@ -915,8 +915,8 @@ class TestParseLineAndToken(unittest.TestCase):
 
 
 class TestNormalizeExtResponse(unittest.TestCase):
-    def test_090227_format(self):
-        source = {"name": "090227"}
+    def test_probe_dict_schema_format(self):
+        source = {"name": "S1", "schema": "probe_dict"}
         data = {
             "success": True,
             "responseTime": 123.4,
@@ -936,8 +936,8 @@ class TestNormalizeExtResponse(unittest.TestCase):
         self.assertFalse(result["ipv6_ok"])
         self.assertEqual(result["exit_geo"]["countryCode"], "US")
 
-    def test_cmliu_format(self):
-        source = {"name": "cmliu"}
+    def test_probe_dict_schema_second_source(self):
+        source = {"name": "S2", "schema": "probe_dict"}
         data = {
             "success": True,
             "responseTime": 200.0,
@@ -953,8 +953,8 @@ class TestNormalizeExtResponse(unittest.TestCase):
         self.assertTrue(result["dual_stack"])
         self.assertTrue(result["ipv6_ok"])
 
-    def test_toicf_format(self):
-        source = {"name": "toicf"}
+    def test_probe_list_schema_format(self):
+        source = {"name": "S3", "schema": "probe_list"}
         data = {
             "ok": True,
             "supports_ipv4": True,
@@ -980,18 +980,21 @@ class TestNormalizeExtResponse(unittest.TestCase):
         self.assertEqual(result["exit_geo"]["city"], "Los Angeles")
 
     def test_unknown_source(self):
-        result = vp._normalize_ext_response({"name": "unknown"}, {})
-        self.assertFalse(result["ok"])
+        for src in ({"name": "unknown"},
+                     {"name": "S9", "schema": "no_such_schema"}):
+            with self.subTest(src=src):
+                result = vp._normalize_ext_response(src, {})
+                self.assertFalse(result["ok"])
 
     def test_string_success_is_not_ok_r169(self):
         """R169验证正确性：与 probe 侧同契约（字符串布尔非显式 True 不算
         成功；两链同源同判，防 update/quality 链分叉）。"""
-        for name in ("090227", "cmliu"):
+        for name in ("S1", "S2"):
             for bad in ("false", "true", 1, 0, None):
-                result = vp._normalize_ext_response({"name": name}, {
+                result = vp._normalize_ext_response({"name": name, "schema": "probe_dict"}, {
                     "success": bad, "probe_results": {}})
                 self.assertIs(result["ok"], False, (name, bad))
-            result = vp._normalize_ext_response({"name": name}, {
+            result = vp._normalize_ext_response({"name": name, "schema": "probe_dict"}, {
                 "success": True, "probe_results": {}})
             self.assertIs(result["ok"], True)
 
@@ -999,13 +1002,13 @@ class TestNormalizeExtResponse(unittest.TestCase):
         """R170可用性：非布尔 success 判否时留 debug 痕迹（排障可观测；
         缺键与真布尔保持静默）。"""
         with self.assertLogs("root", level="DEBUG") as logs:
-            vp._normalize_ext_response({"name": "090227"}, {
+            vp._normalize_ext_response({"name": "S1", "schema": "probe_dict"}, {
                 "success": "false", "probe_results": {}})
         self.assertTrue(any("not bool" in m for m in logs.output))
         with self.assertNoLogs("root", level="DEBUG"):
-            vp._normalize_ext_response({"name": "090227"}, {
+            vp._normalize_ext_response({"name": "S1", "schema": "probe_dict"}, {
                 "success": True, "probe_results": {}})
-            vp._normalize_ext_response({"name": "090227"}, {})
+            vp._normalize_ext_response({"name": "S1", "schema": "probe_dict"}, {})
 
     def test_ext_warn_needed_r171(self):
         """R171用户侧体验：ext 开启＋无源才 warn（显式关闭/有源皆静默）。"""
@@ -1020,43 +1023,43 @@ class TestNormalizeExtResponse(unittest.TestCase):
 class TestMergeExtVerdict(unittest.TestCase):
     def test_two_ok_sources_consensus(self):
         results = [
-            {"name": "090227", "ok": True, "response_ms": 100, "colo": "LAX",
+            {"name": "S1", "ok": True, "response_ms": 100, "colo": "LAX",
              "ipv4_ok": True, "ipv6_ok": False, "dual_stack": False,
              "inferred_stack": "ipv4", "exit_geo": {"countryCode": "US"}},
-            {"name": "cmliu", "ok": True, "response_ms": 150, "colo": "LAX",
+            {"name": "S2", "ok": True, "response_ms": 150, "colo": "LAX",
              "ipv4_ok": True, "ipv6_ok": False, "dual_stack": False,
              "inferred_stack": "ipv4", "exit_geo": {"countryCode": "US"}},
         ]
         verdict = vp.merge_ext_verdict(results)
         self.assertTrue(verdict["alive"])
-        self.assertEqual(set(verdict["basis"]), {"090227", "cmliu"})
+        self.assertEqual(set(verdict["basis"]), {"S1", "S2"})
         self.assertEqual(verdict["merged"]["colo"], "LAX")
 
     def test_single_ok_uncertain(self):
         results = [
-            {"name": "090227", "ok": True, "response_ms": 100, "colo": "LAX",
+            {"name": "S1", "ok": True, "response_ms": 100, "colo": "LAX",
              "ipv4_ok": True, "ipv6_ok": False, "dual_stack": False,
              "inferred_stack": "ipv4", "exit_geo": None},
-            {"name": "cmliu", "ok": False, "error": "timeout"},
-            {"name": "toicf", "ok": False, "error": "timeout"},
+            {"name": "S2", "ok": False, "error": "timeout"},
+            {"name": "S3", "ok": False, "error": "timeout"},
         ]
         verdict = vp.merge_ext_verdict(results)
         self.assertEqual(verdict["alive"], "uncertain")
-        self.assertEqual(verdict["basis"], ["090227"])
+        self.assertEqual(verdict["basis"], ["S1"])
 
     def test_all_fail_dead(self):
         results = [
-            {"name": "090227", "ok": False, "error": "timeout"},
-            {"name": "cmliu", "ok": False, "error": "timeout"},
-            {"name": "toicf", "ok": False, "error": "timeout"},
+            {"name": "S1", "ok": False, "error": "timeout"},
+            {"name": "S2", "ok": False, "error": "timeout"},
+            {"name": "S3", "ok": False, "error": "timeout"},
         ]
         verdict = vp.merge_ext_verdict(results)
         self.assertFalse(verdict["alive"])
 
     def test_skipped_when_no_errors(self):
         results = [
-            {"name": "090227", "ok": False},
-            {"name": "cmliu", "ok": False},
+            {"name": "S1", "ok": False},
+            {"name": "S2", "ok": False},
         ]
         verdict = vp.merge_ext_verdict(results)
         self.assertEqual(verdict["alive"], "skipped")
@@ -1131,7 +1134,7 @@ class TestWriteExtCheck(unittest.TestCase):
         alive = {
             "1.0.0.1:443#US": (
                 "1.0.0.1", "443", "US", "tls", 100.0, 1.0,
-                {"sources": ["090227", "cmliu"], "alive": True,
+                {"sources": ["S1", "S2"], "alive": True,
                  "response_ms": 120, "colo": "LAX"},
             ),
         }
@@ -1153,7 +1156,7 @@ class TestWriteExtCheck(unittest.TestCase):
         alive = {
             "1.0.0.1:443#US": (
                 "1.0.0.1", "443", "US", "tls", 100.0, 1.0,
-                {"sources": ["090227"], "alive": True},
+                {"sources": ["S1"], "alive": True},
             ),
         }
         vp.write_ext_check(alive)
@@ -1179,7 +1182,7 @@ class TestWriteValidOutputsExtRegion(unittest.TestCase):
         alive = {
             "1.0.0.1:443#US": (
                 "1.0.0.1", "443", "US", "tls", 100.0, 1.0,
-                {"sources": ["090227"], "alive": True,
+                {"sources": ["S1"], "alive": True,
                  "response_ms": 100, "colo": "LAX",
                  "exit_geo": {"countryCode": "US"}},
             ),
@@ -1664,17 +1667,17 @@ class TestExtractToicfExitGeo(unittest.TestCase):
              "exit_city": "LA", "exit_asn": 15169, "exit_org": "G"},
             {"ok": True, "exit_ip": "1.1.1.1", "exit_country": "AU"},
         ]}
-        geo = vp._extract_toicf_exit_geo(data)
+        geo = vp._extract_list_probe_exit_geo(data)
         self.assertEqual(geo["countryCode"], "US")
         self.assertEqual(geo["city"], "LA")
         self.assertEqual(geo["asn"], 15169)
 
     def test_none_when_no_ok_probe_with_exit_ip(self):
-        self.assertIsNone(vp._extract_toicf_exit_geo(
+        self.assertIsNone(vp._extract_list_probe_exit_geo(
             {"probe_results": [{"ok": False}, {"ok": True}]}
         ))
-        self.assertIsNone(vp._extract_toicf_exit_geo({}))
-        self.assertIsNone(vp._extract_toicf_exit_geo({"probe_results": []}))
+        self.assertIsNone(vp._extract_list_probe_exit_geo({}))
+        self.assertIsNone(vp._extract_list_probe_exit_geo({"probe_results": []}))
 
 
 class TestHistoryRecordShape(unittest.TestCase):

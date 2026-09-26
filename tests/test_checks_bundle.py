@@ -259,11 +259,13 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
         "tests/test_quality.py": 25,
         "scripts/quality_reputation.py": 18,
         "tests/test_download.py": 3,
-        "tests/test_validate.py": 9,
-        "docs/data-spec.md": 2,
+        "tests/test_validate.py": 0,
+        "docs/data-spec.md": 0,
         "docs/scripts.md": 0,
         "docs/logic.md": 0,
-        "scripts/validate_proxies.py": 1,
+        # R248：1 → **0**。`_normalize_ext_response` 改按源定义下发的
+        # ``schema`` **结构字段**分派，三个来源标识不再出现在公开仓。
+        "scripts/validate_proxies.py": 0,
     }
 
     ROOT = Path(__file__).resolve().parent.parent
@@ -322,11 +324,11 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
             "tests/test_quality.py": 25,
             "scripts/quality_reputation.py": 18,
             "tests/test_download.py": 3,
-            "tests/test_validate.py": 9,
-            "docs/data-spec.md": 2,
+            "tests/test_validate.py": 0,
+            "docs/data-spec.md": 0,
             "docs/scripts.md": 0,
             "docs/logic.md": 0,
-            "scripts/validate_proxies.py": 1,
+            "scripts/validate_proxies.py": 0,
         }
         for rel, b in self.BASELINES.items():
             with self.subTest(file=rel):
@@ -979,9 +981,76 @@ class TestReputationSourceNamesInDocs(unittest.TestCase):
 
     #: 各文件允许的信誉数据源名出现数上限（棘轮，只降不升）。
     BASELINES = {
-        "docs/scripts.md": 63,
+        # R248：63 → **25**。四处逐源枚举（opt-in 源清单、静态清单体积与超时、
+        # DNS 类源上限、DoH 分区延迟实测、负缓存举例、连续型风险源字段清单、
+        # 在线纯净度评分接入结论）已换成注册表指针与「口径随源而异」表述，
+        # **全部阈值/超时/限速/缓存语义原样保留**。剩余 25 处是散见的单处提及、
+        # 非枚举；枚举本身由 ``test_docs_have_no_per_source_enumeration_r248``
+        # 以「单行 ≥3 个不同来源标识」的结构判据锁死（目标 0）。
+        "docs/scripts.md": 25,
         "docs/logic.md": 13,
     }
+
+    def test_docs_have_no_per_source_enumeration_r248(self):
+        """R248：文档**任何一行**都不得枚举 ≥3 个外部来源标识。
+
+        起因：``docs/data-spec.md`` 有两行把来源名**逐个列出**——第 259 行
+        43 个（信誉侧 42 ＋ 下载侧 1）、第 301 行 24 个。R237 已把逐源明细迁入 PCB ``REPUTATION_SOURCES.md``
+        并让公开文档只留指针，但这两行是**漏掉的副本**，R223 的反向锁没覆盖
+        （它锁的是「逐源**代号**表」，不是来源**名**枚举）。
+
+        判据是**结构性的**、与具体名字无关：**单行内 ≥3 个不同来源标识**即判红。
+        零假阳性——正常文档不会在一行里枚举三个以上来源身份；而名字换代
+        （今天叫 A 明天叫 B）本判据照样咬。计数棘轮在本门禁里不需要：目标是 0。
+
+        覆盖两族 token（下载来源 ＋ 信誉数据源），并含已知的通用词
+        （``ip-api``/``abuse``/``dnsbl``）——那三类**只会让判据更严**、不会造成
+        假阴性，故一并纳入。
+        """
+        import re
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import checks_bundle as cb
+        try:
+            lg = cb.load_plugin("leak_guard")
+            dl = sorted(lg.download_vendor_tokens())
+            rp = sorted(lg.reputation_source_names())
+        except Exception:
+            self.skipTest("私有 leak_guard 不可得：无法判定（fail-open）")
+        # R248：**已核实的假阳性**从判据里剔除——它们不是来源身份，而是
+        # 公开服务名／语义维度名／普通英文词，与源名撞词（各自证据见本类
+        # docstring 与 R233 的归因）：
+        #   ip-api  公开地理服务 ip-api.com（本仓多处公开使用）
+        #   abuse   rep_flags 的**语义标志**维度
+        #   dnsbl   **机制类别**（DNSBL 是一类技术，不是某一家）
+        #   static  普通英文词
+        # 剔除它们**不会掩盖枚举**：真枚举是 5~43 个标识，远超阈值。
+        # （R227 的教训针对的是「不可靠判据」——这里每个剔除项都有独立归因，
+        #  不是为了让红变绿而临时开洞。）
+        FALSE_POSITIVES = {"ip-api", "abuse", "dnsbl", "static"}
+        toks = sorted((set(dl) | set(rp)) - FALSE_POSITIVES)
+        if not toks:
+            self.skipTest("token 集为空：判据失效（fail-open）")
+        rx = re.compile(r"(?<![A-Za-z0-9_])(?:" + "|".join(
+            re.escape(t) for t in toks) + r")(?![A-Za-z0-9_])", re.IGNORECASE)
+        docs = sorted((Path(__file__).resolve().parent.parent / "docs")
+                      .rglob("*.md"))
+        docs += [Path(__file__).resolve().parent.parent / "README.md",
+                 Path(__file__).resolve().parent.parent / "data" / "README.md"]
+        bad = []
+        for f in docs:
+            if not f.is_file():
+                continue
+            for i, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                names = {m.group(0).lower() for m in rx.finditer(ln)}
+                if len(names) >= 3:
+                    bad.append(f"{f.name}:{i} 枚举 {len(names)} 个："
+                               f"{sorted(names)[:6]}")
+        self.assertEqual(
+            bad, [],
+            "文档出现逐源枚举（真相源应是私有包注册表；公开文档只留指针）——"
+            f"共 {len(bad)} 行：{bad[:4]}")
 
     @staticmethod
     def _pattern():
