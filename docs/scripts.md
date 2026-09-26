@@ -76,7 +76,7 @@
 | `chart_churn.svg` | 每次更新 added / removed 分组条形图（近 7 天窗口） |
 | `chart_latency_speed.svg` | 延迟与速度分桶双面板条形图 |
 | `chart_sets.svg` | 各命名集合存活代理条形图 |
-| `chart_cn.svg` | 大陆连通性分运营商状态（可达/覆盖 + min/中位延迟 ms；无 cn01 运营商数据时回退 verdict 分布） |
+| `chart_cn.svg` | 大陆连通性分运营商状态（可达/覆盖 + min/中位延迟 ms；无分运营商数据时回退 verdict 分布） |
 | `chart_cn_7d.svg` | 分运营商可达数折线趋势（近 7 天窗口，数据源 `cn_history.jsonl`） |
 | `chart_family.svg` | 实际出口 IP 家族分布条形图 |
 | `chart_source_avail.svg` | IP 来源覆盖率 + 每代理源数量分布 |
@@ -286,9 +286,20 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 
 大陆连通性检测（独立 CI 运行）。内部拆分子模块：`ws_transport.py`（WebSocket 帧/缓冲 `_WebSocket`/`WS_MAX_BUF`）与 `china_engine.py`（判定引擎/比率表）仅被本脚本 import、无独立 CLI，行为统一在本条目描述（见下方「三源严守」与 engine 判定说明）。CI 以 `--source data/valid/all.txt --limit 0` 全量池检测；本地缺省按 `data/valid/all_rep.txt` 信誉降序采样前 250 条（缺失时回退 `all.txt`，`FALLBACK_SOURCE`）。从大陆视角实测 TCP 可达性，分三层判定（曾有的 **L1 启发式**基于行内 `-CF` 死标记记录 heuristic 源，随 CF token 废弃一并移除，china.json 不再写 `cf_heuristic` 字段）：
 
-- **L2 批量通道 cn01 实测（主源）**：每任务 5 目标 × 电信/联通/移动各 6 节点（共 18 节点，`CN01_NODES_PER_ISP=6`），经 WebSocket 收结果，TCP 连通即判可达；节点按运营商归属（id 映射兜底节点名关键词），任务级另出 per-ISP 最小 RTT（`isp_ms`），落 china.json 后供 CN 清单取**最快运营商视角**（`common.cn_fastest_ms`）渲染展示延迟与 `≈XMB/s` 速度。cn01 失败/被限的键另有两条同站降级：纯 TCP 大节点池（记 `cn02` 源）；CN-26 ICMP 大节点池电信 87/联通 83/移动 89（记 `cn03` 源，归一 `level=icmp`、不产 `isp_ms`）
-- **L2 单节点实测（并发）**：`cn27`（呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 key 可放宽；CN-31 起 TCP-fail 追加同节点 ICMP ping 消歧，CN-32 起 TCP-ok 且其余免额 0 ok 追加同节点 HTTPS 应用层确认，共用配额）+ `cn20`（北京节点 TCP，免 key）+ `cn21`（CN-29：山东枣庄 BGP 节点 ICMP，免 key，`level=icmp`，echo 校验，不产 `isp_ms`）+ `cn22`（CN-38：同站 HTTP 状态码，免 key，`level=http`，`-2` 判 fail，无 ms）+ `cn23`（CN-39：同站 8 端口扫描，仅 443 键产出，`level="tcp"` 布尔见证）+ `cn24`（浙江宁波电信 TCP，免 key 双镜像；CN-39 起 ok 附 `isp_ms={中国电信}`）+ `cn25`（CN-25 新增：同站同节点 ICMP 主机存活，免 key，`level=icmp`，不进延迟显示/不产 `isp_ms`，与 ICMP 源同口径；CN-26 起三端点主站异常自动 failover 同站镜像，429 不切换）+ `cn26`（CN-37 新增：同站同节点 TLS 握手，免 key，`level="tcp"` 保守，无 ms 只作布尔见证）+ `cn36`（CN-46 新增：社区探针北京节点 ICMP ping，匿名免 key（250/h 配额），`level="icmp"`，不产 `isp_ms`；CI 以 60 键/4 并发启用）+ `cn37`（CN-47 新增：同站同 API 路由追踪，末跳达目标即见证，`ms` 恒空，`level="icmp"`，不产 `isp_ms`；CI 以 40 键/4 并发启用）+ `cn38`（CN-48 新增：同站同 API 应用层确认，明文打 TLS 端口状态码即往返，`ms` 取 `timings.tcp`，`level="http"`，不产 `isp_ms`；CI 以 40 键/4 并发启用）+ `cn39`（CN-49 新增：同站同 API MTR，任一 hop 末跳达目标即见证，`ms` 恒空，`level="icmp"`，不产 `isp_ms`；CI 以 40 键/4 并发启用）。**保守判定：多节点源（cn40/cn01/cn41/cn02/cn03/cn30/cn31/cn32/cn07/cn08/cn14/cn15/cn17/cn18/cn16/cn11/cn12/cn09/cn10/cn04/cn34/cn42/cn43/cn44/cn13，与 `merge_verdict` 的 `multi_ok` 表一致）单独确认 → reachable；单节点源（cn27/cn28/cn29/cn20/cn21/cn22/cn23/cn24/cn25/cn26/cn36/cn37/cn38/cn39）≥2 个确认 → reachable；仅 1 个确认 → uncertain；均失败 → unreachable**
-- **L3 多节点复核（有界并发小样本）**：`cn30`（免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP `ip:port` 直连，节点成功率达 50% 即判可达）先于 cn40 跑——免费、端到端 ~2-6s/键，确认过的键自动让位；`cn31`（CN-33：同站 `type=ping`，裸 IP 目标，`success`＋`avg_ms>0`，`level=icmp`，不产 `isp_ms`，与 TCP 共用节点采样跑在 TCP 相之后）；`cn32`（CN-35：同站 `type=http`，`http://ip:port/`，`success`＋`status>0` 即应用层确认，`level=http`，ms 取 `connect_ms`，与 TCP 同口径产 `isp_ms`，跑在 ping 相之后）；`cn33`（CN-40：同站 `type=traceroute`，裸 IP 目标，`success` 即达判，`ms` 恒空，`level=icmp`，不产 `isp_ms`，跑在 http 相之后）；`cn07`（18 ICMP 节点，成功率达 50% 判可达，专测中国大陆主机存活）；`cn08`（~12 节点 ICMP ping，纯 HTTP+SSE 零鉴权）；`cn14`（~155 节点，JWT+WS，ICMP ping / TCP `ip:port` 均可）；`cn17`（~163 TCP 节点，SHA-256 PoW + ALTCHA 会话复用纯 Python 求解 + WS，真实端口直连；CN-30 起同通道 `cn18` ICMP 并行，`level=icmp`，紧凑键 `r/q` 判定，不产 `isp_ms`；CN-44 起同基建 `cn19` MTR 通道，约 139 节点，末跳达目标即见证，`level=icmp`，不产 `ms`/`isp_ms`，同族 `traceroute` 型后端容量不稳不接入）；`cn16`（~53 ICMP 节点，服务端渲染 token + WS）；`cn11`（34 个大陆各省运营商节点持续 TCPing，socket.io v4 over WebSocket，CF 反爬用 HTTPS+Referer 壳页取节点、连 `wss://<源站>/socket.io` 发/收事件，零 key，实测 35/35 节点出数）；`cn12`（CN-36：同站 continuous-ping，35 节点 socket.io，事件与 TCP 全同形，`level=icmp`，不产 `isp_ms`，活体 35/35 出数）；`cn09`（约 39 个 ISP×节点 TCPing 测量单元，HTTP+SSE 零鉴权，协议细节已迁 PCB，实测 39/39 出数）；`cn10`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`，活体 39/39 出数）；`cn04`（CN-27：28 城三网 TCPing，`level=tcp`，原生分 ISP；CI 200 键/6 并发启用）；`cn05`（CN-50：同站 HTTP 测速通道，`status_code>0` 即应用层确认，`level=http`，活体 27/28 出数；仅 443 键可用；CI 200 键/6 并发启用）；`cn06`（CN-42：公开 WS 通道约 16 节点 TCPing，原生分三网，活体 16 节点出数；CI 以 200 键/6 并发启用）；`cn34`（CN-43 复活：同路径 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网，活体 287 节点出数；CI 以 100 键/8 并发启用）＋`cn35`（CN-45：同站路由追踪，hop 行目标 IP 即见证，`level=icmp`，不产 `ms`/`isp_ms`，CI 以 100 键/8 并发启用）；`cn15`（CN-28：cn14 同站 ICMP，复用 code=3 分支，`level=icmp`，不产 `isp_ms`，活体 178/179 出数）；随后 `cn40`（约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive），各源均只投「当前尚未被 cn01/单节点源判可达」的键且按 `--cn-limit CODE=N` 有界；多节点源须「≥ `MULTI_MIN_NODES`（5）个节点 + 成功率达标」才可独立判 reachable，防限流残缺样本假阳性；可选 `cn41`（多运营商，需站长签发 token（`--tcpping-token`/`TCPPING_CN_TOKEN` env），缺则自动跳过）
+- **L2 批量通道实测（主源）**：按任务批量下发目标，每任务多目标 ×
+  电信/联通/移动各 N 节点（三网聚合，跨省等距采样），经流式通道回收结果，
+  TCP 连通即判可达；节点回报应用层状态时另计应用层确认（`level=http`）。
+  主源不可用时由同族降级通道（纯 TCP 大节点池 → ICMP 复测）依次接管。
+  各通道的节点规模与限速配额见私有包，公开文档不记录。
+- **L2 单节点实测（并发）**：一批免额/低额单节点源并行，分别覆盖 TCP、
+  ICMP 存活、应用层状态码、TLS 握手与端口扫描等判据；配额型通道的 key
+  经 `--api-key` 注入、缺则自动跳过。
+- **L3 多节点复核（有界并发小样本）**：对尚未被 L2 判可达的键，按
+  `--cn-limit <代号>=N` 有界配额跑多节点复核，各源只投未判定键。多节点源
+  须报告 ≥ `MULTI_MIN_NODES`（5）个节点且成功率达阈值才可独立判
+  reachable；部分通道需签发 token（`--tcpping-token`），缺则跳过。
+  需签发 token 的多运营商复核通道与各通道地域/协议细节一律见私有包。
+
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
@@ -296,14 +307,14 @@ upsert `→OC` 标记（同国也标注，陈旧出口直接替换）；仅当�
 | `--limit` | 按信誉降序采样条数（0=全部） | 250 |
 | `--workers` | L2 并发上限 | 56 |
 | `-t, --timeout` | 单次 HTTP 超时（秒） | 10 |
-| `--api-key` | cn27 站 key（读 `CHINA_CHECK_API_KEY`） | 空 |
-| `--tcpping-token` | cn41 复核 token（读 `TCPPING_CN_TOKEN`） | 空 |
+| `--api-key` | 配额型单节点通道的 key（读 `CHINA_CHECK_API_KEY`） | 空 |
+| `--tcpping-token` | 需签发 token 的复核通道凭证（读 `TCPPING_CN_TOKEN`） | 空 |
 
 | `--dry-run` | 只输出计划（含sample/overrides），不发请求不写盘 | 关 |
 | `--list-cn` | 列出 PCB 注册表全部代号与默认（code/family/limit/concurrency，不含插件名与内部函数名；R100，无网络无写盘；无包时提示返回 2） | 关 |
 | `--cn-latency-cap` | CN 清单大陆视角 RTT 门槛（ms，`inf` 关闭） | 150 |
 | `--cn-cache-ttl` | CN 结果缓存秒数（复用 china.json 内 `checked_at` 未过期的 reachable/uncertain 键并跳过复测；CI 6 小时） | 0 |
-| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit cn30=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn；有效代号见 `--list-cn`） | 空 |
+| `--cn-limit` | 按代号覆盖复核条数（可重复，如 `--cn-limit <代号>=800`；优先于注册表默认；格式错误打stderr warn并丢弃，未知代号另行warn；有效代号见 `--list-cn`） | 空 |
 | `--cn-concurrency` | 按代号覆盖并发数（可重复；优先于注册表默认；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
 | `--cn-nodes` | 按代号覆盖每键采样节点数（可重复；非法/未知同上warn；有效代号见 `--list-cn`） | 空 |
 
@@ -326,66 +337,29 @@ help↔docs 对等门禁对本组只在有注册表时断言。
 缓存只复用三家运营商读数齐全的条目；缺失运营商的条目会重新进入探测，并按上述上限轮转补测，避免单运营商旧缓存造成三网统计失衡。
 
 泛型覆盖适用矩阵（R89；派线漂移由 `TestCnOverrideMatrixR89` 锁定，改派线须同步改此段）：
-- `--cn-limit`/`--cn-concurrency` 生效 30 码：cn04-12、cn13-19、cn30-40、cn42-44（其中 cn42-44/cn13 经动态循环变量派发，无字面量调用）。
-- `--cn-nodes` 仅生效 2 码：cn02（大节点池采样）、cn30（复核采样）。
-- 豁免 14 码（设泛型覆盖无效）：cn01/cn03（批量 legacy 旗标驱动）、cn02（仅 nodes 有效，无 limit 概念，补测由 cn01 失败触发）、cn20-29（L2 常开全池，无条数概念）、cn41（搭 cn40 复核相，需 token）。R99 起对豁免码的覆盖打 stderr warn（`--cn-<kind> for '<code>' has no effect`），无包时跳过此提示。
+- 生效/豁免的具体代号集合**由私有注册表声明**（公开文档不逐条列举；
+  `--list-cn` 的 `family` 列即分组依据）。设泛型覆盖对豁免码无效，
+  运行时会打 stderr warn（`--cn-<kind> for '<code>' has no effect`）。
+  派线漂移由 `TestCnOverrideMatrixR89` 对注册表与实现对账锁定。R99 起对豁免码的覆盖打 stderr warn（`--cn-<kind> for '<code>' has no effect`），无包时跳过此提示。
 
 各代号默认值（由 PCB 注册表自动生成，勿手改；条数 0=跳过，-1=全部未定键；`常开`=L2 常开/配额族无条数概念）：
 
 | 代号 | 说明 | 条数 | 并发 |
 |---|---|---|---|
-| `cn01` | cn01 批量多节点复核主通道（HTTP 任务，三网聚合） | 常开 | — |
-| `cn02` | cn02 批量多节点复核降级通道（cn01 失败时补测） | 常开 | — |
-| `cn03` | cn03 批量多节点 ICMP 复核通道 | 常开 | — |
-| `cn04` | cn04 WS 多节点 TCPing 复核 | 0 | 6 |
-| `cn05` | cn05 HTTP 多节点应用层复核（仅 443 键） | 0 | 6 |
-| `cn06` | cn06 公开 WS 通道多节点 TCPing 复核 | 0 | 6 |
-| `cn07` | cn07 大陆多节点 ICMP 复核 | 0 | 24 |
-| `cn08` | cn08 多节点存活复核（HTTP+SSE） | 0 | 8 |
-| `cn09` | cn09 SSE 多节点 TCPing 复核 | 0 | 8 |
-| `cn10` | cn10 SSE 多节点 ICMP 复核 | 0 | 8 |
-| `cn11` | cn11 socket.io 多节点 TCPing 复核 | 0 | 6 |
-| `cn12` | cn12 socket.io 多节点 ICMP 复核 | 0 | 6 |
-| `cn13` | cn13 WS 多节点 TCPing 复核（休眠态保留） | 0 | 6 |
-| `cn14` | cn14 WS 多节点 TCPing 复核 | 0 | 8 |
-| `cn15` | cn15 WS 多节点 ICMP 复核 | 0 | 8 |
-| `cn16` | cn16 WS 多节点存活复核 | 0 | 6 |
-| `cn17` | cn17 WS 多节点 TCPing 复核 | 0 | 6 |
-| `cn18` | cn18 WS 多节点 ICMP 复核 | 0 | 6 |
-| `cn19` | cn19 WS 多节点 MTR 复核（末跳见证） | 0 | 6 |
-| `cn20` | cn20 单节点 TCP 复核（L2 常开） | 常开 | — |
-| `cn21` | cn21 单节点 ICMP 复核（L2 常开） | 常开 | — |
-| `cn22` | cn22 单节点状态码复核（L2 常开） | 常开 | — |
-| `cn23` | cn23 单节点端口扫描复核（L2 常开） | 常开 | — |
-| `cn24` | cn24 单节点 TCP 复核（L2 常开） | 常开 | — |
-| `cn25` | cn25 单节点 ICMP 复核（L2 常开） | 常开 | — |
-| `cn26` | cn26 单节点 TLS 握手复核（L2 常开） | 常开 | — |
-| `cn27` | cn27 单节点 TCP 二次确认（配额） | 常开 | — |
-| `cn28` | cn28 单节点 ICMP 存活确认（配额，共用限速器） | 常开 | — |
-| `cn29` | cn29 单节点应用层确认（配额） | 常开 | — |
-| `cn30` | cn30 多节点 TCPing 复核 | 150 | 8 |
-| `cn31` | cn31 多节点 ICMP 复核 | 0 | 8 |
-| `cn32` | cn32 多节点应用层复核 | 0 | 8 |
-| `cn33` | cn33 多节点路由追踪复核 | 0 | 8 |
-| `cn34` | cn34 多节点 TCPing 复核 | 0 | 6 |
-| `cn35` | cn35 路由追踪复核（末跳见证） | 0 | 6 |
-| `cn36` | cn36 社区探针 ICMP 复核 | 0 | 4 |
-| `cn37` | cn37 社区探针路由追踪复核 | 0 | 4 |
-| `cn38` | cn38 社区探针应用层复核 | 0 | 4 |
-| `cn39` | cn39 社区探针 MTR 复核 | 0 | 4 |
-| `cn40` | cn40 多节点 TCP 复核（有界并发小样本） | 300 | 6 |
-| `cn41` | cn41 多运营商 TCP 复核（搭同族复核相，需 token） | 常开 | — |
-| `cn42` | cn42 多节点 TCPing 复核（休眠） | 0 | 6 |
-| `cn43` | cn43 多节点 TCPing 复核（休眠） | 0 | 6 |
-| `cn44` | cn44 多节点 TCPing 复核（休眠） | 0 | 6 |
+**各代号默认值**：不在公开文档逐条列举（源清单属私有包内容，公开树零字面）。
+运行时用 `python scripts/china_check.py --list-cn` 列出**全部运行时代号**及其
+`family`/`limit`/`concurrency` 默认值（`0`=跳过、`-1`=全部未定键、`常开`=L2
+常开）；该命令直接读私有注册表，是唯一的权威清单来源，文档不复制副本
+（避免与注册表二次漂移）。
+
 
 **CN 检测耗时基线**（R21 实测）：无缓存全量复测约 4h40m；`--cn-cache-ttl 21600`（6h）稳态约 3m17s（复用约 16300 键、复测约 2200 键，命中约 88%）。删除或调小该 TTL 即回到数小时全量（CI 配额与上游负载同步放大）。
 
 **公开仓 6h 超时回退**：CI job 硬上限为 360 分钟，`china-check.yml` 因此给全量主探测设 270 分钟墙钟上限；触发 `timeout` 后自动改跑 300 条有界样本（再限时 60 分钟，默认 L3 复核配额全关），并保留至少 30 分钟给 `annotate_classify`、CN 视图不变式校验与提交。回退样本的旧可达键由 `compute_fallback_merge` 原样兜底，故超时降级仍会产出完整 `china.json`/`all_cn.txt`，不会因 GitHub 硬杀整轮留白；非超时错误直接失败，不进回退。
 
-结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict；cn01 源另含每运营商最小 RTT `isp_ms`）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，仅含本轮判定 reachable 的行，历史累积 `-CN` 不再自动纳入；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等，当前不可达者撤销失效 `-CN`）。
+结果写入 `china.json`（keyed 明细，含各源 status/ms 与合成 verdict；批量源另含每运营商最小 RTT `isp_ms`）与 `all_cn.txt`（全量大陆可达清单，源为 `data/valid/all.txt`，仅含本轮判定 reachable 的行，历史累积 `-CN` 不再自动纳入；缺 all.txt 时回退 all_ltd.txt）；可达者在 `all.txt`/`all_ltd.txt` 追加 `-CN` 备注（幂等，当前不可达者撤销失效 `-CN`）。
 
-**代号注册表终态**（R13 结论）：源元数据唯一真相源为 PCB `pcb/plugins/_sources.py`（44 代号：family/runner/channel/level/flag/limit/concurrency/min_ratio/verdict/desc）；公开侧旗标默认值、dispatch 码、engine 判定集/比率表、本表默认值、毕业链配额校验（`TestWorkflowCodesInRegistry`/`TestRegistryDocsTable`）全部由其派生（帮助文案仍为手写，由 `TestChinaHelpFlagsMatchDocs` 锁与本表对等）。以下三类字面保留，属结构必需而非硬编码信息：① `cn_opt(args, "cn30", …)` 类调用点代号（join key；通用 phase 循环可收敛但徒增间接层，另议）；② 无包回退静态表（CI 无 PCB 时 fail-open 的基石，移除条件＝CI 直连 PCB 即 `BUNDLE_PAT` 落地）；③ workflow 配额与 china.json 键中的代号（算子配置引用 ID，非代码硬编码；一致性由上锁测试保证）。
+**代号注册表终态**（R13 结论）：源元数据唯一真相源为 PCB `pcb/plugins/_sources.py`（全部代号及其 family/limit/concurrency 等元数据；本文件不逐条列举；条目字段含 channel/level/flag/limit/concurrency/min_ratio/verdict/desc）；公开侧旗标默认值、dispatch 码、engine 判定集/比率表、本表默认值、毕业链配额校验（`TestWorkflowCodesInRegistry`/`TestRegistryDocsTable`）全部由其派生（帮助文案仍为手写，由 `TestChinaHelpFlagsMatchDocs` 锁与本表对等）。以下三类字面保留，属结构必需而非硬编码信息：① `cn_opt(args, "<代号>", …)` 类调用点代号（join key；通用 phase 循环可收敛但徒增间接层，另议）；② 无包回退静态表（CI 无 PCB 时 fail-open 的基石，移除条件＝CI 直连 PCB 即 `BUNDLE_PAT` 落地）；③ workflow 配额与 china.json 键中的代号（算子配置引用 ID，非代码硬编码；一致性由上锁测试保证）。
 
 **稳定子集准入**（`*_stable.txt` 系清单）：`china.json` 连续可达轮数 `streak` ≥ 2 **且** 历史翻转计数 `flip` ≤ `STABLE_MAX_FLIP`（1，排除可达↔不可达慢性振荡源）；`streak` 跨轮累计，间隔 ≤ 6h 容差（`STREAK_GAP_TOLERANCE_S=6×3600`）内延续计数，超容差重新从 1 起算。
 
@@ -629,9 +603,9 @@ UTC 日期记入 `data/quality/node_seen.json`，滚动裁剪 `WINDOW_DAYS`(45) 
 |---|---|---|
 | `--data-dir` | 数据根目录 | `data/` |
 
-### cn01 批量探测（PCB 私有插件）
+### 批量探测通道（私有插件）
 
-cn01 批量大陆可达性探测已迁入私有检查包（PCB 私有仓，代号 cn01，不进公开 git）：节点抓取 → 批量任务提交 → WebSocket 收集 → 聚合成源判定；8 次连续批量失败触发断路器暂停，任务带 pacing + 并发上限。公开侧经 `scripts/checks_bundle.py` 按 `INTERFACE_VERSION` 加载，无包时 cn01 系源整段 fail-open 跳过。参数经 `china_check.py` 透传生效（无包时仅作默认值展示）。
+批量大陆可达性探测已迁入私有检查包（不进公开 git）：节点抓取 → 批量任务提交 → 流式通道收集 → 聚合成源判定；连续多次批量失败触发断路器暂停，任务带 pacing + 并发上限。公开侧经 `scripts/checks_bundle.py` 按 `INTERFACE_VERSION` 加载，无包时批量通道系源整段 fail-open 跳过。参数经 `china_check.py` 透传生效（无包时仅作默认值展示）。
 
 | 参数 | 说明 | 默认 |
 |---|---|---|

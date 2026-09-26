@@ -3913,26 +3913,38 @@ class TestCiEnabledSources(unittest.TestCase):
         self.assertEqual(reg.by_code("cn11")["limit_default"], 0)
         self.assertEqual(reg.by_code("cn11")["concurrency"], 6)
 
-    def test_graduated_limits_match_readme(self):
-        """CN-10：已毕业源的 CI 配额须与 README 链一致（防 CI 行与文档
-        双边漂移；生产出数待下次 china 验证）。"""
+    def test_ci_quotas_are_registry_known_and_docs_carry_no_copy(self):
+        """R223：CI 配额的漂移防线改挂在**注册表**上，且文档不再复制配额。
+
+        原 CN-10 锁断言 README 里逐源复述 CI 配额（`cn11（200 键/6 并发…`
+        之类）。R223 清代号时把这段复制品删了——文档副本本身就是「外部来源
+        相关内容」，且天然会与注册表二次漂移。故改为两条更强的不变量：
+
+        ① CI 里每个 ``--cn-limit/--cn-concurrency <代号>=N`` 的代号都必须在
+           私有注册表里存在（拼错的代号会静默落回默认，见
+           ``test_workflow_quota_known`` 同族；此处再加配额为正整数一道）；
+        ② README **不得**再出现逐源配额复制品（形如 ``<代号>（N 键/M 并发``
+           ），杜绝副本回流。
+        """
         import re
+        reg = _registry_sources(self)
+        known = {e["code"] for e in reg.SOURCES}
         root = Path(__file__).resolve().parent.parent
         wf = (root / ".github" / "workflows" / "china-check.yml").read_text(
             encoding="utf-8")
+        pairs = re.findall(r"--cn-(?:limit|concurrency|nodes) (\w+)=(\d+)",
+                           wf)
+        self.assertTrue(pairs, "CI 未发现任何按代号配额，锁已失效")
+        for code, val in pairs:
+            with self.subTest(code=code):
+                self.assertIn(code, known, f"CI 配额引用未知代号：{code}")
+                self.assertGreater(int(val), 0, f"{code} 配额须为正整数")
         readme = (root / "README.md").read_text(encoding="utf-8")
-        for name in ("cn11", "cn09", "cn10", "cn04", "cn15", "cn18",
-                       "cn31", "cn32", "cn33", "cn06", "cn19", "cn34",
-                       "cn35", "cn36", "cn37", "cn38", "cn39", "cn05",
-                       "cn40", "cn12"):
-            m = re.search(rf"--cn-limit {name}=(\d+).*?"
-                          rf"--cn-concurrency {name}=(\d+)", wf, re.S)
-            self.assertIsNotNone(m, f"CI 未启用 {name}")
-            limit, conc = m.group(1), m.group(2)
-            self.assertRegex(
-                readme,
-                re.compile(re.escape(f"{name}（{limit} 键/{conc} 并发")),
-                f"README 链与 CI 配额不一致：{name}")
+        dup = re.findall(r"\bcn\d{2}\b（\d+ 键/\d+ 并发", readme)
+        self.assertEqual(
+            dup, [],
+            "README 出现逐源配额复制品：配额真相源是私有注册表，"
+            "文档复制品会二次漂移且属外部来源相关内容")
 
     def test_cn04_cli_default_stays_opt_in(self):
         """CN-27：四源复核本地默认 opt-in（0/6），只在 CI 显式启用。"""
@@ -4583,25 +4595,28 @@ class TestEngineRegistryTables(unittest.TestCase):
             self.assertIsNone(ce._build_verdict_tables())
 
 class TestRegistryDocsTable(unittest.TestCase):
-    """docs/scripts.md 代号默认表须与 PCB 注册表逐行一致（生成器锁）。"""
+    """R223 反向生成器锁：公开文档**不得**复制私有注册表的逐源清单。
 
-    def test_docs_table_matches_registry(self):
+    原锁断言 docs/scripts.md 的 44 行代号默认表与注册表逐行一致——即把
+    「文档必须有一份注册表副本」当正确。R223 清代号时证明这是反模式：副本
+    天然与真相源二次漂移，且 44 行逐源描述本身就是外部来源相关信息。
+
+    现改为锁「副本不得存在」，并要求文档给出唯一发现入口（``--list-cn``）：
+    注册表是真相源，文档只指向它。这样漂移在结构上不可能发生——没有副本
+    可漂移。
+    """
+
+    def test_docs_carry_no_registry_duplicate(self):
         import re
-        reg = _registry_sources(self)
         doc = (Path(__file__).resolve().parent.parent / "docs"
                / "scripts.md").read_text(encoding="utf-8")
-        rows = re.findall(r"^\| `(cn\d+)` \| (.*?) \| (.*?) \| (.*?) \|$",
-                          doc, re.M)
-        self.assertEqual(len(rows), 44)
-        by_code = {code: (desc, lim, conc) for code, desc, lim, conc in rows}
-        for e in reg.SOURCES:
-            self.assertIn(e["code"], by_code, e["code"])
-            desc, lim, conc = by_code[e["code"]]
-            self.assertEqual(desc, e["desc"], e["code"])
-            self.assertEqual(lim, "常开" if e["limit_default"] is None
-                             else str(e["limit_default"]), e["code"])
-            self.assertEqual(conc, "—" if e["concurrency"] is None
-                             else str(e["concurrency"]), e["code"])
+        rows = re.findall(r"^\| `(cn\d{2})` \|", doc, re.M)
+        self.assertEqual(
+            rows, [],
+            "docs/scripts.md 出现逐源代号表行：注册表副本会二次漂移，"
+            "且逐源清单属外部来源相关内容")
+        self.assertIn("--list-cn", doc,
+                      "文档须给出唯一发现入口 --list-cn（注册表为真相源）")
 
 
 class TestNoStaleProtocolDefs(unittest.TestCase):

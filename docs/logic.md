@@ -10,7 +10,7 @@ download_proxies.py → validate_proxies.py → quality_check.py
                                              ├─ quality_reputation.py
                                              └─ reorg_country.py
                            ↓
-                   china_check.py (+ PCB 批量插件 cn01)
+                   china_check.py (+ 私有包批量通道)
                    exit_family.py
                    annotate_classify.py
                            ↓
@@ -247,246 +247,45 @@ traceback——IPQS 分支超时异常已净化（`from None` 断开因果链）
 源作为 basis 标注；CF token 现已废弃（池子全为 CF 边缘端口恒真，
 归一化时丢弃），零网络层不再存在，china.json 不再写 `cf_heuristic` 字段。
 
-#### L2 批量实测（主源）
+#### 分层结构
 
-**cn01 批量探活**：
+检测分两层，**源的清单、协议与配额全部存于私有包**（公开树零字面），
+运行时经私有注册表枚举：
 
-- 每任务 5 个目标 × 每 ISP 8 个节点（电信/联通/移动共 24 节点，池子 ~80/ISP，跨省等距采样）
-- 通过 WebSocket 收集结果
-- TCP 连通即判可达；节点返回 `http_code>0` 时另计**应用层确认**（`level=http`）。
-  注意：TLS 端口（443 等）上 cn01 发明文 HTTP，CF 边缘会回 `400`——这同样
-  证明完整数据往返、路径无 TCP 层干扰，故计入应用层确认（但不验证 TLS 内容）
-- 限速：8 并发任务，0.5s 间隔
-- 熔断：连续 8 次失败后停止
+- **L2 批量探活（主源）**：按任务批量下发目标，每任务多目标 × 每 ISP
+  多节点（三网）采样，结果经流式通道回收。TCP 连通即判可达；节点回报
+  应用层状态时另计**应用层确认**（`level=http`）——注意 TLS 端口上发明文
+  请求会被边缘回 `4xx`，这同样证明完整数据往返、路径无传输层干扰，故计入
+  应用层确认（但不验证应用层内容）。主源不可用时有同族降级通道（纯 TCP
+  大节点池 → ICMP 复测）依次接管，保证单点故障不致整轮失明。
+- **L2 单节点实测（并发）**：一批免额/低额单节点源并行，分别覆盖 TCP、
+  ICMP 存活、应用层状态码与端口扫描等判据。ICMP 类读数按 `level` 与
+  ≤2ms 门限剔除——1\~8ms 的「到 IP 边缘路由」延迟与真实代理/隧道延迟无关，
+  混入会产出反直觉的失真行。
+- **L3 多节点复核（有界并发小样本）**：对**尚未被 L2 判可达**的键，按
+  `--cn-limit CODE=N` 有界配额跑多节点复核。免费通道优先、确认过的键自动
+  让位；各源均只投未判定键。多节点源须「报告 ≥ `MULTI_MIN_NODES`（5）个
+  节点 + 成功率达标」才可独立判 reachable，防限流残缺样本造成假阳性。
+  部分通道需 CLI 注入 token（`--tcpping-token`/`TCPPING_CN_TOKEN` env），
+  缺则自动跳过。
 
-**单节点实测（并发）**：
+各源的具体协议、节点规模、限速配额与地域**一律不在公开文档记录**，由私有
+包承载；公开侧只经 `--list-cn` 列出运行时代号与其
+`family/limit/concurrency` 默认值（不含插件名与内部函数名）。
 
-- `cn27`：呼和浩特阿里云节点，匿名限速 5/10s、250/h，配置 `--api-key` 可放宽
-- `cn28`（CN-31）：同节点 ICMP ping，仅 TCP 判 fail 时追加
-  消歧（TCP-fail＋ping-ok→uncertain，主机存活；双 fail→置信定罪），共用
-  250/h 配额，`level=icmp`，不产 `isp_ms`
-- `cn29`（CN-32）：同节点 HTTPS 应用层确认，首个 http 级
-  单节点源（CF 边缘回 4xx 亦算完整往返）；仅 TCP-ok 且其余免额 0 ok 时
-  追加猎取第二确认（uncertain→reachable），共用配额，不产 `isp_ms`
-- `cn20`：北京节点 TCP，免 key
-- `cn21`（CN-29）：山东枣庄 BGP 节点 ICMP，免 key（JSON；
-  `level=icmp`，echo 校验防垃圾回显，不产 `isp_ms`）。同运营商、不同城市
-  服务器＋不同协议（地理＋协议双差异，中增益）
-- `cn22`（CN-38）：同站 HTTP 状态码，免 key（JSON；
-  `level=http`，`-2` 判 fail、`-4` 拒绝按 error，无 ms，不产 `isp_ms`）。
-  同站第四端点（TCP/ICMP/状态码）
-- `cn23`（CN-39）：同站 8 端口扫描，免 key（JSON；
-  固定集合仅含 443 一档池端口，非 443 键恒 skipped；`level="tcp"`，
-  布尔见证，无 ms，不产 `isp_ms`）
-- `cn24`（无铭 API tcping）：浙江宁波电信 TCP 1 节点，免 key（纯文本报告；
-  CN-26 起主站异常自动 failover 同站镜像，429 不切换；
-  CN-39 起 ok 附 `isp_ms={中国电信}`，L2 全池电信放量）
-- `cn25`（无铭 API ping，CN-25 新增）：同站同节点 ICMP 主机存活，免 key
-  （纯文本报告；`level=icmp`，不进 `cn_display_ms`/`isp_ms`，与 ICMP 源
-  同口径；同镜像 failover）。同站不同协议：TCP 握手与 ICMP 回显失效模式正交（端口封 vs
-  禁 Ping），独立性评级低增益-同站（新增协议层证据，非地理/ISP 覆盖）
-- `cn26`（无铭 API ssl，CN-37 新增）：同站同节点 TLS 握手，免 key（JSON，
-  双镜像 failover；`level="tcp"` 保守，无 ms 只作布尔见证，不产 `isp_ms`）。
-  同站第三协议：TCP/ICMP/TLS 失效模式正交（端口封/禁 Ping/握手失败）
-- `cn36`（CN-46 新增）：社区探针北京节点 ICMP ping，匿名免 key
-  （250/h 配额，单次 cost 1；`level="icmp"`，不产 `isp_ms`；单北京点，
-  作单节点冗余票；服务端拒私有/保留目标时判 error 不污染；CI 以 60 键/4
-  并发启用，约 8min）。
-- `cn37`（CN-47 新增）：同站同 API 路由追踪，末跳 `resolvedAddress`
-  精确等于目标即见证（活体双目标末跳到达；死体结构上恒 fail），`ms` 恒空，
-  `level="icmp"`，不产 `isp_ms`；CI 以 40 键/4 并发启用。
-- `cn38`（CN-48 新增）：同站同 API 应用层确认（明文打 TLS 端口，
-  服务端状态码即完整往返；`ms` 取 `timings.tcp`，connect_ms 同口径），
-  `level="http"`，不产 `isp_ms`；CI 以 40 键/4 并发启用。
-- `cn39`（CN-49 新增）：同站同 API MTR，任一 hop `resolvedAddress`
-  精确等于目标即见证（活体末跳到达；不可解析目标 result failed；死体无响应
-  跳结构上恒 fail），`ms` 恒空，`level="icmp"`，不产 `isp_ms`；CI 以 40 键/4
-  并发启用。
-
-**batch_tcping 补测（降级通道）**：
-
-- batch_http 对某目标失败/被限时（captcha、风控、熔断），改用
-  `cn02` 纯 TCPING 复测
-- 节点池大得多（电信/联通/移动各 ~75-88 个，默认等距取 8×3=24 节点）
-- 结果记为独立多节点源 `cn02`（`result>0` → 可达，`-1` → 失败），
-  单独 ok 即可判 reachable
-
-**batch_ping 补测（CN-26，ICMP 主机存活通道）**：
-
-- 同上触发条件（仅 error/rate_limited 键；TCP 实测 fail 的键不用 ICMP
-  翻案，保守），改用 `cn03` ICMP 复测
-- 节点池电信 87 / 联通 83 / 移动 89（默认等距取 8×3=24 节点）；提交参数、
-  WS 收数与 batch 系完全同构，活体实证
-- 结果记为独立多节点源 `cn03`，归一为 `level=icmp` 且不产 `isp_ms`
-  （ICMP 不得进展示延迟，多节点 ICMP 源同口径），强确认单独 ok
-  即可判 reachable
-
-#### L3 多节点复核（有界并发小样本）
-
-按序接入多节点复核源补强，各源只投「当前尚未被 cn01/单节点源判可达」的键、按 `--cn-limit CODE=N` 有界，先免费/低鉴权源再复杂源：
-
-- `cn30`：免费 REST，~146 大陆节点按运营商均衡采样 10 个，TCP 直连，节点成功率达 50% 即判可达
-- `cn31`（CN-33）：同站 `type=ping`（裸 IP 目标，无端口概念），节点成功 = `success`＋`avg_ms>0`，`level=icmp`，不产 `isp_ms`；与 TCP 共用节点采样，跑在 TCP 相之后（只投仍未定论者），CI 400 键/20 并发
-- `cn32`（CN-35）：同站 `type=http`（`http://ip:port/`，明文打 TLS 端口收 CF 400 即完整往返，cn01 同口径），节点成功 = `success`＋`status>0`，`level=http`，ms 取 `connect_ms`，与 TCP 同口径产 `isp_ms`；跑在 ping 相之后（只投仍未定论者），CI 200 键/8 并发
-- `cn33`（CN-40）：同站 `type=traceroute`（裸 IP 目标，多跳轨迹），节点成功 = 后端判定 `success`（活体 98/100，拒测 0/100），`ms` 恒空（轨迹时长非 RTT，布尔见证），`level=icmp`，不产 `isp_ms`；跑在 http 相之后；mtr 型因 cost 高 375 倍不接入；CI 200 键/6 并发
-- `cn07`：18 ICMP 节点，成功率达 50% 判可达（专测大陆主机存活）
-- `cn08`（已迁 PCB，~12 大陆 ICMP 节点，纯 HTTP+SSE 零鉴权）、`cn14`（~155 节点，JWT+WS，TCP `ip:port`）、`cn15`（CN-28：cn14 同站 ICMP ping，复用 code=3 分支，`level=icmp`，不产 `isp_ms`；CI 200 键/8 并发）、`cn17`（~163 TCP 节点，SHA-256 PoW + ALTCHA 会话复用纯 Python 求解 + WS，真实端口直连；CN-30 起同通道 `cn18` ICMP 并行；CN-44 起同基建 `cn19` MTR 通道，约 139 节点末跳见证，不产 `ms`/`isp_ms`）、`cn16`（~53 ICMP 节点，服务端渲染 token + WS）、`cn11`（34 大陆省市节点 TCPing，socket.io）、`cn12`（CN-36：同站 continuous-ping，35 节点 socket.io，结果帧与 TCP 同形，`level=icmp`，不产 `isp_ms`；CI 200 键/6 并发）、`cn09`（约 39 ISP×节点 TCPing，HTTP+SSE 零鉴权）、`cn10`（CN-34：同站 ICMP，复用 port="" 分支，`level=icmp`，剥离 `isp_ms`；CI 200 键/8 并发）、`cn04`（CN-27：28 城三网 TCPing，原生分 ISP；CI 以 200 键/6 并发启用）、`cn05`（CN-50：同站 HTTP 测速通道，应用层确认，`level=http`，活体 27/28 出数；仅 443 键可用；CI 以 200 键/6 并发启用）、`cn06`（CN-42：公开 WS 通道约 16 节点 TCPing，原生分三网，活体 16 节点出数；CI 以 200 键/6 并发启用）、`cn34`（CN-43 复活：cn34 同站 同路径 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网经 `_cn_isp_label` 聚合，活体 287 节点出数，死体 0 出数完美区分；SSE 单键约 90s 采集窗，CI 以 100 键/8 并发启用）＋`cn35`（CN-45：同站路由追踪，hop 行目标 IP 即见证，`level=icmp`，不产 `ms`/`isp_ms`，CI 以 100 键/8 并发启用）、`cn42`（休眠）、`cn43`（休眠）、`cn44`（休眠）、`cn13`：各含多大陆节点，默认 0（跳过），由 `--cn-limit CODE=N` 启用（cn13 已迁 PCB）
-- `cn40`：约 13 个大陆节点，≥7/13 可达即判可达，报告不足 5 节点 → inconclusive
-- `cn41`：多运营商 TCPing，token 由 CLI 注入（`--tcpping-token`/`TCPPING_CN_TOKEN` env），缺则自动跳过
-
-多节点源须「报告 ≥ `MULTI_MIN_NODES`（5）个节点 + 各自成功率达标」才可独立判 reachable（`strong_valid`），防限流残缺样本假阳性退化为单点。
-
-已评估并放弃的补充源：`同站端口检测接口`（已 404）。
-2026-09 穷尽复核（CN-19/21/22，CN-43 更新）：`cn42`（API 404＋新页挂 验证墙）、
-`cn34`（cn34 同站 旧 POST 405 下线，CN-43 起同路径 GET+SSE 新接口复活；逆向细节已迁 PCB）、`cn43`（提交接口 404，
-工具路由迁移无迹可循）、`cn44`（验证墙＋`探测接口` 404 双重出局）、
-`cn13`（TLS 主机名错乱无 SAN）、
-`同站测速源`（验证墙，API 签名未知）、站长测速（captcha＋JS
-内聚无 API 面）、`check-host.net`（59 节点零 CN）、dnschecker（403）、
-pingtool（404 且无 CN）、oioweb/uomg（TLS 坏）。CN-25 在同站内再挖一层：
-`cn25`（无铭 API ICMP ping，与 tcping 同站同节点、不同协议层）证实同运营者
-仍可产出正交证据；用户已授权逆向与反爬对抗（2026-09-19，源越多越好），
-下一阶段按此新口径复活 captcha 墙后休眠源（休眠源清单及新路由/新端点/
-签名细节均已迁 PCB），此前"新源唯一现实路径为用户 key"的结论作废。
-CN-26 首轮逆向复核（均为活体探针实证）：
-`cn42`（`/tcping` 页 200 存活但提交链为 验证墙＋`encryptFun`
-加密提交，匿名无协议旁路，仍阻塞）、`cn43`（提交签名为静态盐 SHA1
-可复刻，但匿名提交强制图片验证码 `/site/verify` 且 TCPing 路由
-`/site/tcping` 404 无 TCP 能力，仍阻塞）、`ping.sx`（421KB 前端包零
-China/节点提及，`public-us` 美区 playground，无 CN 覆盖，不接入）、
-小小API 根域无第二 vantage（TLS 中断/404；四端点已入 cn20-cn23）。
-同轮产出：`cn03`（提交/WS/记录与 batch 系全同构，无新增
-反爬动作）；无铭 API 双镜像 failover。
-CN-27 逆向复核（活体探针实证）：`同站测速源`（提交协议裸露：`POST
-/api/node` 会话 CSRF＋`POST /api/node-data` 轮询，全程无 captcha 参数，
-但匿名仅返回 1 个赞助节点广东深圳[电信]且 12s 轮询无数据，`type=tcping`
-亦同单节点、无真实 TCP 能力，仍阻塞）；`ping.cn`（TLS 主机名错乱，
-oioweb 同类，不接入）；`cn42` 的 api 域（404）；同站另两通道 batch_https/dns
-（软 404 回首页，不存在）。
-同轮产出：`cn04`（28 城三网，CI 200 键/6 并发启用；逆向细节见 PCB 包内文档）。
-CN-28 逆向复核（活体探针实证）：`api.qqsuu.cn`（`dm-ping` 需 ApiKey 登录，
-key 墙；`dm-tcping` 接口不存在。不接入）/`tool.lu`（首页零 ping/tcp
-提及，无网络测量工具。不接入）/`api.oick.cn`（聚合站 ping 路径猜测 404，
-无目录可循，停损）。
-同轮产出：`cn14` code=3（PING）分支此前已实现但无调用方，单列
-`cn15` 源（同站同节点、不同协议层，低增益-同站；`level=icmp`、
-不产 `isp_ms`；活体 223.5.5.5→178/179、192.0.2.1→186 全 fail；CI 200 键/
-8 并发启用）。
-CN-29 逆向复核（活体探针实证）：`cn17` 确认死亡——`探测任务接口`
-现回 403 `{"captcha":"altcha"}`（tcping/ping 双类型同墙）；ALTCHA 半破解
-（challenge 为标准 ALTCHA：SHA-256、maxNumber 50000、~0.1s 解出；
-payload 须 base64，solve 200 `ok:true`；但会话绑定未过，verify/task 仍
-403；续攻方向：task 体回显 payload / 对 widget 源码 payload 字段 /
-TLS 指纹差；验证方法：同脚本复测 solve→verify→task 全链）。CI 配额
-该族 `--cn-limit` 配额 400→0 停烧（代码保留待复活；原锁测试名含真名，
-已随 R217 中性化改造移除，此处不再指向具体测试名）。
-`api.qqsuu.cn`（`dm-ping` 需 ApiKey、`dm-tcping` 不存在。不接入）/
-`tool.lu`（无测量工具）/`api.oick.cn`（路径 404）/`ping-qyc`（WS-only）。
-同轮产出：`cn21`（小小API `api/ping`，`?url=` 参数经文档查得；山东枣庄 BGP
-ICMP，活体 223.5.5.5→8.239ms、8.8.8.8→42ms，TEST-NET 回显失配判 fail，
-私网 -4 拒绝按 error）接入为 `cn21` 源（地理＋协议双差异，中增益；
-L2 全池；`level=icmp`、不产 `isp_ms`）。
-CN-30 逆向决战 cn17（活体全链路打通）：ALTCHA 为标准规范纯计算
-（challenge：SHA-256、maxNumber 50000、~0.1s；solve 载荷须 base64，
-裸对象回 400），会话绑定铁律——只带 `probe_captcha_pass`（忌预载壳页
-`ip_page_token`）、全站高频握手触发静默升级（短时 ~20 次即 403；
-进程级缓存会话 TTL 1800s、任务 403 自愈重试一次）。`type=ping` 同通道
-可用（结果帧紧凑键经前端 a2 映射确认：`r`=rtt_avg、`m`=rtt_min、
-`q`=loss、`i`=isp、`a`=地域；`complete` 帧收尾）。
-同轮产出：`cn17` 复活（CI 400 恢复，会话复用＋403 重试）＋新源
-`cn18`（同站 ICMP，`level=icmp`，地域|ISP 去重，不产 `isp_ms`；
-显示语义未定前宁缺勿假；CI 200 键/6 并发）。
-CN-34 逆向复核（活体探针实证）：`cn09 type=ping`（SSE 同端点，39/39
-出数，原生 ms；节点 `isp`/`country_group` 富模式）接入为 `cn10` 源
-（同站 ICMP，`level=icmp`，剥离 `isp_ms`；CI 200 键/8 并发）。`cn11`（其 /httptest 为 URL 型网站测速，非 ip:port TCP，
-不接入）。同站 batch 通道族（WS 即关，节点表小，不接入；待验证法：浏览器抓包）。
-CN-36 逆向复核（活体探针实证）：`cn12/continuous-ping`（同站 JS
-`continuous_ping.js`，事件族与 TCP 全同形，仅 start 载荷无 port；
-35 节点原生 isp：电信 11/移动 10/联通 8/多线 4/港澳台 1/海外 1；
-活体 35/35 出数）接入为 `cn12` 源（参数化复用 socket.io 通道；
-`level=icmp`，不产 `isp_ms`；CI 200 键/6 并发）。
-CN-37 逆向复核（活体探针实证）：无铭 API ssl 端点（`?domain=&port=`，
-存活回完整证书链＋协议/套件/有效期，死亡回 `success:false`；双镜像
-同形存活）接入为 `cn26` 源（同站第三协议 TCP/ICMP/TLS；
-`level="tcp"` 保守，无 ms；L2 全池；双镜像 failover）。
-CN-38 逆向复核（活体探针实证）：websearch 挖出 `kkce`（openapi 需点数，
-付费墙；web 端 WS 403＋登录门，不接入）/`dnspup`（WAF 硬拦截 403，
-不接入）/`tance`（TLS 握手失败，不接入）；小小API 目录深挖出
-`api/speed`（需 Key，不接入）＋`api/status`（免 key，`?url=`，
-400/404 均为应用层应答，`-2` 死、`-4` 拒）接入为 `cn22` 源
-（同站第四端点；`level=http`，无 ms；L2 全池）。
-CN-39 逆向复核（活体探针实证）：小小API 目录续挖出 `api/portscan`
-（`?address=`，固定 8 端口，443:true/全关两态）接入为 `cn23` 源
-（仅 443 键产出，其余 skipped；`level="tcp"` 布尔见证；L2 全池）。
-分运营商放量：实测 china.json 23139 条仅 500 带 `isp_ms`；`cn24
-`（宁波电信归属明确）ok 即附 `isp_ms={中国电信}`，L2 全池
-每键一个电信样本（北京/呼和浩特/BGP 节点归属不明，继续豁免；
-ICMP 全系继续豁免，规则：TCP/HTTP 产出、ICMP 豁免）。
-CN-33 逆向复核（活体探针实证）：`cn31 通道 type=ping`（202 建任务，
-158 节点，`avg_ms`/`packets_received`  schema 与 tcping 同构）接入为
-`cn31` 源（同站 ICMP，裸 IP 目标；`level=icmp`、不产 `isp_ms`；
-与 TCP 共用节点采样，跑在 TCP 相之后；CI 400 键/20 并发）。
-`cn17 type=http/https`（http→403 墙、https→400 未知类型，不接入；
-站方频率敏感，不再深耗）/同站另一 batch 通道
-（同族 WS 即关史，不再深耗）。
-CN-35 逆向复核（活体探针实证）：`cn32 通道 type=http`（202 建任务，
-全字段 `status/connect_ms/speed_mbps/resolved_ip`；`https://` 型被拒，
-仅 `http://ip:port/` 可用；192.0.2.1 以 success=false＋prohibited 干脆
-拒绝）接入为 `cn32` 源（同站应用层；`level=http`；ms 取
-`connect_ms`；与 TCP 同口径产 `isp_ms`——HTTP 层与 cn01 一致，ICMP 才
-豁免；跑在 ping 相之后；CI 200 键/8 并发）。
-`http.ping.pe`（530 源站死）/`cn07`（纯 ICMP ping 站，无 TCP 端点）/`tool.lu`（无测量工具）/`yunaq`（非测量站）/`speedtest.cn`
-（自测站，无 ip:port 探针），不接入。
-CN-40 逆向复核（活体探针实证）：`cn33 通道 type=traceroute`（202 建任务，
-158 节点；`hops[]` 逐跳 avg/loss；mtr 型 cost 高 375 倍不接入）接入为
-`cn33` 源（同站路由追踪；`success` 即达判，`ms` 恒空布尔见证；
-`level=icmp`，不产 `isp_ms`；跑在 http 相之后；CI 200 键/6 并发）。
-`pingcz.cn`（OAuth 登录门）/`iptrace.net`（API 需 Key），不接入。
-CN-42 逆向复核（活体探针实证）接入为 `cn06` 源（约 16 节点 TCPing；`level=tcp`；`isp_ms` 只收电信/联通/移动；CI 200 键/6 并发；逆向细节见 PCB 包内文档）。
-CN-43 逆向复活（活体探针实证）接入为 `cn34`（cn34 同站 GET+SSE 新接口，约 287 节点 TCPing，`isp` 原生三网经 `_cn_isp_label` 聚合；严格口径 `rtt_avg>0` 且 `loss==0`；采集窗上限 95s；`v` 按目标冒号切换 6/4；CI 100 键/8 并发约 20min；逆向细节见 PCB 包内文档）。
-CN-46 独立厂商（活体探针实证）接入为 `cn36`（社区探针，`locations=[{country:CN}]` 实证命中北京探针 ICMP；`192.0.2.1` 被服务端 validation 拒收故判 error 不污染；匿名 250/h 配额；`level=icmp`，不产 `isp_ms`；与 cn22 交叉即 reachable；CI 60 键/4 并发约 8min；逆向细节见 PCB 包内文档）。同轮排除：`cn27` 站内 MTR（建任务成功但 MTR 节点池无 CN 节点，`region:[CN]` 0 出数）；`host.tools`（文档化免 key API，但后端 dispatcher 持续失联）；`uptimia`（14 站点无 CN）；`traceroute.dev`（亚洲站无大陆）；`cn42` 的 aliyun 镜像（控制台登录门）；该族异步社区模型不适配批量（仅作小配额单点票）。
-CN-47 同站追踪（活体探针实证）接入为 `cn37`（同 API 路由追踪，末跳 `resolvedAddress` 精确等于目标即见证，双活体目标末跳到达；死体无响应跳结构上恒 fail；`ms` 恒空/`level=icmp`/不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
-CN-48 同站应用层（活体探针实证）接入为 `cn38`（同 API `type=http`，明文打 TLS 端口收服务端 400 即完整往返，cn32 同口径；闭端口 failed＋timings 全空，完美区分；`ms` 取 `timings.tcp`；`level=http`；不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
-CN-49 同站 MTR（活体探针实证）接入为 `cn39`（同 API `type=mtr`，末跳 `resolvedAddress` 精确等于目标即见证；活体 223.5.5.5/8.8.8.8 末跳到达；死体无响应跳结构上恒 fail；`ms` 恒空/`level=icmp`/不产 `isp_ms`；CI 40 键/4 并发；逆向细节见 PCB 包内文档）。
-CN-50 同站 HTTP（活体探针实证）接入为 `cn05` 源（仅 443 键；`level=http`；CI 200 键/6 并发；逆向细节见 PCB 包内文档）。CN-50 收官：50 轮 CN 检查源任务完成（CN-25…CN-50 连贯链，见各轮逆向记录）。
-CN-45 同站追踪（活体探针实证）接入为 `cn35`（cn34 同站 同族路由追踪，hop 行目标 IP 精确相等即见证；活体 37/42 达目标、死体 0 出数；`ms` 恒空/`level=icmp`/不产 `isp_ms`；采集窗 80s；CI 100 键/8 并发；逆向细节见 PCB 包内文档）。同轮修复 CN-43 遗留 bug：专用相与五源通用循环双跑（循环摘除 cn34，回归锁覆盖）。
-CN-44 逆向复核（活体探针实证）：`cn17` 同基建 `u.type` 枚举——`trace` 被拒（无效类型），`traceroute` 建任务成功但后端回"任务暂不可用"（容量不稳，不接入，待复测），`mtr` 建任务＋WS 出数（约 139 节点，`event: result` 行含 `mtr_text` 全轨迹）——活体 138/139 末跳达目标、死体 0/169，接入为 `cn19` 源（末跳见证布尔判定，子串防误判；后端"暂不可用"判 error 不污染 unreachable；`ms` 恒空/`level=icmp`/不产 `isp_ms`，cn33 同口径；CI 200 键/6 并发）。
-CN-41 分运营商速度维（活体探针实证）：`cn32 type=http` 结果行虽带
-`speed_mbps`（100/100 有值），但目标为 48 字节 400 错误页，中位仅
-0.01Mbps——实为 RTT 倒数，无带宽意义，不接入（宁缺勿假）。改由
-`isp_ms` 套用与 CN 清单 `≈XMB/s` 完全相同的单流参考上限公式逐运营商
-派生 `isp_speed`（`common.cn_isp_speed` 单一事实源，≤2ms 噪声同门剔除），
-只增 `china.json` 字段，展示消费留待逻辑优化轮。
-CN-31 逆向复核（活体探针实证）：同站 batch_ping 通道（WS 即关，不接入）/小小API `api/netCheck`
-（需 Key，不接入）。同轮产出：`cn28`（同节点 ICMP，
-活体出数：`checks[0]={status,connectiontime}`）接入为 `cn28`
-源（仅 TCP-fail 追加消歧，共用配额；`level=icmp`、不产 `isp_ms`）。
-CN-32 事故复盘（更新链连续失败）：`data/download/countries/` 下 75 个
-valid 式 `<CC>/all.txt` 目录（f5725f9f4 误入库）炸掉 `write_outputs`
-残留清理（`stale.unlink()` 遇目录抛 IsADirectoryError；worktree 实证
-复现＋修复验证 exit 0）。根因：`reconcile_views` 的回填按 valid 布局
-写分裂，`reconcile_download_tree` 误将其用于扁平 download 树。修复：
-75 目录删除＋回填加 `backfill` 开关（download 侧 False）＋残留清理
-遇目录跳过告警（fail-open）。创建向量未完全锁定（提交信息为
-annotate 系，待验证），机制已根治。
-同轮产出：`cn29`（同节点 HTTPS 应用层确认，
-活体：404 亦完整往返）接入为 `cn29` 源（同节点第三协议；
-仅 TCP-ok 且其余免额 0 ok 时猎取第二确认；`http_status>0`→`level=http`
-首个 http 单节点源，无应答但连通→`tcp`；不产 `isp_ms`）。
-（`cn16` 的公共表单端反爬成本高，但对应实验性 REST 通道已由 WS 版 `cn16` 源替代并接入上述列表。）
 
 ### 5.2 合成判定逻辑（merge_verdict）
 
 ```
-输入：sources = {cn27: {status, ok, ms, level}, cn20: {...}, cn24: {...},
-       cn25: {...}, cn01: {...}, cn40: {...}, cn30: {...}, ...}
+输入：sources = {<代号>: {status, ok, ms, level, ok_nodes, nodes, ratio}, ...}
+     代号与「多节点/单节点」分组均来自私有注册表（--list-cn 可见 code/family），
+     公开文档不逐个列举。
 
 规则（merge_verdict，与 china_check 实现逐条对应）：
-1. 多节点源（cn40/cn01/cn02/cn03/cn41/cn30/cn31/cn32/cn33/cn06/cn07/cn08/
-   cn14/cn15/cn17/cn18/cn19/cn16/cn11/cn12/cn09/cn10/cn04/cn05/cn34/cn35/cn42/cn43/cn44/cn13）任一
-   强确认（`strong_valid`：成功率达各自阈值且报告 ≥5 节点）→ reachable
-2. 单节点源（cn27/cn28/cn29/cn20/cn21/cn22/cn23/cn24/cn25/cn26/cn36/cn37/cn38/cn39）≥2 个 ok → reachable
-3. 多节点源仅弱确认（如 cn01 仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
+1. 任一多节点源强确认（strong_valid：成功率达各自阈值且报告 ≥ MULTI_MIN_NODES
+   个节点）→ reachable
+2. 单节点源 ≥2 个 ok → reachable
+3. 多节点源仅弱确认（如某批量源仅 1/24 节点）+ 无 ≥2 单节点 ok → uncertain
 4. 有任意 ok 源但未达上述 → uncertain
 5. 单节点源 ≥2 个 fail → unreachable；或多节点源 ≥2 个 fail、
    或多节点源 ≥1 fail 且单节点源 ≥1 fail → unreachable
@@ -523,9 +322,9 @@ annotate 系，待验证），机制已根治。
   `common.cn_display_ms`（可信大陆探测优先、L3 复核源 ≤2ms 噪声不作数）、
   `速度` 替换为 `≈XMB/s` 大陆估算——与 `all_cn.txt` 完全同源同口径，杜绝
   "海外 6ms/117MB/s 冒充大陆速度"的陈旧视图；无大陆读数的键速度 token 删除。
-- **cn16（纯 ICMP）不构成大陆延迟证据**：其 1~8ms 是到国内 IP 边缘的 ping
+- **纯 ICMP 类源不构成大陆延迟证据**：其 1~8ms 是到国内 IP 边缘的 ping
   假象、与真实代理/隧道延迟无关且反直觉地极小。`cn_display_ms` 回退时显式剔除
-  cn16，且回退 entry 合并 ms 时拒绝 ≤2ms（该值可能正是被 ICMP 污染的合并结果），
+  纯 ICMP 源，且回退 entry 合并 ms 时拒绝 ≤2ms（该值可能正是被 ICMP 污染的合并结果），
   宁缺勿假——避免产出 `US-2ms` 之类失真行。
 - **CN 全量清单兜底 ≥1 万（判定层合并，单一事实源）**：上轮可达、本轮仅因源
   配额/调度抖动落入 uncertain（或未被采样）且**无任何失败源**的键，在写
@@ -609,9 +408,9 @@ annotate 系，待验证），机制已根治。
 - **延迟 `ms`** 分两种视图：
   * CN 系清单（`all_cn*`、各国/各集合 `cn*.txt`）：行内 ms 已替换为
     **大陆实测 RTT**——优先取**最快运营商视角**（`common.cn_fastest_ms`：
-    各运营商最小 RTT 取全局最小，如 cn01 电信/联通/移动节点分别聚合后的
+    各运营商最小 RTT 取全局最小，如批量源按电信/联通/移动节点分别聚合后的
     最低值，即大陆用户体验上界）；无 per-ISP 读数（`isp_ms`）时回退可信
-    大陆探测源（cn20 北京 / cn24 宁波 / cn27 呼市）的 ok 最小 RTT，
+    大陆视角探测源（节点地域见私有包）的 ok 最小 RTT，
     再回退全部 ok 源 ≥2ms 最小可信值及行内值，杜绝 L3 复核源 1ms 噪声
     冒充真实延迟。速度 token 同步改写为大陆视角估算 `≈XMB/s`——以最新
     **最快运营商 RTT** 推算单流上限，与海外实测取小；`china.json` 另存

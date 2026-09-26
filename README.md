@@ -57,7 +57,7 @@
   - **池健康看门狗**（`health_alert.py`）：池量暴跌/大陆可达崩塌/上游源覆盖骤降/数据过期 → webhook 告警
   - （流媒体解锁检查已移除；历史行上的 NF/D+/YT 等标记仍被解析器容忍但不再产生新观测）
 - **大陆连通性检测**（独立 CI）：以大陆视角实测代理池是否可用，保守判定（多节点源单独或 ≥2 单节点源交叉确认才标 reachable，详见 `docs/logic.md`）+ 证据分级（`level`：http/tcp/icmp）+ 跨轮稳定计数（`streak`）
-  - 探源：批量通道 cn01（24 节点跨省采样 + cn02 大节点池降级补测）+ cn20-cn29 单节点 + cn40 多运营商复核（50+ 源全清单与配额见下方 CI 章节）
+  - 探源：批量主通道 + 同族大节点池降级补测 + 一批免额单节点源 + 多运营商复核通道（源全清单、协议与配额属私有包，见下方 CI 章节与 `--list-cn`）
   - 产出：`data/quality/china.json` 全量明细 + `data/valid/all_cn.txt` 全量清单及 `all_cn_http.txt`/`all_cn_stable.txt` 可靠性子集，`data/valid/*.txt` 追加 `-CN` 备注
 - **实际出口家族检测**（独立 CI）：探测每个存活代理的真实出口 IP 家族（IPv4/IPv6）——CF 边缘代理虽以 v4 地址呈现，实际出口常为 v6；按家族分离保存 `all_ipv4.txt` / `all_ipv6.txt`（双栈双入）并在 `data/valid/*.txt` 追加 `-V4`/`-V6`/`-DS` 备注（探测无结论 `unknown` 时清旧家族 token，不冒称）；同时对照上游 `data/quality/upstream_meta.json` 的真实出口 `clientIp` 交叉验证（`data/quality/exit_family.json` 记录 `upstream_match`）
 - **更新差异**：每次更新自动对比上一版，产出 `added`/`removed` 并归档
@@ -204,8 +204,8 @@ data/download/all.txt                       # 全量去重清单（未验证）
 <summary><code>china-check.yml</code> — 大陆连通性检测（独立 CI）</summary>
 
 - **触发**：每小时定时（`cron: 11 * * * *`）+ `workflow_dispatch` 手动触发（原 workflow_run 依赖已移除，独立于质量链节奏）。GitHub 调度偶发连续跳 tick（实测）时以 `workflow_dispatch` 手动补跑为准，streak 6h 容差覆盖短缺口
-- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，全免费 CN 验证源分层判定：cn01 批量 + cn02 大节点池降级 + cn03 ICMP 兜底（CN-26）、cn27 呼和浩特 TCP（fail 追加同节点 ICMP 消歧，ok 且孤证追加 HTTPS 应用层确认）/cn20（北京 TCP）＋cn21（枣庄 ICMP）＋cn22（状态码）＋cn23（443 扫描）/cn24 TCP（附电信 isp_ms）+cn25 ICMP+cn26 TLS 三协议单节点（双镜像 failover），多源复核集：cn30（800 键/20 并发）＋cn31（400 键/20 并发，同站 ICMP）＋cn32（200 键/8 并发，同站应用层）＋cn33（200 键/6 并发，同站路由追踪）、cn07（1200/40）、cn08（600/12）、cn14（500/8）、cn15（200 键/8 并发，同站 ICMP）、cn17（400 键/8 并发，ALTCHA 会话复用）＋cn18（200 键/6 并发，同通道 ICMP）＋cn19（200 键/6 并发，同站 MTR 末跳见证）、cn16（200/8）、cn11（200 键/6 并发，34 大陆省运营商节点 TCPing）＋cn12（200 键/6 并发，同站 ICMP）、cn09（200 键/8 并发，约 39 ISP×节点 TCPing 测量单元）＋cn10（200 键/8 并发，同站 ICMP）、cn04（200 键/6 并发）＋cn05（200 键/6 并发，仅 443 键）、cn06（200 键/6 并发）＋cn34（100 键/8 并发，约 287 节点 TCPing）＋cn35（100 键/8 并发，同站路由追踪）、cn36（60 键/4 并发，北京探针 ICMP，匿名配额）＋cn37（40 键/4 并发，同站路由追踪末跳见证）＋cn38（40 键/4 并发，同站应用层状态码）＋cn39（40 键/4 并发，同站 MTR 末跳见证）、cn40（300 键/6 并发，约 13 大陆节点多数可达））→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含 CN 数据）
-- **细节**：作业硬上限 360 分钟；主全量探测由 `timeout` 限制为 270 分钟，超时自动回退到 300 条有界样本（再限时 60 分钟），至少预留 30 分钟给标注、不变式校验和提交，避免公开仓 6h 硬杀导致整轮无数据；`concurrency` 组防重入；`contents: write` 权限；cn27 key 与 cn41 复核 token 经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
+- **流程**：跑测试（`unittest`）→ `china_check.py`（对 `data/valid/all.txt` 全量池，`--limit 0`，全免费大陆验证源**分层判定**：批量主通道（大节点池/ICMP 逐级降级）→ 一批免额单节点源（TCP/ICMP 存活/应用层状态码/端口扫描/TLS 握手，按配额与限速）→ 有界并发的多节点复核集（免费通道优先、已确认键自动让位；各通道的协议/节点规模/限速配额见私有包，运行时代号与默认配额见 `china_check.py --list-cn`）→ `annotate_classify.py`（填充缺失后缀 + 追加分类 token）→ 有变更则自动提交并推送；完成后再由专职 build-good 与 stats 工作流重建 good 清单/图表（含大陆数据）
+- **细节**：作业硬上限 360 分钟；主全量探测由 `timeout` 限制为 270 分钟，超时自动回退到 300 条有界样本（再限时 60 分钟），至少预留 30 分钟给标注、不变式校验和提交，避免公开仓 6h 硬杀导致整轮无数据；`concurrency` 组防重入；`contents: write` 权限；配额型通道 key 与需签发 token 的复核凭证经 secrets 注入 `CHINA_CHECK_API_KEY`/`TCPPING_CN_TOKEN`（未配置自动跳过/降级）
 - **说明**：各工作流提交经 `.github/scripts/commit_data.sh`——只提交本 job
   实际写入的文件（mtime 标记），push 冲突时其余文件对齐 origin，
    杜绝旧 checkout 快照回滚他人并发更新；china.json 另有 `last_ok_ts`
