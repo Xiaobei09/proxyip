@@ -619,5 +619,78 @@ class TestCommittedCnViewInvariant(unittest.TestCase):
         self.assertGreater(total, 0)
 
 
+class TestCommittedChinaJsonSourceKeys(unittest.TestCase):
+    """R226：**已发布数据产物**的源键门禁（安全合规 / 私有源隔离）。
+
+    事故实录：``data/quality/china.json`` 自首个提交（2026-09-21）起，就有
+    21.2% 的条目以**插件名**而非代号作 ``sources``/``basis`` 键——可点名到 12
+    个真实来源名，等于把来源真名写进公开数据产物长期对外泄漏。R225 已修根因
+    （兜底搬运不再复制非法键），但**门禁此前完全不覆盖 data/**（R218 的泄漏
+    扫描只扫 scripts/tests/docs/README/.github），所以这类泄漏能无声累积。
+
+    本测试把「已发布 JSON 的源键必须都是注册表合法代号」变成可测不变量。
+
+    棘轮设计：现存存量需由 china_check 重跑自然清除（禁手改 data/），故此刻
+    以**计数基线**表达而非直接要求为 0——基线只允许**下降**。任何新增泄漏
+    （含真名键换新名字）都会让计数上升并立即变红；存量清零后把基线改为 0 即
+    升级为绝对断言。基线只记**计数**，公开树不落任何真名字面。
+    方向感知：计数高于基线报「新增泄漏」，低于基线则要求**下调基线**（双向
+    都红，杜绝「悄悄调高基线给泄漏发通行证」与「调低基线把未清存量永久豁免」）。
+    """
+
+    #: 含非代号 ``sources``/``basis`` 键的条目数上限（棘轮，只降不升）。
+    LEGACY_ENTRY_BASELINE = 4657
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def _non_code_entries(self):
+        import china_check as cc
+        known = cc._known_source_keys()
+        if known is None:
+            # 无私有包即无真相源可比对 —— 降级跳过（硬性约束 5：缺依赖须
+            # 跳过/降级，不得让门禁在无包环境硬失败）。
+            self.skipTest("私有注册表不可得：无法判定合法代号，跳过（fail-open）")
+        path = self.ROOT / "data" / "quality" / "china.json"
+        if not path.is_file():
+            self.skipTest("china.json 不存在（数据链未跑过）")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        proxies = data.get("proxies")
+        self.assertIsInstance(proxies, dict, "china.json 缺 proxies")
+        bad = 0
+        for entry in proxies.values():
+            if not isinstance(entry, dict):
+                continue
+            keys = list(entry.get("sources") or {}) + list(entry.get("basis") or [])
+            if any(k not in known for k in keys):
+                bad += 1
+        return bad, len(proxies)
+
+    def test_published_source_keys_are_registry_codes(self):
+        bad, total = self._non_code_entries()
+        base = self.LEGACY_ENTRY_BASELINE
+        if bad > base:
+            self.fail(
+                f"已发布 china.json 的非代号源键条目数 {bad} > 棘轮基线 {base}"
+                f"（共 {total} 条）：**出现新增泄漏**。根因通常是兜底搬运或某条"
+                "写入路径绕过了注册表代号（参见 R225 _drop_legacy_source_keys）")
+        if bad < base:
+            self.fail(
+                f"非代号源键条目数已降至 {bad}（基线 {base}）：**该下调基线**——"
+                "存量已清除，把 LEGACY_ENTRY_BASELINE 改成实际值（含直接改 0 "
+                "升级为绝对断言）。基线只许在数据实际下降后才可下调，否则会把"
+                "尚未清除的存量永久豁免。")
+        # 占比同样受限，防止分母缩水时计数看似未增
+        if total:
+            self.assertLessEqual(
+                bad / total, base / max(1, total) + 0.02,
+                "非代号源键占比上升")
+
+    def test_baseline_is_a_floor_not_a_ceiling(self):
+        """基线本身不得被上调（否则新增泄漏可被合法化）。"""
+        self.assertLessEqual(
+            self.LEGACY_ENTRY_BASELINE, 4657,
+            "棘轮基线只允许下降；上调等于给新增泄漏发通行证")
+
+
 if __name__ == "__main__":
     unittest.main()
