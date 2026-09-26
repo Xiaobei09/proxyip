@@ -787,7 +787,11 @@ class TestCnCodenamesRatchetedDown(unittest.TestCase):
 
     #: data/ 各文件允许的 CNXX **出现次数**上限（棘轮，只降不升）。
     DATA_BASELINES = {
-        "data/quality/china.json": 159989,
+        # R240：159989 → **0**。R237 的 ``_seal_cn_source_keys``（``sources`` 键
+        # ＋ ``basis``）＋ R240 追加的 error 值内代号替换（``pcb bundle missing
+        # for cnNN``，实测 10269 处）共同清空。归零后本门禁从「棘轮」升级为
+        # **绝对断言**（已发布产物不得再出现任何 CN 代号）。
+        "data/quality/china.json": 0,
     }
 
     _RX = None

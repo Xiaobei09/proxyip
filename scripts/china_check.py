@@ -1111,9 +1111,18 @@ def _run_cn08_slots(
 
 
 def _bundle_missing(source: str) -> dict:
-    """无 PCB 时插件源的 fail-open 占位（记 error，不崩不断言）。"""
+    """无 PCB 时插件源的 fail-open 占位（记 error，不崩不断言）。
+
+    R240：消息里的来源**改印不透明 id**——该 error 值会逐字落进已发布
+    ``data/quality/china.json``（实测 10269 处 ``pcb bundle missing for cnNN``），
+    而 CN 代号是要清除的泄漏面。诊断价值不丢：操作者可经 ``--list-cn`` 的
+    ``public_id`` 列（或私有包 ``code_of_public_id``）反查回代号。
+    无 registry 时回落为**不含代号**的通用措辞。
+    """
+    ident = cn_public_id(source) if isinstance(source, str) else None
+    tail = f" for {ident}" if ident else ""
     return {"status": "error", "ok": False, "ms": None,
-            "error": f"pcb bundle missing for {source}", "level": None,
+            "error": f"pcb bundle missing{tail}", "level": None,
             "ok_nodes": 0, "nodes": 0, "ratio": None}
 
 
@@ -2373,6 +2382,25 @@ def _drop_legacy_source_keys(entry: dict) -> dict:
     return entry
 
 
+_CN_TEXT_RE = re.compile(r"(?<![A-Za-z0-9_])cn\d{1,2}(?![A-Za-z0-9_])")
+
+
+def _seal_cn_text(text: str) -> str:
+    """把一段文本里出现的 CN 代号逐个换成不透明 id（R240）。
+
+    **只换代号片段，不哈希整条文本**——整条哈希既不可逆回代号，也会让同一
+    代号在不同消息里得到不同的 id，破坏可复现性。用于 ``error`` 值里嵌入
+    代号的情形（如 ``"pcb bundle missing for cnNN"``，实测 10269 处）。
+    """
+    if not isinstance(text, str) or not _CN_TEXT_RE.search(text):
+        return text
+
+    def sub(m):
+        return cn_public_id(m.group(0)) or m.group(0)
+
+    return _CN_TEXT_RE.sub(sub, text)
+
+
 def _seal_cn_source_keys(entries: dict) -> dict:
     """把 ``entries`` 各条目的 ``sources`` 键由代号换成不透明 id（R237）。
 
@@ -2395,16 +2423,25 @@ def _seal_cn_source_keys(entries: dict) -> dict:
             pid = cn_public_id(k) if isinstance(k, str) else None
             sealed[pid or k] = v
         new_entry = dict(entry)
-        new_entry["sources"] = sealed
         # ``basis`` 是同一族的另一个载体（实测 1227 处代号，占 0.8%）：
         # 语义为「本条判定依据了哪些通道」。只换**能换的**——``cn_public_id``
         # 对非代号（理论上已被 R225 的净化剔除）返回 None，原样保留。
+        # R240：error 值里也可能嵌着代号（``pcb bundle missing for cnNN``），
+        # 一并换成不透明 id——它同样逐字落进已发布产物。
+        sealed = {k: (dict(v, error=_seal_cn_text(v["error"]))
+                       if isinstance(v, dict)
+                       and isinstance(v.get("error"), str) else v)
+                  for k, v in sealed.items()}
         basis = entry.get("basis")
         if isinstance(basis, (list, tuple)):
             new_entry["basis"] = [
                 (cn_public_id(b) or b) if isinstance(b, str) else b
                 for b in basis
             ]
+        # 必须在 error 值改写**之后**再挂到 new_entry——首版先挂了旧 dict、
+        # 随后又重新绑定局部名 ``sealed``，改写结果被丢弃（别名 bug，R240 实测
+        # 表现为「密封后仍剩 10269 处」）。
+        new_entry["sources"] = sealed
         out[key] = new_entry
     return out
 
