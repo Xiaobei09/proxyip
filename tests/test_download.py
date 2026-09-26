@@ -3,6 +3,7 @@
 import io
 import json
 import sys
+import tempfile
 import time
 import unittest
 import unittest.mock
@@ -1725,3 +1726,102 @@ class TestExtraSourcesCountMatchesReadme(unittest.TestCase):
         self.assertIn(
             "--list-extra-sources", section,
             "data-spec.md 须给出唯一发现入口 --list-extra-sources")
+
+
+class TestSourceHistorySealing(unittest.TestCase):
+    """R239：``source_history.json`` 的**历史轮**键也须去身份。
+
+    R238 实测：本轮新写入的键已是 0 真名，但 14 轮窗口内仍有 3 个旧轮带真名
+    （117 处），等窗口滚动需 ~3.5 天（被动）。该文件每轮被
+    ``download_proxies._append_source_history`` **整体重写**，故在那个唯一写点
+    顺带把携带过来的历史键一并换掉即可立即清零。
+
+    **不做会静默坏掉别的东西**：``health_alert.check_sources`` 按 ``counts``
+    的键（label）分组求时间序列（``series.setdefault(label, ...)``）。一旦同一
+    来源在旧轮是裸标签、新轮是不透明 id，它会被切成**两段独立序列**，各自样本数
+    不足 ``SOURCE_MIN_SAMPLES`` → **源骤降告警从此不再触发**。统一成同形态后
+    分组照旧、序列连续。本类锁定这条不变量。
+
+    标签一律**运行时从私有包派生**，测试文件零真名字面量（否则会顶高
+    ``TestDownloadVendorNamesAbsent`` 自己的棘轮基线）。
+    """
+
+    def _labels(self):
+        if not dp.SOURCE_LABELS:
+            self.skipTest("needs PCB dl_sources bundle")
+        return sorted(dp.SOURCE_LABELS.values())[:2]
+
+    def _run(self, tmp, runs, new_counts):
+        old = dp.SOURCE_HISTORY_FILE
+        dp.SOURCE_HISTORY_FILE = Path(tmp) / "source_history.json"
+        try:
+            Path(dp.SOURCE_HISTORY_FILE).write_text(
+                json.dumps({"runs": runs}), encoding="utf-8")
+            dp._append_source_history("new", new_counts)
+            return json.loads(
+                Path(dp.SOURCE_HISTORY_FILE).read_text(encoding="utf-8"))
+        finally:
+            dp.SOURCE_HISTORY_FILE = old
+
+    def test_history_keys_sealed_and_series_continuous(self):
+        with tempfile.TemporaryDirectory() as td:
+            labs = self._labels()
+            runs = [{"ts": f"old{i}", "counts": {labs[0]: 10 - i,
+                                                 labs[1]: 3}}
+                    for i in range(3)]
+            doc = self._run(td, runs, {labs[0]: 12, labs[1]: 3})
+        for r in doc["runs"]:
+            with self.subTest(ts=r["ts"]):
+                self.assertTrue(r["counts"])
+                for k in r["counts"]:
+                    self.assertTrue(
+                        k.startswith("dsrc_"),
+                        f"历史轮键未去身份：{k!r}")
+        key_sets = [frozenset(r["counts"]) for r in doc["runs"]]
+        self.assertEqual(
+            len(set(key_sets)), 1,
+            "不同轮的键集合不一致 → check_sources 的时间序列会被切断")
+        blob = json.dumps(doc, ensure_ascii=False)
+        for lab in labs:
+            self.assertNotIn(f'"{lab}"', blob,
+                             f"标签 {lab!r} 仍留在落盘内容里")
+
+    def test_semantic_sentinels_are_not_hashed(self):
+        """``main``/``multi`` 是**语义哨兵**（主源/多源重叠），不得哈希。
+
+        R239 首版直接调 ``SOURCE_PUBLIC_ID(k)``、**绕过了** ``source_origin``
+        的哨兵豁免，把 ``main`` 也哈希了——违反本仓既定的「语义哨兵不哈希」
+        原则（``main``/``multi`` 由 ``write_source_attribution`` 直接写入、
+        不经 URL 派生，不是来源身份），并撞上
+        ``TestAppendSourceHistory.test_tolerates_malformed_top_level``。
+        本用例把该豁免锁死。
+        """
+        with tempfile.TemporaryDirectory() as td:
+            sentinels = {"main": 10, "multi": 3}
+            doc = self._run(td, [{"ts": "old", "counts": dict(sentinels)}],
+                            dict(sentinels))
+        for r in doc["runs"]:
+            for k, v in r["counts"].items():
+                with self.subTest(run=r["ts"], key=k):
+                    self.assertIn(k, sentinels,
+                                  f"哨兵被哈希成 {k!r}——它不是来源身份")
+                    self.assertEqual(v, sentinels[k])
+
+    def test_malformed_run_passes_through(self):
+        """``runs`` 被手写破坏成标量时不得崩（原已有 malformed 防御，不得回归）。"""
+        with tempfile.TemporaryDirectory() as td:
+            doc = self._run(td, ["malformed", 7], {self._labels()[0]: 1})
+        self.assertIn("malformed", doc["runs"])
+        self.assertIn(7, doc["runs"])
+
+    def test_no_bundle_passes_through_unchanged(self):
+        """无 PCB 包时 ``SOURCE_PUBLIC_ID`` 为 None → 原样保留，不丢数据。"""
+        labs = self._labels()
+        idder, dp.SOURCE_PUBLIC_ID = dp.SOURCE_PUBLIC_ID, None
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                doc = self._run(td, [{"ts": "old", "counts": {labs[0]: 5}}],
+                                {labs[0]: 6})
+            self.assertIn(labs[0], doc["runs"][0]["counts"])
+        finally:
+            dp.SOURCE_PUBLIC_ID = idder

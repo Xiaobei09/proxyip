@@ -1383,6 +1383,35 @@ def _build_source_stats(
     return stats
 
 
+def _seal_history_counts(run) -> object:
+    """把一轮历史里的 ``counts`` 键由标签换成不透明 id（R239）。
+
+    非 dict 条目原样透传（``source_history.json`` 的 ``runs`` 允许被手写破坏成
+    标量，见 ``_append_source_history`` 里的 malformed 防御）。无包时
+    ``source_origin`` 回落标签、``SOURCE_PUBLIC_ID`` 为 ``None`` → 原样返回。
+    """
+    if not isinstance(run, dict):
+        return run
+    counts = run.get("counts")
+    if not isinstance(counts, dict) or SOURCE_PUBLIC_ID is None:
+        return run
+    # 只哈希**私有表内的来源标签**——与 ``source_origin`` 同一判据。
+    # ``main``/``multi`` 是主源与多源重叠的**语义哨兵**（由
+    # ``write_source_attribution`` 直接写入、不经 URL 派生），不是来源身份，
+    # 哈希它们会破坏语义并违反既有契约。未知标签同样原样保留。
+    private_labels = set(SOURCE_LABELS.values()) | set(SOURCE_ORIGIN_MAP.values())
+    sealed = {}
+    for k, v in counts.items():
+        pid = (SOURCE_PUBLIC_ID(k)
+               if isinstance(k, str) and k in private_labels else None)
+        sealed[pid or k] = v
+    if sealed == counts:
+        return run
+    out = dict(run)
+    out["counts"] = sealed
+    return out
+
+
 def _append_source_history(ts: str, counts: dict[str, int]) -> None:
     """追加本轮各上游源的 unique 数到 ``source_history.json``（供健康告警）。
 
@@ -1400,6 +1429,17 @@ def _append_source_history(ts: str, counts: dict[str, int]) -> None:
         )
     history.append({"ts": ts, "counts": dict(sorted(counts.items()))})
     history = history[-SOURCE_HISTORY_MAX:]
+    # R239：把**携带过来的历史轮**的 counts 键也换成不透明 id。
+    #
+    # 本函数每轮整体重写该文件，故这是唯一写点。R238 实测：本轮新写入的键已经
+    # 是 0 真名，但 14 轮窗口内仍有 3 个旧轮带真名（117 处），等窗口滚动需 ~3.5 天。
+    #
+    # **必须现在做**，否则 `health_alert.check_sources` 会**静默失效**：它按
+    # ``counts`` 的键（label）分组求时间序列（``series.setdefault(label,…)``），
+    # 一旦同一来源在旧轮是裸标签、新轮是不透明 id，就会被切成**两段独立序列**，
+    # 各自样本数不足 ``SOURCE_MIN_SAMPLES`` → 源骤降告警从此不再触发。
+    # 统一成同形态后分组照旧、序列连续。
+    history = [_seal_history_counts(run) for run in history]
     write_text_if_changed(
         SOURCE_HISTORY_FILE,
         json.dumps({"runs": history}, ensure_ascii=False, separators=(",", ":"))
