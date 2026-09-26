@@ -671,7 +671,12 @@ class TestDownloadVendorNamesInData(unittest.TestCase):
     BASELINES = {
         "data/quality/ipinfo.json": 0,
         "data/quality/reputation.json": 0,
-        "data/quality/source_history.json": 117,
+        # R243：117 → **0**。R239 的 ``_seal_history_counts()``（在**追加时**对
+        # 整条历史做键替换，保住 ``health_alert.check_sources`` 的时序连续性）
+        # 已由 ``update-proxies`` run 36247043518 带新代码跑完而生效——这正是
+        # R239 记下的待验证项，本轮结清。独立复核：正则全量扫描该文件命中 0。
+        # 归零后转为**绝对断言**。
+        "data/quality/source_history.json": 0,
         "data/quality/source_quality.json": 0,
         "data/output/source_quality_report.txt": 0,
         "data/quality/ip_sources.json": 0,

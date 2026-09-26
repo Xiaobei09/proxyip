@@ -34,6 +34,7 @@ from common import (
     normalize_note,
     parse_line,
     parse_ltd_line,
+    read_exit_region,
     read_json,
     collect_txt_files,
     annotate_files,
@@ -343,7 +344,20 @@ def reconcile_views(valid_dir: Path, backfill: bool = True) -> int:
         return float(m.group(1)) if m else float("inf")
 
     def backfill_countries() -> int:
-        """master 行补入缺失的国家分裂；返回补入行数。"""
+        """master 行补入缺失的国家分裂；返回补入行数。
+
+        R243：归类依据由**入口国**改为**出口国**（``read_exit_region`` 优先，
+        无 ``→`` 标注时回落入口国）。原实现用 ``parse_ltd_line(...)[3]``，
+        而它取标注里**第一个** CC——即 ``#<入口>→<出口>`` 的**入口**。
+
+        这与 ``reorg_country`` 的成文契约（docstring 首行：按**出口** IP 国家
+        重组）冲突，只在**入口≠出口**时暴露——即**多出口 IP**。实测症状：
+        ``countries/CO/all.txt`` 里的 3 行 ``#🇨🇴CO→US-…`` 被 reorg 按出口迁到
+        ``countries/US/`` 并把空掉的 CO 目录整棵剪掉（报 "pruned 1 orphan"），
+        下一轮本函数又按入口把它们填回 CO——**两阶段互相撤销对方的产出**，
+        每次跑批都重写 40 个文件、且 ``test_no_orphan_dirs`` 常驻红。
+        两阶段对「这行属于哪个国家」必须持有同一信念。
+        """
         want: dict[str, dict[str, str]] = {}
         for line in all_txt.read_text(encoding="utf-8").splitlines():
             if not line:
@@ -351,7 +365,11 @@ def reconcile_views(valid_dir: Path, backfill: bool = True) -> int:
             parsed = parse_ltd_line(line)
             if not parsed or parsed[3] == "ALL":
                 continue
-            want.setdefault(parsed[3], {})[line.split("#", 1)[0]] = line
+            # 出口国优先（与 reorg_country 同源）；无标注则回落入口国。
+            cc = read_exit_region(line) or parsed[3]
+            if len(cc) != 2 or not cc.isalpha():
+                continue
+            want.setdefault(cc, {})[line.split("#", 1)[0]] = line
         added = 0
         cdir = valid_dir / "countries"
         for cc in sorted(want):

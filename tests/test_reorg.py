@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import reorg_country as rc
-from common import parse_ltd_line
+from common import parse_ltd_line, read_exit_region
 
 
 class TestMarker(unittest.TestCase):
@@ -224,6 +224,72 @@ class TestReorgCountryConsistency(unittest.TestCase):
                 continue
             keys.add(ln.split("#", 1)[0])
         return keys
+
+    def test_country_dir_matches_exit_region_r243(self):
+        """R243：``countries/<CC>/all.txt`` 里每一行的**出口国**必须就是 ``<CC>``。
+
+        这条不变量被违反时，两个流水线阶段会**互相撤销对方的产出**：
+
+        - ``reorg_country`` 按 docstring 首行的成文契约「按**出口** IP 国家重组」，
+          把 ``#<入口>→<出口>`` 里出口≠入口的行迁到出口国目录，并把迁空后的
+          目录整棵剪掉（报 ``pruned N orphan country dirs``）；
+        - ``annotate_classify.reconcile_views`` 的国家回填原按
+          ``parse_ltd_line(...)[3]`` 分组，而它取标注里**第一个** CC —— 即
+          **入口**国 —— 于是又把它们填回入口国目录。
+
+        实测症状（``countries/CO``）：3 行 ``#🇨🇴CO→US-…`` 被 reorg 按出口迁到
+        ``countries/US/`` 并把空掉的 CO 目录整棵剪掉，下一轮回填又按入口填回
+        CO —— **两阶段互相撤销对方的产出**，每次跑批重写数十个文件，
+        ``test_no_orphan_dirs`` 常驻红。只在**入口≠出口**（多出口 IP）时暴露，
+        故长期被当成「偶发噪声」。
+
+        断言刻意**只针对回填行为**、不扫描已提交数据：同一端点同时出现在多个
+        国家目录是 data-spec **允许**的（``dup_endpoints`` 告警、非漂移），
+        数据面已有大量此类行，拿它当判据会既误报又判别不了本 bug。
+        """
+        import tempfile
+
+        import annotate_classify as ac
+
+        # 入口 CO、出口 US 的一行；reorg 已把它放进 countries/US/
+        line = ("1.2.3.4:443#\U0001F1E8\U0001F1F4CO\u2192US-100ms-1MB/s-DC-mid"
+                "-V4-CN-50-U100")
+        key = "1.2.3.4:443"
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            (valid / "countries" / "US").mkdir(parents=True)
+            (valid / "all.txt").write_text(line + "\n", encoding="utf-8")
+            (valid / "countries" / "US" / "all.txt").write_text(
+                line + "\n", encoding="utf-8")
+            ac.reconcile_views(valid)
+            co = valid / "countries" / "CO" / "all.txt"
+            got = co.read_text(encoding="utf-8") if co.exists() else ""
+        self.assertNotIn(
+            key, got,
+            "国家回填按**入口**国分组——与 reorg_country「按出口国重组」的"
+            "成文契约冲突，两阶段会互相撤销产出（多出口 IP 上必现）")
+
+    def test_backfill_uses_exit_region_when_present_r243(self):
+        """R243：正向锁——出口国与入口国不同时，回填的目标目录是**出口国**。"""
+        import tempfile
+
+        import annotate_classify as ac
+
+        line = ("5.6.7.8:443#\U0001F1E7\U0001F1F7BR\u2192NL-200ms-2MB/s-RES-mid"
+                "-V4-CN-40-U100")
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid"
+            valid.mkdir(parents=True)
+            (valid / "all.txt").write_text(line + "\n", encoding="utf-8")
+            ac.reconcile_views(valid)
+            nl = valid / "countries" / "NL" / "all.txt"
+            br = valid / "countries" / "BR" / "all.txt"
+            self.assertTrue(
+                nl.exists() and "5.6.7.8:443" in nl.read_text(encoding="utf-8"),
+                "回填未把行放进出口国目录 NL")
+            self.assertFalse(
+                br.exists(),
+                "回填把行放进了**入口**国目录 BR")
 
     def test_sum_equals_all_txt(self):
         all_path = self._valid() / "all.txt"
