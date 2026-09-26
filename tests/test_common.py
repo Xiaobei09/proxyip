@@ -221,7 +221,7 @@ class TestNormalizeNote(unittest.TestCase):
         # 有大陆延迟：替换为估算 ≈（min(5.0, 8*60/236.4≈2.03)）
         self.assertEqual(
             _rewrite_cn_speed("1.2.3.4:443#US-42ms-5.00MB/s-fast-90", cn_ms),
-            "1.2.3.4:443#US-42ms-≈2.0MB/s-fast-90",
+            "1.2.3.4:443#US-42ms-≈2.03MB/s-fast-90",
         )
         # 无大陆延迟观测 → 速度语义不明，删除 token
         self.assertEqual(
@@ -237,7 +237,7 @@ class TestNormalizeNote(unittest.TestCase):
         cn_fast = {"1.2.3.4:443#US": 30.0}
         self.assertEqual(
             _rewrite_cn_speed("1.2.3.4:443#US-42ms-5.00MB/s-fast-90", cn_fast),
-            "1.2.3.4:443#US-42ms-≈5.0MB/s-fast-90",
+            "1.2.3.4:443#US-42ms-≈5.00MB/s-fast-90",
         )
 
     def test_rewrite_cn_speed_floor_cap(self):
@@ -246,7 +246,7 @@ class TestNormalizeNote(unittest.TestCase):
         cn_slow = {"9.9.9.9:443#US": 5000.0}
         self.assertEqual(
             _rewrite_cn_speed("9.9.9.9:443#US-42ms-5.00MB/s-fast-90", cn_slow),
-            "9.9.9.9:443#US-42ms-≈0.4MB/s-fast-90",
+            "9.9.9.9:443#US-42ms-≈0.40MB/s-fast-90",
         )
         # RTT 缺失/非正数 → 速度 token 删除（宁缺勿假），floor 不适用
         for bad in (0.0, -1.0, 0):
@@ -277,8 +277,8 @@ class TestNormalizeNote(unittest.TestCase):
                     f"1.2.3.4:443#US-42ms-{raw}MB/s-fast-90", cn)
                 self.assertIn(f"-≈{want}MB/s", out)
                 self.assertNotIn("≈0.0MB/s", out)
-        # 正常量级仍保持原有一位小数展示约定（不无谓改动既有格式）
-        self.assertIn("-≈0.4MB/s", _rewrite_cn_speed(
+        # R247：统一两位小数（data-spec 契约）——0.44 不再被舍成 0.4
+        self.assertIn("-≈0.44MB/s", _rewrite_cn_speed(
             "1.2.3.4:443#US-42ms-0.44MB/s-fast-90", cn))
         # ② 上游实测真为 0 → 删 token，不写 0
         out = _rewrite_cn_speed("1.2.3.4:443#US-42ms-0MB/s-fast-90", cn)
@@ -318,14 +318,23 @@ class TestNormalizeNote(unittest.TestCase):
                 derived_zero, 0,
                 f"重渲染 {checked} 行已发布 CN 视图，{derived_zero} 行产出假零")
 
-    def test_fmt_cn_speed_precision_ladder(self):
-        """R221：渲染精度阶梯本身（不经整行 rewrite，便于定位）。"""
-        self.assertEqual(_fmt_cn_speed(0.01), "0.01")
-        self.assertEqual(_fmt_cn_speed(0.04), "0.04")
-        self.assertEqual(_fmt_cn_speed(0.05), "0.1")
-        self.assertEqual(_fmt_cn_speed(0.44), "0.4")
-        self.assertEqual(_fmt_cn_speed(7.24), "7.2")
-        self.assertEqual(_fmt_cn_speed(12.53), "12.5")
+    def test_fmt_cn_speed_two_decimals(self):
+        """R247：**无条件两位小数**（不经整行 rewrite，便于定位）。
+
+        契约权威是 ``docs/data-spec.md`` 第 69 行（测速段）与第 214 行
+        （JSON 导出）——两处都写明「两位小数」。R221 的精度阶梯（仅 sub-0.1
+        退两位）与之不一致，且它自己就是 R221 为修「假零」而引入的**混合
+        精度**：同一段里 99.6% 一位小数、仅 sub-0.1 两位。
+
+        注意 0.05 与 0.44：旧阶梯分别渲染成 ``0.1`` 与 ``0.4``（**舍入改变了
+        数值**），统一两位后忠实还原为 ``0.05``/``0.44``。这不是精度损失，
+        恰恰相反——是去掉了一层无谓的舍入。
+        """
+        for raw, want in ((0.01, "0.01"), (0.04, "0.04"), (0.05, "0.05"),
+                          (0.44, "0.44"), (7.24, "7.24"), (12.53, "12.53"),
+                          (2.0, "2.00"), (236.4, "236.40")):
+            with self.subTest(raw=raw):
+                self.assertEqual(_fmt_cn_speed(raw), want)
 
     def test_rewrite_cn_speed_idempotent_on_estimated(self):
         # 已含 ≈ 估算 token 的行再经 rewrite（重入/CN 视图文件二次处理）——

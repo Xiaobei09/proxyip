@@ -856,7 +856,7 @@ class TestAnnotations(unittest.TestCase):
         )
         self.assertEqual(count, 1)
         # 兜底行同样走大陆延迟/速度重写，与当期一致
-        self.assertIn("1.2.3.4:80#US-236ms-≈2.0MB/s-fast-CN-90", cn_text)
+        self.assertIn("1.2.3.4:80#US-236ms-≈2.03MB/s-fast-CN-90", cn_text)
 
     def test_generate_all_cn_full_pool_subset(self):
         # 全量池文本里非限量（超出每国 20 条）的行同样进入 all_cn.txt
@@ -888,7 +888,7 @@ class TestAnnotations(unittest.TestCase):
         reachable = {"1.1.1.1:443#US"}
         cn_ms = {"1.1.1.1:443#US": 236.4}
         cn_text, _n = cc.generate_all_cn(text, reachable, cn_ms)
-        self.assertIn("1.1.1.1:443#US-236ms-≈2.0MB/s-fast-CN-90", cn_text)
+        self.assertIn("1.1.1.1:443#US-236ms-≈2.03MB/s-fast-CN-90", cn_text)
         # 无大陆观测的行：保留延迟（无替代），但速度无从推算 → 移除海外值
         text2 = "2.2.2.2:443#US-77ms-3.00MB/s\n"
         cn_text2, _n = cc.generate_all_cn(
@@ -1094,7 +1094,7 @@ class TestAnnotations(unittest.TestCase):
         cn_ms = {"1.2.3.4:80#US": 200.0}
         text, n = cc.generate_all_cn(pool, reachable, cn_ms, fallback_keys=fallback)
         self.assertEqual(n, 1)
-        self.assertIn("1.2.3.4:80#US-200ms-≈2.4MB/s", text)
+        self.assertIn("1.2.3.4:80#US-200ms-≈2.40MB/s", text)
         self.assertIn("-CN", text)
         self.assertEqual(cc.cn_health_report(text), {"count": 1, "no_ms": 0, "junk_ms": 0})
         # 无 fallback 时（old 行为）→ 空清单

@@ -1628,7 +1628,7 @@ class TestVerifiedStableOutputs(unittest.TestCase):
                 "≈", lines[0], f"{name}.txt must use CN-aware ≈ speed (not plain)"
             )
         self.assertIn(
-            "-88ms-≈1.5MB/s", (us / "cn4_ltd.txt").read_text()
+            "-88ms-≈1.50MB/s", (us / "cn4_ltd.txt").read_text()
         )
         self.assertNotIn(
             "-100ms-", (us / "cn4.txt").read_text(), "Overseas TLS latency must be replaced"
