@@ -2259,7 +2259,7 @@ def compute_fallback_merge(
             # streak 清零：本轮未复测，不得虚报"连续可达"（stable 计算在合并
             # 前、不会混入；这里再显式清 0 防止 china.json 消费者误读）；\
             # 保留 sources/last_ok_ts 供下一轮兜底资格与大陆读数追溯。
-            dup = dict(p)
+            dup = _drop_legacy_source_keys(dict(p))
             dup["verdict"] = "reachable"
             dup["fallback"] = True
             dup["streak"] = 0
@@ -2267,6 +2267,59 @@ def compute_fallback_merge(
             reachable.add(k)
             fallback_keys.add(k)
     return fallback_keys
+
+
+def _known_source_keys() -> set | None:
+    """当前注册表的合法源键集合；无包返回 None（不净化，fail-open）。"""
+    reg = _sources_registry()
+    if reg is None:
+        return None
+    codes = getattr(reg, "codes", None)
+    if not callable(codes):
+        return None
+    try:
+        return set(codes())
+    except Exception:
+        return None
+
+
+def _drop_legacy_source_keys(entry: dict) -> dict:
+    """剔除上一轮遗留的**非法** ``sources``/``basis`` 键（R225）。
+
+    实测事故：``data/quality/china.json`` 自首个提交（2026-09-21）起就有
+    21.2% 的条目以**插件名**而非代号作 ``sources``/``basis`` 键（可点名到
+    12 个真实来源名）——那是代号化迁移**之前**的写法。迁移改了新写入路径，
+    却没清理已落盘的数据；而本函数的"本轮未采样"分支是 ``dict(p)`` 整条
+    复制，于是这批 legacy 键被逐轮原样搬运、永久存活，等于把来源真名
+    通过公开数据产物持续对外泄漏。
+
+    此处按当前注册表的合法代号集净化：不在集合内的键一律丢弃。这些键本就
+    无法参与派发（``_build_slot_table`` 只认注册表代号），留着只有泄漏与
+    计数失真两个坏处；而它们携带的顶层 ``ms``/``isp_ms`` 仍按原逻辑沿用
+    （那是给人看的大陆读数，与键名无关）。
+
+    无包时不净化（``None``）——没有真相源可比对，宁可原样搬运也不误删。
+    """
+    known = _known_source_keys()
+    if known is None:
+        return entry
+    src = entry.get("sources")
+    if isinstance(src, dict):
+        kept = {k: v for k, v in src.items() if k in known}
+        if len(kept) != len(src):
+            if kept:
+                entry["sources"] = kept
+            else:
+                entry.pop("sources", None)
+    basis = entry.get("basis")
+    if isinstance(basis, (list, tuple)):
+        kept_b = [b for b in basis if b in known]
+        if len(kept_b) != len(basis):
+            if kept_b:
+                entry["basis"] = kept_b
+            else:
+                entry.pop("basis", None)
+    return entry
 
 
 def build_cn_best(entries: dict) -> dict:

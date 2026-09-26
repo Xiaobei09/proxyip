@@ -3499,6 +3499,48 @@ class TestComputeFallbackMerge(unittest.TestCase):
         self.assertEqual(fb, set())
         self.assertNotIn("a:443#US", reachable)
 
+    def test_legacy_non_code_source_keys_dropped_on_carry_forward(self):
+        """R225：兜底搬运不得把**非法**（legacy）源键搬进已发布数据。
+
+        实测事故：china.json 自首个提交（2026-09-21）起，21.2% 条目以**插件名**
+        而非代号作 sources/basis 键（可点名 12 个真实来源名）。代号化迁移改了
+        新写入路径却没清已落盘数据，而"本轮未采样"分支是 ``dict(p)`` 整条复制，
+        于是这批 legacy 键被逐轮搬运、永久存活——等于把来源真名经公开数据产物
+        持续泄漏。本测试锁三件事：① legacy 键被剔除；② 合法代号**不被误删**；
+        ③ 顶层大陆读数（ms/isp_ms）仍沿用（与键名无关，净化不得牵连它）。
+        """
+        if cc._sources_registry() is None:
+            self.skipTest("needs PCB _sources bundle（真相源不可得时不净化）")
+        reg = cc._sources_registry()
+        known = set(reg.codes())
+        # 「legacy 键」= 某个**插件名**（迁移前用它当 sources 键）。此处从
+        # 注册表运行时取，公开树零真名字面——否则本用例自身即成泄漏点
+        # （R225 首版正因写死真名被 TestTrueNameForwardLeak 当场拦下）。
+        legacy = next(e["plugin"] for e in reg.SOURCES
+                      if e["plugin"] not in known)
+        code = cc.CN20_CODE
+        self.assertIn(code, known)
+        # 注意 _prev() 返回 {key: entry} 映射，须写进**内层**条目
+        prev = self._prev("a:443#US")
+        entry = prev["a:443#US"]
+        entry["sources"] = {legacy: {"status": "ok", "ok": True, "ms": 180.0},
+                            code: {"status": "ok", "ok": True, "ms": 181.0}}
+        entry["basis"] = [legacy, code]
+        entry["ms"] = 180.0
+        entry["isp_ms"] = {"中国电信": 194.4}
+        # "本轮未采样"：entries 里没有该键 → 走整条复制分支
+        entries = {}
+        fb = cc.compute_fallback_merge(entries, prev, set())
+        self.assertEqual(fb, {"a:443#US"})
+        out = entries["a:443#US"]
+        self.assertNotIn(legacy, (out.get("sources") or {}),
+                         "legacy 真名键被搬运进已发布数据")
+        self.assertNotIn(legacy, (out.get("basis") or []))
+        self.assertIn(code, (out.get("sources") or {}), "合法代号被误删")
+        self.assertIn(code, (out.get("basis") or []))
+        self.assertEqual(out.get("ms"), 180.0)
+        self.assertEqual(out.get("isp_ms"), {"中国电信": 194.4})
+
     def test_already_reachable_unchanged(self):
         prev = self._prev("a:443#US")
         entries = {"a:443#US": {"verdict": "reachable", "sources": {}}}
