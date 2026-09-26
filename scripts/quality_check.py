@@ -102,17 +102,26 @@ def build_ipinfo_map(
         score = compute_reputation(signals, abuse_item, weights)
         if score is not None:
             info["reputation"] = score
+            # R233：来源身份一律经 rep_public_id 去身份后才进已发布产物。
+            # ``multi`` 是语义哨兵（多源交叉），rep_public_id 原样透传。
+            #
+            # ``rep_flags`` **刻意不去身份**：它是**语义标志**而非来源身份
+            # （hosting/anonymous/listed/proxy/vpn/crawler/mobile…），
+            # 下游 build_good 等按字面语义读取。实测其中 ``abuse``（2545 处）
+            # 与词表撞名——那只是因为私有包有 rep_abuse.py，**属词表假阳性**，
+            # 把它哈希掉会摧毁 flags 的可判读性。故 flags 保持原样。
             if abuse_item:
-                info["reputation_source"] = abuse_item.get("service")
+                info["reputation_source"] = rep_public_id(
+                    abuse_item.get("service"))
             else:
                 _score, responding, flagged, numeric = vote_reputation(
                     signals, weights
                 )
-                info["reputation_source"] = (
+                info["reputation_source"] = rep_public_id(
                     responding[0] if len(responding) == 1 else "multi"
                 )
-                info["risk_sources"] = numeric
-                info["rep_sources"] = responding
+                info["risk_sources"] = [rep_public_id(s) for s in numeric]
+                info["rep_sources"] = [rep_public_id(s) for s in responding]
                 info["rep_flags"] = flagged
         info["risk"] = derive_risk(signals, abuse_item, weights)
         info_map[res["key"]] = info
@@ -216,13 +225,16 @@ def build_reputation_map(
             if aggs:
                 bonus = round(min(max(aggs) / 50.0, 1.0) * 10)
                 score = min(100, score + bonus)
+        # R233：来源名一律经 rep_public_id 去身份后才进已发布产物
+        # （data/quality/reputation.json 与 ipinfo.json 的每条记录都带这三个
+        # 字段）。``multi`` 是语义哨兵，rep_public_id 原样透传。
         rep_map[res["key"]] = {
             "score": score,
             "risk": reputation_risk(score),
-            "source": source,
-            "sources": responding,
+            "source": rep_public_id(source),
+            "sources": [rep_public_id(s) for s in responding],
             "flags": flagged,
-            "numeric": numeric,
+            "numeric": [rep_public_id(s) for s in numeric],
             **({"deep_bonus": bonus} if bonus else {}),
         }
     return rep_map

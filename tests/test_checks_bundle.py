@@ -334,6 +334,138 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
                                      f"{rel} 基线只允许下降")
 
 
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
+class TestReputationSourceNamesDeidentified(unittest.TestCase):
+    """R233：信誉数据源**真名**不得留在已发布 data/ 里（安全合规 / 私有源隔离）。
+
+    实测规模（按权威词表 62 项逐词统计）：**1067304 处**，横跨 7 个文件——
+    ``reputation_cache.json`` 407227（每 IP 字典以**源名为键**）、
+    ``ipinfo.json`` 323371、``reputation.json`` 310770、
+    ``data/valid/reputation_cache.json`` 19871、
+    ``data/valid/reputation.json`` 6054、``external_check.json`` 8、
+    ``upstream_meta.json`` 3。这是本轮实测中**最大的一处泄漏面**。
+
+    公开侧代码早已把三表迁入 PCB（公开树零字面），但真名是**运行时从私有包
+    流进公开 data/** 的——与 R227 记录的「已发布产物以真名为键」同族。
+
+    门禁采用**结构化解析**而非文本扫描：2.1MB 级正则全文扫描实测 36s（不可
+    接受），而 ``json.load`` 只要 2.2s 且精确（曾试图用引号计数替代，两口径
+    实测不一致——``abuse`` 24230、``static`` 2 处对不上，已弃用）。
+
+    存量以**计数棘轮**表达：只许下降，不许上升；方向感知双向断言。
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    #: 各文件允许残留的「词表内真名」出现数上限（棘轮，只降不升）。
+    BASELINES = {
+        "data/quality/reputation_cache.json": 360826,
+        "data/quality/ipinfo.json": 320824,
+        "data/quality/reputation.json": 308225,
+        "data/valid/reputation_cache.json": 14963,
+        "data/valid/reputation.json": 6054,
+        "data/quality/external_check.json": 0,
+        "data/quality/upstream_meta.json": 0,
+    }
+
+    @staticmethod
+    def _vocab():
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import checks_bundle as cb
+        try:
+            names = cb.load_plugin("leak_guard").reputation_source_names()
+        except Exception:
+            return None
+        return {str(n).strip().lower() for n in names}
+
+    def _scan(self, vocab):
+        """返回 ``{相对路径: 词表内真名出现数}``（结构化，非文本 grep）。"""
+        import json
+        found = {}
+        for rel in self.BASELINES:
+            f = self.ROOT / rel
+            if not f.exists():
+                continue
+            try:
+                doc = json.loads(f.read_text(encoding="utf-8"))
+            except ValueError:
+                continue
+            n = 0
+            proxies = doc.get("proxies") if isinstance(doc, dict) else None
+            if isinstance(proxies, dict):
+                for entry in proxies.values():
+                    if not isinstance(entry, dict):
+                        continue
+                    # 缓存形态：每 IP 字典的**键**即源名
+                    for k in entry:
+                        if str(k).strip().lower() in vocab:
+                            n += 1
+                    # 记录形态：来源身份字段。``rep_flags`` **不在此列**——
+                    # 它是语义标志（hosting/anonymous/listed…）而非来源身份；
+                    # 其中 ``abuse`` 与词表撞名属**已知假阳性**（私有包有
+                    # rep_abuse.py），哈希它会摧毁 flags 的可判读性。
+                    for field in ("sources", "numeric", "rep_sources",
+                                  "risk_sources"):
+                        seq = entry.get(field)
+                        if isinstance(seq, list):
+                            n += sum(1 for v in seq
+                                     if isinstance(v, str)
+                                     and v.strip().lower() in vocab)
+                    for field in ("source", "reputation_source"):
+                        src = entry.get(field)
+                        if (isinstance(src, str)
+                                and src.strip().lower() in vocab):
+                            n += 1
+            if n:
+                found[rel] = n
+        return found
+
+    def test_reputation_source_names_ratcheted_down(self):
+        vocab = self._vocab()
+        if vocab is None:
+            self.skipTest("私有 leak_guard 不可得：无法派生词表，跳过（fail-open）")
+        found = self._scan(vocab)
+        for rel, n in sorted(found.items()):
+            with self.subTest(file=rel):
+                if n > self.BASELINES.get(rel, 0):
+                    self.fail(
+                        f"{rel}：词表内信誉数据源名 {n} 处 > 棘轮基线 "
+                        f"{self.BASELINES.get(rel, 0)}——**出现新增泄漏**。"
+                        f"已发布产物只许落 rsrc_* 不透明 id")
+        for rel, b in self.BASELINES.items():
+            if found.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：词表内信誉数据源名降至 {found.get(rel, 0)}"
+                        f"（基线 {b}）——**该下调 BASELINES**")
+
+    def test_scan_actually_detects_injected_name(self):
+        """自证：判据必须真能命中（注入一个词表内真名 → 计数上升）。"""
+        import json
+        import tempfile
+        vocab = self._vocab()
+        if vocab is None or not vocab:
+            self.skipTest("词表不可得")
+        probe = sorted(vocab)[0]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rel = "data/quality/reputation.json"
+            (root / "data/quality").mkdir(parents=True)
+            (root / rel).write_text(json.dumps(
+                {"proxies": {"1.2.3.4:443#US": {
+                    "sources": [probe], "numeric": [],
+                    "source": "multi"}}}), encoding="utf-8")
+            old_root, self.ROOT = self.ROOT, root
+            try:
+                got = self._scan(vocab)
+            finally:
+                self.ROOT = old_root
+        self.assertEqual(got.get(rel), 1,
+                         f"注入 {probe!r} 后判据未命中——门禁失效")
+
+
 class TestDocsLeakGuard(unittest.TestCase):
     def test_docs_source_endpoints_absent(self):
         if _GUARD is None:

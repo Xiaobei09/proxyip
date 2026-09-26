@@ -185,6 +185,63 @@ except Exception:
     DEFAULT_REP_SOURCES = ()
     SOURCE_PACING = {}
 
+# R233：信誉数据源名的**不透明公开 id** 派生器（与下载源 dsrc_* 同构、命名空间
+# 隔离）。词表权威源是 PCB ``leak_guard.reputation_source_names()``（62 项，
+# 实测覆盖已发布数据里出现的全部 25 个名字，零遗漏）。
+#
+# 无包降级**天然安全**，不需额外守卫：``REPUTATION_WEIGHTS`` 为空表时
+# ``vote_reputation`` 返回 ``score=None``，``build_rep_map`` 直接 ``continue``
+# ——记录压根不写，也就没有源名可泄漏。降级路径不产生真名。
+#
+# 语义哨兵：``multi`` 表示多源交叉（对应下载源侧的 ``main``/``multi``），
+# 不是来源身份，原样透传不哈希。
+REP_PUBLIC_ID = None
+try:
+    REP_PUBLIC_ID = _load_pcb_plugin("leak_guard").reputation_source_public_id
+except Exception:
+    REP_PUBLIC_ID = None
+
+#: 不哈希的语义哨兵（多源交叉，非来源身份）。
+REP_SENTINELS = frozenset({"multi"})
+
+
+def _rep_public_vocab() -> frozenset:
+    """权威词表（一次性构建）；为空表示词表不可得。"""
+    global _REP_PUBLIC_VOCAB
+    if _REP_PUBLIC_VOCAB is None:
+        vocab = set()
+        if REP_PUBLIC_ID is not None:
+            try:
+                from checks_bundle import load_plugin as _lp
+                getter = getattr(_lp("leak_guard"),
+                                 "reputation_source_names", None)
+                if getter is not None:
+                    vocab = {str(n).strip().lower() for n in getter()}
+            except Exception:
+                vocab = set()
+        _REP_PUBLIC_VOCAB = frozenset(vocab)
+    return _REP_PUBLIC_VOCAB
+
+
+_REP_PUBLIC_VOCAB: frozenset | None = None
+
+
+def rep_public_id(name):
+    """信誉数据源名→不透明公开 id；哨兵 / 无包降级 / **词表外**原样返回。
+
+    「词表外原样保留」是**必需的**，不是放水：反查表只覆盖权威词表，若对
+    词表外的名字也哈希，落盘后就**无法还原**（round-trip 断裂），缓存条目
+    静默失效、信誉信号丢失。R233 round-trip 实测抓到了这一点
+    （``some_unknown_source`` → ``rsrc_*`` → 读回仍是 id）。
+    词表外的名字按定义不属本仓来源清单（同 R229 对 URL 文件名主干的处理）。
+    """
+    if not name or name in REP_SENTINELS or REP_PUBLIC_ID is None:
+        return name
+    if str(name).strip().lower() not in _rep_public_vocab():
+        return name
+    return REP_PUBLIC_ID(name) or name
+
+
 def parse_abuser_score(value) -> float | None:
     """``"0.0039 (Low)"`` → 0.0039；非数值返回 ``None``。"""
     if isinstance(value, (int, float)):
@@ -1698,18 +1755,112 @@ async def run_abuse(
     return abuse_map
 
 
-def load_rep_cache() -> dict:
-    """Load the reputation signal cache; corrupt/missing files read as empty."""
+# R233：缓存的**每 IP 字典以信誉数据源名为键**（实测 ``reputation_cache.json``
+# 407227 处、``data/valid/reputation_cache.json`` 19871 处），是本次实测中
+# **最大的一处泄漏面**（占信誉族 1067304 处的 40%）。
+#
+# 去身份只做在**序列化边界**（出 ``save_rep_cache`` / 进 ``load_rep_cache``），
+# **不动内存缓存的键**：内存侧 ``entry[name] = ...`` 及其读路径（按 name 命中
+# 缓存、按 ``SOURCE_PACING[name]`` 取节流）全部保持真名，逻辑零风险；只有落到
+# 磁盘的产物是 ``rsrc_*``。下次 load 时按同一映射还原，round-trip 无损。
+#
+# 还原走一次性构建的反查表（62 项），避免每键一次线性扫描——407k 键下线性
+# 反查是 2500 万次字符串比较，不可接受。
+_REP_PUBLIC_UNSEAL = None
+try:
+    _REP_PUBLIC_UNSEAL = getattr(
+        _load_pcb_plugin("leak_guard"), "reputation_source_from_id", None)
+except Exception:
+    _REP_PUBLIC_UNSEAL = None
+
+
+def _rep_source_of_id(pid):
+    """``rsrc_*`` → 信誉数据源名（**算法还原**，不查表）。"""
+    if _REP_PUBLIC_UNSEAL is None:
+        return None
     try:
-        data = json.loads(REP_CACHE_FILE.read_text(encoding="utf-8"))
+        return _REP_PUBLIC_UNSEAL(pid)
+    except Exception:
+        return None
+
+#: 模块默认缓存路径（用于判定「调用方是否重定向过」）。
+_DEFAULT_REP_CACHE_FILE = REP_CACHE_FILE
+
+
+def _rep_cache_write_path() -> Path:
+    """缓存**写/读**落点，三态判定（R233）。
+
+    1. 有 PCB 包 → ``REP_CACHE_FILE``：键已去身份，落进入库目录也安全；
+    2. 无包但 ``REP_CACHE_FILE`` **已被重定向**（测试的临时目录等）→ 就地写：
+       调用方明确指定了非发布位置，无泄漏风险；
+    3. 无包且是默认路径 → ``.cache/``：``data/quality/`` 入库，明文源名写
+       进去就是泄漏，而缓存纯为优化，改落点不损正确性。
+    """
+    if REP_PUBLIC_ID is not None:
+        return REP_CACHE_FILE
+    if REP_CACHE_FILE != _DEFAULT_REP_CACHE_FILE:
+        return REP_CACHE_FILE
+    return _local_rep_cache_file()
+
+
+def _local_rep_cache_file() -> Path:
+    """无 PCB 包时的缓存落点：仓库根 ``.cache/``（已 gitignore，不发布）。
+
+    选它而不是 ``data/raw/``：后者**确实被 git 跟踪**（含 1111/SG.txt 等
+    历史文件），且 ``commit_data.sh`` 的 EXCL 只挡自动提交，挡不住手动
+    ``git add``。``.cache/`` 在 ``data/`` 之外，发布链路完全够不着。
+    """
+    d = Path(__file__).resolve().parent.parent / ".cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "reputation_cache.json"
+
+
+def load_rep_cache() -> dict:
+    """Load the reputation signal cache; corrupt/missing files read as empty.
+
+    R233：磁盘上的键是不透明 ``rsrc_*``，此处还原成内存侧惯用的源名。
+    """
+    try:
+        path = _rep_cache_write_path()
+    except OSError:
+        path = REP_CACHE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
         proxies = data.get("proxies") or {}
-        return {ip: e for ip, e in proxies.items() if isinstance(e, dict)}
+        out = {}
+        for ip, e in proxies.items():
+            if not isinstance(e, dict):
+                continue
+            out[ip] = {(_rep_source_of_id(k) or k): v for k, v in e.items()}
+        return out
     except (OSError, ValueError, TypeError):
         return {}
 
 
 def save_rep_cache(cache: dict) -> None:
-    write_json(REP_CACHE_FILE, keyed_json(cache))
+    """写盘前把每 IP 字典的源名键换成不透明 id（R233）。
+
+    **无 PCB 包时拒绝写盘**（fail-safe，不 fail-open）：``REP_CACHE_FILE`` 位于
+    ``data/quality/`` 且**入库**，若无包则 ``rep_public_id`` 原样返回名字，
+    于是明文源名会被写进已发布产物——这正是 R233 要消除的泄漏。缓存只是
+    优化，跳过写入只损失下次查询速度，不损正确性，故宁可跳过。
+    """
+    idder = REP_PUBLIC_ID
+    target = _rep_cache_write_path()
+    if idder is None:
+        # 无包 = 无法去身份。落点由 ``_rep_cache_write_path`` 决定：默认路径
+        # 会被挪到不入库的 ``.cache/``，以免明文源名进已发布 data/quality/。
+        # 早先「直接跳过写盘」会把缓存机制整个关掉、连带 8 个缓存用例红——
+        # 教训：fail-safe 要**换落点**，不是停功能。
+        write_json(target, keyed_json(cache))
+        return
+    out = {}
+    for ip, e in cache.items():
+        if not isinstance(e, dict):
+            out[ip] = e
+            continue
+        out[ip] = {(rep_public_id(k) or k): v for k, v in e.items()}
+    write_json(target, keyed_json(out))
 
 
 ABUSE_STALE_TTL = 86400  # abuse.json 回退最大年龄（秒）；<=0 表示不限制

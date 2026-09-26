@@ -965,6 +965,14 @@ class TestWriteSourceAttribution(unittest.TestCase):
         self.assertEqual(data["sources"]["3.3.3.3:443#ALL"], same)
 
 
+def dl_sources_label_of_id(pid):
+    """经 checks_bundle 取 PCB 的 id→标签还原（不硬编码 salt/实现）。"""
+    import sys as _s
+    _s.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import checks_bundle as cb
+    return cb.load_plugin("dl_sources").source_label_of_id(pid)
+
+
 class TestProxyMirrorSources(unittest.TestCase):
     def test_mirror_sources_parse_ipport_lines(self):
         by_port = dp.extract_plain(b"1.2.3.4:8080\n5.6.7.8:443\n")
@@ -1108,9 +1116,18 @@ class TestProxyMirrorSources(unittest.TestCase):
         private_urls = set(dp.SOURCE_LABELS) | set(dp.SOURCE_ORIGIN_MAP)
         for u in urls:
             if u in private_urls:
+                _oid = dp.source_origin(u)
+                # R233：token 格式由「12 位 hex」改为「base64url 密文体」
+                # （可逆编解码，见 pcb/plugins/opaque.py）。断言强度提升：
+                # 除了格式，还要求它**能真实还原出非空标签**——证明这确实
+                # 是密封 token，而非恰好带前缀的明文。
                 self.assertRegex(
-                    dp.source_origin(u), _re.compile(r"^dsrc_[0-9a-f]{12}$"),
+                    _oid, _re.compile(r"^dsrc_[A-Za-z0-9_-]+$"),
                     "私有表来源回落成明文标签")
+                _back = dl_sources_label_of_id(_oid)
+                self.assertTrue(
+                    _back and not _re.match(r"^dsrc_", _back),
+                    f"origin {_oid!r} 无法还原为标签——不是有效的密封 token")
 
     def test_same_origin_urls_merge_into_one_stats_row(self):
         if not dp.EXTRA_SOURCES:

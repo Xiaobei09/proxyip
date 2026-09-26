@@ -244,7 +244,8 @@ class TestBuildIpinfo(unittest.TestCase):
         self.assertEqual(info["ip_type"], "DC")
         self.assertEqual(info["risk"], "low")
         self.assertEqual(info["reputation"], 90)
-        self.assertEqual(info["reputation_source"], "ip-api")
+        # R233：来源身份经 rep_public_id 去身份，期望值由同一映射推导。
+        self.assertEqual(info["reputation_source"], qr.rep_public_id("ip-api"))
         self.assertTrue(info["geo_checked"])
 
     def test_reputation_netcoffee_wins(self):
@@ -1706,8 +1707,11 @@ class TestReputation(unittest.TestCase):
         rep = qc.build_reputation_map(results, risk_data, self.W)
         self.assertNotIn("1.2.3.4:443#US", rep)
         self.assertEqual(rep["5.6.7.8:8443#JP"]["score"], 70)
-        self.assertEqual(rep["5.6.7.8:8443#JP"]["source"], "netcoffee")
-        self.assertEqual(rep["5.6.7.8:8443#JP"]["sources"], ["netcoffee"])
+        # R233：来源身份落盘前经 rep_public_id 去身份，期望值由同一映射推导
+        # （不在测试里再写死一份字面量，也就不会随契约漂移而失效）。
+        _nc = qr.rep_public_id("netcoffee")
+        self.assertEqual(rep["5.6.7.8:8443#JP"]["source"], _nc)
+        self.assertEqual(rep["5.6.7.8:8443#JP"]["sources"], [_nc])
 
     def test_deep_speed_bonus(self):
         if not qr.STATIC_LIST_SCORES or not qr.REPUTATION_WEIGHTS:
@@ -2612,8 +2616,17 @@ class TestReputationCache(unittest.TestCase):
         self.assertEqual(len(calls), 1)  # 第二轮命中负缓存，未重查
         self.assertNotIn("netcoffee", first.get("1.1.1.1", {}))
         self.assertNotIn("netcoffee", second.get("1.1.1.1", {}))
+        # R233：落盘键是不透明 rsrc_*（真名不得进已发布产物），故此处按
+        # rep_public_id 推导键名断言——同时顺带证明落盘确实不含真名。
+        # 该契约**依赖 PCB 包**（无包时 save_rep_cache 拒绝写盘，见其 docstring），
+        # 故无包时跳过本用例而非降低断言。
+        if qr.REP_PUBLIC_ID is None:
+            self.skipTest("needs PCB leak_guard bundle（去身份契约依赖它）")
         cache = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))["proxies"]
-        self.assertEqual(cache["1.1.1.1"]["netcoffee"]["data"], {})
+        _nc_key = qr.rep_public_id("netcoffee")
+        self.assertEqual(cache["1.1.1.1"][_nc_key]["data"], {})
+        self.assertNotIn("netcoffee", cache["1.1.1.1"],
+                         "落盘缓存键不得是源真名")
 
     def test_negative_cache_shorter_ttl_than_positive(self):
         # 负缓存 TTL 上限 NEG_CACHE_TTL(<正 TTL)：2 天前的负条目应重查，
@@ -2731,9 +2744,11 @@ class TestReputationCache(unittest.TestCase):
             {"2.2.2.2": 2, "3.3.3.3": 1},
         )
         # 写回 ts：只有成功刷新的 3.3.3.3 被更新；失败者保留旧 ts（下轮再试）
+        # R233：落盘键是不透明 rsrc_*（真名不得进已发布产物），按推导键断言。
         cache = json.loads(qr.REP_CACHE_FILE.read_text(encoding="utf-8"))["proxies"]
-        self.assertGreaterEqual(cache["3.3.3.3"]["netcoffee"]["ts"], now)
-        self.assertEqual(cache["2.2.2.2"]["netcoffee"]["ts"], now - 2 * ttl)
+        _nck = qr.rep_public_id("netcoffee")
+        self.assertGreaterEqual(cache["3.3.3.3"][_nck]["ts"], now)
+        self.assertEqual(cache["2.2.2.2"][_nck]["ts"], now - 2 * ttl)
 
     def test_no_rep_cache_flag(self):
         calls = []
