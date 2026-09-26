@@ -1266,10 +1266,19 @@ def list_cn_sources() -> int:
         print("list-cn: PCB bundle missing (see docs/scripts.md 代号表)",
               file=sys.stderr)
         return 2
-    print("code family limit concurrency")
+    # R239：多印一列不透明 id —— ``--cn-limit`` 改用它之后，这是操作者
+    # 唯一的发现路径（与 --list-reputation-providers 同模式）。
+    pid = getattr(reg, "public_id", None)
+    print("code family limit concurrency public_id")
     for e in reg.SOURCES:
+        pub = ""
+        if callable(pid):
+            try:
+                pub = pid(e["code"]) or ""
+            except Exception:
+                pub = ""
         print(f"{e['code']} {e['family']} "
-              f"{e['limit_default']} {e['concurrency']}")
+              f"{e['limit_default']} {e['concurrency']} {pub}")
     return 0
 
 
@@ -1300,6 +1309,36 @@ def _add_registry_cli_options(parser) -> int:
     return len(specs)
 
 
+def cn_code_of(spec: str) -> str:
+    """把 ``--cn-limit`` 的键归一为**注册表代号**：接受代号或不透明 id。
+
+    R239：批量通道调参表（``.github/workflows/china-check.yml`` 里 20 多行
+    ``--cn-limit CODE=N``）此前必须写代号，而代号本身是要清除的泄漏面。改用
+    不透明 id 后，操作者需要一个发现路径——``--list-cn`` 已多印一列 id。
+
+    **两种形态都接受**（裸代号与 ``src_*`` id）：CI 侧的历史配置尚未迁移，
+    若只认 id 会让存量调参项全部失效并被静默丢弃。故先归一再入表。
+
+    无 registry / 未知值 → 原样返回（小写化），交由既有的
+    ``warn_unknown_cn_codes`` 在注册表上下文里提示。
+    """
+    raw = (spec or "").strip()
+    if not raw:
+        return ""
+    reg = _sources_registry()
+    if reg is None:
+        return raw.lower()
+    unseal = getattr(reg, "code_of_public_id", None)
+    # R239：id 是 base64url 密文体，**大小写敏感**——必须先按原样试解封。
+    # （首版先 ``.lower()`` 再解封，把 ``src_SnVS…`` 变成 ``src_snvs…``，
+    #  密文失配 → 静默回落成「未知代号」，调参项会被丢掉。）
+    if callable(unseal) and raw.startswith("src_"):
+        got = unseal(raw)
+        if got:
+            return got
+    return raw.lower()
+
+
 def parse_cn_kv(pairs):
     """解析 ``--cn-limit CODE=N``… 为 ``{code: N}``（非法项丢弃，code 小写化）。
 
@@ -1313,7 +1352,10 @@ def parse_cn_kv(pairs):
             print(f"warn: ignoring malformed CODE=N {item!r}", file=sys.stderr)
             continue
         code, _, val = item.partition("=")
-        code, val = code.strip().lower(), val.strip()
+        # **传原值**：不透明 id 是 base64url 密文体、大小写敏感，先 ``.lower()``
+        # 会让解封失配 → 静默回落成「未知代号」→ 调参项被丢弃。归一与
+        # 小写化都在 ``cn_code_of`` 内部按正确顺序做。
+        code, val = cn_code_of(code.strip()), val.strip()
         if not code:
             print(f"warn: ignoring malformed CODE=N {item!r}", file=sys.stderr)
             continue

@@ -639,7 +639,11 @@ class TestCommittedChinaJsonSourceKeys(unittest.TestCase):
     """
 
     #: 含非代号 ``sources``/``basis`` 键的条目数上限（棘轮，只降不升）。
-    LEGACY_ENTRY_BASELINE = 4657
+    # R240：基线 4657 → **0**。R225 的 legacy 源键净化（``
+    # _drop_legacy_source_keys``）+ R237 的 ``_known_source_keys`` 双向白名单
+    # 共同作用，已发布 china.json 的**非代号源键条目数归零**。
+    # 归零后本门禁从「棘轮」升级为**绝对断言**（不得再出现非代号源键）。
+    LEGACY_ENTRY_BASELINE = 0
 
     ROOT = Path(__file__).resolve().parent.parent
 
@@ -732,7 +736,9 @@ class TestCommittedChinaJsonSourceKeys(unittest.TestCase):
                 if isinstance(err, str) and (segments(err) & roots):
                     bad.append(f"{key}/{code}")
         # 存量待重跑清除：方向感知棘轮（高于=新增泄漏；低于=该下调基线）
-        base = 2018
+        # R240：基线 2018 → **130**。R225 净化 + R232 把 PCB 插件里硬编码的
+        # 真名 error 消息去身份（``no batch nodes`` 等）共同作用。
+        base = 130
         if len(bad) > base:
             self.fail(
                 f"sources[*].error 含来源真名的条目数 {len(bad)} > 棘轮基线 "

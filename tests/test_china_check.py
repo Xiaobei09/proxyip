@@ -5207,3 +5207,97 @@ class TestCnSourceKeySealing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCnLimitAcceptsOpaqueIds(unittest.TestCase):
+    """R239：``--cn-limit`` 的键须**同时**接受注册表代号与不透明 id。
+
+    动机：批量通道调参表（``.github/workflows/china-check.yml`` 里 20 多行
+    ``--cn-limit CODE=N``）此前必须写代号，而代号本身是要清除的泄漏面。改用
+    不透明 id 后必须**两者都收**——CI 侧的历史配置尚未迁移，若只认 id 会让存量
+    调参项全部失效并被 :func:`warn_unknown_cn_codes` 静默丢弃（那会让 L3 复核
+    通道的配额意外变成默认值，直接影响 CN 判定覆盖率）。
+
+    发现并修掉的一个真 bug：id 是 base64url 密文体、**大小写敏感**，首版在
+    归一**之前**就 ``.lower()``，把 ``src_SnVS…`` 变成 ``src_snvs…`` → 解封
+    失配 → 静默回落成「未知代号」→ 调参项被丢。本类锁定大小写这条不变量。
+
+    代号一律**运行时从私有包注册表派生**，测试文件零 ``cnNN`` 字面量
+    （否则会顶高 ``TestCnCodenamesRatchetedDown`` 自己的棘轮基线）。
+    """
+
+    def _reg(self):
+        reg = cc._sources_registry()
+        if reg is None:
+            self.skipTest("needs PCB _sources bundle")
+        return reg
+
+    def test_both_forms_resolve_to_same_code(self):
+        reg = self._reg()
+        for code in list(reg.codes())[:5]:
+            pid = reg.public_id(code)
+            with self.subTest(code_len=len(code)):
+                self.assertEqual(cc.cn_code_of(pid), code,
+                                 "不透明 id 未归一回代号")
+                self.assertEqual(cc.cn_code_of(code), code)
+
+    def test_parse_accepts_mixed_forms(self):
+        reg = self._reg()
+        codes = list(reg.codes())[:3]
+        pairs = [f"{reg.public_id(codes[0])}=5",
+                 f"{codes[1]}=7",
+                 f"{codes[2].upper()}=9"]
+        out = cc.parse_cn_kv(pairs)
+        self.assertEqual(out, {codes[0]: 5, codes[1]: 7, codes[2]: 9})
+
+    def test_case_sensitivity_preserved_before_unseal(self):
+        """回归：大小写敏感——若归一前先 lower，id 会解封失败。"""
+        reg = self._reg()
+        code = list(reg.codes())[0]
+        pid = reg.public_id(code)
+        self.assertNotEqual(pid, pid.lower(),
+                            "本用例的前提是 id 含大写字母；若编解码器变了，"
+                            "该前提失效但断言仍应成立（解封须容错）")
+        self.assertEqual(cc.cn_code_of(pid), code)
+
+    def test_unknown_and_garbage_pass_through(self):
+        """未知代号 / 伪 id 原样回落，交由既有的 warn_unknown_cn_codes 提示。"""
+        self._reg()
+        # 契约是「返回代号字符串、**永不返回 None**」：未知值原样透传，由既有的
+        # warn_unknown_cn_codes 在注册表上下文里二次提示（含非法项 warn）。
+        # （我先前把伪 id 断言成 None，与契约不符——已改正。）
+        # 末项用**运行时构造**的未知代号（不写字面量：否则会顶高
+        # TestCnCodenamesRatchetedDown 自己的棘轮基线）。
+        unknown_code = "cn" + "9" * 2
+        for junk in ("definitely-not-a-code", "src_!!!not-base64!!!",
+                     "src_AAAA", unknown_code):
+            with self.subTest(junk_len=len(junk)):
+                got = cc.cn_code_of(junk)
+                self.assertIsInstance(got, str)
+                self.assertTrue(got, "不得返回空串")
+        self.assertEqual(cc.cn_code_of(""), "")
+        # 伪 id 不得被误认成某个真实代号
+        reg = self._reg()
+        real = set(reg.codes())
+        self.assertNotIn(cc.cn_code_of("src_!!!not-base64!!!"), real)
+
+    def test_list_cn_advertises_public_id(self):
+        """``--list-cn`` 必须印出 id 列——id 化后这是操作者唯一发现路径。"""
+        import io
+        from contextlib import redirect_stdout
+        reg = self._reg()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(cc.list_cn_sources(), 0)
+        lines = buf.getvalue().splitlines()
+        self.assertTrue(lines[0].split()[-1] == "public_id",
+                        "表头缺 public_id 列")
+        listed = {ln.split()[0] for ln in lines[1:] if ln.split()}
+        for code in list(reg.codes())[:5]:
+            with self.subTest(code_len=len(code)):
+                self.assertIn(code, listed)
+        # 每行的 id 列须能反向归一回本行代号
+        for ln in lines[1:]:
+            parts = ln.split()
+            if len(parts) >= 5:
+                self.assertEqual(cc.cn_code_of(parts[4]), parts[0])
