@@ -239,6 +239,101 @@ class TestTrueNameForwardLeak(unittest.TestCase):
         self.assertIsNone(legacy.search(f"class Test{probe}Thing:"))
 
 
+@unittest.skipIf(_GUARD is None, "PCB bundle 缺省，模式清单不可用")
+class TestDownloadVendorNamesAbsent(unittest.TestCase):
+    """R230：下载来源**厂商名**不得出现在公开树（安全合规 / 私有源隔离）。
+
+    事故链：R227 查出已发布产物以厂商短标签为键 → R229 把键空间换成不透明
+    ``dsrc_*`` id；但公开侧的**注释与 docstring** 同样点名厂商（实测 99 处
+    跨 9 文件）——键空间改了、散文没改，泄漏照旧。R227 当时**刻意没加**门禁，
+    理由是黑名单判据不可靠（PCB 三张表互不覆盖，实测漏 6/13 个键，会给假
+    信心）。本轮补上那个**可靠判据**：厂商集合由私有包
+    ``leak_guard.download_vendor_tokens()`` 从三张表权威派生，公开树零字面。
+
+    存量（测试数据与功能性契约名）以**计数棘轮**表达：只许下降，不许上升。
+    方向感知双向断言：高于基线 = 出现新增泄漏；低于基线 = 该下调基线。
+    """
+
+    #: 各文件允许的厂商名命中行数上限（棘轮，只降不升）。
+    BASELINES = {
+        "tests/test_quality.py": 27,
+        "scripts/quality_reputation.py": 19,
+        "tests/test_download.py": 14,
+        "tests/test_validate.py": 9,
+        "docs/data-spec.md": 3,
+        "docs/scripts.md": 3,
+        "docs/logic.md": 2,
+        "scripts/validate_proxies.py": 1,
+    }
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    @staticmethod
+    def _tokens():
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "scripts"))
+        import checks_bundle as cb
+        try:
+            return {t.lower() for t in cb.load_plugin("leak_guard")
+                    .download_vendor_tokens()}
+        except Exception:
+            return None
+
+    def _targets(self):
+        out = []
+        for d in ("scripts", "tests"):
+            out += sorted((self.ROOT / d).glob("*.py"))
+        out += sorted((self.ROOT / "docs").glob("*.md"))
+        out += [self.ROOT / "README.md"]
+        return [f for f in out if f.exists()]
+
+    def test_download_vendor_names_absent_or_ratcheted_down(self):
+        tokens = self._tokens()
+        if tokens is None:
+            self.skipTest("私有 leak_guard 不可得：无法派生厂商集，跳过（fail-open）")
+        pats = [re.compile(r"(?<![A-Za-z0-9])" + re.escape(t) +
+                           r"(?![A-Za-z0-9])", re.IGNORECASE)
+                for t in sorted(tokens)]
+        counts = {}
+        for f in self._targets():
+            rel = f.relative_to(self.ROOT).as_posix()
+            n = sum(1 for line in f.read_text(encoding="utf-8").splitlines()
+                    if any(p.search(line) for p in pats))
+            if n:
+                counts[rel] = n
+        base = self.BASELINES
+        for rel, n in sorted(counts.items()):
+            with self.subTest(file=rel):
+                if n > base.get(rel, 0):
+                    self.fail(
+                        f"{rel}：厂商名命中 {n} 行 > 棘轮基线 "
+                        f"{base.get(rel, 0)}——**出现新增泄漏**。键空间已换"
+                        "不透明 id，注释/docstring 里的厂商点名必须一并去身份")
+        for rel, b in base.items():
+            if counts.get(rel, 0) < b:
+                with self.subTest(file=rel):
+                    self.fail(
+                        f"{rel}：厂商名命中降至 {counts.get(rel, 0)}"
+                        f"（基线 {b}）——**该下调 BASELINES**")
+
+    def test_baselines_not_raised(self):
+        floor = {
+            "tests/test_quality.py": 27,
+            "scripts/quality_reputation.py": 19,
+            "tests/test_download.py": 14,
+            "tests/test_validate.py": 9,
+            "docs/data-spec.md": 3,
+            "docs/scripts.md": 3,
+            "docs/logic.md": 2,
+            "scripts/validate_proxies.py": 1,
+        }
+        for rel, b in self.BASELINES.items():
+            with self.subTest(file=rel):
+                self.assertLessEqual(b, floor[rel],
+                                     f"{rel} 基线只允许下降")
+
+
 class TestDocsLeakGuard(unittest.TestCase):
     def test_docs_source_endpoints_absent(self):
         if _GUARD is None:

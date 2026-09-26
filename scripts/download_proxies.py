@@ -109,9 +109,9 @@ SMALL_SETS: dict[str, list[str]] = {
 #   plain —— ``ip:port(#note)?`` 行（note 可为国家码或中文名）
 #   ip    —— 裸 ``ip(#note)?`` 行（无端口，统一按 DEFAULT_EXTRA_PORT）
 #   csv   —— ``IP,port,区域,延迟`` 表（区域为机场码或国家码）
-#   b64ip —— base64 解码后按裸 IP 解析（IP-OPT-3 起用于 LeilaoMi base64.txt）
-#   colocsv —— ``IP,Colo,Region`` 追踪榜（Colo 为 IATA 机场码，IP-OPT-7 起用于 FarelRA ips.csv）
-#   dccsv —— ``IP,端口,…,数据中心,…`` 实测榜（数据中心为 IATA 机场码，IP-OPT-9 起用于 cmliu addressescsv.csv）
+#   b64ip —— base64 解码后按裸 IP 解析（IP-OPT-3 起用于某来源的 base64 清单）
+#   colocsv —— ``IP,Colo,Region`` 追踪榜（Colo 为 IATA 机场码，IP-OPT-7 起用于某来源的 ips.csv）
+#   dccsv —— ``IP,端口,…,数据中心,…`` 实测榜（数据中心为 IATA 机场码，IP-OPT-9 起用于某来源的 addressescsv.csv）
 #   json  —— ``all.json`` 格式镜像（``{"data":[{"ip","port","meta"}]}``，
 #            缺失国家字段的条目归入 ALL；容忍畸形载荷）
 #
@@ -573,7 +573,7 @@ def extract_ipcsv(content, port: str = DEFAULT_EXTRA_PORT) -> dict:
     """Parse CSV rows whose first column is a bare IP (``ip,...[,CC]``).
 
     表头/坏行跳过；末列为两位字母国家码时作备注归位，否则归 ``ALL``
-    （IP-05：ymyuuu proxy.csv 110 行，IP 全有效、国家码/速度列全空）。
+    （IP-05：某来源的 proxy.csv 110 行，IP 全有效、国家码/速度列全空）。
     """
     by_port: dict[str, dict[str, list[str]]] = defaultdict(dict)
     text = _decode(content).lstrip("\ufeff")
@@ -618,7 +618,7 @@ def extract_bare_ips(content, port: str = DEFAULT_EXTRA_PORT) -> dict:
 
 
 def extract_b64_bare_ips(content, port: str = DEFAULT_EXTRA_PORT) -> dict:
-    """Base64 解码后按裸 IP 解析（IP-OPT-3：LeilaoMi ``base64.txt``）。
+    """Base64 解码后按裸 IP 解析（IP-OPT-3：某来源的 ``base64.txt``）。
 
     空/非法 base64 返回空/Raise 由调用方按源失败跳过（与其它分支一致，
     非 fatal）。解码后不是裸 IP 的行由 ``extract_bare_ips`` 自然丢弃。
@@ -654,7 +654,7 @@ def extract_csv_ports(content) -> dict:
 
 
 def extract_colocsv(content, port: str = DEFAULT_EXTRA_PORT) -> dict:
-    """Parse ``IP,Colo,Region`` tracker 行（IP-OPT-7：FarelRA ``ips.csv``）。
+    """Parse ``IP,Colo,Region`` tracker 行（IP-OPT-7：某来源的 ``ips.csv``）。
 
     无端口列，统一归 ``port`` 桶；国家由 Colo（IATA 机场码，经
     ``AIRPORT_COUNTRY_MAP``）派生，未命中归 ``ALL``；首行表头与坏行丢弃。
@@ -678,7 +678,7 @@ def extract_colocsv(content, port: str = DEFAULT_EXTRA_PORT) -> dict:
 
 
 def extract_dccsv(content) -> dict:
-    """Parse ``IP,端口,…,数据中心,…`` 实测榜（IP-OPT-9：cmliu ``addressescsv.csv``）。
+    """Parse ``IP,端口,…,数据中心,…`` 实测榜（IP-OPT-9：某来源的 ``addressescsv.csv``）。
 
     取第 1 列 IP、第 2 列端口；国家由第 5 列数据中心（IATA 机场码，经
     ``AIRPORT_COUNTRY_MAP``）派生，未命中归 ``ALL``；中文表头与坏行
@@ -706,8 +706,8 @@ def extract_dccsv(content) -> dict:
 def extract_annotated_ports(content) -> dict:
     """Parse ``IP:port#CC [注解]`` 榜单行（CC 后跟空格+方括号说明）。
 
-    典型来源：LancelotRar/best-cf-ips ``IP:port#CC 🇯🇵``、svip-s
-    ``IP:port#HK [优选高速 56ms]`` —— 现有 PLAIN_LINE_RE 会被尾部的
+    典型形态：``IP:port#CC 🇯🇵``、``IP:port#HK [优选高速 56ms]``——
+    现有 PLAIN_LINE_RE 会被尾部的
     ``[注解]``/旗标整行拒绝，此解析器只取 ``ip:port + 2 字母 CC``。
     """
     by_port: dict[str, dict[str, list[str]]] = defaultdict(dict)
@@ -1050,8 +1050,8 @@ def write_source_attribution(
     :data:`IP_SOURCES_FILE`.
 
     Source labels: ``"main"`` for the primary upstream, or the extra-source
-    origin (e.g. ``"wanwu"``, ``"wwuyi"``; single-file origins keep their
-    filename stem, e.g. ``"fdip"``); generic ``all.json``-style
+    origin (an opaque ``dsrc_`` id; single-file origins keep their
+    filename stem); generic ``all.json``-style
     mirrors are host-disambiguated (e.g. ``mirror-a/all``).  IPs appearing
     in multiple origins are labelled ``"multi"``.
     """
