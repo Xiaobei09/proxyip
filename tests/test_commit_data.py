@@ -470,5 +470,49 @@ class TestWorkflowConcurrency(unittest.TestCase):
                     f"{wf.name} cancel-in-progress 应为 {want}")
 
 
+class TestPrivateBundlePinConsistency(unittest.TestCase):
+    """R219：私有包 pin 一致性锁（跨工作流数据流 / CI 与提交合规）。
+
+    事故实录：R218 公开侧改用中性别名（``CODE_SLOT_*``）与分段扫描，
+    私有包同批交付新契约，但三个 workflow 的 pin 仍停在旧提交 →
+    ``update-proxies`` 整 job 红（``cn42_check`` unexpectedly None ＋
+    真名基线 7 处误判），而**只跑公开测试的 5 个 workflow 全绿**，
+    红绿信号互相矛盾，排查成本全在「哪个 pin 是新的」。
+
+    本锁把「pin 是否被整体推进」变成可测不变量：凡检出私有包的
+    workflow 必须 pin 同一 SHA。部分推进（只改一个）即刻变红，
+    不必等 CI 用一次 job 时长来报告。
+    """
+
+    PCB_REPO = "Xiaobei09/PCB"
+
+    def _pins(self):
+        import re
+        pins = {}
+        for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            text = wf.read_text(encoding="utf-8")
+            if self.PCB_REPO not in text:
+                continue
+            m = re.search(r"repository:\s*" + re.escape(self.PCB_REPO)
+                          + r"\s*\n\s*ref:\s*([0-9a-f]{40})", text)
+            self.assertIsNotNone(
+                m, f"{wf.name} 检出私有包但 ref 不是 40 位 SHA（须 pin 不用分支名）")
+            pins[wf.name] = m.group(1)
+        return pins
+
+    def test_all_bundle_workflows_pin_same_sha(self):
+        pins = self._pins()
+        self.assertTrue(pins, "无任何 workflow 检出私有包，扫描器失效")
+        uniq = set(pins.values())
+        self.assertEqual(
+            len(uniq), 1,
+            f"私有包 pin 不一致（部分推进）→ {pins}")
+
+    def test_pin_is_lowercase_hex40(self):
+        for name, sha in self._pins().items():
+            with self.subTest(workflow=name):
+                self.assertRegex(sha, r"^[0-9a-f]{40}$")
+
+
 if __name__ == "__main__":
     unittest.main()
