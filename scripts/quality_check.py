@@ -716,20 +716,22 @@ def parse_reputation_sources(
 ) -> tuple[list[str], list[str]]:
     """Resolve ``--reputation-sources``/``--reputation-provider``.
 
-    Returns ``(sources, unknown)``。``provider`` 为 ``none``/``netcoffee``/
-    ``ip-api`` 时直接给出对应源（``unknown`` 恒空）；否则把 ``value`` 按
-    逗号拆分，仅保留 ``allowed``（默认 ``REPUTATION_WEIGHTS``）内的知名，
-    未知/无效项放入 ``unknown`` 由调用方告警——避免 typo 被静默丢弃后
-    整组回退成全量默认源的误配置。合法源为空时回退 ``default``。
+    Returns ``(sources, unknown)``。``provider`` 为哨兵 ``none`` 时不查源；
+    为**不透明 provider id** 时按 PCB 的 ``PROVIDER_GROUPS`` 给出对应源
+    （``unknown`` 恒空）——**具名 provider 的语义已迁入私有包**，公开树
+    因此无需指名任何源名（R234；合法 id 见 ``--list-rep-sources``）。
+    ``multi``（哨兵）与其余情形把 ``value`` 按逗号拆分，仅保留 ``allowed``
+    （默认 ``REPUTATION_WEIGHTS``）内的知名，未知/无效项放入 ``unknown``
+    由调用方告警——避免 typo 被静默丢弃后整组回退成全量默认源的误配置。
+    合法源为空时回退 ``default``。
     """
     allowed = allowed if allowed is not None else REPUTATION_WEIGHTS
     default = default if default is not None else list(DEFAULT_REP_SOURCES)
     if provider == "none":
         return [], []
-    if provider == "netcoffee":
-        return ["netcoffee", "ip-api"], []
-    if provider == "ip-api":
-        return ["ip-api"], []
+    group = rep_provider_group(provider)
+    if group is not None:
+        return list(group), []
     raw = [s.strip() for s in (value or "").split(",") if s.strip()]
     unknown = [s for s in raw if s not in allowed]
     valid = [s for s in raw if s in allowed]
@@ -773,11 +775,36 @@ def list_rep_sources() -> int:
     """`--list-rep-sources`：打印全部信誉源与权重/默认成员（R142 可发现性）。
 
     动态读权重表（经 PCB 回绑，无包回退内置静态值）；无网络无写盘。
+
+    R234：provider 的发现路径是**独立**的 ``--list-reputation-providers``，
+    刻意不混进本命令——R142 立的「输出 == 权重表 + 表头」契约不应被破坏。
     """
     defaults = set(DEFAULT_REP_SOURCES)
     print("name weight default")
     for name, weight in REPUTATION_WEIGHTS.items():
         print(f"{name} {weight} {'yes' if name in defaults else 'no'}")
+    return 0
+
+
+def list_reputation_providers() -> int:
+    """`--list-reputation-providers`：打印 ``--reputation-provider`` 合法值。
+
+    R234：choices 改成不透明 id 后，这是它们的**唯一**发现路径。
+
+    独立 flag 而非并入 ``--list-rep-sources``：后者有 R142 立的输出契约
+    （输出 == 权重表全量 + 一行表头），把 provider 区块混进去会破坏该契约。
+    单一职责、契约各自完整。
+
+    打印 id 与**源数量**（不打印源名——那正是要消除的泄漏）；语义在 PCB
+    ``PROVIDER_GROUPS``。无网络无写盘。
+    """
+    print("# --reputation-provider 合法值")
+    print("# id kind")
+    for prov in rep_provider_choices():
+        group = rep_provider_group(prov)
+        kind = ("sentinel" if group is None
+                else f"provider sources={len(group)}")
+        print(f"{prov} {kind}")
     return 0
 
 
@@ -793,10 +820,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--reputation-provider",
-        choices=("multi", "netcoffee", "ip-api", "none"),
+        # R234：choices 不再硬编码源名——具名策略一律用不透明 id
+        # （合法值见 --list-rep-sources；语义由 PCB PROVIDER_GROUPS 定义）。
+        choices=rep_provider_choices(),
         default="multi",
-        help="Reputation strategy: multi (weighted merge of --reputation-sources), "
-        "netcoffee (legacy net.coffee + ip-api), ip-api (flags only), or none",
+        help="Reputation strategy: multi (weighted merge of "
+        "--reputation-sources), none, or an opaque provider id "
+        "(list them with --list-rep-sources)",
     )
     parser.add_argument(
         "--reputation-sources",
@@ -815,6 +845,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--list-rep-sources", action="store_true",
         help="列出全部信誉源与权重/默认成员（动态读权重表，无网络无写盘）",
+    )
+    parser.add_argument(
+        "--list-reputation-providers", action="store_true",
+        help="列出 --reputation-provider 的合法值（哨兵 + 不透明 id；"
+        "R234 起具名策略只用不透明 id，语义由私有包 PROVIDER_GROUPS 定义）",
     )
     parser.add_argument(
         "--rep-cache-ttl",
@@ -850,6 +885,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.list_rep_sources:
         return list_rep_sources()
+    if args.list_reputation_providers:
+        return list_reputation_providers()
     import os
 
     args.abuse_key = ""
@@ -885,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
             "Unknown reputation source %r dropped; check --reputation-sources",
             name,
         )
-    if args.reputation_provider not in ("none", "netcoffee", "ip-api") and \
+    if args.reputation_provider == "multi" and \
        unknown and args.reputation_sources == list(DEFAULT_REP_SOURCES):
         logging.warning(
             "No valid reputation source survived; fell back to all defaults "

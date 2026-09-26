@@ -19,7 +19,7 @@
 
 #### CF 反代补充来源
 
-除主源外，默认还会拉取一批 **自称 Cloudflare 第三方反代 proxyip 的来源**（非官方 CF 段）并合并。来源清单（订阅源/文件路径/接入演进）已迁 PCB，公开侧经 `--list-extra-sources` 取 origin 表（无包时为空、fail-open）。**同源合并**：多个订阅文件在储存层只记 12 个来源——`wentao`/`list`/`ymyuuu`/`leilao_cfproxy`/`proxyip`/`wwuyi`/`wanwu`/`svip_cfip`/`afr`/`wangallen`/`farel`/`cmliu`；抓取仍按文件并行，`source_stats`/归属/健康历史以来源为键（同站重复不算交叉佐证）。解析方式分九种：`plain`（`ip:port#国家`/`ip:port#中文`）、`ip`（裸 IP，统一按 443 端口）、`ipcsv`（CSV 首列裸 IP，末列两位字母国家码作备注否则归 ALL）、`csv`（`IP,端口,地区,延迟`，地区为机场码或国家码）、`b64ip`（base64 解码后按裸 IP 解析）、`colocsv`（`IP,Colo,Region` 追踪榜按 Colo 派生国家）、`dccsv`（`IP,端口,…,数据中心` 实测榜按数据中心派生国家）、`json`（`all.json` 格式镜像，缺失国家字段的条目归入 `ALL`，畸形载荷容忍）、`ipnote`（`ip:port#CC [注解]` 榜单行，CC 为两位字母，尾部方括号注解或旗标一并剥离）。具体来源归属/键与订阅文件映射见 `--list-extra-sources` 输出。
+除主源外，默认还会拉取一批**自称 Cloudflare 第三方反代 proxyip 的来源**（非官方 CF 段）并合并。来源清单（订阅源/文件路径/接入演进）已迁 PCB，公开侧经 `--list-extra-sources` 取 origin 表（无包时为空、fail-open）。**同源合并**：多个订阅文件在储存层只记若干个来源（**不透明 origin**，清单见 `--list-extra-sources`；来源真名与 URL 仅存于私有包）
 
 > **池政策红线**：`EXTRA_SOURCES` 只收录 **非 Cloudflare AS13335** 的第三方 CF 反代/proxyip 池，**官方 CF 段优选榜**一律不入池——否则 18k 池会瞬间膨胀到 10 万+，冲击全链路逐键作业的 CI 预算，且违背引擎设计意图。新增源须先采样核验 ASN 非 13335、端口 ∈ CF 边缘端口。**单源体积守卫**：`MAX_EXTRA_SOURCE_BYTES`（默认 4MB）超限的源整体跳过并告警，防任何未来源（或上游异常放大）拖垮标准抓取/解析开销。中文名与机场码经映射表归一为 ISO2（带速度地区的榜单注释先剥离速度前缀再提取地区，如 `222.32(MB/s)HK香港`→`HK`；`#ALL` 为「无国家」哨兵，不会被误判为国别）；仍无国家的条目经 `ip-api.com/batch` 尽力补齐（每批 100、失败保留 `#ALL`）。单个来源失败仅告警跳过，不影响整体运行。来源标签：`json` 镜像若为通用清单名（`all.json`/`all.zip` 等，多镜像会共用 `all` 这一名字），会自动以注册域前缀消歧（如 `mirror-a/all`、`mirror-b/all`），避免不同镜像在来源统计/逐 IP 归属/健康监控中互覆；其余来源保持文件名主干。
 
@@ -104,10 +104,11 @@
 |---|---|---|
 | `--source` | 输入代理列表 | `data/valid/all.txt` |
 | `--abuse-service` | 滥用分服务（none/abuseipdb/ipqs） | none |
-| `--reputation-provider` | 信誉策略（multi/netcoffee/ip-api/none） | multi |
+| `--reputation-provider` | 信誉策略：`multi`（加权合并 `--reputation-sources`）／`none`（不查）／**不透明 provider id**（R234：具名策略不再以源码名出现在本表，语义由私有包 `PROVIDER_GROUPS` 定义，合法 id 见 `--list-reputation-providers`） | multi |
 | `--reputation-sources` | multi 时启用的源（逗号分隔，有效源名见 `--list-rep-sources`，见下；默认全集见该命令输出标 `yes` 项）；**未知/拼错的源名打印警告并丢弃，杜绝 typo 静默变全量默认** | 见 `--list-rep-sources` |
 | `--reputation-weights` | 权重覆盖，如 `netcoffee:40,ncgy:20`；**未知源名/格式错误打印警告并丢弃**；有效源名见 `--list-rep-sources` | 见下 |
 | `--list-rep-sources` | 列出全部信誉源与权重/默认成员（R142，无网络无写盘） | 关 |
+| `--list-reputation-providers` | 列出 `--reputation-provider` 的合法值（哨兵 + 不透明 id，R234；**只印源数量不印源名**） | 关 |
 | `--rep-cache-ttl` | 信誉信号缓存有效期（秒） | 604800（7 天） |
 | `--no-rep-cache` | 禁用信誉信号缓存 | 关 |
 | `-t, --timeout` | 单代理超时（秒） | 6 |

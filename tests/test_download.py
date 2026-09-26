@@ -561,7 +561,7 @@ class TestNormalizeCountry(unittest.TestCase):
         self.assertEqual(dp.normalize_country("东京"), "ALL")
 
     def test_speed_prefixed_notes(self):
-        # Wwuyi123/CF-Proxyip 的 ``IP#速度(MB/s)地区`` 注释：以前全落 ALL，
+        # 某 CF 反代池的 ``IP#速度(MB/s)地区`` 注释：以前全落 ALL，
         # 现在应直接提取地区，减少 ip-api 往返。
         self.assertEqual(dp.normalize_country("256.85(MB/s)HK香港"), "HK")
         self.assertEqual(dp.normalize_country("222.32(MB/s)日本"), "JP")
@@ -988,7 +988,7 @@ class TestProxyMirrorSources(unittest.TestCase):
     def test_cf_country_scoped_and_leilao_sources_registered(self):
         if not dp.EXTRA_SOURCES:
             self.skipTest("needs PCB dl_sources bundle")
-        # IP-OPT-8：ipdb.api 三接口经 14 轮生产 unique 恒 0 + 与 ymyuuu 文件
+        # IP-OPT-8：ipdb.api 三接口经 14 轮生产 unique 恒 0 + 与某同源文件
         # 逐字节镜像确认，摘除（github raw 的 CN 镜像回退已覆盖可用性）。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         for u in (
@@ -997,13 +997,13 @@ class TestProxyMirrorSources(unittest.TestCase):
             "https://ipdb.api.030101.xyz/?type=bestproxy&country=true",
         ):
             self.assertNotIn(u, urls)
-        # LeilaoMi 精选池（非 CF ASN）默认启用以提升覆盖，且带可读标签。
+        # 某精选池（非 CF ASN）默认启用以提升覆盖，且带可读标签。
         leilao = [u for u in urls
                   if dp.source_label(u) == "leilao_cfproxy"]
         self.assertTrue(leilao)
 
     def test_ipcsv_first_column_bare_ips(self):
-        # IP-05：ymyuuu proxy.csv（首列裸 IP，其余为测速列）经 ipcsv 分支
+        # IP-05：某 proxy.csv（首列裸 IP，其余为测速列）经 ipcsv 分支
         # 提取；表头/坏行跳过；末列两位字母国家码作备注，否则归 ALL。
         by_port = dp.extract_ipcsv(
             b"IP \xe5\x9c\xb0\xe5\x9d\x80,\xe5\xb7\xb2\xe5\x8f\x91\xe9\x80\x81\n"
@@ -1091,8 +1091,8 @@ class TestProxyMirrorSources(unittest.TestCase):
     def test_five_cf_proxyip_sources_registered(self):
         if not dp.EXTRA_SOURCES:
             self.skipTest("needs PCB dl_sources bundle")
-        # IP-OPT-1 同源合并：Wwuyi123（4 文件）→ wwuyi，
-        # wanwushequ 地区榜（18 文件）→ wanwu；文件仍逐个抓取，
+        # IP-OPT-1 同源合并：某上游 4 个文件 → 单一 origin，
+        # 某地区榜 18 个文件 → 单一 origin；文件仍逐个抓取，
         # 储存只记一个来源。
         # R229：origin 现为不透明 id，且**不硬编码任何标签**。改为按
         # 「同源合并」这一结构不变量断言：每个 origin 恰好对应一个标签、
@@ -1154,7 +1154,7 @@ class TestProxyMirrorSources(unittest.TestCase):
         # R214 首增 byJoey/cfnew-ipdb（CF 官方 AS13335 边缘 10 万+）与
         # LancelotRar（同为 CF 官方段 top200）——与 EXTRA_SOURCES 政策
         # 「非 AS13335 / 排除官方 CF 段」冲突，R215 回退，代之以实测
-        # 非 AS13335 的 svip-s/cloudflare_ip 第三方反代池（ipnote 格式）。
+        # 非 AS13335 的第三方反代池（ipnote 格式）。
         urls = [u for _kind, u in dp.EXTRA_SOURCES]
         self.assertTrue(
             any(u.endswith("/best_ips.txt") for u in urls))

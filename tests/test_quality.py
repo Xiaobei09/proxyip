@@ -1427,10 +1427,30 @@ class TestReputation(unittest.TestCase):
         self.assertEqual(qc.parse_reputation_sources("")[0],
                          list(qc.DEFAULT_REP_SOURCES))
         self.assertEqual(qc.parse_reputation_sources("", "none")[0], [])
-        self.assertEqual(qc.parse_reputation_sources("", "netcoffee")[0],
-                         ["netcoffee", "ip-api"])
-        self.assertEqual(qc.parse_reputation_sources("", "ip-api")[0],
-                         ["ip-api"])
+        # R234：具名 provider 一律用不透明 id，语义在 PCB PROVIDER_GROUPS。
+        # 本用例**不指名任何 provider**（指名即泄漏，正是本轮要消除的），
+        # 改为遍历 choices 全量校验——覆盖面比逐个点名校验更广且零字面量。
+        provs = qr.rep_provider_choices()
+        self.assertEqual(set(qr.REP_PROVIDER_SENTINELS),
+                         {"multi", "none"})
+        named = [x for x in provs if x not in qr.REP_PROVIDER_SENTINELS]
+        self.assertTrue(named, "PCB 未登记任何具名 provider")
+        for pid in named:
+            with self.subTest(provider_len=len(pid)):
+                group = qr.rep_provider_group(pid)
+                self.assertTrue(group, f"{pid} 未解析出源组")
+                self.assertTrue(all(
+                    g in qr.REPUTATION_WEIGHTS for g in group),
+                    "provider 组的源必须都在权重表内")
+                self.assertEqual(
+                    qc.parse_reputation_sources("", pid)[0], list(group),
+                    "parse_reputation_sources 未按 provider id 给出该组")
+        # 非 id 输入（含任何明文名）都不得被当作具名 provider：按 multi
+        # 路径处理，回退默认全集。
+        for bogus in ("rsrc_not_a_real_id", "definitely-not-a-provider"):
+            self.assertIsNone(qr.rep_provider_group(bogus))
+            self.assertEqual(qc.parse_reputation_sources("", bogus)[0],
+                             list(qc.DEFAULT_REP_SOURCES))
 
     def test_parse_reputation_weights_unknown_warned(self):
         """R261：权重覆盖对未知源名/无冒号片段告警并丢弃，

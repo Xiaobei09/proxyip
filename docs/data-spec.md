@@ -242,7 +242,7 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 | `sources` | 确认存活的 API 源列表（至少 2 个） |
 | `alive` | 共识结果：`true`/`"uncertain"`（仅 1 源确认）/`false` |
 | `response_ms` | 最快 API 响应时间（毫秒） |
-| `colo` | Cloudflare datacenter IATA（仅 090227/cmliu 源） |
+| `colo` | Cloudflare datacenter IATA（仅部分 ext 源回报） |
 | `ipv4_ok` / `ipv6_ok` | IPv4/IPv6 出口可达 |
 | `dual_stack` | 双栈出口 |
 | `inferred_stack` | 推断出口栈类型：`ipv4`/`ipv6`/`dual` |

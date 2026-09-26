@@ -179,11 +179,13 @@ try:
     REPUTATION_WEIGHTS = _rep.REPUTATION_WEIGHTS
     DEFAULT_REP_SOURCES = _rep.DEFAULT_REP_SOURCES
     SOURCE_PACING = _rep.SOURCE_PACING
+    PROVIDER_GROUPS = _rep.PROVIDER_GROUPS
     _REP_SOURCES_BUNDLE = True
 except Exception:
     REPUTATION_WEIGHTS = {}
     DEFAULT_REP_SOURCES = ()
     SOURCE_PACING = {}
+    PROVIDER_GROUPS = {}
 
 # R233：信誉数据源名的**不透明公开 id** 派生器（与下载源 dsrc_* 同构、命名空间
 # 隔离）。词表权威源是 PCB ``leak_guard.reputation_source_names()``（62 项，
@@ -224,6 +226,48 @@ def _rep_public_vocab() -> frozenset:
 
 
 _REP_PUBLIC_VOCAB: frozenset | None = None
+
+
+# R234：具名信誉 provider 的不透明 id 解析。provider 语义（哪些源构成该策略）
+# 已迁入 PCB ``_rep_sources.PROVIDER_GROUPS``，公开树因此无需指名任何源名。
+# provider token 用 ``provider:`` 命名空间，故与源 token 互不冒充。
+REP_PROVIDER_IDS = None
+try:
+    REP_PROVIDER_IDS = _load_pcb_plugin(
+        "leak_guard").reputation_provider_public_ids
+except Exception:
+    REP_PROVIDER_IDS = None
+
+#: 不算「具名 provider」的哨兵：multi=加权合并全部源，none=不查。
+REP_PROVIDER_SENTINELS = ("multi", "none")
+
+
+def rep_provider_choices() -> tuple:
+    """``--reputation-provider`` 的合法取值（哨兵 + 不透明 provider id）。"""
+    ids = ()
+    if REP_PROVIDER_IDS is not None:
+        try:
+            ids = tuple(sorted(REP_PROVIDER_IDS()))
+        except Exception:
+            ids = ()
+    return REP_PROVIDER_SENTINELS + ids
+
+
+def rep_provider_group(provider):
+    """不透明 provider id → 源名元组；哨兵/未知返回 ``None``。
+
+    返回的是**内存侧惯用的源名**（下游按名取权重点火），故不透明性只作用于
+    CLI 表面与已发布产物，不影响内部逻辑。
+    """
+    if provider in REP_PROVIDER_SENTINELS or REP_PROVIDER_IDS is None:
+        return None
+    try:
+        m = REP_PROVIDER_IDS()
+    except Exception:
+        return None
+    if provider not in m:
+        return None
+    return tuple(PROVIDER_GROUPS.get(m[provider], ()))
 
 
 def rep_public_id(name):

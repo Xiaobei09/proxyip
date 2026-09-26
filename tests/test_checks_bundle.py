@@ -258,10 +258,10 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
     BASELINES = {
         "tests/test_quality.py": 27,
         "scripts/quality_reputation.py": 19,
-        "tests/test_download.py": 14,
+        "tests/test_download.py": 7,
         "tests/test_validate.py": 9,
-        "docs/data-spec.md": 3,
-        "docs/scripts.md": 3,
+        "docs/data-spec.md": 2,
+        "docs/scripts.md": 2,
         "docs/logic.md": 2,
         "scripts/validate_proxies.py": 1,
     }
@@ -321,10 +321,10 @@ class TestDownloadVendorNamesAbsent(unittest.TestCase):
         floor = {
             "tests/test_quality.py": 27,
             "scripts/quality_reputation.py": 19,
-            "tests/test_download.py": 14,
+            "tests/test_download.py": 7,
             "tests/test_validate.py": 9,
-            "docs/data-spec.md": 3,
-            "docs/scripts.md": 3,
+            "docs/data-spec.md": 2,
+            "docs/scripts.md": 2,
             "docs/logic.md": 2,
             "scripts/validate_proxies.py": 1,
         }
