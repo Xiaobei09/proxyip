@@ -1,0 +1,249 @@
+name: China check
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 独立心跳：每小时一轮（与 update-proxies 的 :00 错开到 :11）。
+    # streak 依赖"连续多轮可达"，此前仅挂在 quality-check 成功之后，
+    # 任一上游失败或 IP 长期未变更都会冻结 stable 累积——故必须独立定时。
+    # 不再挂 workflow_run 链：实测 GitHub 在 cron 命中时若本工作流仍有
+    # in_progress run 就不会再起新 run（旧 run 安然跑完）；而 workflow_run
+    # 触发的新 run 会取消上一个 in_progress run（观测 3 次），导致
+    # probe 永远跑不完、china.json 冻结。纯 schedule 驱动即可。
+    #
+    # ⚠️ R351：**本注释上方「每小时一轮」是 cron 标称值，不是实测值。**
+    # 实测（不加 --event 过滤的完整 run 列表，China check 取到 83 个 schedule
+    # 样本、update-proxy 91 个）四个定时工作流的实际达成率只有标称的
+    # 23%–43%：本工作流 1 次 / 4.24 小时。最近 9 个间隔全部 ≥ 2.3 小时。
+    # 且缺口**不能**用「in_progress 时不起新 run」解释：近 8 次里 6 次只跑
+    # 0.0–0.6h 即退出，其后仍有空闲 2.0h 与 6.05h 的窗口（对应 2 个与 6 个
+    # :11 槽位被丢弃）。**⇒ 是平台侧丢弃/延迟 schedule，不是本仓库配置。**
+    # 复现方式：
+    #   gh run list --workflow='China check' --limit 100 \
+    #     --json createdAt,event,conclusion   # 注意不要用 --event schedule，
+    #   #   该过滤在本仓返回过陈旧列表（曾据此误判「某工作流停了 10 天」）。
+    #
+    # 由此，**任何依赖「每小时一轮」的推理都不成立**：streak 累积速率与
+    # 「连续多轮」的样本量都是标称的 1/4。引用轮次数前必须先按实测节奏折算。
+    - cron: "11 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Mainland-China reachability
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      # R352：**本流水线不再需要任何人去签发任何 key 或 token**。原有的两个
+      # secret 注入已删除，依据是取证而非猜测：
+      #   · 必填 token 的那个源已整源下线——它是注册表里唯一凭证必填的源，
+      #     且 ``CI_OVERRIDES`` 从未收录它 ⇒ 产线从未派发，删除零数据损失。
+      #   · 剩下的可选 api key 喂给的是 ``auth: "optional Bearer"`` 的源，
+      #     **无 key 亦正常工作**（实测新鲜键 7/10 出数），从来不是必需品；
+      #     留着这行只会让人误以为「上线前得先去申请一个 key」。
+      # 两个 secret 在本仓从未存在过（旧值恒为空），故此改动零行为变化。
+      #
+      # CI 必须真实检出 PCB；缺失即失败，禁止静默写成空源证据。
+      PROXYIP_REQUIRE_PCB: "1"
+      # 公开仓单 job 硬上限 6h；主探测最多占 4.5h，预留 1h 给回退与提交。
+      CN_PRIMARY_TIMEOUT_SECONDS: 16200
+      CN_FALLBACK_TIMEOUT_SECONDS: 3600
+      CN_FALLBACK_LIMIT: 300
+      # R329：主探测采样上限。此前是 ``--limit 0``（全量 17,242 键），而
+      # ``write_json(CHINA_FILE)`` 只在 ``main()`` 末尾（pcb/scripts/china_check.py
+      # :2677）执行 ⇒ 撞 16200s 上限被 SIGTERM 杀死时，**整轮实测成果 100%
+      # 丢弃**，只有回退那 300 条落盘。run 36304900938 实录：L1 sweep 10,968.1s
+      # （3.05h，独占预算 67.7%）+ 10 个源 review 5,160s，止于第 10 个源，距
+      # 上限仅剩 68s，yml 里另 ~20 个源**从未被轮到**。
+      # 预算算术（R333 起用沙箱；**R443 起改用真实 CI run**，
+      # provenance：run 36409745468 / job 108886908845，锁见 tests 里
+      # R329/R333 两条锁与 ``test_ci_budget_constants_match_real_run_r443``）：
+      #   真实 run（同配置 --limit 4000、PCB pin 同 commit）job 合计 4,186s
+      #   ＝ 上限的 25.8%，逐项：
+      #     L1 sweep           2,303.1s （probe 3,965 键 ⇒ **0.5809 s/键**）
+      #     carrier probe      993 targets（撞 limit=1000 硬上限）
+      #     batch-source       2,307.4s 累计（含 carrier ⇒ carrier 仅 4.3s）
+      #     逐源 review 合计   1,485.5s（仅 4 个源拿到 targets，其余 21 个
+      #                        为 0 target，合计仅 0.6s）
+      #   ⇒ R333 当时的沙箱值（L1 1,595.7s / 0.399 s键 / 逐源 562.7s）
+      #     **低估** 45% / 164%，低估方向恰好朝危险侧（把开销算小 ⇒ 真超时
+      #     前守卫先变绿）。故本注释与两条预算守卫的常数已全部换成真实值。
+      #   ⇒ R329 当初的算术（0.636×N + 26 源×516s ⇒ 15,960s / 98.5%）
+      #     **高估 7.3 倍**，两个错因：逐源成本 ∝ 该源拿到的 targets 而非
+      #     源个数（targets 由「前面的源还剩多少键没覆盖」决定，与该源自己的
+      #     --cn-limit 无关）；L1 单键成本随样本量下降（0.636@17242 vs
+      #     0.5809@4000）⇒ 均不可线性外推。
+      #   ★``… review: N.Ns`` 的 N.NN 是**累计已耗**（源码用单个
+      #     ``time.monotonic() - _t0``），不是本源耗时 ⇒ 逐源成本只能取
+      #     **相邻差**；且单源 s/target 实测跨度 0.065–4.347（67×），
+      #     **不可按源数或键数线性外推**。
+      # 取 4000：既跑得完，又留足余量吸收逐源成本在覆盖率波动下的放大。
+      # **覆盖面不降**：样本外的键由 ``compute_fallback_merge`` 按上一轮
+      # verdict 兜底沿用（池仍 21,877，MIN_CN_POOL=10000 硬约束不受影响），
+      # 而兜底键 ``streak`` 被强制归 0、不虚报连续可达。
+      # **最坏情况为零损失**：若仍撞线则回退照旧接管，行为与改动前完全一致。
+      CN_PRIMARY_LIMIT: 4000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout PCB bundle (read-only, pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: Xiaobei09/PCB
+          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          token: ${{ secrets.BUNDLE_PAT }}
+          path: pcb
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：本工作流纯 schedule 驱动（每小时 11 分自启，见上），无
+          # workflow_run 触发者，故不存在"触发者失败时跳过"的判定；从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），单次失败不冻结 CN 连通性追踪(streak)与后缀应用，
+          # 否则 IP 未变更期间 stable 永远无法累积。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        if: steps.gate.outputs.skip != 'true'
+        # R246：同时跑 **pcb/tests**。跨仓对账（``pcb/tests/test_public_plan.py``：
+        # 公开工作流的 CI 配额 vs 私有 ``CI_OVERRIDES``）此前**在 CI 里从不
+        # 执行**——所有工作流的测试目标都是 ``discover -s tests``（纯公开测试），
+        # 它只在有人手动同时挂两棵树时才跑。R241 把工作流改成不透明 id 后，
+        # 那道对账立刻失配却**潜伏了整整一轮**无人发现。
+        # ``-t .`` 让顶层包解析到仓库根，pcb/tests 内部按 ``pcb/plugins`` 导入插件。
+        #
+        # R254：改用 ``pcb/scripts/run_ci_tests.py`` 做**按严重度分级**的运行。
+        # 本步位于 ``China reachability check`` **之前**，它坏掉的代价不是
+        # 「构建变红」而是**整轮数据采集作废**（实测 run 36285211125 在 2m25s
+        # 处死于一条纯记账的基线漂移，4.5h 上限的 CN 探测一次都没跑）。而泄漏
+        # 门禁是方向感知的：**上行**（新增泄漏）＝缺陷＝硬失败；**下行**（基线
+        # 该下调）＝记账＝``::warning::`` 放行。
+        #
+        # 为什么**不能**简单把本步挪到探测之后（那才是更自然的顺序）：
+        # ``reorg_country.py`` 归 ``quality-check.yml`` 单一所有，本工作流
+        # **不跑**它，所以 annotate 之后的状态**必然处于未收敛态**（R243/R253
+        # 实测的 orphan 国别目录即源于此），全量测试挪过去会**必然**红。
+        # 分级是在不挪位置、不弱化任何断言的前提下解决代价不对称的唯一办法。
+        #
+        # 记账项在本工作流**不会**消失：其余全部工作流继续直接跑
+        # ``python -m unittest``，同一条 ``RatchetDowngrade``（继承
+        # ``AssertionError``）在那里照样判红。
+        run: |
+          python pcb/scripts/run_ci_tests.py --discover pcb/tests_pipeline
+          python pcb/scripts/run_ci_tests.py --discover pcb/tests --top .
+
+      - name: China reachability check
+        id: china
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set +e
+          # R356：limit/concurrency 的**数值真相已单点存放于私有注册表**
+          # （``CI_OVERRIDES``）。此处不再逐条复写——复写等于两份真相，迟早
+          # 漂移；且在没有回落路径时删掉会让全通道 limit 归零、整轮空跑。
+          # 无 flag 时 ``china_check.seed_cn_defaults_from_registry`` 从 PCB
+          # 注册表取回同一组 26 条（实测与旧命令行逐字一致）。需要临时调参
+          # 时在下面命令里追加显式 flag 即可（显式覆盖优先）。
+          # ⚠️ 本段注释必须留在命令**之前**：续行里的 ``#`` 会让其后所有内容
+          # （含 ``--cn-cache-ttl``）一并被吞成注释，实测报
+          # ``--cn-cache-ttl: command not found``。
+          timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
+            python pcb/scripts/china_check.py \
+            --source data/valid/all.txt --limit "${CN_PRIMARY_LIMIT}" \
+            --cn-cache-ttl 21600
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; then
+            echo "mode=fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning::主 CN 探测达到 ${CN_PRIMARY_TIMEOUT_SECONDS}s 上限；转入 ${CN_FALLBACK_LIMIT} 条有界回退"
+            find data -type f -name '*.tmp' -newer .jobstart -delete 2>/dev/null || true
+            timeout --signal=TERM --kill-after=60s "${CN_FALLBACK_TIMEOUT_SECONDS}s" \
+              python pcb/scripts/china_check.py \
+              --source data/valid/all.txt \
+              --limit "${CN_FALLBACK_LIMIT}" \
+              --cn-cache-ttl 21600
+          else
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            exit "$rc"
+          fi
+
+      - name: Annotate and classify
+        id: annotate
+        # R313 自指死锁：本步是「已发布 →出口 标注」与「countries/sets/ports 视图」
+        # 的**唯一**修复动作（fill_and_classify 的 upsert_exit_region +
+        # reconcile_views 的 backfill/prune）。而 `Run tests` 排在它**之前**，
+        # 且未加 always() ⇒ 早测一红本步即被 **skipped** ⇒ 修复永不执行 ⇒
+        # 下一轮读到同样的陈旧数据、同样变红 ⇒ 永久自锁。
+        # 实测 run 36362738287：Run tests 3 红 → China reachability/Annotate/
+        # Verify/Commit 全 skipped。本地复现：生产 annotate_classify.py 把
+        # 红 #1 的 5/17215 处标注漂移收敛到 **0/17217**。
+        # 步序不动（R290 `test_run_tests_precedes_heavy_steps` 与 R312
+        # `test_quality_chain_script_order` 仍绿；R254 成文的「不挪测试」也不受影响），
+        # 只放开**失败传播**：always() 让 heal 在早测失败时仍执行。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/annotate_classify.py
+
+      # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
+
+      # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
+
+      # 提交前护栏：数据产出后再校验 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测速度），防止陈旧/空 cn_ms 重建把纯 -XMB/s 提交进仓库；
+      # 失败即中止，本 run 不提交（此前 tests 步先于数据改动执行，抓不到
+      # 改后状态）。
+      - name: Verify CN-view invariant
+        id: verify
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: >-
+          python -m unittest
+          pcb.tests_pipeline.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      - name: Show summary
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          echo "China check mode: ${{ steps.china.outputs.mode || 'full' }}"
+          echo "China-reachable proxies:"
+          wc -l data/valid/all_cn.txt 2>/dev/null || true
+          echo "Verdict distribution:"
+          jq -r '[.proxies[].verdict] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/quality/china.json 2>/dev/null || true
+
+      - name: Commit changes
+        # R313：`china.outcome` 由 `== 'success'` 放宽为 `!= 'failure'`——
+        # `Run tests` 早红时 `China reachability check` 被 fail-fast **skipped**
+        # （R254 成文的成本决策，本就不该烧 4.5h 配额），此时 quality 未刷新、
+        # annotate 仍基于**已提交**的 china.json 收敛（本地已验证足以修红 #1）。
+        # **真实探测失败仍判 `failure` ⇒ 依然拦住提交**，门禁未被弱化；
+        # 且 job 整体仍因 `Run tests` 红而 failed ⇒ 红信号照常上报。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

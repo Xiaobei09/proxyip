@@ -1,0 +1,126 @@
+name: Exit family check
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Quality check"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: exit-family
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Actual exit IPv4/IPv6 family
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout PCB bundle (read-only, pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: Xiaobei09/PCB
+          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          token: ${{ secrets.BUNDLE_PAT }}
+          path: pcb
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：不因触发者(quality-check)失败而跳过——本工作流从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），上游单次失败不应影响出口 IP 家族分离与标注
+          # （all_ipv4/all_ipv6/-V4/-V6/-DS），否则本次家族观测将缺席。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        if: steps.gate.outputs.skip != 'true'
+        run: python -m unittest discover -s pcb/tests_pipeline -v
+
+      - name: Exit family check
+        id: exit
+        if: steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/exit_family.py
+
+      - name: Annotate and classify
+        id: annotate
+        # R324 自指死锁（与 china-check.yml 的 eb59f4c 同构）：`Run tests`
+        # 排在本步**之前**且未加 always() ⇒ 早测一红本步即被 skipped ⇒
+        # 唯一能修 `→出口` 标注漂移与 views 收敛的动作永不执行 ⇒ 下一轮
+        # 读到同样陈旧的数据、同样变红 ⇒ 永久自锁。
+        # 实测 run 36373246886（head=6760481a）：Run tests 3 红 ⇒
+        # Exit family check/Annotate/Build good/Verify/Commit 全 skipped。
+        # 步序不动（R290/R312 只锁 china-check；此处不挪测试，R254 的
+        # fail-fast 成本决策同样适用），只放开**失败传播**。
+        # 注意 `Exit family check` 是探测步（exit_family.py 对全池做
+        # socket I/O），**刻意不加** always()：R254 早测红就不烧网络配额。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/annotate_classify.py
+
+      - name: Build good lists
+        id: good
+        # R324：同 Annotate——早测失败不得拦住下游 heal 链。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/build_good.py
+
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。tests 步先于数据改动执行、抓不到改后状态，
+      # 此处对已落盘数据校验，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        # R324：`always()` 只放开**传播**，不弱化护栏——`good` 真失败仍被拦住。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
+        run: >-
+          python -m unittest
+          pcb.tests_pipeline.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      # 图表/统计由专职 stats 工作流在 "Exit family check" 完成后统一重建（单一写入者）
+
+      - name: Show summary
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          echo "IPv4 exit:"
+          wc -l data/valid/all_ipv4.txt 2>/dev/null || true
+          echo "IPv6 exit:"
+          wc -l data/valid/all_ipv6.txt 2>/dev/null || true
+          echo "Family distribution:"
+          jq -r '[.proxies[].family] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/quality/exit_family.json 2>/dev/null || true
+
+      - name: Commit changes
+        # R324：`exit.outcome` 由 `== 'success'` 放宽为 `!= 'failure'`——
+        # `Run tests` 早红时探测步被 fail-fast **skipped**，提交门须放行
+        # skipped，否则 heal 落不了盘；但**真实探测失败**（`outcome ==
+        # 'failure'`）仍必须拦住提交。`always()` 不会把 job 判绿：早测失败
+        # 仍令 job failed（与 eb59f4c 对 china-check 的处理同构）。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.exit.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.good.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

@@ -1,0 +1,81 @@
+name: Update proxy list
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+  # push 触发已移除：与 concurrency(cancel-in-progress) 组合时，密集提交会
+  # 连环取消在跑的重探测任务，造成长时间无成功渲染（曾 5h+ 断档）。
+  # 改为 schedule + 手动 dispatch；代码变更需尽快生效时手动触发一次。
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-proxies
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: Download and extract proxies
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout PCB bundle (read-only, pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: Xiaobei09/PCB
+          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          token: ${{ secrets.BUNDLE_PAT }}
+          path: pcb
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: python -m unittest discover -s pcb/tests_pipeline -v
+
+      - name: Download and extract
+        id: download
+        run: python pcb/scripts/download_proxies.py
+
+      - name: Validate proxies
+        id: validate
+        run: python pcb/scripts/validate_proxies.py --time-budget 3600
+
+      - name: Show stats
+        run: |
+          echo "Files extracted:"
+          find data/raw -name '*.txt' | wc -l
+          echo "Country files:"
+          find data/download/countries -name '*.txt' | wc -l
+          echo "Port files:"
+          find data/download/ports -name '*.txt' | wc -l
+          echo "Unique IPs:"
+          wc -l data/download/all.txt
+          echo "Alive proxies:"
+          wc -l data/valid/all.txt
+          echo "History records:"
+          wc -l data/quality/history.jsonl
+          echo "Diff archives:"
+          ls data/diff/*.json 2>/dev/null | wc -l
+
+      - name: Commit changes
+        # R325：🔴 **数据管道停摆的根因**。`Download and extract` 与
+        # `Validate proxies` 均无 if:（隐含 success()）⇒ 早测一红即被 skip ⇒
+        # `== 'success'` 令提交永不发生 ⇒ **新代理数据永远拉不下来**。
+        # 实测 run 36372900933（head=eb59f4c5）：`Run tests` 3 红 ⇒
+        # `Download and extract`/`Validate`/`Commit changes` **全 skipped**
+        # （最近 6 次红 4 次）⇒ 代理数据已陈旧 4 轮。
+        # 下载步是重网络步，按 R254 **刻意不加** always()（只放行提交门）。
+        if: always() && steps.download.outcome != 'failure' && steps.validate.outcome != 'failure'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): update proxy list ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

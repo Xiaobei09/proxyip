@@ -1,0 +1,130 @@
+name: Annotate and classify
+
+on:
+  workflow_run:
+    workflows: ["Quality check"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: annotate-classify
+  cancel-in-progress: false
+
+jobs:
+  annotate:
+    name: Suffix filling & node classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout PCB bundle (read-only, pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: Xiaobei09/PCB
+          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          token: ${{ secrets.BUNDLE_PAT }}
+          path: pcb
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：不因触发者(quality-check)失败而跳过——本工作流从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），上游单次失败不应冻结 CN 连通性追踪(streak)
+          # 与后缀应用，否则 IP 未变更期间 stable 永远无法累积。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Annotate and classify
+        id: annotate
+        if: steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/annotate_classify.py
+
+      # R288：测试闸门后移到 heal 之后。理由三条，都写在这里：
+      # 1) R290（pcb/tests_pipeline/test_commit_data.py::TestWorkflowTestGate）要求
+      #    「Run tests 排在**重型网络步**之前」以防红单测晚暴露、空烧
+      #    数小时配额，并由其 GATES 强制——但 GATES 只含 update-proxies /
+      #    quality-check / china-check 三条**有网络步**的链。本工作流
+      #    **没有任何网络步**（全是本地脚本），R290 的约束对象在此不存
+      #    在，且本工作流从未被纳入 GATES。故后移不违反 R290。
+      # 2) 原顺序造成**死锁**：上游任何中断留下的漂移会让 Run tests 判
+      #    红，于是在跑到「唯一能自愈漂移的 Annotate and classify」
+      #    **之前**就中止 ⇒ 漂移永久无人修复。实测 run 36329225670 失败
+      #    于 Run tests（3 条漂移用例，正是本步骤可修的）。
+      # 3) 上方 Verify CN-view invariant 的注释已自陈「tests 步先于数据
+      #    改动执行、抓不到改后状态」。后移让闸门真正判**将要提交的状态**，
+      #    是同一诉求的补齐，而非削弱。
+      # 提交仍由 success() 把关（测试红照样不提交）；annotate 失败时跳过
+      # 本步，与 Verify CN-view invariant 对 steps.build 的写法一致。
+      - name: Run tests
+        if: steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: python -m unittest discover -s pcb/tests_pipeline -v
+
+      - name: Build good lists
+        id: build
+        # R324 残余死锁：R288 已把测试后移到 Annotate 之后（治好漂移那条），
+        # 但本步仍在 `Run tests` **之后**且无 always() ⇒ 早测一红本步即被
+        # skipped ⇒ 若红因正是 good 清单问题，修复动作本身被跳过。
+        # （实测 update-proxies run 36372900933：Run tests 3 红 ⇒
+        #  Download and extract/Validate/Commit 全 skipped ⇒ 数据 4 轮没更新。）
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/build_good.py
+
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。tests 步先于数据改动执行、抓不到改后状态，
+      # 此处对已落盘数据校验，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        # R324：与 Build good lists 同理——护栏必须能在早测失败时照常执行，
+        # 否则它检查的是「什么都没构建」的旧树。`steps.build.outcome ==
+        # 'success'` 保留：build 真失败仍拦住（always() 只放开传播）。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.build.outcome == 'success'
+        run: >-
+          python -m unittest
+          pcb.tests_pipeline.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      - name: Show summary
+        # R324：早测失败时也要能看到本轮统计（可观测性）；always() 不会把
+        # job 判绿，也不影响 Commit changes 的 success() 闸门。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          echo "Annotated lines:"
+          wc -l data/valid/all.txt
+          echo "IP type distribution:"
+          grep -oP '(?<=-)(DC|RES|MOB|PROXY)(?=-|$)' data/valid/all_ltd.txt 2>/dev/null | sort | uniq -c | sort -rn || true
+          echo "Speed tier distribution:"
+          grep -oP '(?<=-)(fast|mid|slow)(?=-|$)' data/valid/all_ltd.txt 2>/dev/null | sort | uniq -c | sort -rn || true
+
+      - name: Commit changes
+        # 闸门：仅当 annotate/build_good + CN 视图护栏均成功才提交——否则部分
+        # 写入的 data/valid/*.txt 与 good 清单会被推入库（自定义 if 会顶掉默认
+        # success()，须显式恢复）
+        if: success() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success' && steps.build.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): suffix filling & node classification ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
