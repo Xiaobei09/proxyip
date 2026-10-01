@@ -12,7 +12,7 @@ name: Leak guard
 # 分段扫描门禁因此只在部分链路上生效，覆盖面与它宣称的不符。
 #
 # 无感链路清单：**空**。R490 切流时给余下 5 条链路补上了
-# `Checkout PCB bundle (read-only, pinned)`，覆盖面从 4/9 变成 9/9，
+# `Checkout PCB bundle (read-only, tracking main)`，覆盖面从 4/9 变成 9/9，
 # 「对泄漏无感」这一类 workflow 不再存在。
 # 判据随之**升级**：test_checks_bundle 的
 # test_workflow_bundle_checkout_coverage 不再核对「注释点名的清单」，
@@ -75,15 +75,20 @@ jobs:
             echo "has_bundle=false" >> "$GITHUB_OUTPUT"
             echo "::warning::BUNDLE_PAT 未配置——防泄漏门禁降级为仅公开侧断言（端点/真名模式清单在私有包内，无包不可得）"
           fi
+          # 摘要里回显的 ref **从本文件派生**，不手写：手写标签会随 ref 改动
+          # 而静默过期（R866 摘掉硬编码的「pinned」时发现的同类问题）。
+          # 与本文件既有哲学一致——门禁数字一律派生，不写死。
+          pcb_ref="$(awk '/repository: Xiaobei09\/PCB/{f=1} f&&/ref:/{sub(/^[^:]*:[[:space:]]*/,""); print; exit}' "$GITHUB_WORKSPACE/.github/workflows/leak-guard.yml")"
+          echo "pcb_ref=${pcb_ref:-unknown}" >> "$GITHUB_OUTPUT"
 
       # pin 必须与另外三个检出私有包的 workflow 完全一致
       # （pcb/tests_pipeline/test_commit_data.py::TestPrivateBundlePinConsistency 锁定）。
-      - name: Checkout PCB bundle (read-only, pinned)
+      - name: Checkout PCB bundle (read-only, tracking main)
         if: steps.detect.outputs.has_bundle == 'true'
         uses: actions/checkout@v7
         with:
           repository: Xiaobei09/PCB
-          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          ref: main
           token: ${{ secrets.BUNDLE_PAT }}
           path: pcb
 
@@ -172,6 +177,7 @@ jobs:
       - name: Summarise guard coverage
         env:
           HAS_BUNDLE: ${{ steps.detect.outputs.has_bundle }}
+          PCB_REF: ${{ steps.detect.outputs.pcb_ref }}
           GUARD_RAN: ${{ steps.run_guard.outputs.ran }}
           GUARD_SKIPPED: ${{ steps.run_guard.outputs.skipped }}
           GUARD_EFFECTIVE: ${{ steps.run_guard.outputs.effective }}
@@ -183,7 +189,7 @@ jobs:
             echo "### 私有源泄漏门禁"
             echo ""
             if [ "$HAS_BUNDLE" = "true" ]; then
-              echo "- 私有包：**已检出**（pinned）→ 端点/真名/文档三类禁区全量生效"
+              echo "- 私有包：**已检出**（ref: $PCB_REF）→ 端点/真名/文档三类禁区全量生效"
             else
               echo "- 私有包：**缺 BUNDLE_PAT** → 模式清单不可得，仅公开侧断言生效"
             fi
@@ -246,12 +252,12 @@ jobs:
 
       # pin 必须与另外几个检出私有包的 workflow 完全一致
       # （pcb/tests_pipeline/test_commit_data.py::TestPrivateBundlePinConsistency 锁定）。
-      - name: Checkout PCB bundle (read-only, pinned)
+      - name: Checkout PCB bundle (read-only, tracking main)
         if: steps.detect.outputs.has_bundle == 'true'
         uses: actions/checkout@v7
         with:
           repository: Xiaobei09/PCB
-          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          ref: main
           token: ${{ secrets.BUNDLE_PAT }}
           path: pcb
 

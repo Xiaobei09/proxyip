@@ -93,11 +93,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Checkout PCB bundle (read-only, pinned)
+      - name: Checkout PCB bundle (read-only, tracking main)
         uses: actions/checkout@v7
         with:
           repository: Xiaobei09/PCB
-          ref: c07ab2e263d92169468723de6138a6f2f429e9e2
+          ref: main
           token: ${{ secrets.BUNDLE_PAT }}
           path: pcb
 
