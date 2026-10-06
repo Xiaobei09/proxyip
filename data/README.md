@@ -52,16 +52,16 @@ data/
 
 | 工件 | 生产者 | 说明 |
 |------|--------|------|
-| `all.txt`（18411 行基线） | `validate_proxies.py` | 全量可达清单（本次判定） |
+| `all.txt` | `validate_proxies.py` | 全量可达清单（本次判定；行数随池波动，权威值见 `output/stats.json` 的 `alive`） |
 | `all_<组>.txt` 系列 | `validate_proxies.py` | `_ltd/_verified/_stable/_rep` 变体 |
 | `all_cn*.txt` | `china_check.py` | 大陆可达清单（含 best-ISP 后缀） |
 | `all_diverse.txt` | `validate_proxies.py` | 覆盖多样化子集 |
 | `meta.json` | `validate_proxies.py` | 行键元数据（国家/端口/延迟/速度） |
 | `ext_check.json` | `validate_proxies.py` | TLS 复核结果 |
 | `speed.json` | `deep_speed.py` | 大窗口真实测速 |
-| `countries/<CC>/` | `validate_proxies.py` + `reorg_country.py` | 按出口国分目录（77 个国家目录，`all.txt` 1:1 切分） |
-| `sets/<name>/` | `validate_proxies.py` | 常用集合目录（10 个） |
-| `ports/*.txt` | `validate_proxies.py` | 按端口分组（6 个） |
+| `countries/<CC>/` | `validate_proxies.py` + `reorg_country.py` | 按出口国分目录（目录数随池波动，无单一权威键；`all.txt` 1:1 切分） |
+| `sets/<name>/` | `validate_proxies.py` | 常用集合目录（集合数随池增减，见目录实际条目） |
+| `ports/*.txt` | `validate_proxies.py` | 按端口分组（端口数见 `output/stats.json` 的 `ports`） |
 | `tiers/`、`good*`、`premium*` | `build_good.py` / `build_premium.py` | 档位/优质清单 |
 
 ### 3.3 `data/quality/`（判定层）
@@ -88,8 +88,8 @@ data/
 
 | 工件 | 生产者 | 说明 |
 |------|--------|------|
-| `raw/`（273 文件） | `download_proxies.py` | 上游原始归档（zip/txt），仅归档 |
-| `download/`（104 文件） | `download_proxies.py` | 下载切片（all.txt、countries/…），供验证链消费 |
+| `raw/` | `download_proxies.py` | 上游原始归档（zip/txt），仅归档；文件数随上游快照增减 |
+| `download/` | `download_proxies.py` | 下载切片（all.txt、countries/…），供验证链消费；文件数随国家/端口/集合拆分变化 |
 
 ---
 
@@ -108,6 +108,12 @@ data/
 ## 5. 新鲜度
 
 - 每份工件都有生产时间：`output/stats.json` 的 `ts`、`quality/quality_meta.json` 的 `ts`。
+- **本索引不写死易变计数**（清单行数、国家目录数、集合数、归档文件数）：它们
+  每轮都可能变化，写进文档必然过期（本表曾把国家目录数写成 77、清单行数写成
+  18411）。可对照的权威键仅两个，且与落盘严格相等（实测）：行数 →
+  `output/stats.json` 的 `alive`、端口数 → 其 `ports`。`countries`/`sets` 在
+  stats.json 是 download 层全池口径，与 `valid/` 子集目录数不等（77≠73、
+  22≠10），**不得**引作目录数。新增描述性数字前先问「它会变吗」。
 - 图表/徽章由 `stats.yml` 与 `quality-check.yml` 定时重建；README 引用的图表直链
   `raw.githubusercontent.com` 即时反映最新提交（2026-09-16 起已替换 jsDelivr 缓存源）。
 - `countries/` 与根 `all.txt` 强制 1:1（回归测试 `test_sum_equals_all_txt`）。
