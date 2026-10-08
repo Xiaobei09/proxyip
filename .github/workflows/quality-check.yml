@@ -49,13 +49,22 @@ jobs:
             echo "::notice::Superseded by run $LATEST, skipping"
             exit 0
           fi
-          # 2. 触发者成功检查
+          # 2. 触发者结论 → 只判「数据新不新鲜」，**不许关掉愈合链**。
+          #    跨工作流 R325 I1：本工作流是 reorg_country.py 的唯一所有者
+          #    （china-check.yml 成文「单一写入者」），而它只被
+          #    update-proxies 成功触发。原写法在此置 skip=true ⇒ 整条愈合链
+          #    skipped ⇒ all.txt/countries 漂移永无人愈 ⇒ 下一班
+          #    update-proxies 起跑即红 ⇒ conclusion=failure ⇒ gate 又跳 ⇒
+          #    跨工作流自指死锁，唯一解药只剩手动 dispatch（实测 R13/R29
+          #    两次被迫救火）。漂移制造者是 china-check 的 reachability
+          #    提交（写 all.txt+countries 但会漏归档端点），每小时一次。
+          #    触发者失败时 download 也没跑、数据未变 ⇒ heal 链照跑（幂等），
+          #    只用 stale 拦住 R254 的网络测量步，不白烧 90min 配额。
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             CONCLUSION="${{ github.event.workflow_run.conclusion }}"
             if [ "$CONCLUSION" != "success" ]; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "::notice::Triggering run concluded: $CONCLUSION, skipping"
-              exit 0
+              echo "stale=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Triggering run concluded: $CONCLUSION → heal chain runs, network measurement skipped"
             fi
           fi
         env:
@@ -73,7 +82,10 @@ jobs:
 
       - name: Deep quality check
         id: quality
-        if: steps.gate.outputs.skip != 'true'
+        # R48：stale 只拦本网络测量步（触发者失败 ⇒ 数据未变 ⇒ 没有新探测
+        # 对象）。愈合链 reorg/annotate/commit 刻意**不看** stale，否则
+        # 触发者一红就没人修漂移，死锁复发。
+        if: steps.gate.outputs.skip != 'true' && steps.gate.outputs.stale != 'true'
         timeout-minutes: 110
         run: python pcb/scripts/quality_check.py --source data/valid/all.txt --time-budget 5400 --rep-cache-ttl 604800
 
