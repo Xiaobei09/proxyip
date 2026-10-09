@@ -55,7 +55,7 @@
 | 大陆日常使用（最稳） | `data/valid/all_cn_stable.txt` | 连续 ≥2 轮大陆可达，抗误判/churn（不满足时不生成） |
 | 大陆 + 应用层确认 | `data/valid/all_cn_http.txt` | 过滤"TCP 通但被干扰"；无应用层证据时不生成 |
 | 大陆全量 | `data/valid/all_cn.txt` | 全可达集，按大陆实测延迟升序 |
-| 综合最优 | `data/valid/all_good.txt` | CN 可达 + 有信誉记录 + 非高风险 + 有速度读数，CN 视图 |
+| 综合最优 | `data/valid/all_good.txt` | CN 可达 + 有信誉记录 + 非高风险 + 有国内速度（≈XMB/s） |
 | 高端优质 | `data/valid/all_premium.txt` | CN 可达 + 信誉≥95 + 真实住宅 IP |
 | 按国家/集合取用 | `data/valid/countries/<CC>/cn4.txt` 等 | 各目录 `all/ltd/v4/46/cn/rep/good/premium` 多件套 |
 | 未验证全量 | `data/download/all.txt` | 去重清单，IP 数字序 |
@@ -74,8 +74,8 @@ data/valid/countries/US/46.txt             # 该国出口为双栈（v4+v6）的
 data/valid/countries/US/cn.txt             # 该国大陆可达的代理
 data/valid/countries/US/cn4.txt            # 该国大陆可达且出口为 IPv4 的代理
 data/valid/countries/US/rep.txt            # 该国按信誉分降序
-data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 有信誉记录 + 非高风险 + 有速度读数，综合分降序，CN 视图）
-data/valid/all_premium.txt                  # 全局高端优质（CN 可达 + 信誉≥95 + 真实住宅IP，综合分降序，CN 视图）
+data/valid/all_good.txt                     # 全局综合最优（CN 可达 + 有信誉记录 + 非高风险 + 有国内速度 ≈XMB/s）
+data/valid/all_premium.txt                  # 全局高端优质（CN 可达 + 信誉≥95 + 真实住宅 IP）
 data/valid/all_premium_v4.txt               # 高端优质（出口为 IPv4 的家族分支，另有 _v6 / _46）
 data/valid/countries/US/premium.txt         # 该国高端优质
 data/valid/sets/hot/premium.txt             # 热门集合高端优质
