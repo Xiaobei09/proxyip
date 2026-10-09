@@ -293,7 +293,12 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 ### `data/valid/all.json`
 
 结构化代理池导出，数组元素：
-`{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`。
+`{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`，
+并按来源**按需**附加可选字段（命中才出现、缺省即整字段省略；只增不改不删）：
+
+- `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域同 `china.json`，按 `ip:port#EXIT` 精确 join。
+- `cn_level` / `cn_streak` / `cn_flip` —— 大陆**证据分级/连续可达轮数/翻转计数**：`cn_level ∈ http|tcp|icmp`，`"http"` 即应用层确认可用（区别于仅能 ping 通）。
+- `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）。
 
 `cn` 为该行 note 中存在 `CN`/`CN4`/`CN6`/`CN46`/`CNH` 任一 token 即 true；
 `exit` 为行首**出口**国家码（有出口观测即 `←` 前的首个 CC，无箭头观测时为 `null`）；
