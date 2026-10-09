@@ -319,8 +319,8 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 
 ### `data/quality/entry_geo.json`
 
-入口地理缓存：顶层 `updated_at`（ISO-8601）与 `ips`（`{ip: {cc, asn}}`）。`ips` 仅保留
-当前批存在的入口，过期 IP 随批次自然淘汰。
+入口地理缓存：顶层 `updated_at`（ISO-8601）与 `ips`（`{ip: {cc, asn}}`）。`ips` 跨批
+**只增不减**（无裁剪路径）：已离池的入口 IP 保留原实测值、不再复查（入口 geo 近乎静态）。
 
 ### `data/quality/premium_meta.json`
 
