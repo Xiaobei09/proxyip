@@ -11,12 +11,12 @@
 - `data/valid/` 每行一条 `ip:port#🇺🇸US-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + 国家代号 +
   `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；测速失败时省略速度段
   （`ip:port#🇺🇸US-120ms`）
-- **入口/出口地区**：已标注出口的行会在国家代号后插入 `→<出口>`
-  （如 `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码
+- **入口/出口地区**：已标注出口的行会在国家代号后插入 `←<出口>`
+  （如 `1.2.3.4:443#🇺🇸US←US-120ms-0.44MB/s`）。出口地区为 2 位 ISO 国家码
   （`US`/`JP`/`DE`…）。入口未知的 `#ALL` 行同样标注出口
-  （`1.2.3.4:443#ALL→US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆
+  （`1.2.3.4:443#ALL←US-120ms-0.44MB/s`），`ALL` 作为伪国家不会与阿尔巴尼亚 `AL` 混淆（R1747 起箭头方向翻转为 `←`；存量旧行 `→` 读取端仍兼容，经各轮 annotate/reorg 渐进迁移）
 - **质量检测备注**：被检测的行在既有后缀后追加若干 `-` 分隔的 token。完整示例：
-  `1.2.3.4:443#🇺🇸US→US-120ms-0.44MB/s-RES-fast-V4-CN-29-U35`
+  `1.2.3.4:443#🇺🇸US←US-120ms-0.44MB/s-RES-fast-V4-CN-29-U35`
 - **去重**：同一 `ip:port` 组合在**同一国家标签内**唯一；同一入口可能被不同订阅标为多国
   出口（此时保留多国条目，池中存在少量跨标签重复属设计内）
 - **排序**：
@@ -30,7 +30,7 @@
 ## 备注段（note）与 token 语义
 
 `ip:port#<cc><note>` 中 `key = ip:port#<cc>`；`note` 为国家代号之后直至行尾的剩余部分
-（含 `→<出口>`，因为 `→` 非 `A-Z`，国家码扫描会跳过它）。
+（含 `←<出口>`，因为 `←` 非 `A-Z`，国家码扫描会跳过它）。
 
 token 是 note 中以**段首或 `-` 为界**的独立子串，即 `(?:^|-)TOKEN(?:$|-)`。因此
 `-RES-fast-V4-CN-29-U35` 含 token `RES`、`fast`、`V4`、`CN`、`29`、`U35`。
@@ -287,7 +287,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 `{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`。
 
 `cn` 为该行 note 中存在 `CN`/`CN4`/`CN6`/`CN46`/`CNH` 任一 token 即 true；
-`exit` 为 `→CC` 后的实测出口 CC（无 `→` 时为 `null`）；
+`exit` 为 `←CC` 后的实测出口 CC（无 `←` 时为 `null`）；
 `latency_ms`/`speed_mbps` 只取 note 中首个 `Nms`/`N.MB/s` token——
 `≈XMB/s` 大陆估算 token 因 `≈` 前缀无法经 `float()` 解析，`speed_mbps` 记 `null`。
 
