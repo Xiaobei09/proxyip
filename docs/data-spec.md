@@ -298,7 +298,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 
 - `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域同 `china.json`，按 `ip:port#EXIT` 精确 join。
 - `cn_level` / `cn_streak` / `cn_flip` —— 大陆**证据分级/连续可达轮数/翻转计数**：`cn_level ∈ http|tcp|icmp`，`"http"` 即应用层确认可用（区别于仅能 ping 通）。
-- `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）。
+- `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）、`geo`（实测出口**地区** `{"country","city","colo"}`，来自 `upstream_meta.json` 按入口 IP join）、`region_differs`（出口地区国 ≠ 入口标签国 = 出入地区不同）。
 
 `cn` 为该行 note 中存在 `CN`/`CN4`/`CN6`/`CN46`/`CNH` 任一 token 即 true；
 `exit` 为行首**出口**国家码（有出口观测即 `←` 前的首个 CC，无箭头观测时为 `null`）；
