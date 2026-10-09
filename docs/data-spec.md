@@ -257,7 +257,7 @@ CN 分运营商趋势，每行一快照 `{ts, cn_reachable, cn_by_isp}`；`cn_by
 `country_match`（是否错区）、`geo_checked`（是否查到出口地理）、
 `reputation`（0-100 运行维度分，口径见上）、`rep_flags`（共识确定的语义维度：
 proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
-`reputation_source`（取值真相源在私有注册表，公开树只存不透明 id；多源时为 `multi`）、
+`reputation_source`（取值真相源在私有注册表，公开树只存不透明 id（`rsrc_` 前缀）；多源时为 `multi`）、
 `risk`（由信誉分推导）。
 
 注：地址族（`family`）与双栈（`dual_stack`）信息在 `exit_family.json` 中，不在本文件。
@@ -332,7 +332,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 单行 JSON，顶层 `proxies` 键为 `ip:port#国家`，值为
 `{score, risk, source, sources, flags, numeric[, deep_bonus]}`：`score` 为 0-100 信誉分
 （越大越干净），`risk` 为 `high`（<30）/`medium`（<75）/`low`（≥75），
-`source` 取值真相源在私有注册表（公开树只存不透明 id；多源时为 `multi`）、
+`source` 取值真相源在私有注册表（公开树只存不透明 id（`rsrc_` 前缀）；多源时为 `multi`）、
 `sources` 为实际参与合分的源列表，`flags` 为共识确定的语义维度列表，
 `numeric` 为参与连续型罚分的源列表，`deep_bonus` 为有深测带宽加成时的 +0~10 值（无则缺省）。
 按分数降序、同分按键序排列。
@@ -466,8 +466,15 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 
 - `"main"`（主源）、`"multi"`（多来源重叠）、`"unknown"`、`mirror-*/all`（通用清单名消歧）
   ——这些是**语义哨兵**，可读
-- 内置补充来源一律记为其**不透明公开 id**（`dsrc_` + 12 位十六进制）。id 与来源标签无可逆
-  关系，公开侧与本文档均不出现来源真名。同站多文件只记一个 id，故一个 id 可对应多个抓取地址
+- 内置补充来源一律记为其**不透明公开 id**：`dsrc_` 前缀 + 加盐派生、可逆编码的 token，
+  长度不固定，**非十六进制摘要**（旧方案的定长 12 hex 已随单向哈希一并作废）。id 与来源
+  标签**无 salt 不可反查**，公开侧与本文档均不出现来源真名。同站多文件只记一个 id，故一个
+  id 可对应多个抓取地址
+
+不透明 id 按 artifact 分族，前缀互不重叠、同一 salt 下不撞 id：下载源 `dsrc_`（本文件及
+`source_stats.json`/`source_history.json`/`source_quality.json`）、信誉源 `rsrc_`
+（`reputation.json`/`ipinfo.json`/`reputation_cache.json`）、CN 点位源 `src_`（`china.json`）。
+三族同构（加盐、可逆、确定性 join key），安全边界是**私有仓不公开**而非 salt 保密。
 
 来源 id 全集**不在本文档逐条列举**（会与私有清单二次漂移）。
 
