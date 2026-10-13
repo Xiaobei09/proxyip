@@ -294,17 +294,25 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
 
 ### `data/quality/exit_family.json`
 
-出口家族探测结果。顶层 `ts` + `proxies`：每个 `ip:port#国家` 的值为
-`{method, ts, family(ipv4/ipv6/dual/unknown), evidence, v4_src/v6_src, exit_v4/exit_v6,
-shared_exit, upstream_client_ip, upstream_family, upstream_absent, upstream_match}`。
-**R415 多出口标记（只增字段）**：`v4_seen`/`v6_seen`（同族多源回显的**不同字面量数**，
->1 即「同族多出口」硬证据）、`multi_exit`（`v4_seen>1` 或 `v6_seen>1`）、
-`upstream_ip_match`（实测出口**字面量**与上游 `clientIp` 地址等价比较（IPv6 归一化）；
-True/False，任一侧未知时省略——比 `upstream_match` 的家族级比较更严）。
+出口家族探测结果。顶层 `ts` + `proxies`：每个 `ip:port#国家` 的值为**下列完整字段**
+（探测字段之外的可推导项如 line/ip/port/cc 刻意不落盘；缺字段视为该维度无数据）：
 
-**部分字段按需填充**：`upstream_*` 只在有 v6 出口探测结果时出现，`shared_exit` 在
-ipv4/unknown/dual 有值；缺字段视为无上游数据。探测字段之外（line/ip/port/cc 等可推导项）
-刻意不落盘。`family` 是分组/清单的**权威来源**（优先于行内 `-V4`/`-V6`/`-DS` 备注）。
+- `method`（探测方式）、`ts`（该条目探测时刻）、`family`
+  （ipv4/ipv6/dual/unknown；分组/清单的**权威来源**，优先于行内 `-V4`/`-V6`/`-DS` 备注）、
+  `evidence`（回显证据强度，见 evidence 语法）。
+- `v4_src` / `v6_src`（各家族获胜回显服务）、`exit_v4` / `exit_v6`（实测出口 IP）、
+  `shared_exit`（复用同一出口的条数，>1 时出现）。
+- **R415 多出口标记（只增字段）**：`v4_seen` / `v6_seen`（同族多源回显的**不同字面量数**，
+  >1 即「同族多出口」硬证据）、`multi_exit`（`v4_seen>1` 或 `v6_seen>1`）。
+- **R463 证据强度（只增字段）**：`v4_votes` / `v6_votes`（获胜字面量的共识**票数**）与
+  `v4_total` / `v6_total`（**观测数**）——`v4_seen`/`v6_seen` 只说"有几种字面量"：
+  2-2（两个出口各获两票）与 2-1（单个离群回显）的 `seen` 同为 2，只有票数/观测数
+  能分辨；`votes == total` 即全源一致，`votes * 2 == total` 即等票对峙。
+- 上游交叉验证（按需填充：`upstream_*` 只在有 v6 出口探测结果时出现）：
+  `upstream_client_ip`（上游观测出口）、`upstream_family`、`upstream_absent`、
+  `upstream_match`（家族级比较）、`upstream_ip_match`（实测出口**字面量**与上游
+  `clientIp` 地址等价比较（IPv6 归一化）；True/False，任一侧未知时省略——
+  比 `upstream_match` 的家族级比较更严）。
 
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
