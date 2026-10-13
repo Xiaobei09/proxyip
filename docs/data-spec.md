@@ -348,8 +348,9 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 质量检测汇总：`ts`（ISO-8601）、`total`（代理总数）、`tls`（参与本轮质量检测的键数）、
 `by_type`（IP 类型分布）、`ext_check_total`/`ext_check_ok`、`country_mismatch`（错区数）、
 `risk`、`abuse_checked`、`reputation_checked`（获分条数）、`rep_dist`（0-25/25-50/50-75/75-100
-分桶）、`rep_avg`/`rep_median`、`skipped`（本轮因时间预算耗尽而未执行的相位名列表；
-空列表=完整批次，供下游识别降级批）。
+分桶）、`rep_avg`/`rep_median`、`skipped`（本轮**未执行或明显降级**的相位标记列表；限速/
+截断轮次会追加一条「geo 相位限速」标记——此时实时解析率骤降、但 geo 覆盖率被上一版
+有效回填托住仍在高位，须靠本列表而非覆盖率识别该降级；空列表=完整批次，供下游识别降级批）。
 
 ### `data/quality/abuse.json`
 
