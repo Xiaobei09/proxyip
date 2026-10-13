@@ -480,7 +480,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
   | `pool_coverage` | 已发布条目 vs 可测候选池重合度 `{total, pool, in_pool, outside, outside_no_source, pool_usable}` |
   | `carrier_breakdown` | 逐运营商 `isp_ms` 覆盖 `{total, per, full, partial, zero}` |
   | `carrier_speed_breakdown` | 逐运营商 `isp_speed` 覆盖 `{total, per, ms_per, noise, floor, full, partial, zero, ms_only, speed_only}` |
-  | `unsourced_reachable` | `reachable` 却零 `sources` 证据的条目数 `{total, reachable, unsourced_reachable}` |
+  | `unsourced_reachable` | `reachable` 却零 `sources` 证据的条目数 `{total, reachable, unsourced_reachable, in_pool, outside_pool}`；后两项把该集合拆成「在可测候选池内（可被重测修复）」与「池外（不可测）」 |
 
   只追加、不改动、不删除既有键；`per` 等子字段的键为运营商取值域四类
   （`中国电信`/`中国联通`/`中国移动`/`中国多线`）。
