@@ -295,6 +295,10 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
 出口家族探测结果。顶层 `ts` + `proxies`：每个 `ip:port#国家` 的值为
 `{method, ts, family(ipv4/ipv6/dual/unknown), evidence, v4_src/v6_src, exit_v4/exit_v6,
 shared_exit, upstream_client_ip, upstream_family, upstream_absent, upstream_match}`。
+**R415 多出口标记（只增字段）**：`v4_seen`/`v6_seen`（同族多源回显的**不同字面量数**，
+>1 即「同族多出口」硬证据）、`multi_exit`（`v4_seen>1` 或 `v6_seen>1`）、
+`upstream_ip_match`（实测出口**字面量**与上游 `clientIp` 地址等价比较（IPv6 归一化）；
+True/False，任一侧未知时省略——比 `upstream_match` 的家族级比较更严）。
 
 **部分字段按需填充**：`upstream_*` 只在有 v6 出口探测结果时出现，`shared_exit` 在
 ipv4/unknown/dual 有值；缺字段视为无上游数据。探测字段之外（line/ip/port/cc 等可推导项）
@@ -317,7 +321,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 
 - `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域同 `china.json`，按 `ip:port#EXIT` 精确 join。两者均逐家过**出口地理下限**：低于该出口国物理 RTT 下限的读数（如大陆→US 12ms、→HK 1ms）地理上不可能，不导出；故某家可能只出现在 `cn_isp_ms` 而不在 `cn_isp_speed`，或两家皆无。`china.json` 原始 `isp_ms` 保留作证据，仅导出的 `all.json` 套用下限。
 - `cn_level` / `cn_streak` / `cn_flip` —— 大陆**证据分级/连续可达轮数/翻转计数**：`cn_level ∈ http|tcp|icmp`，`"http"` 即应用层确认可用（区别于仅能 ping 通）。
-- `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）、`geo`（实测出口**地区** `{"country","city","colo"}`，来自 `upstream_meta.json` 按入口 IP join）、`region_differs`（出口地区国 ≠ 入口标签国 = 出入地区不同）。
+- `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`multi_source`（R415：同族多源回显**不一致**=同族多出口）、`upstream_ip_match`（R415：实测出口字面量与上游 `clientIp` 地址等价比较）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）、`geo`（实测出口**地区** `{"country","city","colo"}`，来自 `upstream_meta.json` 按入口 IP join）、`region_differs`（出口地区国 ≠ 入口标签国 = 出入地区不同）。
 
 `cn` 为该行 note 中存在 `CN`/`CN4`/`CN6`/`CN46`/`CNH` 任一 token 即 true；
 `exit` 为行首**出口**国家码（有出口观测即 `←` 前的首个 CC，无箭头观测时为 `null`）；
@@ -447,6 +451,22 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 
 非 `reachable` 键无 `ms`/`isp_ms` 字段属预期——`ms` 缺失仅出现在未确认可达的行，
 可达清单才保证逐行有 ms。
+
+顶层另含两个 **additive** 键（读侧对未知键自动降级，不参与判据）：
+
+- `isp_ms_sources` — 逐源 per-ISP 归属记账（键为不透明 `src_*` id）
+- `meta` — **数据新鲜度/覆盖可见性**快照（`schema: "freshness-coverage/v1"`）：
+
+  | 子键 | 含义 |
+  |---|---|
+  | `age` | 条目账龄分档 `{total, fresh(<=1d), mid(2-7d), stale(>7d), unparsable}`；`fresh` 即本轮实测比例 |
+  | `pool_coverage` | 已发布条目 vs 可测候选池重合度 `{total, pool, in_pool, outside, outside_no_source, pool_usable}` |
+  | `carrier_breakdown` | 逐运营商 `isp_ms` 覆盖 `{total, per, full, partial, zero}` |
+  | `carrier_speed_breakdown` | 逐运营商 `isp_speed` 覆盖 `{total, per, ms_per, noise, floor, full, partial, zero, ms_only, speed_only}` |
+  | `unsourced_reachable` | `reachable` 却零 `sources` 证据的条目数 `{total, reachable, unsourced_reachable}` |
+
+  只追加、不改动、不删除既有键；`per` 等子字段的键为运营商取值域四类
+  （`中国电信`/`中国联通`/`中国移动`/`中国多线`）。
 
 ### `data/valid/all_cn.txt`
 
