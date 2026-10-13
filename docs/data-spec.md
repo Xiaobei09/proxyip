@@ -200,8 +200,10 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 ### `data/quality/cn_history.jsonl`
 
 CN 分运营商趋势，每行一快照 `{ts, cn_reachable, cn_by_isp}`；`cn_by_isp` 为
-`{运营商: {sampled, reachable, cn_wide, min_ms, median_ms}}`（无读数时为 `{}`）。
-`cn_wide`（R393）为 CN 口径可达（各运营商相同），`reachable`/`sampled` 为逐运营商实测。保留最近 8 天。
+`{运营商: {sampled, reachable, min_ms, median_ms}}`（无读数时为 `{}`），外加
+顶层单值 `cn_wide`（R393/R418）为 CN 口径可达参考（池内 `verdict==reachable`
+键数，含无分运营商读数的可达键）。R418 起 `cn_wide` 不再逐家复制——各运营商
+`reachable`/`sampled` 为逐运营商实测，反映真实覆盖差异。保留最近 8 天。
 
 ### `data/valid/meta.json`
 
