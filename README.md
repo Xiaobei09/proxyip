@@ -69,9 +69,9 @@
 
 ```bash
 head -1 data/valid/all.txt                  # 当前延迟最低的存活代理（延迟升序）
-data/valid/all_ltd.txt                      # 每国按实测速度最快的 20 条限量清单
+data/valid/all_ltd.txt                      # 每国按实测速度最快的 10 条限量清单
 data/valid/countries/US/all.txt            # 仅美国的存活代理（含延迟/速度）
-data/valid/countries/US/ltd.txt            # 该国限量（每国最快 20 条，速度降序）
+data/valid/countries/US/ltd.txt            # 该国限量（每国最快 10 条，速度降序）
 data/valid/countries/US/v4.txt             # 该国出口为 IPv4 的代理（仅 v4-only，不含双栈）
 data/valid/countries/US/46.txt             # 该国出口为双栈（v4+v6）的代理
 data/valid/countries/US/cn.txt             # 该国大陆可达的代理
