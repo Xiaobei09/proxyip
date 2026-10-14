@@ -1,5 +1,9 @@
 # 可用性校验流程（Availability Validation）
 
+本文件说明「一个 IP 如何被判为可用」的链路、判定阈值与**可点击的复核入口**。
+只使用公开工件与 Actions 记录即可复现结论；上游私有端点/凭证/真名从不出现于
+本仓库（模式只能由 `PRIVATE_SOURCE_IDENTIFIER_PATTERN` 环境变量注入）。
+
 ## 链路总览
 
 1. ip 源抓取：`pcb/scripts/download_proxies.py`
@@ -8,6 +12,43 @@
 4. 大陆可达与分运营商：`china_check.py`、`china_engine.py`
 5. 缓存：`pool_cache.py`（7 天，单轮 ≤ 1000）
 6. 质量与 good/premium：`quality_*.py`、`build_good.py`
+
+## 工件与入口（具体链接）
+
+| 环节 | 工作流 | 产物 |
+|---|---|---|
+| 采集去重 | [update-proxies.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/update-proxies.yml) | `data/download/all.txt` |
+| 存活/延迟 | [quality-check.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/quality-check.yml) | `data/valid/all.txt`、`data/quality/` |
+| 综合最优 | [build-good.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/build-good.yml) | `data/valid/all_good*.txt`、`all_premium*.txt` |
+| 大陆可达 | [china-check.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/china-check.yml) | `data/valid/all_cn*.txt`、`data/quality/china.json` |
+| 深度测速 | [deep-speed.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/deep-speed.yml) | `data/valid/speed.json` |
+| 出口地理 | [exit-family.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/exit-family.yml) / [annotate-classify.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/annotate-classify.yml) | `data/valid/exit_family.json`、`data/quality/` |
+| 统计出图 | [stats.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/stats.yml) | `data/output/stats.json`、`chart_*.svg` |
+| 泄漏门禁 | [leak-guard.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/leak-guard.yml) | 通过/失败结论 |
+
+直链复核（`main` 分支）：
+
+- 存活清单：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all.txt>
+- 大陆可达：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all_cn.txt>
+- 连续两轮大陆可达：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all_cn_stable.txt>
+- 综合最优：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all_good.txt>
+- 实测速度：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/speed.json>
+- 结构化索引：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/index.json>
+- 汇总统计：<https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json>
+- 数据目录：<https://github.com/Xiaobei09/proxyip/tree/main/data>
+- 格式规范：[docs/data-spec.md](https://github.com/Xiaobei09/proxyip/blob/main/docs/data-spec.md)
+
+## 分阶段判定（逐级收窄）
+
+1. **去重入库**：汇总 `ip:port`，统一为 `ip:port#国家` 数字序；入库 ≠ 可用。
+2. **传输层存活（L1）**：TLS/TCP 握手与握手延迟测量，失败即弃。
+3. **应用层确认（`-CNH`）**：大陆侧 TCP 可达后再发真实 HTTP，2xx 才算应用层确认。
+4. **全链路测速（`*_verified`）**：TLS + HTTP 2xx + 真实下载全部通过。
+5. **跨轮稳定（`*_stable`）**：上一轮与本轮存活取交集，对抗 churn。
+6. **综合最优（`all_good.txt`）**：大陆可达 + 有信誉记录 + 非高风险 + 有速度读数。
+
+行尾 token 见 [README「行内备注速查」](https://github.com/Xiaobei09/proxyip/blob/main/README.md#中国大陆使用建议)：
+`-CN` 大陆可达、`-CNH` 应用层确认、`←CC` 实测出口地区、`≈XMB/s` 国内速度。
 
 ## 具体端点
 
@@ -26,3 +67,25 @@
 - 单轮总测试项 <= 1000；先补无数据 key，再 uncertain，再有数据键。
 - 分运营商读数超过 1 天清除；4 运营商可用读数目标均衡。
 - 出口 multi-source comparison 至少 10 个源（可复用声誉源观测）。
+
+## 独立复现（本地命令）
+
+```bash
+# 当前大陆可达清单（含延迟/运营商/出口标记）
+curl -fsSL https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all_cn.txt | head
+
+# 最近一轮总量与运营商分布
+curl -fsSL https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json
+
+# 工作流最近运行结论
+#   https://github.com/Xiaobei09/proxyip/actions/workflows/china-check.yml
+```
+
+复现「某 IP 为何被判可用」：候选是否存在 → `all.txt` 是否有延迟 → `all_cn.txt`
+是否有 `-CN`/`-CNH` → 是否进入 `all_good.txt`。
+
+## 安全与门禁
+
+- 泄漏门禁扫描 `scripts/`、`tests/`、`docs/`、`.github/workflows/`、`.github/scripts/`。
+- `.github/scripts/leak_scan.sh` 未得到模式注入时**拒绝运行**（fail-closed），
+  不会输出「干净」的假结论。
