@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
-# 私有源泄露扫描（公开契约版）。
+# Private-source leak scan (public contract form).
 #
-# 用法：
+# Usage:
 #   PRIVATE_SOURCE_IDENTIFIER_PATTERN='<regex>' bash .github/scripts/leak_scan.sh
 #
-# 无法在公开树 hard-code 真名/URL/凭证或其模式；模式只能由环境变量注入
-#（CI secrets 或维护者本地 .env，后二者均被 .gitignore）。
-# 返回 0 = 无命中；返回 1 = 发现潜在泄露（需立即脱敏/回滚）。
+# The real names / URLs / credentials and their patterns are NEVER hard-coded in
+# the public tree. The pattern must be injected from the environment (CI secret
+# or a maintainer's local, git-ignored, dotenv file). Without it we cannot know
+# what to look for, so we fail closed instead of pretending to be clean.
+#
+# Exit 0 = no match; exit 1 = potential leak found (scrub + roll back now).
 set -uo pipefail
 
 pattern="${PRIVATE_SOURCE_IDENTIFIER_PATTERN:-}"
 if [ -z "$pattern" ]; then
-    echo "::warning::PRIVATE_SOURCE_IDENTIFIER_PATTERN 未配置——仅做公开仓 known-secret 兜底检查"
-    pattern='(BUNDLE_PAT|ABUSEIPDB_KEY|IPQS_KEY|CHINA_CHECK_API_KEY|TCPPING_CN_TOKEN)'
+    echo "::error::PRIVATE_SOURCE_IDENTIFIER_PATTERN is not set; refusing a vacuous scan." >&2
+    exit 2
 fi
 
 matches=""
 while IFS= read -r -d '' f; do
     case "$f" in
-        data/raw/*|data/diff/*|./.opencode/*) continue ;;
+        data/raw/*|data/diff/*|./.opencode/*|./.git/*) continue ;;
     esac
     out=$(grep -HnE "$pattern" "$f" 2>/dev/null || true)
     [ -n "$out" ] && matches="${matches}${out}"$'\n'
