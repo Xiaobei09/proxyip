@@ -48,6 +48,9 @@
 
 </details>
 
+- [源接入规则](docs/source_intake_rules.md)
+- [可用性校验流程](docs/availability_validation.md)
+
 ## 我该用哪个文件？
 
 | 需求 | 首选文件 | 说明 |
