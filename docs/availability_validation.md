@@ -54,7 +54,8 @@
 
 - 出口 IP：`http://httpbin.org/get`、`https://api.ipify.org?format=json`、Cloudflare `cf-ray`、`ip-api.com/json`
 - 分运营商 RTT 异常下限：境内 1ms / 港澳 5ms / 台 8ms / 日韩 12ms / 东南亚 25ms / 其他 40ms。
-- 分运营商数据超过 1 天清除（`CN_ISP_TTL_SEC=86400`）。
+- 分运营商数据超过 1 天清除（携带侧 `china_check.ISP_MS_CARRY_TTL_SEC=86400`；
+  CN 侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。
 - ≥10 个出口源对比，多出口打 `multi_region_exit=true`。
 
 ## 超时
