@@ -37,8 +37,13 @@ on:
     #   （标称 2/h 的 ≈10%）。⇒ 平台对**绝对触发率**封顶：加密 cron 只增加
     #   被丢弃的槽位。**故「一次结束后立刻下一轮」无法靠 cron 达成**——只能靠
     #   带 PAT 的 ``workflow_dispatch`` 自派发（``GITHUB_TOKEN`` 触发的
-    #   workflow_run/dispatch 被平台静默忽略，防递归），但那会烧源站速率配额，
-    #   风险高于收益，暂不启用。复现：
+    #   workflow_run/dispatch 被平台静默忽略，防递归）。
+    #   ★R595：用户明确要求「一轮结束立刻下一轮」⇒ **已启用**自派发（job 末尾
+    #   ``Self-dispatch next round`` 步），并给 R351 的「烧源站配额」顾虑加三重
+    #   保险：①只在本轮整体成功且未被 gate 跳过时派发；②与上一轮**开始**的间隔
+    #   ≥120min（防快速退出轮连环派发）；③24h 内自派发 <10 次（硬上限，≈1 次/
+    #   2.4h，与实测单轮时长 2.2–2.5h 同量级）。派发失败**不判红**（PAT 缺
+    #   workflow scope 时只记 warning，cron 仍兜底）。复现：
     #     gh run list --workflow='China check' --limit 100 \
     #       --json createdAt,event   # 勿用 --event schedule（本仓该过滤返回陈旧列表）
     - cron: "11,41 * * * *"
@@ -273,3 +278,67 @@ jobs:
         if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+
+      # R595：自派发下一轮（用户「一轮结束立刻下一轮」）。平台对 cron 绝对
+      # 触发率封顶（R517 实测 ≈标称的 10%，1 次/4–5h）⇒ 只有带 PAT 的
+      # dispatch 能达成（GITHUB_TOKEN 触发的 dispatch 被平台静默忽略）。
+      # 三重保险与上限取值理由见文件头 R595 注释。任何失败只记 warning、
+      # 不判红（PAT 缺 workflow scope 时 cron 兜底）。
+      - name: Self-dispatch next round
+        if: success() && steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.BUNDLE_PAT }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, subprocess, sys
+
+          MIN_GAP_MIN = 120      # 与上一轮开始的间隔下限（防快速退出轮连环）
+          DAILY_CAP = 10         # 24h 内自派发硬上限（R351 配额顾虑）
+          WF = "china-check.yml"
+          fmt = "%Y-%m-%dT%H:%M:%SZ"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          cur = os.environ["GITHUB_RUN_ID"]
+
+          def gh(*args):
+              return subprocess.run(["gh", *args], capture_output=True,
+                                    text=True)
+
+          p = gh("run", "list", "--workflow", WF, "--repo", repo,
+                 "--limit", "30", "--json", "databaseId,createdAt,event")
+          if p.returncode != 0:
+              print("::warning::自派发前置查询失败，跳过: "
+                    + p.stderr.strip()[:200])
+              sys.exit(0)
+          runs = sorted(json.loads(p.stdout), key=lambda r: r["createdAt"])
+          me = next((r for r in runs
+                     if str(r["databaseId"]) == cur), None)
+          if me is None:
+              print("本轮不在 run 列表（分页/延迟），跳过自派发")
+              sys.exit(0)
+          prev = [r for r in runs if r["createdAt"] < me["createdAt"]]
+          if prev:
+              gap_min = (datetime.datetime.strptime(me["createdAt"], fmt)
+                         - datetime.datetime.strptime(prev[-1]["createdAt"], fmt)
+                         ).total_seconds() / 60
+              if gap_min < MIN_GAP_MIN:
+                  print(f"距上一轮开始仅 {gap_min:.0f}min < "
+                        f"{MIN_GAP_MIN}min，跳过自派发")
+                  sys.exit(0)
+          cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(hours=24))
+          n24 = sum(
+              1 for r in runs
+              if r["event"] == "workflow_dispatch"
+              and datetime.datetime.strptime(r["createdAt"], fmt).replace(
+                  tzinfo=datetime.timezone.utc) >= cutoff)
+          if n24 >= DAILY_CAP:
+              print(f"24h 内自派发 {n24} 次已达上限 {DAILY_CAP}，跳过")
+              sys.exit(0)
+          d = gh("workflow", "run", WF, "--repo", repo, "--ref", "main")
+          if d.returncode == 0:
+              print(f"已派发下一轮（24h 内第 {n24 + 1} 次自派发）")
+          else:
+              print("::warning::自派发失败（PAT 缺 workflow scope?），"
+                    "cron 兜底: " + d.stderr.strip()[:200])
+          PY
