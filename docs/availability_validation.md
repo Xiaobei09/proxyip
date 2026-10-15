@@ -56,7 +56,10 @@
 - 分运营商 RTT 异常下限：境内 1ms / 港澳 5ms / 台 8ms / 日韩 12ms / 东南亚 25ms / 其他 40ms。
 - 分运营商数据超过 1 天清除（携带侧 `china_check.ISP_MS_CARRY_TTL_SEC=86400`；
   CN 侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。
-- ≥10 个出口源对比，多出口打 `multi_region_exit=true`。
+- 出口多源对比（**目标** ≥10 个独立来源）：当前在仓可用的出口地理来源为 3 个——
+  `external_check.json`、`upstream_meta.json`、`ipinfo.json`，由 `common.build_exit_cc_map`
+  按优先级汇聚为每个键的出口地区 `←CC`；`multi_region_exit=true` 在观测到
+  ≥2 个互异出口地区时置真。
 
 ## 超时
 
@@ -67,7 +70,8 @@
 - 每轮 CN 探测结束后应尽量安排下一轮（不与在跑实例冲突）。
 - 单轮总测试项 <= 1000；先补无数据 key，再 uncertain，再有数据键。
 - 分运营商读数超过 1 天清除；4 运营商可用读数目标均衡。
-- 出口 multi-source comparison 至少 10 个源（可复用声誉源观测）。
+- 出口 multi-source comparison 至少 10 个独立来源（当前 3 个；R520 实证声誉源
+  `reputation*.json` 无任何地理字段，**不可复用**，达 10 源须引入独立地理库）。
 
 ## 独立复现（本地命令）
 
