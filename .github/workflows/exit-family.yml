@@ -17,7 +17,12 @@ jobs:
   check:
     name: Actual exit IPv4/IPv6 family
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # R597b：60 → 75。全池 20,122 键即使 96 并发 + 40 分钟预算也需给
+    # annotate/build-good/commit 留量；预算到点部分落盘（exit_family.py
+    # --time-budget 到点停止提交、已得结果照常落盘并与上轮合并），
+    # 故作业**任何情况下都能落产物**，不再像 16 并发时代（实测全量 ~216
+    # 分钟）那样每轮被整体取消、产物零落盘（2026-10-12 起停更）。
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -70,7 +75,10 @@ jobs:
       - name: Exit family check
         id: exit
         if: steps.gate.outputs.skip != 'true'
-        run: python pcb/scripts/exit_family.py
+        # R597b：并发 96（默认 64，探测为网络 I/O 型）+ 40 分钟运行级预算。
+        # 实测 16 并发 93 键/分 ⇒ 全量 216 分钟 > 作业上限 ⇒ 每轮取消；
+        # 64 并发 311 键/分；预算到点部分落盘并与上轮产物合并（carried）。
+        run: python pcb/scripts/exit_family.py --workers 96 --time-budget 2400
 
       - name: Annotate and classify
         id: annotate
