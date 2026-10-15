@@ -77,6 +77,10 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
+        # R594：判的是预愈合快照（本链愈合动作是下方 `Annotate and classify`），
+        # 已发布状态门禁 defer 给其后的 `Published-state gates` 步补跑。
+        env:
+          PCB_PUBLISHED_GATES_DEFERRED: "1"
         if: steps.gate.outputs.skip != 'true'
         run: python -m unittest discover -s pcb/tests_pipeline -v
 
@@ -104,6 +108,14 @@ jobs:
         # 早测红时跳过它 ⇒ 漂移永久无人修复。
         if: always() && steps.gate.outputs.skip != 'true'
         run: python pcb/scripts/annotate_classify.py
+
+      # R594：愈合**之后**判已发布状态不变式（预愈合步已 defer）——
+      # `Deep quality check` 会刷新 ipinfo/external_check，标注步随后用新图
+      # 重写清单，故只有本步之后的快照才是「将要提交的状态」。判据不放水：
+      # 本步若红，说明 annotate **没能**收敛漂移，是真缺陷。
+      - name: Published-state gates
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
 
       # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
 

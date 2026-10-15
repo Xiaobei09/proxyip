@@ -60,6 +60,10 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
+        # R594：预愈合快照豁免（愈合动作是下方 `Annotate and classify`），
+        # 最终状态由其后的 `Published-state gates` 步判定。
+        env:
+          PCB_PUBLISHED_GATES_DEFERRED: "1"
         if: steps.gate.outputs.skip != 'true'
         run: python -m unittest discover -s pcb/tests_pipeline -v
 
@@ -82,6 +86,11 @@ jobs:
         # socket I/O），**刻意不加** always()：R254 早测红就不烧网络配额。
         if: always() && steps.gate.outputs.skip != 'true'
         run: python pcb/scripts/annotate_classify.py
+
+      # R594：愈合**之后**判已发布状态不变式（预愈合步已 defer）。
+      - name: Published-state gates
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
 
       - name: Build good lists
         id: good

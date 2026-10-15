@@ -41,6 +41,12 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
+        # R594：本步判的是**预愈合快照**（本链的愈合动作是下方
+        # `Annotate and classify`），故已发布状态门禁在此 defer、由其后
+        # 的 `Published-state gates` 步补跑判最终状态。豁免与补跑成对，
+        # 由 tests_pipeline/test_commit_data.py 的结构门禁强制。
+        env:
+          PCB_PUBLISHED_GATES_DEFERRED: "1"
         run: python -m unittest discover -s pcb/tests_pipeline -v
 
       - name: Download and extract
@@ -67,6 +73,25 @@ jobs:
           wc -l data/quality/history.jsonl
           echo "Diff archives:"
           ls data/diff/*.json 2>/dev/null | wc -l
+
+      # R594：**本链是 →出口 标注漂移的制造点**。`Download and extract` 会重写
+      # ``data/quality/upstream_meta.json``（地理图）与 ``data/valid/*``，却从不
+      # 重跑标注 ⇒ 提交点上「图 ↔ 清单标注」可以不一致，下游 quality-check 的
+      # 预愈合测试步必红。实测证据：commit a239cae7a（update proxy list，09:31）
+      # 改了 ``upstream_meta.json`` 并重写 ``all.txt`` 41,118 行，随后
+      # quality-check 4 连红（10-14T15:00/20:05、10-15T03:01/09:31），每次都靠
+      # 同一 job 的 heal 提交修好（b926acd82 把 195.133.39.185 修成 DE←DE）。
+      # 在提交前补上标注 ⇒ 每个提交点自洽，下游不必再依赖「下一班注解自愈」。
+      # annotate 失败**不拦提交**（数据新鲜优先；残余漂移由下游 heal 链兜底）。
+      - name: Annotate and classify
+        id: annotate
+        if: always() && steps.download.outcome != 'failure' && steps.validate.outcome != 'failure'
+        run: python pcb/scripts/annotate_classify.py
+
+      # R594：愈合**之后**才判已发布状态不变式（预愈合步已 defer）。
+      - name: Published-state gates
+        if: always() && steps.annotate.outcome == 'success'
+        run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
 
       - name: Commit changes
         # R325：🔴 **数据管道停摆的根因**。`Download and extract` 与
