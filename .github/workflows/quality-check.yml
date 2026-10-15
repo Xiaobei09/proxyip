@@ -113,9 +113,15 @@ jobs:
       # `Deep quality check` 会刷新 ipinfo/external_check，标注步随后用新图
       # 重写清单，故只有本步之后的快照才是「将要提交的状态」。判据不放水：
       # 本步若红，说明 annotate **没能**收敛漂移，是真缺陷。
+      # R596：本链是 ``reorg_country.py`` 的**单一所有者**（R254），故补跑类
+      # 扩为两类——出口标注（``TestExitCountryConvergence``）+ countries 视图
+      # 收敛（``TestReorgCountryConsistency``）。后者在其余三条链（无 reorg）
+      # 的预愈合步 defer 后**只在这里**判最终状态：实测 run 38731163299 的
+      # 硬失败 2 之一（``39.98.224.123:443`` 在 all.txt 而不在任何 countries/*）
+      # 即由本步把关。
       - name: Published-state gates
         if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
-        run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
+        run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence tests_pipeline.test_reorg.TestReorgCountryConsistency -v
 
       # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
 

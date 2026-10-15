@@ -187,6 +187,18 @@ jobs:
         # 记账项在本工作流**不会**消失：其余全部工作流继续直接跑
         # ``python -m unittest``，同一条 ``RatchetDowngrade``（继承
         # ``AssertionError``）在那里照样判红。
+        #
+        # R596：**已发布状态门禁在此 defer**（与 R594 三条链同因、同机制）。
+        # 本步排在 ``Annotate and classify`` **之前**，预愈合快照上的漂移是
+        # 必然：实测 run 38731163299（dispatch 验证轮）硬失败 2 =
+        # ``TestExitCountryConvergence``（出口标注不忠实）+ 
+        # ``TestReorgCountryConsistency``（``39.98.224.123:443`` 在 all.txt
+        # 而不在任何 countries/*）。前者本链 annotate 自愈 ⇒ 由其后
+        # ``Published-state gates`` 步补跑；后者归 quality-check 的 reorg
+        # 单一收敛（R254），本链**无法**愈合 ⇒ 只由该链补跑。豁免与补跑成对，
+        # 由 tests_pipeline/test_commit_data.py 的结构门禁强制。
+        env:
+          PCB_PUBLISHED_GATES_DEFERRED: "1"
         run: |
           python pcb/scripts/run_ci_tests.py --discover pcb/tests_pipeline
           python pcb/scripts/run_ci_tests.py --discover pcb/tests --top .
@@ -240,6 +252,16 @@ jobs:
         # 只放开**失败传播**：always() 让 heal 在早测失败时仍执行。
         if: always() && steps.gate.outputs.skip != 'true'
         run: python pcb/scripts/annotate_classify.py
+
+      - name: Published-state gates
+        # R596：R594 成对约定的**补跑半边**（豁免 + 补跑必须成对，结构门禁在
+        # tests_pipeline/test_commit_data.py）。本链只补跑**它能愈合**的类：
+        # ``annotate_classify`` 收敛出口标注（``TestExitCountryConvergence``）；
+        # reorg 类（``TestReorgCountryConsistency``）归 quality-check 单一收敛，
+        # 在本链补跑必然红 ⇒ 不列入。判据不放水：本步若红，说明 annotate
+        # **没能**收敛漂移，是真缺陷。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
 
       # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
 
