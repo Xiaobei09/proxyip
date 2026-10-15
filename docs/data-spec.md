@@ -323,6 +323,26 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   `multi_exit`（同族多源出口不一致）/`multi_region_exit`（独立出口地理源互斥，
   与 `all.json` 的 `real_exit.multi_region_exit` 同源同口径）为产物全域计数。
 
+### `data/quality/exit_geo_multi.json`
+
+按**实测出口 IP** 逐族查国的多源共识（「出口需要多源对比，不要听信一家之言
+（至少 10 个源）」；口径与源清单见 pcb `docs/exit_multi_source.md`）。
+顶层 `{ts, ips, summary}`：
+
+- `ips`：`{<出口 IP>: {votes, consensus, top_votes, total_votes, distinct_cc,
+  multi_region, ok_sources, providers}}`——`votes` 为**族去重**一票制
+  （同一供应商多端点合 1 票；低质源保留观测但不计票）；`consensus` 无唯一
+  多数时为 `null`（宁缺勿假）；`multi_region`（`distinct_cc ≥ 2`，即互斥出口
+  国并存）与 `all.json` 的 `real_exit.multi_region_exit` 及行尾 `⇋` 标记同源；
+  `providers` 为逐端点原始观测（fail-open：单源失败不投票）。
+- `summary`：`{ips, families_configured, families_target, multi_region}`——
+  可用族数 < 目标（10）时运行日志出 `::warning::`（诚实告警，不判死）。
+- 数据源按**族**计：API 族（`ip-api`、`ipwhois`、`ip-sb`、`ipinfo`、
+  `ipapi.co`、`geojs`、`geolocation-db`〔低质，0 票〕）+ 本地库族
+  （DB-IP Lite，运行时下载、不随仓库分发；© [DB-IP.com](https://db-ip.com)，
+  数据 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)；脚本兼容
+  IP2Location LITE 同型 CSV）。
+
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
 `node_seen.json`：`{runs: {<YYYY-MM-DD>: 轮次计数}, proxies: {<key>: [出现日期…]}}`
