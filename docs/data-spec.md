@@ -308,11 +308,20 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   `v4_total` / `v6_total`（**观测数**）——`v4_seen`/`v6_seen` 只说"有几种字面量"：
   2-2（两个出口各获两票）与 2-1（单个离群回显）的 `seen` 同为 2，只有票数/观测数
   能分辨；`votes == total` 即全源一致，`votes * 2 == total` 即等票对峙。
+- **R597 多出口/多地区（只增字段）**：`v4_lits` / `v6_lits`（同族多源回显的**不同出口
+  字面量清单**，仅在 `v4_seen`/`v6_seen` > 1 时出现——R415 只带计数，消费方无从知道
+  是哪几个出口）、`carried`（True = 该条目**非本轮观测**，因运行级时间预算截断由上一轮
+  产物并回；`ts` 仍为该次观测时刻，新鲜度按 `ts` 判龄）。
 - 上游交叉验证（按需填充：`upstream_*` 只在有 v6 出口探测结果时出现）：
   `upstream_client_ip`（上游观测出口）、`upstream_family`、`upstream_absent`、
   `upstream_match`（家族级比较）、`upstream_ip_match`（实测出口**字面量**与上游
   `clientIp` 地址等价比较（IPv6 归一化）；True/False，任一侧未知时省略——
   比 `upstream_match` 的家族级比较更严）。
+- 顶层 `summary` 计数块（R597）：`{total, probed, sample, partial, carried,
+  time_budget_s, multi_exit, multi_region_exit, shared_exit}`——`probed`/`sample`
+  为本轮实探/计划数，`partial=True` 即被时间预算截断（未探键按 `carried` 并回），
+  `multi_exit`（同族多源出口不一致）/`multi_region_exit`（独立出口地理源互斥，
+  与 `all.json` 的 `real_exit.multi_region_exit` 同源同口径）为产物全域计数。
 
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
