@@ -80,6 +80,22 @@ jobs:
         # 64 并发 311 键/分；预算到点部分落盘并与上轮产物合并（carried）。
         run: python pcb/scripts/exit_family.py --workers 96 --time-budget 2400
 
+      - name: Download local geo DB (DB-IP Lite)
+        # R600（用户「出口 ≥10 源」）：§8.7 结论 2 的本地库路径——离线 CSV、
+        # 零注册零配额、独立于 API 生态的一族。刻意放 $RUNNER_TEMP（**不进
+        # data/**）：commit_data.sh 按 `find data -newer` 收产物，放 data/
+        # 会把 4.5MB 二进制误提交。fail-open：下载失败/当月未发布（回退上月
+        # URL）仅少一票，不判死（与「族数 < 10 只告警」同款）。
+        # 署名：DB-IP Lite © DB-IP.com，CC BY 4.0（运行时下载，不随仓库分发）。
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/geoip"
+          for m in "$(date -u +%Y-%m)" "$(date -u -d 'last month' +%Y-%m)"; do
+            curl -fsSL --retry 2 -o "$RUNNER_TEMP/geoip/dbip-country-lite-$m.csv.gz" \
+              "https://download.db-ip.com/free/dbip-country-lite-$m.csv.gz" && break
+          done
+
       - name: Exit geo multi-source
         id: exitgeo
         # R597（用户「出口需要多源对比，不要听信一家之言（至少 10 个源）」）：
@@ -87,8 +103,9 @@ jobs:
         # 出口产物；缓存 TTL 7 天 ⇒ 每轮增量覆盖。产物供 annotate/export 的
         # ←CC 与 ⇋（多地区出口）标记消费。放在 annotate 之前——annotate 读它。
         # 不加 always()：探测步红就不烧这 10 分钟网络配额（R254 同款决策）。
+        # R600：--local-db-dir 接本地库（上一步下载，失败则无本地票）。
         if: steps.gate.outputs.skip != 'true'
-        run: python pcb/scripts/exit_geo_multi.py --from-exit-family data/quality/exit_family.json --time-budget 600
+        run: python pcb/scripts/exit_geo_multi.py --from-exit-family data/quality/exit_family.json --time-budget 600 --local-db-dir "$RUNNER_TEMP/geoip"
 
       - name: Annotate and classify
         id: annotate
