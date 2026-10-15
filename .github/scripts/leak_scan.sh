@@ -20,8 +20,18 @@ fi
 
 matches=""
 while IFS= read -r -d '' f; do
+    # 跳过集合必须与**权威门禁** ``pcb/tests_pipeline/test_checks_bundle.py``
+    # 的 ``_SKIP_DIRS = {"pcb", ".opencode", ".git"}`` **逐条一致**：那里是
+    # 真名/端点/salt 扫描面的判据，本脚本只是同一契约的手动形态。
+    #
+    # R525：旧式 ``data/raw/*|data/diff/*`` 是**死模式**——``find .`` 产出的
+    # 路径带 ``./`` 前缀，故这两条永不命中，``data/raw`` 实际一直被扫（且它
+    # 本就该扫：权威门禁把 ``data/`` 纳入面内）。真正被漏掉的是 ``./pcb/*``：
+    # ``pcb/`` 是本机内的私有嵌套版本库（公开 ``.gitignore`` 已忽略），
+    # 权威门禁显式跳过它；旧式列表缺这一条，会把**私有树**一并扫进来（误报/越界）。
+    # 故此处改为照抄 ``_SKIP_DIRS``。
     case "$f" in
-        data/raw/*|data/diff/*|./.opencode/*|./.git/*) continue ;;
+        ./pcb/*|./.opencode/*|./.git/*) continue ;;
     esac
     out=$(grep -HnE "$pattern" "$f" 2>/dev/null || true)
     [ -n "$out" ] && matches="${matches}${out}"$'\n'

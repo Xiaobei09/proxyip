@@ -91,6 +91,9 @@ curl -fsSL https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/
 
 ## 安全与门禁
 
-- 泄漏门禁扫描 `scripts/`、`tests/`、`docs/`、`.github/workflows/`、`.github/scripts/`。
+- 泄漏门禁扫描**公开树**的文本文件（含 `docs/`、`.github/`、`README.md` 与已发布
+  的 `data/`），**跳过**私有嵌套库 `pcb/` 与 `.git/`、`.opencode/`——判据同
+  `pcb/tests_pipeline/test_checks_bundle.py` 的 `_SKIP_DIRS`。
+  `scripts/`、`tests/` 已随代码切流迁入私有仓，不在公开面内。
 - `.github/scripts/leak_scan.sh` 未得到模式注入时**拒绝运行**（fail-closed），
-  不会输出「干净」的假结论。
+  不会输出「干净」的假结论；其跳过集合与上面的 `_SKIP_DIRS` 逐条一致（R525）。
