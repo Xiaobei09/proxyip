@@ -80,6 +80,16 @@ jobs:
         # 64 并发 311 键/分；预算到点部分落盘并与上轮产物合并（carried）。
         run: python pcb/scripts/exit_family.py --workers 96 --time-budget 2400
 
+      - name: Exit geo multi-source
+        id: exitgeo
+        # R597（用户「出口需要多源对比，不要听信一家之言（至少 10 个源）」）：
+        # 按**出口 IP** 逐族查国（族去重投票），查询集取自上一步刚写的实测
+        # 出口产物；缓存 TTL 7 天 ⇒ 每轮增量覆盖。产物供 annotate/export 的
+        # ←CC 与 ⇋（多地区出口）标记消费。放在 annotate 之前——annotate 读它。
+        # 不加 always()：探测步红就不烧这 10 分钟网络配额（R254 同款决策）。
+        if: steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/exit_geo_multi.py --from-exit-family data/quality/exit_family.json --time-budget 600
+
       - name: Annotate and classify
         id: annotate
         # R324 自指死锁（与 china-check.yml 的 eb59f4c 同构）：`Run tests`
