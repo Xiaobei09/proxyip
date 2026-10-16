@@ -390,3 +390,69 @@ jobs:
               print("::warning::自派发失败（PAT 缺 workflow scope?），"
                     "cron 兜底: " + d.stderr.strip()[:200])
           PY
+
+      # ★R615：管线头保活。update-proxies（数据链头：update→quality→annotate→
+      # exit-family→build→stats）的 cron 丢弃率 ≈90%（2026-10-16 的 10:00/12:00
+      # 槽位实测全丢），其成功轮间隔一旦拉长，全链断粮、数据冻结（当日
+      # 09:52Z–13:22Z 实测 3.5h 零数据提交）。本步借用 china-check 自身**已保活**
+      # 的完成事件（R595/R613 自派发链 ≈2.5h/轮）做「staleness 看门」：距
+      # update-proxies 上一轮**开始** ≥120min（=其 cron 设计节拍 0 */2）、该轮
+      # 已结束（防 concurrency 取消在跑轮）、24h 内本看门派发 <10 次 ⇒ 补派一轮。
+      # 任何失败只记 warning、不判红（continue-on-error）；cron 仍兜底。
+      - name: Pipeline head watchdog
+        if: ${{ !cancelled() && steps.gate.outputs.skip != 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.BUNDLE_PAT }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, subprocess, sys
+
+          STALE_MIN = 120   # = update-proxies 设计节拍（cron 0 */2）；超过即补派
+          DAILY_CAP = 10    # 24h 内本看门派发硬上限（cron 正常时本步静默）
+          WF = "update-proxies.yml"
+          fmt = "%Y-%m-%dT%H:%M:%SZ"
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def gh(*args):
+              return subprocess.run(["gh", *args], capture_output=True,
+                                    text=True)
+
+          p = gh("run", "list", "--workflow", WF, "--repo", repo,
+                 "--limit", "30",
+                 "--json", "databaseId,createdAt,event,status")
+          if p.returncode != 0:
+              print("::warning::管线头查询失败，跳过: " + p.stderr.strip()[:200])
+              sys.exit(0)
+          runs = sorted(json.loads(p.stdout), key=lambda r: r["createdAt"])
+          if runs:
+              last = runs[-1]
+              if last.get("status") != "completed":
+                  print("update-proxies 有未结束轮（防并发取消），跳过")
+                  sys.exit(0)
+              age_min = (datetime.datetime.now(datetime.timezone.utc)
+                         - datetime.datetime.strptime(
+                             last["createdAt"], fmt).replace(
+                             tzinfo=datetime.timezone.utc)
+                         ).total_seconds() / 60
+              if age_min < STALE_MIN:
+                  print(f"update-proxies 上轮 {age_min:.0f}min 前开始"
+                        f"（<{STALE_MIN}min）仍新鲜，跳过")
+                  sys.exit(0)
+          cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(hours=24))
+          n24 = sum(
+              1 for r in runs
+              if r["event"] == "workflow_dispatch"
+              and datetime.datetime.strptime(r["createdAt"], fmt).replace(
+                  tzinfo=datetime.timezone.utc) >= cutoff)
+          if n24 >= DAILY_CAP:
+              print(f"24h 内看门派发 {n24} 次已达上限 {DAILY_CAP}，跳过")
+              sys.exit(0)
+          d = gh("workflow", "run", WF, "--repo", repo, "--ref", "main")
+          if d.returncode == 0:
+              print(f"已补派 update-proxies（管线头 stale ≥{STALE_MIN}min）")
+          else:
+              print("::warning::管线头派发失败（PAT 缺 workflow scope?），"
+                    "cron 兜底: " + d.stderr.strip()[:200])
+          PY
