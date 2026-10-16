@@ -40,10 +40,11 @@ on:
     #   workflow_run/dispatch 被平台静默忽略，防递归）。
     #   ★R595：用户明确要求「一轮结束立刻下一轮」⇒ **已启用**自派发（job 末尾
     #   ``Self-dispatch next round`` 步），并给 R351 的「烧源站配额」顾虑加三重
-    #   保险：①只在本轮整体成功且未被 gate 跳过时派发；②与上一轮**开始**的间隔
-    #   ≥120min（防快速退出轮连环派发）；③24h 内自派发 <10 次（硬上限，≈1 次/
-    #   2.4h，与实测单轮时长 2.2–2.5h 同量级）。派发失败**不判红**（PAT 缺
-    #   workflow scope 时只记 warning，cron 仍兜底）。复现：
+    #   保险：①本轮**非取消**（成功/失败都派发，取消除外）且未被 gate 跳过；
+    #   ②与上一轮**开始**的间隔下限按上一轮结论取值：成功 ≥120min（防快速退出轮
+    #   连环派发）、失败/超时/取消 ≥5min（恢复链，R613）；③24h 内自派发 <10 次
+    #   （硬上限，≈1 次/2.4h，与实测单轮时长 2.2–2.5h 同量级）。派发失败**不判红**
+    #   （PAT 缺 workflow scope 时只记 warning，cron 仍兜底）。复现：
     #     gh run list --workflow='China check' --limit 100 \
     #       --json createdAt,event   # 勿用 --event schedule（本仓该过滤返回陈旧列表）
     - cron: "11,41 * * * *"
@@ -315,8 +316,17 @@ jobs:
       # ``workflow``+``repo``），本步**优先**用它；未配置/失效时回退
       # BUNDLE_PAT（行为退化为今日现状=warning+cron 兜底，不会更差）。
       # bundle 签出仍用 BUNDLE_PAT，不受本改动影响。
+      #
+      # ★R613：修「失败轮断链」——2026-10-16 09:41Z 轮在测试步硬失败后，本步因
+      # ``if: success()`` 整步跳过 ⇒ 链断；平台对 cron 丢弃率 ≈90%，china.json
+      # 随之冻结数小时（当日 04:27Z 后无成功轮）。修法：①``if`` 改
+      # ``!cancelled()``（成功/失败都派发；取消不派发，防与接管轮双链）；②间隔
+      # 下限按**上一轮结论**取值：上一轮成功 ⇒ 120min（原防线），上一轮失败/
+      # 超时/取消 ⇒ 5min（恢复链：修复一旦推送，下一轮即自愈，不必等 cron 抽签）；
+      # ③DAILY_CAP=10 不变——失败轮通常早退于测试步、不烧源站配额，热循环由日
+      # 上限兜底。
       - name: Self-dispatch next round
-        if: success() && steps.gate.outputs.skip != 'true'
+        if: ${{ !cancelled() && steps.gate.outputs.skip != 'true' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.BUNDLE_PAT }}
@@ -324,7 +334,8 @@ jobs:
           python3 - <<'PY'
           import datetime, json, os, subprocess, sys
 
-          MIN_GAP_MIN = 120      # 与上一轮开始的间隔下限（防快速退出轮连环）
+          MIN_GAP_MIN = 120      # 上一轮成功 ⇒ 间隔下限（防快速退出轮连环）
+          RECOVERY_GAP_MIN = 5   # 上一轮失败/超时/取消 ⇒ 恢复链间隔下限（R613）
           DAILY_CAP = 10         # 24h 内自派发硬上限（R351 配额顾虑）
           WF = "china-check.yml"
           fmt = "%Y-%m-%dT%H:%M:%SZ"
@@ -336,7 +347,8 @@ jobs:
                                     text=True)
 
           p = gh("run", "list", "--workflow", WF, "--repo", repo,
-                 "--limit", "30", "--json", "databaseId,createdAt,event")
+                 "--limit", "30",
+                 "--json", "databaseId,createdAt,event,conclusion")
           if p.returncode != 0:
               print("::warning::自派发前置查询失败，跳过: "
                     + p.stderr.strip()[:200])
@@ -349,12 +361,17 @@ jobs:
               sys.exit(0)
           prev = [r for r in runs if r["createdAt"] < me["createdAt"]]
           if prev:
+              prev_run = prev[-1]
+              # R613：上一轮成功走正常节奏；失败/超时/取消走恢复链（尽快自愈）。
+              thr = (MIN_GAP_MIN if prev_run.get("conclusion") == "success"
+                     else RECOVERY_GAP_MIN)
               gap_min = (datetime.datetime.strptime(me["createdAt"], fmt)
-                         - datetime.datetime.strptime(prev[-1]["createdAt"], fmt)
+                         - datetime.datetime.strptime(prev_run["createdAt"], fmt)
                          ).total_seconds() / 60
-              if gap_min < MIN_GAP_MIN:
-                  print(f"距上一轮开始仅 {gap_min:.0f}min < "
-                        f"{MIN_GAP_MIN}min，跳过自派发")
+              if gap_min < thr:
+                  print(f"距上一轮开始仅 {gap_min:.0f}min < {thr}min"
+                        f"（上一轮 {prev_run.get('conclusion') or 'in_progress'}），"
+                        "跳过自派发")
                   sys.exit(0)
           cutoff = (datetime.datetime.now(datetime.timezone.utc)
                     - datetime.timedelta(hours=24))
