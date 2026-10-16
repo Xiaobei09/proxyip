@@ -306,11 +306,20 @@ jobs:
       # dispatch 能达成（GITHUB_TOKEN 触发的 dispatch 被平台静默忽略）。
       # 三重保险与上限取值理由见文件头 R595 注释。任何失败只记 warning、
       # 不判红（PAT 缺 workflow scope 时 cron 兜底）。
+      #
+      # ★R604：生产实测自派发**从未成功**——38812094649（2026-10-16 00:12Z）
+      # 步骤日志：``HTTP 403: Resource not accessible by personal access
+      # token``。BUNDLE_PAT 用于私有 bundle 签出（repo 读即可），**不带
+      # workflow scope**，而 workflow_dispatch 必须该 scope。修法：新增
+      # ``DISPATCH_PAT``（本仓 admin 账号 OAuth token，实测 scope 含
+      # ``workflow``+``repo``），本步**优先**用它；未配置/失效时回退
+      # BUNDLE_PAT（行为退化为今日现状=warning+cron 兜底，不会更差）。
+      # bundle 签出仍用 BUNDLE_PAT，不受本改动影响。
       - name: Self-dispatch next round
         if: success() && steps.gate.outputs.skip != 'true'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.BUNDLE_PAT }}
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.BUNDLE_PAT }}
         run: |
           python3 - <<'PY'
           import datetime, json, os, subprocess, sys
