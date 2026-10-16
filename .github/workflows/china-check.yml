@@ -365,11 +365,17 @@ jobs:
               # R613：上一轮成功走正常节奏；失败/超时/取消走恢复链（尽快自愈）。
               thr = (MIN_GAP_MIN if prev_run.get("conclusion") == "success"
                      else RECOVERY_GAP_MIN)
-              gap_min = (datetime.datetime.strptime(me["createdAt"], fmt)
+              # R655：间隔 = **当前时刻** − 上一轮开始。旧式被减数用
+              # me.createdAt（本轮创建）——排队班（cron 事件恰好落在上一轮
+              # 开始前后）会算出 4.5min<5min 的伪「快速退出轮」判据，恢复链
+              # 被误停（实测 run 38949831398：派发时实际距上轮开始已
+              # 18.8min，仍判 5min<5min 跳过 ⇒ 链停滞 23min 靠人工恢复）。
+              gap_min = (datetime.datetime.now(datetime.timezone.utc)
                          - datetime.datetime.strptime(prev_run["createdAt"], fmt)
+                         .replace(tzinfo=datetime.timezone.utc)
                          ).total_seconds() / 60
               if gap_min < thr:
-                  print(f"距上一轮开始仅 {gap_min:.0f}min < {thr}min"
+                  print(f"距上一轮开始仅 {gap_min:.1f}min < {thr}min"
                         f"（上一轮 {prev_run.get('conclusion') or 'in_progress'}），"
                         "跳过自派发")
                   sys.exit(0)
