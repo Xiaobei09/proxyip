@@ -56,10 +56,15 @@
 - 分运营商 RTT 异常下限：境内 1ms / 港澳 5ms / 台 8ms / 日韩 12ms / 东南亚 25ms / 其他 40ms。
 - 分运营商数据超过 1 天清除（携带侧 `china_check.ISP_MS_CARRY_TTL_SEC=86400`；
   CN 侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。
-- 出口多源对比（**目标** ≥10 个独立来源）：当前在仓可用的出口地理来源为 3 个——
-  `external_check.json`、`upstream_meta.json`、`ipinfo.json`，由 `common.build_exit_cc_map`
-  按优先级汇聚为每个键的出口地区 `←CC`；`multi_region_exit=true` 在观测到
-  ≥2 个互异出口地区时置真。
+- 出口多源对比（**目标** ≥10 个独立来源）：`exit_geo_multi.json`（exit-family
+  工作流）按**出口 IP** 逐族查国，当前 9 个远程族（`ip-api`、`ipwhois`、`ip-sb`、
+  `ipinfo`、`ipapi.co`、`geojs`、`ip2location`、`ipbase`、`ipquery`；`geolocation-db`
+  保留观测但 weight=0 不计票）+ DB-IP LITE 本地库族（`TARGET_FAMILIES=10`，
+  逐轮实测族数见 `summary.families_configured`）；多族共识（`top_votes ≥ 2`）
+  作为 `←CC` 强票、单族弱票次之，再回退 `external_check.json`、
+  `upstream_meta.json`、`ipinfo.json` 三源（`common.build_exit_cc_map` 按优先级
+  汇聚为每个键的出口地区）；`multi_region_exit=true` 在观测到 ≥2 个互异出口
+  地区时置真。
 
 ## 超时
 
@@ -75,8 +80,9 @@
   规模（`tests/` + `tests_pipeline/` 的**测试函数数 + 测试类数**）上限，与 §缓存 的
   `pool_cache` **单轮补回 ≤1000**、以及部分探测通道内部的 `limit=1000` 硬上限
   是**互相独立**的三个数值，勿混用。
-- 出口 multi-source comparison 至少 10 个独立来源（当前 3 个；R520 实证声誉源
-  `reputation*.json` 无任何地理字段，**不可复用**，达 10 源须引入独立地理库）。
+- 出口 multi-source comparison 至少 10 个独立来源（R607 后达 10 族：9 远程 +
+  DB-IP LITE 本地库；`reputation*.json` 无地理字段、不可直接复用，但其 vendor
+  的独立免 key 地理端点（如 ipquery）已按族接入）。
 
 ## 独立复现（本地命令）
 
