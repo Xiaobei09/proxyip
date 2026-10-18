@@ -9,6 +9,7 @@
 [![Updated](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json&query=updated_ago&label=Updated&color=informational)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json)
 [![Status](https://img.shields.io/badge/endpoint?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/badge.json)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json)
 [![CN Reachable](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json&query=cn_reachable&label=CN%20Reachable&color=red)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/valid/all_cn.txt)
+[![Multi-region exits](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/stats.json&query=exit_geo_multi_region&label=Multi-region%20exits&color=purple)](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/quality/exit_geo_multi.json)
 
 ![Trend](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_combo.svg)
 <details>
