@@ -40,6 +40,18 @@ know about:
   prune/rotate the failing endpoint. Note `families_configured` is a static
   constant and cannot show this; only `families_active` reflects runtime health.
   The optional local DB being absent (⇒ 9) is deliberately above the alert floor.
+- **`entry-audit stale`** — `data/quality/entry_audit.json` (the entry-country
+  label audit behind `chart_entry_audit.svg`) is older than 12h / has too few
+  entries. Its producing step (`Audit entry CC labels`) runs with `always()` and
+  is **not** referenced by the quality-check commit gate, so a crashed audit
+  leaves the artified chart title marked 【数据停摆】 while the badge stays green —
+  this alert makes it proactive. Inspect that step of the latest
+  `Quality check` run.
+- **`source-quality stale`** — `data/quality/source_quality.json` (per-source
+  attribution quality) is older than 12h. Its producing step (`Source quality
+  analysis`) is likewise **not** in the stats-chain commit gate, so it can freeze
+  while the chain keeps committing. Inspect that step of the latest
+  `Stats and charts` run.
 
 Full check list: `pcb/docs/scripts.md` (health_alert).
 
