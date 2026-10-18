@@ -174,6 +174,7 @@ ms 另过**出口地理下限**——大陆出发到某出口国的 RTT 物理�
 | `cn_by_isp` / `cn_by_isp_oldest_age_h` | **分运营商** CN 可达/延迟：键为运营商短名（`电信`/`联通`/`移动`/`多线`），值为 `{sampled, reachable, min_ms, median_ms}`（与分运营商图**同一**计算：池限、逐运营商读数读侧按 **24h 账龄剔除**、延迟过噪声带与出口地理范围门）；`_oldest_age_h` = 参与读数的**最旧**条目年龄（小时，无则 `null`）。无 per-ISP 读数时 `cn_by_isp` 为空对象 |
 | `exit_multi_ip` / `exit_multi_region` / `exit_shared` / `exit_geo_ips` / `exit_geo_multi_region` / `exit_geo_families` | 出口多源/多出口计数（复用 `exit_family.json` 与 `exit_geo_multi.json` 的 `summary`，**不新增探测**）：多出口 IP（同族多源出口不一致）/ 多地区出口（互斥出口国并存）/ 共享出口 / 出口地理已裁决的出口 IP 数 / **出口 IP 级**多地区出口数 / 出口地理对比来源族数（只报**数量**，来源真名不入公开产物，缺失回退 0） |
 | `exit_tagged` / `exit_untagged` / `exit_untagged_ratio` | 出口标注覆盖率（只读 `data/valid/all.txt`）：含箭头 `←` 的行数（有出口地区观测）/ 无箭头的行数（**尚无任何出口观测**，即"没有出口标志"）及其占比（`untagged/total`，缺失回退 0）。用于跟踪"部分 IP 无出口标志"收敛进度 |
+| `exit_marked_multi_region` / `exit_marked_multi_exit` | 多出口/多地区**标记落盘量**（只读 `data/valid/all.txt`）：含 `⇋`（多地区出口）行数 / 含 `⇄`（同族多出口）行数（缺失回退 0）。与 `exit_multi_region`/`exit_multi_ip`（**期望量**）并排即可读出"证据已成立但标记未落"的瞬时窗口；该窗口由下一班 `annotate` 自愈，非缺陷（R682） |
 
 ### `data/output/badge.json`
 
