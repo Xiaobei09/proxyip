@@ -72,7 +72,7 @@ data/
 | `china.json` | `china_check.py` | 大陆探测明细（含 per-ISP `isp_ms`） |
 | `cn_history.jsonl` | `health_alert.py` | 近 8 天分运营商可达历史（chart_cn_7d 数据源） |
 | `quality_meta.json` | `quality_check.py` | 质量轮元信息（skipped 相位列表） |
-| `alert_state.json` | `health_alert.py` | 健康告警状态机 |
+| `alert_state.json` | `health_alert.py` | 健康告警状态机（含 `cn_carrier_sources`：分运营商读数的来源集中度 `readings/sources/zero/top_source/top_share_pct`） |
 | `entry_audit.json` / `entry_geo.json` | `audit_entry_cc.py` | 入口国家标签审计与地理缓存 |
 | `external_check.json` | `validate_proxies.py` | 出口国复核 |
 | `ipinfo.json` | 质量 CI | 入口 IP 地理 |
