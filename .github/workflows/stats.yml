@@ -66,15 +66,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Generate stats and charts
-        id: stats
-        if: steps.gate.outputs.skip != 'true'
-        run: python pcb/scripts/generate_stats.py
-
+      # R700：``export`` 必须先于 ``generate_stats``——后者在
+      # ``collect_exit_coverage`` 里把 ``all.txt`` 的 ⇄/⇋ 标记与 ``all.json``
+      # 的 ``real_exit.multi_*`` 做「同宇宙对账」（R685）；若 stats 先跑，它读到的
+      # ``all.json`` 恒为**上一轮**产物、与本轮 ``all.txt`` 系统性错配（实测
+      # 13:55 ``exit_multi_ip_published=101`` vs ``exit_marked_multi_exit=136``，
+      # 14:56 二者互换）。``export_json`` 只读 ``all.txt``/``china.json``/exit 产物，
+      # 不依赖 ``generate_stats`` 的任何输出，故交换安全。
       - name: Export structured JSON
         id: export
         if: steps.gate.outputs.skip != 'true'
         run: python pcb/scripts/export_json.py
+
+      - name: Generate stats and charts
+        id: stats
+        if: steps.gate.outputs.skip != 'true'
+        run: python pcb/scripts/generate_stats.py
 
       - name: Source quality analysis
         if: steps.gate.outputs.skip != 'true'

@@ -75,5 +75,21 @@ know about:
   `China check` run's stderr line
   `all_cn.txt: … health: count=… no_ms=… junk_ms(<=2ms)=…`.
 
+- **`exit labeling collapse` / `multi-region(⇋) labeling divergence` /
+  `multi-exit(⇄) labeling divergence`** — the published list's exit markers are
+  drifting from the observed evidence. `data/output/stats.json`
+  (`collect_exit_coverage`) records two user-flagged quantities: the share of
+  lines with **no** exit observation (`exit_untagged_ratio`, baseline 0.0 — the
+  watchdog alerts above 5%) and the "same-universe" reconciliation between the
+  expected multi-exit/multi-region counts (`exit_multi_*_published`, from
+  `all.json`'s `real_exit.multi_*`) and the markers actually written to `all.txt`
+  (`exit_marked_multi_exit` = `⇄` lines, `exit_marked_multi_region` = `⇋` lines).
+  A gap beyond the self-healing window (`max(3, 25%)`) means the evidence exists
+  but the marker did not land — the "some multi-exit nodes are unlabeled"
+  symptom. These two counters are only comparable when `export_json` runs
+  **before** `generate_stats` in `stats.yml` (order fixed in R700); beforehand
+  the `*_published` values were always one round behind the markers. Inspect the
+  `Stats and charts` run and `data/output/stats.json`.
+
 Full check list: `pcb/docs/scripts.md` (health_alert).
 
