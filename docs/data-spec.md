@@ -471,6 +471,14 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 **每一份 `good` 清单都是仅含大陆可达行的 CN 列表，因此全部输出统一渲染 CN 视图**：
 行内 ms 为大陆实测 RTT、速度 token 改写为 `≈XMB/s`；无大陆 RTT 数据时行保持原样。
 
+另：`good_ltd` 的**每国配额覆盖度**汇总在 `data/quality/good_meta.json.ltd_per_country`
+（`{target, countries, satisfied, below, below_pct, min, counts}`，R702）——`target`＝
+每出口国配额（`PER_COUNTRY_LIMIT`=10），`counts` 为逐出口国命中数（父池 `all_good.txt`
+里有行、`_ltd` 里 0 行的国家补 0，避免「整国掉光」从缺口里消失）。用户
+「goodltd 的每个国家数量达不到 10」此前只有合计 `proxy_count`、看不到缺口分布，
+现可直接读出「哪几国缺、缺多少」（实测 2026-10-18 15:25 产物：30 国中 16 国 <10、
+min 1）。该块**新增**，旧产物无此字段。
+
 ### `data/valid/all_premium.txt` 及各目录 `premium.txt`
 
 **高端优质清单**（比 `good` 更严格）：
