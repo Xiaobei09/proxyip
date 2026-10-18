@@ -6,6 +6,10 @@
 - Inspect the **latest** same-workflow run for the current head, then a prior
   completed run if needed.
 - Compare the run logs against `docs/leak_guard_concurrency.md`.
+- Other workflows can also read `cancelled` **with zero jobs** when a still-queued
+  run is replaced (pending-supersede): confirmed via the run API where `jobs == []`
+  and no step ever started. That is queue bookkeeping, not a mid-run interruption
+  or a data defect — look at the workflow's newest run before triaging further.
 
 ## Before Blaming CI
 
