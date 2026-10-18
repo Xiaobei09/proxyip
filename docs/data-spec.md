@@ -175,7 +175,8 @@ ms 另过**出口地理下限**——大陆出发到某出口国的 RTT 物理�
 | `cn_isp_pool` / `cn_isp_coverage` | 分运营商 **24h 覆盖率仪表**（用户「目标 24h 内 4 运营商全覆盖」）：`cn_isp_pool` = 当前存活池键数（分母）；`cn_isp_coverage` = `{短名: sampled/池规模}`（0~1，与 `cn_by_isp` **同一**池限口径；池空 ⇒ `{}`）。使「每个运营商已覆盖池内多少比例」成为可直接展示/告警的一条（R683） |
 | `exit_multi_ip` / `exit_multi_region` / `exit_shared` / `exit_geo_ips` / `exit_geo_multi_region` / `exit_geo_families` | 出口多源/多出口计数（复用 `exit_family.json` 与 `exit_geo_multi.json` 的 `summary`，**不新增探测**）：多出口 IP（同族多源出口不一致）/ 多地区出口（互斥出口国并存）/ 共享出口 / 出口地理已裁决的出口 IP 数 / **出口 IP 级**多地区出口数 / 出口地理对比来源族数（只报**数量**，来源真名不入公开产物，缺失回退 0） |
 | `exit_tagged` / `exit_untagged` / `exit_untagged_ratio` | 出口标注覆盖率（只读 `data/valid/all.txt`）：含箭头 `←` 的行数（有出口地区观测）/ 无箭头的行数（**尚无任何出口观测**，即"没有出口标志"）及其占比（`untagged/total`，缺失回退 0）。用于跟踪"部分 IP 无出口标志"收敛进度 |
-| `exit_marked_multi_region` / `exit_marked_multi_exit` | 多出口/多地区**标记落盘量**（只读 `data/valid/all.txt`）：含 `⇋`（多地区出口）行数 / 含 `⇄`（同族多出口）行数（缺失回退 0）。与 `exit_multi_region`/`exit_multi_ip`（**期望量**）并排即可读出"证据已成立但标记未落"的瞬时窗口；该窗口由下一班 `annotate` 自愈，非缺陷（R682） |
+| `exit_marked_multi_region` / `exit_marked_multi_exit` | 多出口/多地区**标记落盘量**（只读 `data/valid/all.txt`）：含 `⇋`（多地区出口）行数 / 含 `⇄`（同族多出口）行数（缺失回退 0） |
+| `exit_multi_ip_published` / `exit_multi_region_published` | 与 `exit_marked_*` **同宇宙**（同一发布轮 `data/valid/all.json` 逐键标志）的**期望量**：`real_exit.multi_source` / `real_exit.multi_region_exit` 为真的条目数（缺失回退 0）。**同宇宙对账**：`exit_marked_multi_exit` ⇔ `exit_multi_ip_published`、`exit_marked_multi_region` ⇔ `exit_multi_region_published`（实测 101=101、31=31）。⚠ 勿与 `exit_multi_ip`/`exit_multi_region` 直接相减——后者取自 `exit_family.json` 的 `summary`，宇宙＝本轮 exit_family **全部键**（含 `carried` 存量键，可能不在当前存活清单），相减会幻读出「已成立但未标注」（口径错配，非滞后） |
 
 ### `data/output/badge.json`
 
