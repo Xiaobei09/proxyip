@@ -19,3 +19,27 @@
 
 - Local full `git sync` is very slow in this workspace, so public changes use
   atomic single-file API commits plus state tracking instead of broad local checkouts.
+
+## When the Health Badge Turns Red
+
+The stats chain runs the pool watchdog every ~2h and turns
+`data/output/badge.json` red on any alert. Checks are **fail-open**: each has a
+minimum-sample floor, so short/empty rounds stay silent. Two exit-side alerts to
+know about:
+
+- **`exit-geo-multi stale`** — `data/quality/exit_geo_multi.json` (the
+  per-exit-IP multi-source consensus behind the `←CC` and `⇋` markers) is older
+  than 12h / has too few entries. Its producing step is **not** covered by the
+  exit-family commit gate, so the artifact can silently freeze while
+  `exit_family.json` keeps refreshing. Inspect the geo step of the latest
+  `Exit family check` run.
+- **`exit-geo multi-source degraded`** — the number of independent families that
+  actually voted this round (`summary.families_active`, target 10) fell below the
+  collapse floor (8), i.e. the "compare multiple sources" consensus is running on
+  too few sources. Read `summary.providers` for per-endpoint `ok` counts and
+  prune/rotate the failing endpoint. Note `families_configured` is a static
+  constant and cannot show this; only `families_active` reflects runtime health.
+  The optional local DB being absent (⇒ 9) is deliberately above the alert floor.
+
+Full check list: `pcb/docs/scripts.md` (health_alert).
+
