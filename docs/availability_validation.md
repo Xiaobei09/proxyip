@@ -62,6 +62,9 @@
 - **源失败隔离可见**：配置内上游源本轮抓取异常或解析为空时仍记 `0` 行
   （`source_stats.json` 的 `total=0` + `source_history.json` 计数 `0`），使
   `health_alert.check_sources` 的骤降判据能看见「源整体停摆」而非因 label 消失而静默（R687）。
+- **时效看门狗对坏时间戳 fail-closed**：产物 / 历史 / CN 快照的时效判据在
+  timestamp 字段**存在却不可解析**（或为空）时告警，不再按 `_now()` 误判成新鲜；
+  字段**整体缺失**（旧格式）仍静默以兼容过渡期（`health_alert._ts_strict`，R690）。
 - 出口多源对比（**目标** ≥10 个独立来源）：`exit_geo_multi.json`（exit-family
   工作流）按**出口 IP** 逐族查国，当前 9 个远程族（`ip-api`、`ipwhois`、`ip-sb`、
   `ipinfo`、`ipapi.co`、`geojs`、`ip2location`、`ipbase`、`ipquery`；`geolocation-db`
