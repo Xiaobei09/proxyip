@@ -55,7 +55,13 @@
 - 出口 IP：`http://httpbin.org/get`、`https://api.ipify.org?format=json`、Cloudflare `cf-ray`、`ip-api.com/json`
 - 分运营商 RTT 异常下限：境内 1ms / 港澳 5ms / 台 8ms / 日韩 12ms / 东南亚 25ms / 其他 40ms。
 - 分运营商数据超过 1 天清除（携带侧 `china_check.ISP_MS_CARRY_TTL_SEC=86400`；
-  CN 侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。
+  CN 侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。**读、写、调度三侧同一 24h 口径**：
+  读侧 `common.fresh_isp_ms` 剔除过期读数；写侧 `merge_isp_ms` 按 TTL 丢弃/携带；
+  调度侧「证据齐全」判据（`_has_complete_carrier_data`/`_trinet_missing`）同按 24h 账龄——
+  全过期的键视为缺口、重回补测候选，避免「raw 齐全但全过期」的键被永久排除在补测外（R686）。
+- **源失败隔离可见**：配置内上游源本轮抓取异常或解析为空时仍记 `0` 行
+  （`source_stats.json` 的 `total=0` + `source_history.json` 计数 `0`），使
+  `health_alert.check_sources` 的骤降判据能看见「源整体停摆」而非因 label 消失而静默（R687）。
 - 出口多源对比（**目标** ≥10 个独立来源）：`exit_geo_multi.json`（exit-family
   工作流）按**出口 IP** 逐族查国，当前 9 个远程族（`ip-api`、`ipwhois`、`ip-sb`、
   `ipinfo`、`ipapi.co`、`geojs`、`ip2location`、`ipbase`、`ipquery`；`geolocation-db`
@@ -83,6 +89,21 @@
 - 出口 multi-source comparison 至少 10 个独立来源（R607 后达 10 族：9 远程 +
   DB-IP LITE 本地库；`reputation*.json` 无地理字段、不可直接复用，但其 vendor
   的独立免 key 地理端点（如 ipquery）已按族接入）。
+
+## 三层清单的成员关系与相位差（R688）
+
+`all.txt`（主池）→ `all_cn.txt`（主池 ∩ 当期 `china.json` 判可达）→
+`all_good.txt` / `all_premium.txt`（在其上叠加信誉/速度/住宅等条件）。**同一次运行内**
+`all_cn ⊆ all.txt`、`all_good/premium ⊆ all_cn` 恒成立；但三层由**不同工作流、不同节奏**
+产出并各自提交——[quality-check.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/quality-check.yml)
+频繁重写 `all.txt` 而 [china-check.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/china-check.yml)
+间隔更疏，故任一提交点上会带出**一轮相位差**（实测 `cn_not_in_all=593`
+`good_not_in_cn=3`）。该漂移由 annotate 步骤的 `verify_cn_lists` 逐轮打印计数
+（`WARN: CN lists drift from all.txt (...)`，**不阻断**，仅作趋势可见化）。
+
+**复现口径**：判「某 IP 是否当前可用」请**同一提交点**取三层，或直接以
+`all.txt` + `china.json.meta.carrier_breakdown`/`proxies[key].verdict` 为准——
+跨清单做集合推论时须容忍上面的一轮相位差，勿把 3~600 的量级差当作单独缺陷。
 
 ## 独立复现（本地命令）
 
