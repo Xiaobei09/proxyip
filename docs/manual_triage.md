@@ -52,6 +52,16 @@ know about:
   analysis`) is likewise **not** in the stats-chain commit gate, so it can freeze
   while the chain keeps committing. Inspect that step of the latest
   `Stats and charts` run.
+- **`CN per-ISP supply collapsed` / `CN carrier dispatch wasted`** — the CN chain's
+  per-operator latency readings (`china.json` → each reachable entry's `isp_ms`)
+  are produced by a small subset of the dispatch sources. `isp_ms_sources`
+  records per-source `{ran, made}`; the watchdog alerts when the overall output
+  rate drops below 10% (measured baseline 25.6% — ran 15918 / made 4080) or when
+  ≥90% of dispatches go to zero-yield sources (baseline 68.6% — 38 sources that
+  ran but produced no `isp_ms`). Both mean the operator dimension is silently
+  disappearing from the lists. Inspect the `China check` run's stderr lines
+  `isp_ms coverage:` / `carrier breakdown:` / the R466
+  `zero-yield sources` warning, then `data/quality/china.json.isp_ms_sources`.
 - **`CN list ms-rewrite degraded` / `CN list junk ms`** — the CN list
   (`data/valid/all_cn.txt`) lost its mainland latency figures on a large share of
   lines (no `ms` token) or gained lines whose `ms` is below the exit region's
