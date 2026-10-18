@@ -69,7 +69,9 @@
   工作流）按**出口 IP** 逐族查国，当前 9 个远程族（`ip-api`、`ipwhois`、`ip-sb`、
   `ipinfo`、`ipapi.co`、`geojs`、`ip2location`、`ipbase`、`ipquery`；`geolocation-db`
   保留观测但 weight=0 不计票）+ DB-IP LITE 本地库族（`TARGET_FAMILIES=10`，
-  逐轮实测族数见 `summary.families_configured`）；多族共识（`top_votes ≥ 2`）
+  逐轮配置族数见 `summary.families_configured`、本轮**真有票**族数见
+  `summary.families_active`（逐端点 `ok` 数见 `summary.providers`，源限流/
+  失败致族退场可发现并归因，R693））；多族共识（`top_votes ≥ 2`）
   作为 `←CC` 强票、单族弱票次之，再回退 `external_check.json`、
   `upstream_meta.json`、`ipinfo.json` 三源（`common.build_exit_cc_map` 按优先级
   汇聚为每个键的出口地区）；`multi_region_exit=true` 在观测到 ≥2 个互异出口

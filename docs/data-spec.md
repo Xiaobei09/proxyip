@@ -182,7 +182,7 @@ ms 另过**出口地理下限**——大陆出发到某出口国的 RTT 物理�
 | `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable` = 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served` = 实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts` = 生成时间 |
 | `cn_by_isp` / `cn_by_isp_oldest_age_h` | **分运营商** CN 可达/延迟：键为运营商短名（`电信`/`联通`/`移动`/`多线`），值为 `{sampled, reachable, min_ms, median_ms}`（与分运营商图**同一**计算：池限、逐运营商读数读侧按 **24h 账龄剔除**、延迟过噪声带与出口地理范围门）；`_oldest_age_h` = 参与读数的**最旧**条目年龄（小时，无则 `null`）。无 per-ISP 读数时 `cn_by_isp` 为空对象 |
 | `cn_isp_pool` / `cn_isp_coverage` | 分运营商 **24h 覆盖率仪表**（用户「目标 24h 内 4 运营商全覆盖」）：`cn_isp_pool` = 当前存活池键数（分母）；`cn_isp_coverage` = `{短名: sampled/池规模}`（0~1，与 `cn_by_isp` **同一**池限口径；池空 ⇒ `{}`）。使「每个运营商已覆盖池内多少比例」成为可直接展示/告警的一条（R683） |
-| `exit_multi_ip` / `exit_multi_region` / `exit_shared` / `exit_geo_ips` / `exit_geo_multi_region` / `exit_geo_families` | 出口多源/多出口计数（复用 `exit_family.json` 与 `exit_geo_multi.json` 的 `summary`，**不新增探测**）：多出口 IP（同族多源出口不一致）/ 多地区出口（互斥出口国并存）/ 共享出口 / 出口地理已裁决的出口 IP 数 / **出口 IP 级**多地区出口数 / 出口地理对比来源族数（只报**数量**，来源真名不入公开产物，缺失回退 0） |
+| `exit_multi_ip` / `exit_multi_region` / `exit_shared` / `exit_geo_ips` / `exit_geo_multi_region` / `exit_geo_families` / `exit_geo_families_active` | 出口多源/多出口计数（复用 `exit_family.json` 与 `exit_geo_multi.json` 的 `summary`，**不新增探测**）：多出口 IP（同族多源出口不一致）/ 多地区出口（互斥出口国并存）/ 共享出口 / 出口地理已裁决的出口 IP 数 / **出口 IP 级**多地区出口数 / 出口地理对比**配置**的来源族数 / 出口地理对比本轮**真有票**（≥1 次 `ok` 观测）的族数（`families_active`，与配置数并排即可发现运行时族退场，R693；均只报**数量**，来源真名不入公开产物，缺失回退 0） |
 | `exit_tagged` / `exit_untagged` / `exit_untagged_ratio` | 出口标注覆盖率（只读 `data/valid/all.txt`）：含箭头 `←` 的行数（有出口地区观测）/ 无箭头的行数（**尚无任何出口观测**，即"没有出口标志"）及其占比（`untagged/total`，缺失回退 0）。用于跟踪"部分 IP 无出口标志"收敛进度 |
 | `exit_marked_multi_region` / `exit_marked_multi_exit` | 多出口/多地区**标记落盘量**（只读 `data/valid/all.txt`）：含 `⇋`（多地区出口）行数 / 含 `⇄`（同族多出口）行数（缺失回退 0） |
 | `exit_multi_ip_published` / `exit_multi_region_published` | 与 `exit_marked_*` **同宇宙**（同一发布轮 `data/valid/all.json` 逐键标志）的**期望量**：`real_exit.multi_source` / `real_exit.multi_region_exit` 为真的条目数（缺失回退 0）。**同宇宙对账**：`exit_marked_multi_exit` ⇔ `exit_multi_ip_published`、`exit_marked_multi_region` ⇔ `exit_multi_region_published`（实测 101=101、31=31）。⚠ 勿与 `exit_multi_ip`/`exit_multi_region` 直接相减——后者取自 `exit_family.json` 的 `summary`，宇宙＝本轮 exit_family **全部键**（含 `carried` 存量键，可能不在当前存活清单），相减会幻读出「已成立但未标注」（口径错配，非滞后） |
@@ -350,8 +350,12 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   多数时为 `null`（宁缺勿假）；`multi_region`（`distinct_cc ≥ 2`，即互斥出口
   国并存）与 `all.json` 的 `real_exit.multi_region_exit` 及行尾 `⇋` 标记同源；
   `providers` 为逐端点原始观测（fail-open：单源失败不投票）。
-- `summary`：`{ips, families_configured, families_target, multi_region}`——
-  可用族数 < 目标（10）时运行日志出 `::warning::`（诚实告警，不判死）。
+- `summary`：`{ips, families_configured, families_active, families_target,
+  providers, multi_region}`——`families_configured` 为**配置**族数（静态源表
+  推出，恒定），`families_active` 为本轮**真有票**（≥1 次 `ok` 观测）的族数，
+  `providers` 为逐端点 `ok` 次数（源退化可归因，如慢性 429 的端点）；配置族数
+  < 目标（10）或**实际有票**族数 < 目标时分别出 `::warning::`（诚实告警，
+  不判死；R693）。
 - 数据源按**族**计：API 族（`ip-api`、`ipwhois`、`ip-sb`、`ipinfo`、
   `ipapi.co`、`geojs`、`geolocation-db`〔低质，0 票〕）+ 本地库族
   （DB-IP Lite，运行时下载、不随仓库分发；© [DB-IP.com](https://db-ip.com)，
