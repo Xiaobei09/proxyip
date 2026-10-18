@@ -52,6 +52,18 @@ know about:
   analysis`) is likewise **not** in the stats-chain commit gate, so it can freeze
   while the chain keeps committing. Inspect that step of the latest
   `Stats and charts` run.
+- **`CN list ms-rewrite degraded` / `CN list junk ms`** — the CN list
+  (`data/valid/all_cn.txt`) lost its mainland latency figures on a large share of
+  lines (no `ms` token) or gained lines whose `ms` is below the exit region's
+  physical RTT floor. Both facts are computed by the CN chain's landing
+  self-check and published as `china.json.meta.list_health`
+  (`{count, no_ms, junk_ms}`); the watchdog alerts when `no_ms/count > 10%`
+  (measured baseline 289/18220 ≈ 1.6% — reachable keys with no credible mainland
+  reading) or `junk_ms > 100` (baseline 0, since the write side drops
+  sub-`CN_ICMP_NOISE_MS` readings and applies the per-country floor). A missing
+  `list_health` block (older artifact) is treated as healthy. Inspect the
+  `China check` run's stderr line
+  `all_cn.txt: … health: count=… no_ms=… junk_ms(<=2ms)=…`.
 
 Full check list: `pcb/docs/scripts.md` (health_alert).
 
