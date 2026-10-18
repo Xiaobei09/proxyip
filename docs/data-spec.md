@@ -377,7 +377,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 `{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`，
 并按来源**按需**附加可选字段（命中才出现、缺省即整字段省略；只增不改不删）：
 
-- `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域同 `china.json`，按 `ip:port#EXIT` 精确 join。两者均逐家过**出口地理下限**：低于该出口国物理 RTT 下限的读数（如大陆→US 12ms、→HK 1ms）地理上不可能，不导出；故某家可能只出现在 `cn_isp_ms` 而不在 `cn_isp_speed`，或两家皆无。`china.json` 原始 `isp_ms` 保留作证据，仅导出的 `all.json` 套用下限。
+- `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域同 `china.json`，按 `ip:port#EXIT` 精确 join。两者均逐家过**出口地理下限**：低于该出口国物理 RTT 下限的读数（如大陆→US 12ms、→HK 1ms）地理上不可能，不导出；故某家可能只出现在 `cn_isp_ms` 而不在 `cn_isp_speed`，或两家皆无。`china.json` **被认可的汇聚值** `isp_ms` 在**写侧**即套用物理可信带（R699：非 bool、有限、>2.0ms 噪声带且 ≤1000ms）——>1s 的 SYN 重传伪读数不再落盘；逐源**原始**读数仍完整保留在 `proxies[*].sources[*].isp_ms` 作证据，仅导出的 `all.json` 再套用**逐家出口地理下限**。
 - `cn_level` / `cn_streak` / `cn_flip` —— 大陆**证据分级/连续可达轮数/翻转计数**：`cn_level ∈ http|tcp|icmp`，`"http"` 即应用层确认可用（区别于仅能 ping 通）。
 - `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`multi_source`（R415：同族多源回显**不一致**=同族多出口）、`upstream_ip_match`（R415：实测出口字面量与上游 `clientIp` 地址等价比较）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）、`geo`（实测出口**地区** `{"country","city","colo"}`，来自 `upstream_meta.json` 按入口 IP join）、`region_differs`（出口地区国 ≠ 入口标签国 = 出入地区不同）、`exit_ccs`（R419：出口地理源观测国**集合**，跨 external_check 实测出口 ∪ upstream CF Worker 观测，排 ipinfo 入口地理）、`multi_region_exit`（R419：`exit_ccs` 含 ≥2 互斥出口国 = **多地区出口**）。**缺 `real_exit` 即省略该字段**：仅剩两类且均为刻意省略——①行内无 `←` 出口观测（`exit` 为 `null`）；②有 `←` 但出口国 == 入口国、且 `exit_family.json`/`external_check.json`/`upstream_meta.json` 均无该键观测（只知国家、不知出口 **IP**）。行内箭头是**国家**级观测，不会提升为 IP 级字段（实测 2026-10-13 快照 20358 键中仅 12 个缺 `real_exit`）。
 
@@ -520,7 +520,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 
 顶层另含两个 **additive** 键（读侧对未知键自动降级，不参与判据）：
 
-- `isp_ms_sources` — 逐源 per-ISP 归属记账（键为不透明 `src_*` id）：`ran`＝该源出现过的键数（**下界**，含跨轮携带，只用于阈值/排序），`made`＝其中产出非空 `isp_ms` 的键数。看门狗据此监控 per-ISP 读数**供给**：实测基线 ran 15918 / made 4080（25.6%），38 个 `ran>0` 却零产出的源吃掉 68.6% 派工——产出率 <10% 或零产出派工占比 ≥90% 时告警
+- `isp_ms_sources` — 逐源 per-ISP 归属记账（键为不透明 `src_*` id）：`ran`＝该源出现过的键数（**下界**，含跨轮携带，只用于阈值/排序），`made`＝其中产出**可信带内** `isp_ms`（R699：非 bool、有限、>2.0ms 噪声带且 ≤1000ms；此前为宽松的 `v > 0`）的键数。看门狗据此监控 per-ISP 读数**供给**：实测基线 ran 15918 / made 4080（25.6%），38 个 `ran>0` 却零产出的源吃掉 68.6% 派工——产出率 <10% 或零产出派工占比 ≥90% 时告警
 - `meta` — **数据新鲜度/覆盖可见性**快照（`schema: "freshness-coverage/v1"`）：
 
   | 子键 | 含义 |
