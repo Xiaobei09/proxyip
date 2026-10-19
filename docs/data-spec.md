@@ -184,7 +184,7 @@ ms 另过**出口地理下限**——大陆出发到某出口国的 RTT 物理�
 | `ip_type` / `family` / `dual_stack` / `country_mismatch` | 出口 IP 类型分布 / 地址族分布 / 双栈数 / 错区数 |
 | `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
-| `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable` = 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served` = 实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts` = 生成时间 |
+| `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable` = 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served` = 实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts` = `china.json` 顶层 `ts`（测量阶段起算时钟，非提交/完成时刻，R752） |
 | `cn_by_isp` / `cn_by_isp_oldest_age_h` | **分运营商** CN 可达/延迟：键为运营商短名（`电信`/`联通`/`移动`/`多线`），值为 `{sampled, reachable, min_ms, median_ms}`（与分运营商图**同一**计算：池限、逐运营商读数读侧按 **24h 账龄剔除**、延迟过噪声带与出口地理范围门）；`_oldest_age_h` = 参与读数的**最旧**条目年龄（小时，无则 `null`）。无 per-ISP 读数时 `cn_by_isp` 为空对象 |
 | `cn_isp_pool` / `cn_isp_coverage` | 分运营商 **24h 覆盖率仪表**（用户「目标 24h 内 4 运营商全覆盖」）：`cn_isp_pool` = 当前存活池键数（分母）；`cn_isp_coverage` = `{短名: sampled/池规模}`（0~1，与 `cn_by_isp` **同一**池限口径；池空 ⇒ `{}`）。使「每个运营商已覆盖池内多少比例」成为可直接展示/告警的一条（R683） |
 | `exit_multi_ip` / `exit_multi_region` / `exit_shared` / `exit_geo_ips` / `exit_geo_multi_region` / `exit_geo_families` / `exit_geo_families_active` | 出口多源/多出口计数（复用 `exit_family.json` 与 `exit_geo_multi.json` 的 `summary`，**不新增探测**）：多出口 IP（同族多源出口不一致）/ 多地区出口（互斥出口国并存）/ 共享出口 / 出口地理已裁决的出口 IP 数 / **出口 IP 级**多地区出口数 / 出口地理对比**配置**的来源族数 / 出口地理对比本轮**真有票**（≥1 次 `ok` 观测）的族数（`families_active`，与配置数并排即可发现运行时族退场，R693；均只报**数量**，来源真名不入公开产物，缺失回退 0） |
@@ -577,7 +577,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 
 ### `data/quality/china.json`
 
-顶层含 `ts`（本轮检测完成时间），`proxies` 为逐条检测明细，键为 `ip:port#国家`，值为：
+顶层含 `ts`（**`china_check.py main()` 统一时钟**，即测量阶段起算时刻；非轮次
+创建时刻、也非提交/完成时刻——长轮次可早于完成约 1.5h，R752 定谳），`proxies`
+为逐条检测明细，键为 `ip:port#国家`，值为：
 
 | 字段 | 含义 |
 |---|---|
