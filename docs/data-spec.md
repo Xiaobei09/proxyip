@@ -449,7 +449,8 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 写入侧保留旧缓存与旧文件级 `ts`，不会用空结果或新时间戳伪装成刷新成功
 （R754/R775）。读取侧对上游字段做类型归一：字符串 `"false"` 不得当真、
 `responseTime:"0"` 归一为 0、`inferred_stack` 大小写归一，确保退化批守卫
-不会被类型漂移绕过（R776）。
+不会被类型漂移绕过（R776）；`Infinity`/`NaN` 等非有限时间值直接归 None，
+避免 `int(inf)` 让整个校验相位失败；`success` 的 NaN/±Inf 同样不判真（R777）。
 
 ### `data/quality/reputation_cache.json`
 
