@@ -167,7 +167,7 @@ ms 另过**出口地理下限**——大陆出发到某出口国的 RTT 物理�
 |---|---|
 | `ts` | 生成时间 |
 | `updated_at` | 数据最后更新时间 |
-| `unique` / `total` | 去重代理数 / 上游原始条目数 |
+| `unique` / `total` | 唯一 `ip:port` 数 / 全量清单条目数（按 `ip:port#CC` 键，＝ `data/download/all.txt` 行数）——同 IP 多国标签在 `total` 分别计、在 `unique` 只计一次（R729 实测差 24） |
 | `countries` / `ports` | 国家数 / 端口数 |
 | `sets` | 各集合条数 |
 | `alive` / `alive_checked` / `alive_rate` | 存活数 / 检测数 / 存活率 |
