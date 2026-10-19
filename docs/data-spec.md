@@ -327,16 +327,23 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   字面量清单**，仅在 `v4_seen`/`v6_seen` > 1 时出现——R415 只带计数，消费方无从知道
   是哪几个出口）、`carried`（True = 该条目**非本轮观测**，因运行级时间预算截断由上一轮
   产物并回；`ts` 仍为该次观测时刻，新鲜度按 `ts` 判龄）。
+- **R740 出口形态两位标记（只增字段）**：`shape`——`SS` 同国同 IP / `SD` 同国不同
+  IP / `CD` 跨境单国不同 IP / `CP` 跨境单国多 IP 池 / `CM` 跨境多国出口池；由出口
+  IP 集合（`exit_v4`/`exit_v6` ＋多出口字面量 `v4_lits`/`v6_lits`）与
+  `data/quality/exit_geo_multi.json` 的逐 IP 国别共识判定——任一出口国别不可判或
+  出口集合为空则**不落字段**（不编造）。
 - 上游交叉验证（按需填充：`upstream_*` 只在有 v6 出口探测结果时出现）：
   `upstream_client_ip`（上游观测出口）、`upstream_family`、`upstream_absent`、
   `upstream_match`（家族级比较）、`upstream_ip_match`（实测出口**字面量**与上游
   `clientIp` 地址等价比较（IPv6 归一化）；True/False，任一侧未知时省略——
   比 `upstream_match` 的家族级比较更严）。
-- 顶层 `summary` 计数块（R597）：`{total, probed, sample, partial, carried,
-  time_budget_s, multi_exit, multi_region_exit, shared_exit}`——`probed`/`sample`
+- 顶层 `summary` 计数块（R597；R740 增 `shape_counts`）：`{total, probed, sample, partial,
+  carried, time_budget_s, multi_exit, multi_region_exit, shared_exit, shape_counts}`——
+  `probed`/`sample`
   为本轮实探/计划数，`partial=True` 即被时间预算截断（未探键按 `carried` 并回），
   `multi_exit`（同族多源出口不一致）/`multi_region_exit`（独立出口地理源互斥，
-  与 `all.json` 的 `real_exit.multi_region_exit` 同源同口径）为产物全域计数。
+  与 `all.json` 的 `real_exit.multi_region_exit` 同源同口径）为产物全域计数；
+  `shape_counts`（R740）为出口形态分布（`{SS/SD/CD/CP/CM: 条数}`，无标记键不计入）。
 
 ### `data/quality/exit_geo_multi.json`
 
