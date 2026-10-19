@@ -43,8 +43,8 @@
 
 The stats chain runs the pool watchdog every ~2h and turns
 `data/output/badge.json` red on any alert. Checks are **fail-open**: each has a
-minimum-sample floor, so short/empty rounds stay silent. Two exit-side alerts to
-know about:
+minimum-sample floor, so short/empty rounds stay silent. The alerts an operator
+is most likely to see:
 
 - **`exit-geo-multi stale`** — `data/quality/exit_geo_multi.json` (the
   per-exit-IP multi-source consensus behind the `←CC` and `⇋` markers) is older
@@ -59,6 +59,15 @@ know about:
   prune/rotate the failing endpoint. Note `families_configured` is a static
   constant and cannot show this; only `families_active` reflects runtime health.
   The optional local DB being absent (⇒ 9) is deliberately above the alert floor.
+- **`exit shapes collapsed`** — the exit-shape classification
+  (`exit_family.json.summary.shape_counts`, mirrored into
+  `stats.json.exit_shapes` as five fixed keys SS/SD/CD/CP/CM) lost its
+  classified share: fewer than 5% of entries that carry an exit marker are
+  shape-classified, with a 500-entry floor. Measured baseline 22.0%; the R795
+  regression form produced 0.6%. This means the geo consensus or the shape
+  attachment step silently degraded — inspect the geo step of the latest
+  `Exit family check` run and the `summary.shape_counts` block. An artifact
+  without `shape_counts` (pre-R738) fails open.
 - **`entry-audit stale`** — `data/quality/entry_audit.json` (the entry-country
   label audit behind `chart_entry_audit.svg`) is older than 12h / has too few
   entries. Its producing step (`Audit entry CC labels`) runs with `always()` and
