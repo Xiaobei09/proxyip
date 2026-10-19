@@ -366,11 +366,15 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   国并存）与 `all.json` 的 `real_exit.multi_region_exit` 及行尾 `⇋` 标记同源；
   `providers` 为逐端点原始观测（fail-open：单源失败不投票）。
 - `summary`：`{ips, families_configured, families_active, families_target,
-  providers, multi_region}`——`families_configured` 为**配置**族数（静态源表
+  providers, multi_region, budget}`——`families_configured` 为**配置**族数（静态源表
   推出，恒定），`families_active` 为本轮**真有票**（≥1 次 `ok` 观测）的族数，
   `providers` 为逐端点 `ok` 次数（源退化可归因，如慢性 429 的端点）；配置族数
   < 目标（10）或**实际有票**族数 < 目标时分别出 `::warning::`（诚实告警，
-  不判死；R693）。
+  不判死；R693）。`budget` 为**预算记账**（R811）：`{seconds, candidates,
+  cache_hits, cold_total, cold_probed, cold_skipped, backfill_skipped,
+  exhausted}`——`cold_skipped` 为时间预算耗尽时**未提交**的冷 IP 数、
+  `backfill_skipped` 为因预算跳过的命中补票数、`exhausted` 为两者之或；缓存
+  命中不计入 `cold_*`（命中仍全额输出，R795）。
 - 数据源按**族**计：API 族（`ip-api`、`ipwhois`、`ip-sb`、`ipinfo`、
   `ipapi.co`、`geojs`、`geolocation-db`〔低质，0 票〕）+ 本地库族
   （DB-IP Lite，运行时下载、不随仓库分发；© [DB-IP.com](https://db-ip.com)，
