@@ -566,7 +566,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 
   | 子键 | 含义 |
   |---|---|
-  | `age` | 条目账龄分档 `{total, fresh(<=1d), mid(2-7d), stale(>7d), unparsable}`；`fresh` 即本轮实测比例 |
+  | `age` | 条目账龄分档 `{total, fresh(<=1d), mid(1-7d), stale(>7d), unparsable}`；`mid` 的精确语义是 `(1d,7d]`（R757 起按精确时长分桶，不再用 `timedelta.days` 向下取整）；`fresh` 即本轮实测比例 |
   | `pool_coverage` | 已发布条目 vs 可测候选池重合度 `{total, pool, in_pool, outside, outside_no_source, pool_usable}` |
   | `carrier_breakdown` | 逐运营商 `isp_ms` 覆盖 `{total, per, full, partial, zero}` |
   | `carrier_speed_breakdown` | 逐运营商 `isp_speed` 覆盖 `{total, per, ms_per, noise, floor, full, partial, zero, ms_only, speed_only}` |
