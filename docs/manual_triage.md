@@ -25,6 +25,14 @@
    in a marker-less `chore(data): …` commit; pushed history is never rewritten —
    a confirmed deviation gets a SHA-exact exemption in the guard, never a
    `--force` push.
+5. A format job that is **cancelled** (not red) is usually the job timeout, not
+   a flaky host: compare the job's duration with its `timeout-minutes`. R792:
+   the full-history checkout (~1 min) plus the growing R107 audit (~4 min) hit
+   the old 5-minute wall — every step showed `success` while the job concluded
+   `cancelled` at exactly 300 s, and re-runs only passed by runner-speed luck.
+   The wall is now 15 minutes. Note re-runs keep the workflow file **from the
+   run's SHA**, so re-running an old cancelled run still hits the old wall —
+   judge the fix by a run triggered by a new push.
 
 ## Current Blocking Pattern
 
