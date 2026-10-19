@@ -584,8 +584,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 > `sources` 的半记录/旧最终记录不会进入 sidecar，只有全 dict 的裸源表
 > 才归一（R771）；从 `prev` 合并的条目还必须有 `checked_at`，只有
 > `sources` 而无 `checked_at` 同样不写入（R772）；`sources` 的每个值
-> 也必须是源结果 dict，标量值在写入与读取两侧都拒绝（R773）。消费者
-> 只读 `china.json`，不要把 sidecar 当数据契约。
+> 也必须是源结果 dict，标量值在写入与读取两侧都拒绝（R773）。sidecar
+> 是旁路：单条坏数据或写盘异常只会让本次不落盘，不会中断主探测
+> （R774）。消费者只读 `china.json`，不要把 sidecar 当数据契约。
 
 ### `data/valid/all_cn.txt`
 
