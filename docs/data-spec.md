@@ -451,6 +451,8 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 `responseTime:"0"` 归一为 0、`inferred_stack` 大小写归一，确保退化批守卫
 不会被类型漂移绕过（R776）；`Infinity`/`NaN` 等非有限时间值直接归 None，
 避免 `int(inf)` 让整个校验相位失败；`success` 的 NaN/±Inf 同样不判真（R777）。
+缓存条目自身 `ts` 的坏形态（字符串/None）按 0 视作过期重查，不中断其余键
+（R780）。
 
 ### `data/quality/reputation_cache.json`
 
