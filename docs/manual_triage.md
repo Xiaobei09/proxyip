@@ -52,8 +52,9 @@ is most likely to see:
   exit-family commit gate, so the artifact can silently freeze while
   `exit_family.json` keeps refreshing. Inspect the geo step of the latest
   `Exit family check` run. The artifact also carries `summary.budget`
-  (R811): at the fixed 600s cap, `exhausted=true` with `cold_skipped > 0`
-  is **expected** behavior, not a fault; read `cold_skipped / candidates`
+  (R811): at the fixed 600s cap, `exhausted=true` (set when
+  `cold_skipped` and/or `backfill_skipped` is non-zero) is **expected**
+  behavior, not a fault; read `cold_skipped / candidates`
   to judge capacity (R812 review trigger: over 90% for three consecutive
   rounds).
 - **`exit-geo multi-source degraded`** — the number of independent families that
