@@ -440,6 +440,15 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 `numeric` 为参与连续型罚分的源列表，`deep_bonus` 为有深测带宽加成时的 +0~10 值（无则缺省）。
 按分数降序、同分按键序排列。
 
+### `data/quality/cmli.json`
+
+单行 JSON，`{ts, proxies}`，键为 `ip:port#国家`，值为
+`{ok, rt_ms, stack, colo, ts}`。它是质量链的**可选缓存**，不是发布契约：
+行尾 `CMOK`/`CMNO` 才是消费者应读取的判定；缓存缺失或 `proxies` 为空时，
+下一轮按 24h TTL 重新查询，不影响已发布备注。整批疑似上游退化或全部请求失败时，
+写入侧保留旧缓存与旧文件级 `ts`，不会用空结果或新时间戳伪装成刷新成功
+（R754/R775）。
+
 ### `data/quality/reputation_cache.json`
 
 单行 JSON，顶层 `proxies` 键为**出口 IP**，值为 `{<source>: {"ts": …, "data": …}}`
