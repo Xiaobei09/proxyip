@@ -230,7 +230,12 @@ jobs:
   commit-format:
     name: Commit message format guard
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # R792：全历史审计（R107 提交格式门禁）随历史线性变长——2026-10-19 实测
+    # ``Checkout (full history)`` ~1m10s + 审计步骤 ~3m45s，当日三连
+    # cancelled 全部是**撞 5 分钟墙**（作业恰在 300s 被取消、各步骤均
+    # success）。墙不能与审计赛跑：抬到 15 分钟留 ~3x 余量；若审计真超时，
+    # 15 分钟墙仍以「可见取消」暴露，而非静默通过。
+    timeout-minutes: 15
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v7
