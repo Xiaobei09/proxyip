@@ -376,6 +376,23 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   数据 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)；脚本兼容
   IP2Location LITE 同型 CSV）。
 
+### `data/quality/exit_geo_cache.json`
+
+出口地理多源查询**缓存**（`exit_geo_multi.py --cache` 默认路径；随公开树跟踪，
+**非发布产物**）。顶层 `{<IP>: {at, record}}`：`at` 为该 IP 最近一次完整多源
+观测的 unix 秒，`record` 与上文 `exit_geo_multi.json` 的逐 IP 记录**同口径**
+（`votes` 族去重一票制、`consensus` / `top_votes` / `total_votes` /
+`distinct_cc` / `multi_region` / `ok_sources` / `providers`）。探测侧命中窗口
+`--cache-ttl` 默认 **7 天**（窗口内 `cache_fresh` ⇒ 该 IP 不重探，省源站额度）。
+
+使用纪律：消费方应优先 `exit_geo_multi.json`；仅当产物缺某 IP 时，形态判定
+（`exit_family.merge_geo_cache`，R797）才回退读本缓存补 `consensus`——**只补
+缺失、产物优先**，读侧 TTL **30 天**；无 `at` / 非数值 `at` / 非 dict 记录
+一律跳过（R804 起顶层非 dict 或 `ips` 非 dict 亦降级为空，不打断形态步）。
+写侧每轮保存前 `prune_cache` 删除 `at` 超 30 天或缺失/畸形的记录（R800，与
+读侧同窗），防止无界增长（2026-10-19 实测 3,945 条 / 6.4MB）。本文件是加速
+缓存，完整度随探测预算波动，**不要**当作稳定数据源二次分发。
+
 ### `data/quality/node_seen.json` 与 `data/quality/uptime.json`
 
 `node_seen.json`：`{runs: {<YYYY-MM-DD>: 轮次计数}, proxies: {<key>: [出现日期…]}}`
