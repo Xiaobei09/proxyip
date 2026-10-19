@@ -207,6 +207,8 @@ jobs:
       - name: China reachability check
         id: china
         if: steps.gate.outputs.skip != 'true'
+        env:
+          CN_BATCH_ALT: "1"
         run: |
           set +e
           # R356：limit/concurrency 的**数值真相已单点存放于私有注册表**
