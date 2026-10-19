@@ -582,7 +582,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 > 归一化、带 `checked_at`，且 `sources`/`basis`/顶层源键均已封存为不透明
 > `src_*`（R766/R767/R770）；写入侧只保留带 `sources` 的完整记录，缺
 > `sources` 的半记录/旧最终记录不会进入 sidecar，只有全 dict 的裸源表
-> 才归一（R771）。消费者只读 `china.json`，不要把 sidecar 当数据契约。
+> 才归一（R771）；从 `prev` 合并的条目还必须有 `checked_at`，只有
+> `sources` 而无 `checked_at` 同样不写入（R772）。消费者只读
+> `china.json`，不要把 sidecar 当数据契约。
 
 ### `data/valid/all_cn.txt`
 
