@@ -64,7 +64,7 @@ is most likely to see:
   prune/rotate the failing endpoint. Note `families_configured` is a static
   constant and cannot show this; only `families_active` reflects runtime health.
   One endpoint, `api.ipbase.com`, has been the lowest-yield provider in every
-  audited run (21-230 ok vs roughly 3,700 for its peers); that shape is a rate
+  audited run (21-230 ok, about 6-22% of the peer median); that shape is a rate
   limit, not a failure, so compare against prior rounds and `families_active`
   before rotating it.
   The optional local DB being absent (⇒ 9) is deliberately above the alert floor.
