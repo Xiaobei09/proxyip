@@ -580,8 +580,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 > `data/quality/china.partial.json` 是 R946 增量 checkpoint，不是稳定产物；
 > 取消/中断轮可能经 `commit_data.sh` 强制提交以支持跨轮恢复。其条目必须已
 > 归一化、带 `checked_at`，且 `sources`/`basis`/顶层源键均已封存为不透明
-> `src_*`（R766/R767/R770）。消费者只读 `china.json`，不要把 sidecar 当
-> 数据契约。
+> `src_*`（R766/R767/R770）；写入侧只保留带 `sources` 的完整记录，缺
+> `sources` 的半记录/旧最终记录不会进入 sidecar，只有全 dict 的裸源表
+> 才归一（R771）。消费者只读 `china.json`，不要把 sidecar 当数据契约。
 
 ### `data/valid/all_cn.txt`
 
