@@ -37,9 +37,10 @@
 
 </details>
 <details>
-<summary>🔍 出口与质量（点击展开 7 图）</summary>
+<summary>🔍 出口与质量（点击展开 8 图）</summary>
 
 ![Exit IP family](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_family.svg)
+![Exit shapes](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_shapes.svg)
 ![Exit country top 15](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_exit.svg)
 ![Entry CC label audit](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_entry_audit.svg)
 ![IP type distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_ip_type.svg)
@@ -132,6 +133,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - `chart_sets.svg` — 各命名集合的存活规模
 - `chart_cn.svg` / `chart_cn_7d.svg` — 大陆连通判定分布与 7 天趋势
 - `chart_family.svg` — 实际出口 IP 家族（v4/v6）分布
+- `chart_shapes.svg` — 出口形态分布（SS 同国同IP / SD 同国不同IP / CD 跨境单国不同IP / CP 跨境单国多IP池 / CM 跨境多国出口池）
 - `chart_ip_type.svg` — 出口 IP 类型（机房/住宅/移动）分布
 - `chart_exit.svg` — 出口国家 top 15
 - `chart_entry_audit.svg` — 入口国标签审计汇总
