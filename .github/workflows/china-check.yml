@@ -333,12 +333,16 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.BUNDLE_PAT }}
+          # R809：本轮探针 outcome（success/skipped/failure）。tests 早红时
+          # `China reachability check` 被 fail-fast 跳过 ⇒ 本轮零产出，
+          # 必须在恢复链间隔内补派，而不是被上轮 success 的 120min 门卡住。
+          CHINA_OUTCOME: ${{ steps.china.outcome }}
         run: |
           python3 - <<'PY'
           import datetime, json, os, subprocess, sys
 
-          MIN_GAP_MIN = 120      # 上一轮成功 ⇒ 间隔下限（防快速退出轮连环）
-          RECOVERY_GAP_MIN = 5   # 上一轮失败/超时/取消 ⇒ 恢复链间隔下限（R613）
+          MIN_GAP_MIN = 120      # 上一轮成功且**本轮产数** ⇒ 间隔下限（防快速退出轮连环）
+          RECOVERY_GAP_MIN = 5   # 上一轮失败/超时/取消，或**本轮探针未成功** ⇒ 恢复链间隔下限（R613/R809）
           # R750：10→16。实测 2026-10-19 07:59:59 轮日志：「24h 内自派发
           # 11 次已达上限 10，跳过」——R718 恢复链（03:42–03:57 三连发）＋
           # 风暴期重试把 24h 额度烧穿，正常轮的自派发被掐断；叠加平台 cron
@@ -369,11 +373,23 @@ jobs:
               print("本轮不在 run 列表（分页/延迟），跳过自派发")
               sys.exit(0)
           prev = [r for r in runs if r["createdAt"] < me["createdAt"]]
+          # R809：本轮探针是否真的产数。`steps.china.outcome` 在 tests 早红
+          # 时为 skipped（fail-fast），探针自身失败时为 failure——两种都是
+          # **零产出轮**，必须走恢复链。
+          probe_ok = os.environ.get("CHINA_OUTCOME") == "success"
           if prev:
               prev_run = prev[-1]
               # R613：上一轮成功走正常节奏；失败/超时/取消走恢复链（尽快自愈）。
-              thr = (MIN_GAP_MIN if prev_run.get("conclusion") == "success"
-                     else RECOVERY_GAP_MIN)
+              # R809：只看上一轮 conclusion 不够——实测 run 39312810041（19:39
+              # 起，tests 红 ⇒ china skipped）在 19:50 自派发时，上一轮 success
+              # ⇒ 120min 门，而距上轮开始仅 113.3min < 120 ⇒ 跳过；叠加平台
+              # 丢 cron，china.json 冻结 2.7h+。本轮零产出时改走 5min 恢复门
+              #（仍受 R655 的「当前时刻−上轮开始」防连环保护）。
+              if probe_ok:
+                  thr = (MIN_GAP_MIN if prev_run.get("conclusion") == "success"
+                         else RECOVERY_GAP_MIN)
+              else:
+                  thr = RECOVERY_GAP_MIN
               # R655：间隔 = **当前时刻** − 上一轮开始。旧式被减数用
               # me.createdAt（本轮创建）——排队班（cron 事件恰好落在上一轮
               # 开始前后）会算出 4.5min<5min 的伪「快速退出轮」判据，恢复链
