@@ -226,11 +226,11 @@ CN 分运营商趋势，每行一快照 `{ts, cn_reachable, cn_by_isp}`；`cn_by
 键数，含无分运营商读数的可达键）。R418 起 `cn_wide` 不再逐家复制——各运营商
 `reachable`/`sampled` 为逐运营商实测，反映真实覆盖差异。保留最近 8 天。
 
-> **写入时机**：该文件由 `stats.yml` 的 Health watchdog 步（在 Generate stats
-> and charts **之后**）追写，而 `chart_cn_7d.svg` 在同一 job 的 Generate 步
-> 生成 ⇒ 趋势图最后一个点是**上一轮** stats 心跳（R827 实测：22:48:22 行已
-> 落盘，22:47 生成的图止于 22:22）。当前快照看 `chart_cn.svg` / `stats.cn_*`；
-> 下一轮 stats 会补上本轮点。属一轮延迟的既定顺序，不是数据丢失。
+> **写入时机（R828 起）**：`stats.yml` 在 Generate stats and charts **之前**
+> 先跑 `health_alert.py --record-cn-history` 预写本轮快照，Health watchdog 步
+> 用 `--no-record-cn-history` 跳过重复追写 ⇒ `chart_cn_7d.svg` **包含当前轮**。
+> 预写步 `continue-on-error: true`；失败时退化为 R827 的旧顺序（图表少当前轮，
+> 下一轮 stats 补上，不是数据丢失）。当前快照仍可看 `chart_cn.svg` / `stats.cn_*`。
 
 ### `data/valid/meta.json`
 
