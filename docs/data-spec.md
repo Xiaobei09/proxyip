@@ -336,7 +336,9 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   IP / `CD` 跨境单国不同 IP / `CP` 跨境单国多 IP 池 / `CM` 跨境多国出口池；由出口
   IP 集合（`exit_v4`/`exit_v6` ＋多出口字面量 `v4_lits`/`v6_lits`）与
   `data/quality/exit_geo_multi.json` 的逐 IP 国别共识判定——任一出口国别不可判或
-  出口集合为空则**不落字段**（不编造）。
+  出口集合为空则**不落字段**（不编造）；R801：落在已知 CDN 边缘网段（Cloudflare
+  公布块）的**字面量**不计入该集合（探测端点自身经 CDN 前置产生的伪出口），共识
+  字段 `exit_v4`/`exit_v6` 不受此过滤。
 - 上游交叉验证（按需填充：`upstream_*` 只在有 v6 出口探测结果时出现）：
   `upstream_client_ip`（上游观测出口）、`upstream_family`、`upstream_absent`、
   `upstream_match`（家族级比较）、`upstream_ip_match`（实测出口**字面量**与上游
