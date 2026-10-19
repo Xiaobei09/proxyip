@@ -78,6 +78,13 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         run: python pcb/scripts/export_json.py
 
+      # R828：先追写本轮 CN 快照再生成图表，否则 chart_cn_7d 永远少当前轮。
+      # continue-on-error：预写失败不得阻断 stats（退化为旧的一轮延迟）。
+      - name: Record CN history (pre-chart)
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: python pcb/scripts/health_alert.py --record-cn-history
+
       - name: Generate stats and charts
         id: stats
         if: steps.gate.outputs.skip != 'true'
@@ -92,7 +99,7 @@ jobs:
         continue-on-error: true
         env:
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
-        run: python pcb/scripts/health_alert.py
+        run: python pcb/scripts/health_alert.py --no-record-cn-history
 
       - name: Commit changes
         if: steps.gate.outputs.skip != 'true' && steps.stats.outcome == 'success' && steps.export.outcome == 'success'
