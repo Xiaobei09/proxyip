@@ -22,7 +22,7 @@
 | 综合最优 | [build-good.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/build-good.yml) | `data/valid/all_good*.txt`、`all_premium*.txt` |
 | 大陆可达 | [china-check.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/china-check.yml) | `data/valid/all_cn*.txt`、`data/quality/china.json` |
 | 深度测速 | [deep-speed.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/deep-speed.yml) | `data/valid/speed.json` |
-| 出口地理 | [exit-family.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/exit-family.yml) / [annotate-classify.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/annotate-classify.yml) | `data/valid/exit_family.json`、`data/quality/` |
+| 出口地理 | [exit-family.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/exit-family.yml) / [annotate-classify.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/annotate-classify.yml) | `data/quality/exit_family.json`、`data/quality/` |
 | 统计出图 | [stats.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/stats.yml) | `data/output/stats.json`、`chart_*.svg` |
 | 泄漏门禁 | [leak-guard.yml](https://github.com/Xiaobei09/proxyip/actions/workflows/leak-guard.yml) | 通过/失败结论 |
 
