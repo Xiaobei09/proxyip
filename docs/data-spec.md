@@ -372,9 +372,14 @@ proxy/vpn/tor/hosting/mobile/abuse/listed/scraper/crawler/anonymous）、
   < 目标（10）或**实际有票**族数 < 目标时分别出 `::warning::`（诚实告警，
   不判死；R693）。`budget` 为**预算记账**（R811）：`{seconds, candidates,
   cache_hits, cold_total, cold_probed, cold_skipped, backfill_skipped,
-  exhausted}`——`cold_skipped` 为时间预算耗尽时**未提交**的冷 IP 数、
-  `backfill_skipped` 为因预算跳过的命中补票数、`exhausted` 为两者之或；缓存
-  命中不计入 `cold_*`（命中仍全额输出，R795）。
+  exhausted}`——`cold_probed` 为本轮**已提交**的冷 IP 数（在途任务收尾计入，
+  探测失败也计入；实际成功记录数以 `ips` 为准），`cold_skipped` 为时间预算
+  耗尽时**未提交**的冷 IP 数、`backfill_skipped` 为因预算跳过的命中补票数、
+  `exhausted` 为 `cold_skipped or backfill_skipped`（**只表示预算耗尽，不
+  表示探测成功**）；恒等式 `cache_hits+cold_total=candidates`、
+  `cold_probed+cold_skipped=cold_total`；缓存命中不计入 `cold_*`（命中仍
+  全额输出，R795）。探测失败率看 `families_active`/`providers`（R693），
+  不从 `budget` 推断。
 - 数据源按**族**计：API 族（`ip-api`、`ipwhois`、`ip-sb`、`ipinfo`、
   `ipapi.co`、`geojs`、`geolocation-db`〔低质，0 票〕）+ 本地库族
   （DB-IP Lite，运行时下载、不随仓库分发；© [DB-IP.com](https://db-ip.com)，
