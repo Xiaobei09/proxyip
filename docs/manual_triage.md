@@ -66,8 +66,10 @@ is most likely to see:
   shape-classified, with a 500-entry floor. Measured baseline 22.0%; the R795
   regression form produced 0.6%. This means the geo consensus or the shape
   attachment step silently degraded — inspect the geo step of the latest
-  `Exit family check` run and the `summary.shape_counts` block. An artifact
-  without `shape_counts` (pre-R738) fails open.
+  `Exit family check` run and the `summary.shape_counts` block. The same
+  five-key distribution is rendered as `data/output/chart_shapes.svg` (R813),
+  so the classified share can be eyeballed against the 5% floor in one look.
+  An artifact without `shape_counts` (pre-R738) fails open.
 - **`entry-audit stale`** — `data/quality/entry_audit.json` (the entry-country
   label audit behind `chart_entry_audit.svg`) is older than 12h / has too few
   entries. Its producing step (`Audit entry CC labels`) runs with `always()` and
