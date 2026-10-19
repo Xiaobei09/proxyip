@@ -18,6 +18,13 @@
    - `pcb.tests_pipeline.test_checks_bundle`
    - `pcb.tests_pipeline.test_commit_data.TestLoopCommitFormat`
 3. Verify private PCB bundle is checked out only when `BUNDLE_PAT` exists.
+4. Check **which** job failed: `Commit message format guard` (mechanical commit
+   audits — e.g. R107: a loop commit, one whose subject carries `[Rn]`, must not
+   touch `data/`) or `Private-source leak guard` (the actual leak scan). A red
+   format job is a convention breach, **not** a leak. Manual data repairs belong
+   in a marker-less `chore(data): …` commit; pushed history is never rewritten —
+   a confirmed deviation gets a SHA-exact exemption in the guard, never a
+   `--force` push.
 
 ## Current Blocking Pattern
 
