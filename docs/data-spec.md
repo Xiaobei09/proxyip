@@ -221,7 +221,10 @@ Status 徽章端点数据（shields.io `endpoint` 格式，供 README 徽章与�
 ### `data/quality/cn_history.jsonl`
 
 CN 分运营商趋势，每行一快照 `{ts, cn_reachable, cn_by_isp}`（R441 起还可能带
-顶层 `cn_reachable_cached` 平滑读数，供 7d 图的平滑线；旧行可缺）；`cn_by_isp` 为
+顶层 `cn_reachable_cached` 平滑读数，供 7d 图的平滑线；旧行可缺）。`ts` 是该行
+写入时刻（stats 预写/watchdog 心跳，UTC），**不是** `china.json.ts`；
+`cn_reachable`/`cn_by_isp` 取写入时最新的 `china.json`，其测量时刻见
+`stats.cn_ts`（可能比行 `ts` 旧）；7d 图 x 轴用行 `ts`。`cn_by_isp` 为
 `{运营商: {sampled, reachable, min_ms, median_ms}}`（无读数时为 `{}`），外加
 顶层单值 `cn_wide`（R393/R418）为 CN 口径可达参考（池内 `verdict==reachable`
 键数，含无分运营商读数的可达键）。R418 起 `cn_wide` 不再逐家复制——各运营商
