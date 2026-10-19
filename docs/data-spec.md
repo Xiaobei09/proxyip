@@ -592,6 +592,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
   | `carrier_speed_breakdown` | 逐运营商 `isp_speed` 覆盖 `{total, per, ms_per, noise, floor, full, partial, zero, ms_only, speed_only}` |
   | `unsourced_reachable` | `reachable` 却零 `sources` 证据的条目数 `{total, reachable, unsourced_reachable, in_pool, outside_pool}`；后两项把该集合拆成「在可测候选池内（可被重测修复）」与「池外（不可测）」 |
   | `list_health` | CN 清单（`all_cn.txt`）落地自检报告 `{count, no_ms, junk_ms}`：`no_ms`＝无 ms token 的行数（大陆延迟重写失效的信令；实测基线 289/18220＝1.6%），`junk_ms`＝ms 低于该行出口国物理下限的行数（正常恒 0）。看门狗在 `no_ms/count > 10%` 或 `junk_ms > 100` 时告警 |
+  | `probe_priority` | 本轮**派工样本**的四档构成 `{total, hold, no_data, uncertain, has_data}`：派工顺序＝续保桶 → 当前无数据 IP → uncertain → 已有数据，把「优先探测无数据 IP」的逐轮兑现度记成账（此前排序键零痕迹，只能事后反推 `prev`） |
 
   只追加、不改动、不删除既有键；`per` 等子字段的键为运营商取值域四类
   （`中国电信`/`中国联通`/`中国移动`/`中国多线`）。
