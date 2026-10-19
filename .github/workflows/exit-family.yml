@@ -127,6 +127,29 @@ jobs:
         if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
         run: cd pcb && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
 
+      # R732：本 job 从检出到提交约 25min（探针 20+min），期间 CN 链/质量链可能
+      # 已落盘更新的 china.json / reputation.json——若沿用检出时的旧版重算 good，
+      # 会把 quality/good_meta.json 覆写成塌缩态（valid 侧因「内容变才写」逃过
+      # 覆盖 ⇒ 两侧割裂 + 误报 good-ltd collapsed；实测 2026-10-19 05:24 起跑的
+      # 本链与 05:46 落盘的 CN 轮重叠：05:50:02 build 用旧 china.json 得
+      # Maps: cn=4327 → good_meta pc=4050/satisfied=0，覆盖了 05:47 的重建）。
+      # 构建前把**跨链质量输入**刷到 origin/main 现值（本 job 不写这两个文件；
+      # 自己的 all.txt/exit_* 等保持就地新值）。fetch/文件缺失均 fail-open：
+      # 刷新失败退回旧行为，不阻断提交。
+      - name: Refresh cross-chain inputs
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          git fetch --depth=1 origin main || true
+          for f in data/quality/china.json data/quality/reputation.json; do
+            if git show "origin/main:$f" > "$f.refresh.$$" 2>/dev/null; then
+              mv "$f.refresh.$$" "$f"
+              echo "refreshed: $f"
+            else
+              rm -f "$f.refresh.$$"
+              echo "skip (not on origin/main): $f"
+            fi
+          done
+
       - name: Build good lists
         id: good
         # R324：同 Annotate——早测失败不得拦住下游 heal 链。
