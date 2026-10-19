@@ -576,6 +576,13 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
   只追加、不改动、不删除既有键；`per` 等子字段的键为运营商取值域四类
   （`中国电信`/`中国联通`/`中国移动`/`中国多线`）。
 
+> **运行时 sidecar（非发布契约）**：China 主探测的
+> `data/quality/china.partial.json` 是 R946 增量 checkpoint，不是稳定产物；
+> 取消/中断轮可能经 `commit_data.sh` 强制提交以支持跨轮恢复。其条目必须已
+> 归一化、带 `checked_at`，且 `sources`/`basis`/顶层源键均已封存为不透明
+> `src_*`（R766/R767/R770）。消费者只读 `china.json`，不要把 sidecar 当
+> 数据契约。
+
 ### `data/valid/all_cn.txt`
 
 **全量大陆可达清单**：从全量存活池中筛出本轮判 `reachable` 的行，统一追加 `-CN` 备注
