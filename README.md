@@ -131,7 +131,7 @@ data/download/all.txt                       # 全量去重清单（未验证）
 - `chart_country_speed.svg` — 各国速度分布（p25–p75 区间）
 - `chart_speed_spread.svg` — 同国内速度分化（四分位差/中位数）
 - `chart_sets.svg` — 各命名集合的存活规模
-- `chart_cn.svg` / `chart_cn_7d.svg` — 大陆连通判定分布与 7 天趋势（R828 起趋势含当前轮；预写失败时才退化为上一轮）
+- `chart_cn.svg` / `chart_cn_7d.svg` — 大陆连通判定分布与 7 天趋势（R828 起趋势含当前轮；预写失败或 `china.json` 缺失/为空时不追加当前点，曲线停在上一已提交行；R835 起不会重复写旧快照）
 - `chart_family.svg` — 实际出口 IP 家族（v4/v6）分布
 - `chart_shapes.svg` — 出口形态分布（SS 同国同IP / SD 同国不同IP / CD 跨境单国不同IP / CP 跨境单国多IP池 / CM 跨境多国出口池）
 - `chart_ip_type.svg` — 出口 IP 类型（机房/住宅/移动）分布
