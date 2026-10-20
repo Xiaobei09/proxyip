@@ -8,7 +8,7 @@
 ## 行格式
 
 - 未验证目录每行一条 `ip:port#国家代号`，例如 `1.2.3.4:443#US`
-- `data/valid/` 每行一条 `ip:port#🇺🇸US←HK-多线-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + **出口**国家代号 +
+- `data/valid/` 每行一条 `ip:port#🇺🇸US←HK-电信-120ms-0.44MB/s`：`#` 后为 emoji 国旗 + **出口**国家代号 +
   箭头 `←` 后为**入口**国家代号 + 可选运营商短名段 + `-` + 延迟毫秒 + `-` + 速度（MB/s，两位小数）；
   测速失败时省略速度段（`ip:port#🇺🇸US←HK-120ms`）。**行首国家码恒为出口、`←` 后恒为入口标签**。
 - **入口/出口地区（R1746 方案 B：出口优先）**：已标注出口的行把出口国旗+出口 ISO 写在 `#` 后**首位**
@@ -20,11 +20,11 @@
   **不等价于「出口 == 入口」**（出口==入口的真观测会写成 `#XX←XX`）。存量旧箭头 `→`（读取端长期兼容）
   与旧式「入口在前」行由一次性迁移脚本迁移为出口优先。
 - **运营商段（R1746 方案 B）**：中国可达的行在入口 ISO 后写独立运营商短名段
-  （`电信`/`联通`/`移动`/`多线`，取该 key `china.json.isp_ms` 最小 RTT 经 `CN_ISP_SHORT` 归一）；非 CN
+  （`电信`/`联通`/`移动`；R838 起删除多线，取该 key `china.json.isp_ms` 最小 RTT 经 `CN_ISP_SHORT` 归一）；非 CN
   可达则省略。旧式末尾 `-<运营商>=<ms>ms` 复合 token 已废弃并删除。海外实测速度保持裸值，`≈XMB/s`
   仅表示大陆视角估算。
 - **质量检测备注**：被检测的行在既有后缀后追加若干 `-` 分隔的 token。完整示例：
-  `1.2.3.4:443#🇺🇸US←HK-多线-120ms-0.44MB/s-RES-fast-V4-CN-29-U35`
+  `1.2.3.4:443#🇺🇸US←HK-电信-120ms-0.44MB/s-RES-fast-V4-CN-29-U35`
 - **去重**：同一 `ip:port` 组合在**同一国家标签内**唯一；同一入口可能被不同订阅标为多国
   出口（此时保留多国条目，池中存在少量跨标签重复属设计内）
 - **排序**：
@@ -39,7 +39,7 @@
 
 `ip:port#<出口><←入口标签><note>` 中 `key = ip:port#<入口标签>`（有箭头时取箭头后的国家码，无箭头时取首个国家码）；
 `note` 为**标签国家码之后**直至行尾的剩余部分（含运营商段与延迟/速度 token，如
-`1.2.3.4:443#🇺🇸US←HK-多线-120ms-RES-fast-V4-CN-29-U35` 的 note 为 `-多线-120ms-RES-fast-V4-CN-29-U35`）。
+`1.2.3.4:443#🇺🇸US←HK-电信-120ms-RES-fast-V4-CN-29-U35` 的 note 为 `-电信-120ms-RES-fast-V4-CN-29-U35`）。
 首个国家码（出口）不进入 key，故出口漂移不重键质量 JSON。
 
 token 是 note 中以**段首或 `-` 为界**的独立子串，即 `(?:^|-)TOKEN(?:$|-)`。因此
@@ -185,8 +185,8 @@ ms 另过**出口地理下限**——大陆出发到某出口国的 RTT 物理�
 | `age_s` / `updated_ago` / `stale` | 数据年龄（秒）/ 可读年龄（如 `4h ago`）/ 是否过期（超过 3h） |
 | `history_records` / `alive_history_records` | 历史记录条数 |
 | `cn_reachable` / `cn_http` / `cn_stable` / `cn_served` / `cn_ts` | CN 池规模：`reachable` = 当前判定可达数（真相；且须同时存在于当前 `data/valid/all.txt` 池，已淘汰节点不计数）；`http`/`stable`/`served` = 实际落盘 `all_cn_http.txt`/`all_cn_stable.txt`/`all_cn.txt` 行数（空组不落盘、波动后旧子集短暂残留属设计，消费此口径所见即所得）；`ts` = `china.json` 顶层 `ts`（测量阶段起算时钟，非提交/完成时刻，R752） |
-| `cn_by_isp` / `cn_by_isp_oldest_age_h` | **分运营商** CN 可达/延迟：键为运营商短名（`电信`/`联通`/`移动`/`多线`），值为 `{sampled, reachable, min_ms, median_ms}`（与分运营商图**同一**计算：池限、逐运营商读数读侧按 **24h 账龄剔除**、延迟过噪声带与出口地理范围门）；`_oldest_age_h` = 参与读数的**最旧**条目年龄（小时，无则 `null`）。无 per-ISP 读数时 `cn_by_isp` 为空对象 |
-| `cn_isp_pool` / `cn_isp_coverage` | 分运营商 **24h 覆盖率仪表**（用户「目标 24h 内 4 运营商全覆盖」）：`cn_isp_pool` = 当前存活池键数（分母）；`cn_isp_coverage` = `{短名: sampled/池规模}`（0~1，与 `cn_by_isp` **同一**池限口径；池空 ⇒ `{}`）。使「每个运营商已覆盖池内多少比例」成为可直接展示/告警的一条（R683） |
+| `cn_by_isp` / `cn_by_isp_oldest_age_h` | **分运营商** CN 可达/延迟：键为运营商短名（`电信`/`联通`/`移动`；R838 起删除多线），值为 `{sampled, reachable, min_ms, median_ms}`（与分运营商图**同一**计算：池限、逐运营商读数读侧按 **24h 账龄剔除**、延迟过噪声带与出口地理范围门）；`_oldest_age_h` = 参与读数的**最旧**条目年龄（小时，无则 `null`）。无 per-ISP 读数时 `cn_by_isp` 为空对象 |
+| `cn_isp_pool` / `cn_isp_coverage` | 分运营商 **24h 覆盖率仪表**（用户「目标 24h 内 3 运营商全覆盖」，R838 删除多线）：`cn_isp_pool` = 当前存活池键数（分母）；`cn_isp_coverage` = `{短名: sampled/池规模}`（0~1，与 `cn_by_isp` **同一**池限口径；池空 ⇒ `{}`）。使「每个运营商已覆盖池内多少比例」成为可直接展示/告警的一条（R683） |
 | `exit_multi_ip` / `exit_multi_region` / `exit_shared` / `exit_geo_ips` / `exit_geo_multi_region` / `exit_geo_families` / `exit_geo_families_active` | 出口多源/多出口计数（复用 `exit_family.json` 与 `exit_geo_multi.json` 的 `summary`，**不新增探测**）：多出口 IP（同族多源出口不一致）/ 多地区出口（互斥出口国并存）/ 共享出口 / 出口地理已裁决的出口 IP 数 / **出口 IP 级**多地区出口数 / 出口地理对比**配置**的来源族数 / 出口地理对比本轮**真有票**（≥1 次 `ok` 观测）的族数（`families_active`，与配置数并排即可发现运行时族退场，R693；均只报**数量**，来源真名不入公开产物，缺失回退 0） |
 | `exit_shapes` | 出口形态分布（复用 `exit_family.json` summary 的 `shape_counts`，**不新增探测**）：固定 `SS`/`SD`/`CD`/`CP`/`CM` 五键、缺失补 0；SS 同国同 IP / SD 同国不同 IP / CD 跨境单国不同 IP / CP 跨境单国多 IP 池 / CM 跨境多国出口池（R738；R801 起 CDN 边缘伪出口不计入）。产物**没有** `shape_counts`（geo 缺失/旧产物）时为 `{}`——**未知 ≠ 全零**；用于看板与告警发现「形态判定整体塌方」（R807）；stats 轮同步渲染 `chart_shapes.svg`（R813） |
 | `exit_tagged` / `exit_untagged` / `exit_untagged_ratio` | 出口标注覆盖率（只读 `data/valid/all.txt`）：含箭头 `←` 的行数（有出口地区观测）/ 无箭头的行数（**尚无任何出口观测**，即"没有出口标志"）及其占比（`untagged/total`，缺失回退 0）。用于跟踪"部分 IP 无出口标志"收敛进度 |
@@ -432,7 +432,7 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 `{line, key, ip, port, flag, cc, exit, latency_ms, speed_mbps, family(V4|V6|DS|null), cn(bool), type, tier, rep, uptime7}`，
 并按来源**按需**附加可选字段（命中才出现、缺省即整字段省略；只增不改不删）：
 
-- `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域同 `china.json`，按 `ip:port#EXIT` 精确 join。两者均逐家过**出口地理下限**：低于该出口国物理 RTT 下限的读数（如大陆→US 12ms、→HK 1ms）地理上不可能，不导出；故某家可能只出现在 `cn_isp_ms` 而不在 `cn_isp_speed`，或两家皆无。`china.json` **被认可的汇聚值** `isp_ms` 在**写侧**即套用物理可信带（R699：非 bool、有限、>2.0ms 噪声带且 ≤1000ms）——>1s 的 SYN 重传伪读数不再落盘；逐源**原始**读数仍完整保留在 `proxies[*].sources[*].isp_ms` 作证据，仅导出的 `all.json` 再套用**逐家出口地理下限**。
+- `cn_isp_speed` / `cn_isp_ms` —— 分运营商大陆**速度/延迟**：值形如 `{"中国电信": 1.8}` / `{"中国电信": 202.1}`，运营商键域为三网（`中国电信`/`中国联通`/`中国移动`；R838 起导出侧过滤历史多线），按 `ip:port#EXIT` 精确 join。两者均逐家过**出口地理下限**：低于该出口国物理 RTT 下限的读数（如大陆→US 12ms、→HK 1ms）地理上不可能，不导出；故某家可能只出现在 `cn_isp_ms` 而不在 `cn_isp_speed`，或两家皆无。`china.json` **被认可的汇聚值** `isp_ms` 在**写侧**即套用物理可信带（R699：非 bool、有限、>2.0ms 噪声带且 ≤1000ms）——>1s 的 SYN 重传伪读数不再落盘；逐源**原始**读数仍完整保留在 `proxies[*].sources[*].isp_ms` 作证据，仅导出的 `all.json` 再套用**逐家出口地理下限**。
 - `cn_level` / `cn_streak` / `cn_flip` —— 大陆**证据分级/连续可达轮数/翻转计数**：`cn_level ∈ http|tcp|icmp`，`"http"` 即应用层确认可用（区别于仅能 ping 通）。
 - `real_exit` —— 实测**真实出口**元数据：`family`（ipv4/ipv6/dual/unknown）、`v4`/`v6`（实测出口 IP）、`shared`、`upstream_match`、`multi`（v4≠v6=多个出口）、`multi_source`（R415：同族多源回显**不一致**=同族多出口）、`upstream_ip_match`（R415：实测出口字面量与上游 `clientIp` 地址等价比较）、`differs`（出口 IP 均 ≠ 入口 IP = 出入 IP 不同）、`geo`（实测出口**地区** `{"country","city","colo"}`，来自 `upstream_meta.json` 按入口 IP join）、`region_differs`（出口地区国 ≠ 入口标签国 = 出入地区不同）、`exit_ccs`（R419：出口地理源观测国**集合**，跨 external_check 实测出口 ∪ upstream CF Worker 观测，排 ipinfo 入口地理）、`multi_region_exit`（R419：`exit_ccs` 含 ≥2 互斥出口国 = **多地区出口**）。**缺 `real_exit` 即省略该字段**：仅剩两类且均为刻意省略——①行内无 `←` 出口观测（`exit` 为 `null`）；②有 `←` 但出口国 == 入口国、且 `exit_family.json`/`external_check.json`/`upstream_meta.json` 均无该键观测（只知国家、不知出口 **IP**）。行内箭头是**国家**级观测，不会提升为 IP 级字段（实测 2026-10-13 快照 20358 键中仅 12 个缺 `real_exit`）。
 
@@ -610,7 +610,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 | `last_ok_ts` | 最近一次**连续可达确认**时刻（epoch）；非可达即清，消费方据此判续保 |
 | `last_seen_ok_ts` | 最近一次**观测可达**时刻（epoch）；与 `last_ok_ts` 语义分离——非可达时**保留**上一轮值（如实变旧），供「可用 ip 缓存」按窗口把可用量平滑一个窗口，避免单轮探测抖动造成可用量大幅波动；旧格式缺省，不参与 `streak`/`flip`/stable 判定 |
 | `cn_mainland` | 大陆视角 RTT 是否低于门槛 |
-| `isp_ms` | 各运营商最小 RTT 汇聚，`{运营商: ms}`，取值域为 `中国电信`/`中国联通`/`中国移动`/`中国多线` 四类；取 fastest-isp 时即最快运营商视角。无读数则不写该字段 |
+| `isp_ms` | 各运营商最小 RTT 汇聚，`{运营商: ms}`，原始证据取值域可为 `中国电信`/`中国联通`/`中国移动`/`中国多线` 四类（历史多线仅在原始 `china.json.isp_ms` 保留）；R838 起 `stats.cn_by_isp`、`export_json.cn_isp_ms`、`cn_best_isp`/`cn_fastest_ms`/`cn_isp_speed` 读侧只认三网；取 fastest-isp 时即最快运营商视角。无读数则不写该字段 |
 | `isp_ms_at` | 与 `isp_ms` 成对写的逐家落盘时刻；读侧据此执行 24h 新鲜度 TTL，账龄 >24h 的家在取值端被剔除。写侧 `merge_isp_ms` 同 TTL 落盘（过期丢弃/≤TTL 携带并保留原戳）；**调度侧**的「证据齐全」判据同样按 24h 账龄判定——全过期的键视为缺口、重回补测候选，避免「raw 齐全但全过期」的键被判『不缺』而永久排除在补测之外（R686） |
 | `isp_speed` | 该条**逐运营商估算速度** `{运营商: MB/s}`，由 `isp_ms` 按与大陆清单 `≈XMB/s` 同口径派生；某家延迟低于其**实测出口**国物理 RTT 下限时不派生（避免把共址假象放大成物理上不可能的高速度，宁缺勿假）。无 `isp_ms` 则不写该字段 |
 | `checked_at` | 本条**探测时刻**（epoch）；新鲜度账龄的条目级回退戳（逐家 `isp_ms_at` 缺失时读侧改用它，两者皆缺则不臆造年龄） |
@@ -641,8 +641,8 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
   | `list_health` | CN 清单（`all_cn.txt`）落地自检报告 `{count, no_ms, junk_ms}`：`no_ms`＝无 ms token 的行数（大陆延迟重写失效的信令；实测基线 289/18220＝1.6%），`junk_ms`＝ms 低于该行出口国物理下限的行数（正常恒 0）。看门狗在 `no_ms/count > 10%` 或 `junk_ms > 100` 时告警 |
   | `probe_priority` | 本轮**派工样本**的四档构成 `{total, hold, no_data, uncertain, has_data}`：派工顺序＝续保桶 → 当前无数据 IP → uncertain → 已有数据，把「优先探测无数据 IP」的逐轮兑现度记成账（此前排序键零痕迹，只能事后反推 `prev`） |
 
-  只追加、不改动、不删除既有键；`per` 等子字段的键为运营商取值域四类
-  （`中国电信`/`中国联通`/`中国移动`/`中国多线`）。
+  只追加、不改动、不删除既有键；`per` 等子字段的键为运营商原始证据取值域（`中国电信`/`中国联通`/`中国移动`/历史 `中国多线`）；
+  R838 起公开报告与导出只列三网。
 
 > **`meta.age` 口径迁移（R757/R779/R784）**：R757 起 `age` 用精确时长分桶。
 > 2026-10-19T16:17Z 的 China 提交（`fff4657`）起已切到精确口径：本轮
