@@ -210,6 +210,11 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         env:
           CN_BATCH_ALT: "1"
+          # R901：批量第二源确认上限。c443 批量通道在补完缺家键后，把
+          # 「三网齐但某家仍单源」的已定论键追加投递，用第二个独立源压实
+          # 移动/联通读数（用户「不要听信一家之言」）。0=关闭；此处 2000
+          # 是留给批量通道的剩余预算，不挤占缺家键（它们仍排在列表前面）。
+          CN_EVIDENCE_BATCH_LIMIT: "2000"
         run: |
           set +e
           # R356：limit/concurrency 的**数值真相已单点存放于私有注册表**
