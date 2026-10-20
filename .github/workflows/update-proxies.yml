@@ -51,7 +51,7 @@ jobs:
 
       - name: Download and extract
         id: download
-        run: python pcb/scripts/download_proxies.py
+        run: python pcb/scripts/download_proxies.py --pool-cache-country-floor 10
 
       - name: Validate proxies
         id: validate
