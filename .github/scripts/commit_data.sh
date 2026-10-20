@@ -59,6 +59,16 @@ align_foreign() {
 
 for attempt in 1 2 3 4 5; do
   git fetch origin main || { sleep 5; continue; }
+  # R909：CN 产物是全体发布视图的证据基座，不能被“启动早于新数据提交”的
+  # 长任务用旧快照回滚。若本 job 产出了 china.json，而 origin/main 在本 job
+  # 起始快照之后已经改过它（例如上一轮 China run 刚提交了更强的证据），
+  # 直接放弃本次提交；旧任务消耗的探针可以下一轮重来，但已经发布的新证据
+  # 不能丢。只在本 job 确实产出该文件时启用，避免阻断只更新其它文件的 job。
+  if printf '%s\n' "$PRODUCED" | grep -qxF 'data/quality/china.json' \
+      && ! git diff --quiet "$WORKTREE_REF" origin/main -- data/quality/china.json; then
+    echo "::warning::refusing stale data/quality/china.json overwrite: origin/main advanced after this job's base snapshot" >&2
+    exit 0
+  fi
   git reset -q --mixed origin/main || { echo "git reset failed" >&2; exit 1; }
   align_foreign
   # shellcheck disable=SC2086
