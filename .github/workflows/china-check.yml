@@ -164,6 +164,7 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
+        id: tests
         if: steps.gate.outputs.skip != 'true'
         # R246：同时跑 **pcb/tests**。跨仓对账（``pcb/tests/test_public_plan.py``：
         # 公开工作流的 CI 配额 vs 私有 ``CI_OVERRIDES``）此前**在 CI 里从不
@@ -322,14 +323,20 @@ jobs:
       # ★R613：修「失败轮断链」——2026-10-16 09:41Z 轮在测试步硬失败后，本步因
       # ``if: success()`` 整步跳过 ⇒ 链断；平台对 cron 丢弃率 ≈90%，china.json
       # 随之冻结数小时（当日 04:27Z 后无成功轮）。修法：①``if`` 改
-      # ``!cancelled()``（成功/失败都派发；取消不派发，防与接管轮双链）；②间隔
-      # 下限按**上一轮结论**取值：上一轮成功 ⇒ 60min（R850 连续探测；原 120min 会等 1h），上一轮失败/
-      # 超时/取消 ⇒ 5min（恢复链：修复一旦推送，下一轮即自愈，不必等 cron 抽签）；
-      # ③DAILY_CAP 不变——失败轮通常早退于测试步、不烧源站配额，热循环由日
-      # 上限兜底。（★R750：因实测恢复链突发烧穿额度致正常轮断链——见下方
-      # DAILY_CAP 注释——该值由 10 上调至 16。）
+      # ``!cancelled()``（探针成功/失败都派发；取消不派发，防与接管轮双链；tests
+      # 早红除外，见 R856）；②间隔下限按**上一轮结论**取值：上一轮成功 ⇒ 60min
+      #（R850 连续探测；原 120min 会等 1h），上一轮失败/超时/取消 ⇒ 5min
+      #（恢复链：修复一旦推送，下一轮即自愈，不必等 cron 抽签）；③DAILY_CAP
+      # 不变——失败轮通常早退于测试步、不烧源站配额，热循环由日上限兜底。
+      #（★R750：因实测恢复链突发烧穿额度致正常轮断链——见下方 DAILY_CAP
+      # 注释——该值由 10 上调至 16。）
+      #
+      # ★R856：tests 早红是**确定性代码缺陷**，不是可自愈的探针失败。R854
+      # 实测 39371616026 两红后仍自派发 39372557503，后者在同一位置再红；
+      # 人工取消前已空烧一轮。故自派发只在本步 tests 成功时继续；探针
+      # 成功/失败（timeout/skipped）仍按 R809 的 5min 恢复链处理，不受影响。
       - name: Self-dispatch next round
-        if: ${{ !cancelled() && steps.gate.outputs.skip != 'true' }}
+        if: ${{ !cancelled() && steps.gate.outputs.skip != 'true' && steps.tests.outcome == 'success' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.BUNDLE_PAT }}
