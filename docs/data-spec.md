@@ -235,6 +235,10 @@ CN 分运营商趋势，每行一快照 `{ts, cn_reachable, cn_by_isp}`（R441 �
 > 用 `--no-record-cn-history` 跳过重复追写 ⇒ `chart_cn_7d.svg` **包含当前轮**。
 > 预写步 `continue-on-error: true`；失败时退化为 R827 的旧顺序（图表少当前轮，
 > 下一轮 stats 补上，不是数据丢失）。当前快照仍可看 `chart_cn.svg` / `stats.cn_*`。
+>
+> **空窗（R835 起）**：若 `china.json` 缺失或 `proxies` 为空，预写/watchdog
+> 视为**本轮未评估**，不追加历史行——不会拿 `alert_state` 的旧 `cn_ts` 重复
+> 写旧快照；7d 图保持上一已提交点。
 
 ### `data/valid/meta.json`
 
