@@ -22,7 +22,10 @@ jobs:
     # --time-budget 到点停止提交、已得结果照常落盘并与上轮合并），
     # 故作业**任何情况下都能落产物**，不再像 16 并发时代（实测全量 ~216
     # 分钟）那样每轮被整体取消、产物零落盘（2026-10-12 起停更）。
-    timeout-minutes: 75
+    # R880：geo 预算 600→900s（冷探测受 ip-api/ipbase 1.4s 慢槽限制，
+    # 600s 实测 434 ≈ 理论上限 428；熔断开源不增加吞吐）。最坏相位
+    # 40min 家族 + 15min geo + 10min 测试 + 收尾 < 90min。
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -102,10 +105,13 @@ jobs:
         # 按**出口 IP** 逐族查国（族去重投票），查询集取自上一步刚写的实测
         # 出口产物；缓存 TTL 7 天 ⇒ 每轮增量覆盖。产物供 annotate/export 的
         # ←CC 与 ⇋（多地区出口）标记消费。放在 annotate 之前——annotate 读它。
-        # 不加 always()：探测步红就不烧这 10 分钟网络配额（R254 同款决策）。
+        # 不加 always()：探测步红就不烧这 15 分钟网络配额（R254 同款决策）。
         # R600：--local-db-dir 接本地库（上一步下载，失败则无本地票）。
         if: steps.gate.outputs.skip != 'true'
-        run: python pcb/scripts/exit_geo_multi.py --from-exit-family data/quality/exit_family.json --time-budget 600 --local-db-dir "$RUNNER_TEMP/geoip"
+        # R880：600→900s。R868 熔断已实测排除 3 个 429 源，但冷探测仍是
+        # 434（≈ ip-api/ipbase 1.4s 全局限速的理论上限 428），说明瓶颈是
+        # 预算时长而非失败请求；900s 预期 ~642 冷 IP，且每分钟速率不变。
+        run: python pcb/scripts/exit_geo_multi.py --from-exit-family data/quality/exit_family.json --time-budget 900 --local-db-dir "$RUNNER_TEMP/geoip"
 
       - name: Annotate and classify
         id: annotate
