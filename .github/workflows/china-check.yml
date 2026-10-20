@@ -284,6 +284,14 @@ jobs:
         env:
           PYTHONPATH: "."
 
+      # R883：把 R881 的产物校验器接成提交前硬门禁。此前它只是手工脚本；
+      # 若写侧再引入孤儿/超龄 `isp_ms_at`，数据仍会被 commit。本步按发布
+      # 时钟检查 24h TTL、孤儿时间戳与三网键，失败则 Commit changes 不执行。
+      - name: Verify CN artifact freshness
+        id: verify_cn
+        if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome == 'success'
+        run: python pcb/scripts/verify_china_artifact.py data/quality/china.json
+
       - name: Show summary
         if: always() && steps.gate.outputs.skip != 'true'
         run: |
@@ -301,7 +309,7 @@ jobs:
         # annotate 仍基于**已提交**的 china.json 收敛（本地已验证足以修红 #1）。
         # **真实探测失败仍判 `failure` ⇒ 依然拦住提交**，门禁未被弱化；
         # 且 job 整体仍因 `Run tests` 红而 failed ⇒ 红信号照常上报。
-        if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success'
+        if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success' && steps.verify_cn.outcome != 'failure'
         run: |
           bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
 
