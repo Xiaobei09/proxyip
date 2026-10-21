@@ -3,7 +3,12 @@ name: Quality check
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: ["Update proxy list"]
+    # R1763：China check 也会写入新的 data/valid/all.txt 键；若只挂
+    # Update proxy list，China 在上一轮 quality 之后新增的键会一直缺
+    # CMOK/CMNO（实测 22 个 all_good_ltd 键 27h 未刷新）。China 完成后
+    # 也触发本链；gate 仍按触发者结论决定是否跑网络测量，并发/去重逻辑
+    # 不变。
+    workflows: ["Update proxy list", "China check"]
     types: [completed]
 
 permissions:
