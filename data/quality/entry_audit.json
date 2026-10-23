@@ -1,11 +1,11 @@
 {
- "generated_at": "2026-10-23T02:58:08+00:00",
+ "generated_at": "2026-10-23T03:29:29+00:00",
  "total": 19344,
  "summary": {
   "tag_mismatch": 1810,
-  "ok": 17177,
+  "ok": 17175,
   "cf_fronted": 1,
-  "ok_with_drift": 356
+  "ok_with_drift": 358
  },
  "proxies": {
   "104.129.167.255:2083#US": {
@@ -1922,7 +1922,7 @@
   },
   "129.153.58.219:443#CA": {
    "listed": "CA",
-   "exit_cc": "CA",
+   "exit_cc": null,
    "entry_ip": "129.153.58.219",
    "entry_geo": "CA",
    "verdict": "ok",
@@ -2938,7 +2938,7 @@
   },
   "172.191.74.198:443#US": {
    "listed": "US",
-   "exit_cc": "US",
+   "exit_cc": null,
    "entry_ip": "172.191.74.198",
    "entry_geo": "US",
    "verdict": "ok",
@@ -76178,10 +76178,10 @@
   },
   "91.184.242.57:8443#NL": {
    "listed": "NL",
-   "exit_cc": "GB",
+   "exit_cc": "NL",
    "entry_ip": "91.184.242.57",
    "entry_geo": "NL",
-   "verdict": "ok_with_drift",
+   "verdict": "ok",
    "asn": 210644
   },
   "94.16.114.184:443#DE": {
@@ -84018,10 +84018,10 @@
   },
   "37.220.82.145:443#DE": {
    "listed": "DE",
-   "exit_cc": "DE",
+   "exit_cc": "NL",
    "entry_ip": "37.220.82.145",
    "entry_geo": "DE",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 210976
   },
   "46.101.221.147:443#DE": {
@@ -86106,10 +86106,10 @@
   },
   "185.114.156.236:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "DE",
    "entry_ip": "185.114.156.236",
    "entry_geo": "NL",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 200223
   },
   "185.125.102.107:443#DE": {
@@ -94290,7 +94290,7 @@
   },
   "178.236.247.188:2053#NL": {
    "listed": "NL",
-   "exit_cc": "GB",
+   "exit_cc": "DE",
    "entry_ip": "178.236.247.188",
    "entry_geo": "US",
    "verdict": "tag_mismatch",
@@ -97130,7 +97130,7 @@
   },
   "149.28.25.176:443#JP": {
    "listed": "JP",
-   "exit_cc": "JP",
+   "exit_cc": null,
    "entry_ip": "149.28.25.176",
    "entry_geo": "JP",
    "verdict": "ok",
@@ -97866,7 +97866,7 @@
   },
   "193.124.183.69:443#FI": {
    "listed": "FI",
-   "exit_cc": "EE",
+   "exit_cc": "FI",
    "entry_ip": "193.124.183.69",
    "entry_geo": "RU",
    "verdict": "tag_mismatch",
@@ -106106,7 +106106,7 @@
   },
   "89.144.30.149:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "DE",
    "entry_ip": "89.144.30.149",
    "entry_geo": "DE",
    "verdict": "tag_mismatch",
@@ -111178,10 +111178,10 @@
   },
   "178.253.31.163:8443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "178.253.31.163",
    "entry_geo": "FI",
-   "verdict": "ok_with_drift",
+   "verdict": "ok",
    "asn": 204339
   },
   "193.124.57.218:443#CZ": {
@@ -118690,7 +118690,7 @@
   },
   "83.147.222.59:443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "83.147.222.59",
    "entry_geo": "UA",
    "verdict": "tag_mismatch",
@@ -119474,10 +119474,10 @@
   },
   "132.243.20.185:8443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "132.243.20.185",
    "entry_geo": "FI",
-   "verdict": "ok_with_drift",
+   "verdict": "ok",
    "asn": 204339
   },
   "136.244.94.162:443#DE": {
@@ -119538,7 +119538,7 @@
   },
   "83.147.222.59:8443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "83.147.222.59",
    "entry_geo": "UA",
    "verdict": "tag_mismatch",
@@ -120378,7 +120378,7 @@
   },
   "83.168.89.167:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "DE",
    "entry_ip": "83.168.89.167",
    "entry_geo": "PL",
    "verdict": "tag_mismatch",
@@ -122106,7 +122106,7 @@
   },
   "212.127.78.92:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "DE",
    "entry_ip": "212.127.78.92",
    "entry_geo": "PL",
    "verdict": "tag_mismatch",
@@ -122474,10 +122474,10 @@
   },
   "132.243.20.114:443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "132.243.20.114",
    "entry_geo": "FI",
-   "verdict": "ok_with_drift",
+   "verdict": "ok",
    "asn": 204339
   },
   "146.56.151.92:443#KR": {
@@ -123066,7 +123066,7 @@
   },
   "109.69.61.108:443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "109.69.61.108",
    "entry_geo": "DE",
    "verdict": "tag_mismatch",
@@ -123962,7 +123962,7 @@
   },
   "83.168.91.22:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "DE",
    "entry_ip": "83.168.91.22",
    "entry_geo": "PL",
    "verdict": "tag_mismatch",
@@ -124634,7 +124634,7 @@
   },
   "82.23.183.218:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "DE",
    "entry_ip": "82.23.183.218",
    "entry_geo": "DE",
    "verdict": "tag_mismatch",
@@ -127234,7 +127234,7 @@
   },
   "201.10.80.72:443#DE": {
    "listed": "DE",
-   "exit_cc": "BR",
+   "exit_cc": "DE",
    "entry_ip": "201.10.80.72",
    "entry_geo": "BR",
    "verdict": "tag_mismatch",
@@ -128898,10 +128898,10 @@
   },
   "185.94.167.193:443#FI": {
    "listed": "FI",
-   "exit_cc": "SE",
+   "exit_cc": "FI",
    "entry_ip": "185.94.167.193",
    "entry_geo": "FI",
-   "verdict": "ok_with_drift",
+   "verdict": "ok",
    "asn": 207569
   },
   "45.192.247.177:443#HK": {
@@ -129746,7 +129746,7 @@
   },
   "109.120.187.173:8443#FI": {
    "listed": "FI",
-   "exit_cc": "GB",
+   "exit_cc": "HR",
    "entry_ip": "109.120.187.173",
    "entry_geo": "FI",
    "verdict": "ok_with_drift",
@@ -132418,10 +132418,10 @@
   },
   "43.168.16.112:443#HK": {
    "listed": "HK",
-   "exit_cc": "HK",
+   "exit_cc": "SG",
    "entry_ip": "43.168.16.112",
    "entry_geo": "HK",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 139341
   },
   "144.31.66.8:2053#FI": {
@@ -132882,7 +132882,7 @@
   },
   "94.177.8.10:443#AT": {
    "listed": "AT",
-   "exit_cc": "AT",
+   "exit_cc": null,
    "entry_ip": "94.177.8.10",
    "entry_geo": "AT",
    "verdict": "ok",
@@ -133986,7 +133986,7 @@
   },
   "138.124.102.170:2053#DE": {
    "listed": "DE",
-   "exit_cc": "GB",
+   "exit_cc": "SE",
    "entry_ip": "138.124.102.170",
    "entry_geo": "SE",
    "verdict": "tag_mismatch",
@@ -140818,7 +140818,7 @@
   },
   "155.248.171.126:443#JP": {
    "listed": "JP",
-   "exit_cc": "JP",
+   "exit_cc": null,
    "entry_ip": "155.248.171.126",
    "entry_geo": "JP",
    "verdict": "ok",
@@ -146954,7 +146954,7 @@
   },
   "168.107.65.59:443#SG": {
    "listed": "SG",
-   "exit_cc": "SG",
+   "exit_cc": null,
    "entry_ip": "168.107.65.59",
    "entry_geo": "SG",
    "verdict": "ok",
@@ -147042,7 +147042,7 @@
   },
   "85.198.67.80:2087#FI": {
    "listed": "FI",
-   "exit_cc": "FI",
+   "exit_cc": "DE",
    "entry_ip": "85.198.67.80",
    "entry_geo": "RU",
    "verdict": "tag_mismatch",
@@ -147514,10 +147514,10 @@
   },
   "103.161.178.215:443#VN": {
    "listed": "VN",
-   "exit_cc": "VN",
+   "exit_cc": "SG",
    "entry_ip": "103.161.178.215",
    "entry_geo": "VN",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 135951
   },
   "140.245.222.123:443#IN": {
@@ -148410,10 +148410,10 @@
   },
   "79.137.194.151:2053#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "GB",
    "entry_ip": "79.137.194.151",
    "entry_geo": "NL",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 210644
   },
   "173.249.31.130:8443#FR": {
@@ -148834,10 +148834,10 @@
   },
   "94.228.160.240:443#NL": {
    "listed": "NL",
-   "exit_cc": "NL",
+   "exit_cc": "GB",
    "entry_ip": "94.228.160.240",
    "entry_geo": "NL",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 203273
   },
   "129.225.70.75:443#IN": {
@@ -150122,7 +150122,7 @@
   },
   "77.232.143.27:8443#DE": {
    "listed": "DE",
-   "exit_cc": "DE",
+   "exit_cc": "GB",
    "entry_ip": "77.232.143.27",
    "entry_geo": "SE",
    "verdict": "tag_mismatch",
@@ -150346,7 +150346,7 @@
   },
   "109.120.157.224:443#DE": {
    "listed": "DE",
-   "exit_cc": "DE",
+   "exit_cc": "GB",
    "entry_ip": "109.120.157.224",
    "entry_geo": "SE",
    "verdict": "tag_mismatch",
@@ -150386,7 +150386,7 @@
   },
   "77.232.143.27:443#DE": {
    "listed": "DE",
-   "exit_cc": "DE",
+   "exit_cc": "GB",
    "entry_ip": "77.232.143.27",
    "entry_geo": "SE",
    "verdict": "tag_mismatch",
@@ -150402,7 +150402,7 @@
   },
   "94.228.168.228:443#FI": {
    "listed": "FI",
-   "exit_cc": "DE",
+   "exit_cc": "GB",
    "entry_ip": "94.228.168.228",
    "entry_geo": "DE",
    "verdict": "tag_mismatch",
@@ -152578,10 +152578,10 @@
   },
   "109.120.185.210:443#FI": {
    "listed": "FI",
-   "exit_cc": "FI",
+   "exit_cc": "GB",
    "entry_ip": "109.120.185.210",
    "entry_geo": "FI",
-   "verdict": "ok",
+   "verdict": "ok_with_drift",
    "asn": 210644
   },
   "2.26.249.164:443#DE": {
@@ -154706,7 +154706,7 @@
   },
   "77.110.107.24:8443#DE": {
    "listed": "DE",
-   "exit_cc": "DE",
+   "exit_cc": null,
    "entry_ip": "77.110.107.24",
    "entry_geo": "DE",
    "verdict": "ok",
