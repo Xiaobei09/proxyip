@@ -68,6 +68,11 @@
   读侧 `common.fresh_isp_ms` 剔除过期读数；写侧 `merge_isp_ms` 按 TTL 丢弃/携带；
   调度侧「证据齐全」判据（`_has_complete_carrier_data`/`_trinet_missing`）同按 24h 账龄——
   全过期的键视为缺口、重回补测候选，避免「raw 齐全但全过期」的键被永久排除在补测外（R686）。
+- **文件级新鲜度兜底（R1769）**：旧 `china.json` 可能整轮没有逐条 `checked_at`。
+  此时以顶层 `ts` 作为整份快照的账龄；超过 24h 则 `-CN`/`-CNH`、运营商标记与
+  good 延迟表一并按陈旧剔除，不再因「条目无时间戳」永久放行。`cn可达（平滑）`
+  只缓存 24h 内「曾经可达」的**可达性**，用于抑制单轮探测抖动，不会把旧 RTT
+  当新读数；分运营商延迟仍严格按 24h 清除。
 - **源失败隔离可见**：配置内上游源本轮抓取异常或解析为空时仍记 `0` 行
   （`source_stats.json` 的 `total=0` + `source_history.json` 计数 `0`），使
   `health_alert.check_sources` 的骤降判据能看见「源整体停摆」而非因 label 消失而静默（R687）。
