@@ -77,6 +77,11 @@ jobs:
       CN_PRIMARY_TIMEOUT_SECONDS: 16200
       CN_FALLBACK_TIMEOUT_SECONDS: 3600
       CN_FALLBACK_LIMIT: 300
+      # R1788：主探测内部软截止 4h。实测 run 40992331706 主探测 03:26 起、
+      # 07:56 撞 16,200s 被 SIGTERM，随后又跑 ~56min 回退才落盘（单轮 5h33m）。
+      # 到点后跳过剩余注册表槽位/批量阶段，让 merge/write 在硬超时前完成：
+      # 少测最后一段，但提前发布并让下一轮更早开始。0/缺省 = 关闭。
+      CN_SOFT_DEADLINE_SECONDS: 14400
       # R329：主探测采样上限。此前是 ``--limit 0``（全量 17,242 键），而
       # ``write_json(CHINA_FILE)`` 只在 ``main()`` 末尾（pcb/scripts/china_check.py
       # :2677）执行 ⇒ 撞 16200s 上限被 SIGTERM 杀死时，**整轮实测成果 100%
