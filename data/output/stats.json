@@ -1,7 +1,7 @@
 {
-  "ts": "2026-11-05T06:26:41Z",
+  "ts": "2026-11-05T08:54:23Z",
   "updated_at": "2026-11-04T02:45:13Z",
-  "age_s": 99687.04625296593,
+  "age_s": 108548.87279605865,
   "updated_ago": "1d ago",
   "stale": true,
   "unique": 21432,
@@ -107,15 +107,38 @@
   "country_mismatch": 1410,
   "history_records": 380,
   "alive_history_records": 517,
-  "cn_reachable": 13791,
-  "cn_http": 9101,
-  "cn_stable": 1543,
-  "cn_served": 13791,
-  "cn_ts": "2026-11-04T06:49:35Z",
-  "cn_by_isp": {},
-  "cn_by_isp_oldest_age_h": null,
+  "cn_reachable": 13641,
+  "cn_http": 3807,
+  "cn_stable": 0,
+  "cn_served": 5652,
+  "cn_ts": "2026-11-05T08:52:09Z",
+  "cn_by_isp": {
+    "电信": {
+      "sampled": 5483,
+      "reachable": 5482,
+      "min_ms": 10.4,
+      "median_ms": 236.8
+    },
+    "移动": {
+      "sampled": 3951,
+      "reachable": 3949,
+      "min_ms": 18.7,
+      "median_ms": 212.0
+    },
+    "联通": {
+      "sampled": 4002,
+      "reachable": 4000,
+      "min_ms": 10.3,
+      "median_ms": 263.4
+    }
+  },
+  "cn_by_isp_oldest_age_h": 3.0,
   "cn_isp_pool": 16671,
-  "cn_isp_coverage": {},
+  "cn_isp_coverage": {
+    "电信": 0.3289,
+    "移动": 0.237,
+    "联通": 0.2401
+  },
   "exit_multi_ip": 65,
   "exit_multi_region": 867,
   "exit_shared": 4982,
@@ -133,8 +156,8 @@
   "exit_tagged": 16671,
   "exit_untagged": 0,
   "exit_untagged_ratio": 0.0,
-  "exit_marked_multi_region": 522,
-  "exit_marked_multi_exit": 65,
+  "exit_marked_multi_region": 893,
+  "exit_marked_multi_exit": 78,
   "exit_multi_ip_published": 65,
   "exit_multi_region_published": 522
 }
