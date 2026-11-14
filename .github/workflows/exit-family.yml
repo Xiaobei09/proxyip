@@ -1,0 +1,215 @@
+name: Exit family check
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Quality check"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+# R1824：与 build-good / annotate-classify 共用 good 写入组，避免
+# 旧代码检出的长跑任务在末尾覆盖已生效的 good/good_meta。
+concurrency:
+  group: data-good-writers
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Actual exit IPv4/IPv6 family
+    runs-on: ubuntu-latest
+    # R597b：60 → 75。全池 20,122 键即使 96 并发 + 40 分钟预算也需给
+    # annotate/build-good/commit 留量；预算到点部分落盘（exit_family.py
+    # --time-budget 到点停止提交、已得结果照常落盘并与上轮合并），
+    # 故作业**任何情况下都能落产物**，不再像 16 并发时代（实测全量 ~216
+    # 分钟）那样每轮被整体取消、产物零落盘（2026-10-12 起停更）。
+    # R880：geo 预算 600→900s（冷探测受公共地理 API 1.4s 慢槽限制，
+    # 600s 实测 434 ≈ 理论上限 428；熔断开源不增加吞吐）。
+    # R1859（用户「让出口探测点增加到 20 个左右」）：端点 9 → 20，单键探测量
+    # 约 2.2×。并发 96 → 160（网络 I/O 型，单键配额不变），运行级预算
+    # 2400 → 3600s，作业上限 90 → 120min；最坏相位约 60min 家族 +
+    # 15min geo + 15min 测试 + 收尾 < 120min。
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物（data/{quality,raw,download,diff}）只在 CI 工作区挂载，
+      # 公开仓只保留用户可直接消费的 data/{valid,output}。必须早于测试/脚本
+      # 读取 data：挂载会把工作区目录链成 data/ 下的软链。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：不因触发者(quality-check)失败而跳过——本工作流从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），上游单次失败不应影响出口 IP 家族分离与标注
+          # （all_ipv4/all_ipv6/-V4/-V6/-DS），否则本次家族观测将缺席。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        # R594：预愈合快照豁免（愈合动作是下方 `Annotate and classify`），
+        # 最终状态由其后的 `Published-state gates` 步判定。
+        env:
+          PUBLISHED_GATES_DEFERRED: "1"
+        if: steps.gate.outputs.skip != 'true'
+        run: python -m unittest discover -s tools/tests_pipeline -v
+
+      - name: Exit family check
+        id: exit
+        if: steps.gate.outputs.skip != 'true'
+        # R597b：并发 96（默认 64，探测为网络 I/O 型）+ 40 分钟运行级预算。
+        # 实测 16 并发 93 键/分 ⇒ 全量 216 分钟 > 作业上限 ⇒ 每轮取消；
+        # 64 并发 311 键/分；预算到点部分落盘并与上轮产物合并（carried）。
+        # R1859：20 端点 ⇒ 并发 160 + 60 分钟预算，避免 9 端点时的 96/2400
+        # 配置在 2.2× 探测量下只跑完部分键。
+        run: python tools/scripts/exit_family.py --workers 160 --time-budget 3600
+
+      - name: Download local geo DB (DB-IP Lite)
+        # R600（用户「出口 ≥10 源」）：§8.7 结论 2 的本地库路径——离线 CSV、
+        # 零注册零配额、独立于 API 生态的一族。刻意放 $RUNNER_TEMP（**不进
+        # data/**）：commit_data.sh 按 `find data -newer` 收产物，放 data/
+        # 会把 4.5MB 二进制误提交。fail-open：下载失败/当月未发布（回退上月
+        # URL）仅少一票，不判死（与「族数 < 10 只告警」同款）。
+        # 署名：DB-IP Lite © DB-IP.com，CC BY 4.0（运行时下载，不随仓库分发）。
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/geoip"
+          for m in "$(date -u +%Y-%m)" "$(date -u -d 'last month' +%Y-%m)"; do
+            curl -fsSL --retry 2 -o "$RUNNER_TEMP/geoip/dbip-country-lite-$m.csv.gz" \
+              "https://download.db-ip.com/free/dbip-country-lite-$m.csv.gz" && break
+          done
+
+      - name: Exit geo multi-source
+        id: exitgeo
+        # R597（用户「出口需要多源对比，不要听信一家之言（至少 10 个源）」）：
+        # 按**出口 IP** 逐族查国（族去重投票），查询集取自上一步刚写的实测
+        # 出口产物；缓存 TTL 7 天 ⇒ 每轮增量覆盖。产物供 annotate/export 的
+        # ←CC 与 ⇋（多地区出口）标记消费。放在 annotate 之前——annotate 读它。
+        # 不加 always()：探测步红就不烧这 15 分钟网络配额（R254 同款决策）。
+        # R600：--local-db-dir 接本地库（上一步下载，失败则无本地票）。
+        if: steps.gate.outputs.skip != 'true'
+        # R880：600→900s。R868 熔断已实测排除 3 个 429 源，但冷探测仍是
+        # 434（≈ 公共地理 API 1.4s 全局限速的理论上限 428），说明瓶颈是
+        # 预算时长而非失败请求；900s 预期 ~642 冷 IP，且每分钟速率不变。
+        run: python tools/scripts/exit_geo_multi.py --from-exit-family data/quality/exit_family.json --time-budget 900 --local-db-dir "$RUNNER_TEMP/geoip"
+
+      - name: Annotate and classify
+        id: annotate
+        # R324 自指死锁（与 china-check.yml 的 eb59f4c 同构）：`Run tests`
+        # 排在本步**之前**且未加 always() ⇒ 早测一红本步即被 skipped ⇒
+        # 唯一能修 `→出口` 标注漂移与 views 收敛的动作永不执行 ⇒ 下一轮
+        # 读到同样陈旧的数据、同样变红 ⇒ 永久自锁。
+        # 实测 run 36373246886（head=6760481a）：Run tests 3 红 ⇒
+        # Exit family check/Annotate/Build good/Verify/Commit 全 skipped。
+        # 步序不动（R290/R312 只锁 china-check；此处不挪测试，R254 的
+        # fail-fast 成本决策同样适用），只放开**失败传播**。
+        # 注意 `Exit family check` 是探测步（exit_family.py 对全池做
+        # socket I/O），**刻意不加** always()：R254 早测红就不烧网络配额。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python tools/scripts/annotate_classify.py
+
+      # R594：愈合**之后**判已发布状态不变式（预愈合步已 defer）。
+      - name: Published-state gates
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: cd tools && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
+
+      # R732：本 job 从检出到提交约 25min（探针 20+min），期间 CN 链/质量链可能
+      # 已落盘更新的 china.json / reputation.json——若沿用检出时的旧版重算 good，
+      # 会把 quality/good_meta.json 覆写成塌缩态（valid 侧因「内容变才写」逃过
+      # 覆盖 ⇒ 两侧割裂 + 误报 good-ltd collapsed；实测 2026-10-19 05:24 起跑的
+      # 本链与 05:46 落盘的 CN 轮重叠：05:50:02 build 用旧 china.json 得
+      # Maps: cn=4327 → good_meta pc=4050/satisfied=0，覆盖了 05:47 的重建）。
+      # 构建前把**跨链质量输入**刷到 origin/main 现值（本 job 不写这两个文件；
+      # 自己的 all.txt/exit_* 等保持就地新值）。fetch/文件缺失均 fail-open：
+      # 刷新失败退回旧行为，不阻断提交。
+      - name: Refresh cross-chain inputs
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          git fetch --depth=1 origin main || true
+          for f in data/quality/china.json data/quality/reputation.json; do
+            if git show "origin/main:$f" > "$f.refresh.$$" 2>/dev/null; then
+              mv "$f.refresh.$$" "$f"
+              echo "refreshed: $f"
+            else
+              rm -f "$f.refresh.$$"
+              echo "skip (not on origin/main): $f"
+            fi
+          done
+
+      - name: Build good lists
+        id: good
+        # R324：同 Annotate——早测失败不得拦住下游 heal 链。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python tools/scripts/build_good.py
+
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。tests 步先于数据改动执行、抓不到改后状态，
+      # 此处对已落盘数据校验，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        # R324：`always()` 只放开**传播**，不弱化护栏——`good` 真失败仍被拦住。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
+        run: >-
+          python -m unittest
+          tools.tests_pipeline.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      # 图表/统计由专职 stats 工作流在 "Exit family check" 完成后统一重建（单一写入者）
+
+      - name: Show summary
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          echo "IPv4 exit:"
+          wc -l data/valid/all_ipv4.txt 2>/dev/null || true
+          echo "IPv6 exit:"
+          wc -l data/valid/all_ipv6.txt 2>/dev/null || true
+          echo "Family distribution:"
+          jq -r '[.proxies[].family] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/quality/exit_family.json 2>/dev/null || true
+
+      - name: Commit changes
+        # R324：`exit.outcome` 由 `== 'success'` 放宽为 `!= 'failure'`——
+        # `Run tests` 早红时探测步被 fail-fast **skipped**，提交门须放行
+        # skipped，否则 heal 落不了盘；但**真实探测失败**（`outcome ==
+        # 'failure'`）仍必须拦住提交。`always()` 不会把 job 判绿：早测失败
+        # 仍令 job failed（与 eb59f4c 对 china-check 的处理同构）。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.exit.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.good.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): exit ipv4/ipv6 split + suffix filling ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

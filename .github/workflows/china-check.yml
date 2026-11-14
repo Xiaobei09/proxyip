@@ -1,0 +1,545 @@
+name: China check
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 独立心跳：每 30 分钟一轮（:11/:41，与 update-proxies 的 :00 错开）。
+    # R486 已把名义节奏由「每小时 :11」加密为「:11/:41」，目标是「一轮结束后
+    # 立即下一轮」——配合下方 ``concurrency``（不重叠）与 job 内
+    # 「Skip if superseded」门，前一 run 结束时若有排队中的新 run 即就近接管。
+    # R512 仅同步本注释（R486 未改注释），使说明与 cron 一致。
+    # streak 依赖"连续多轮可达"，此前仅挂在 quality-check 成功之后，
+    # 任一上游失败或 IP 长期未变更都会冻结 stable 累积——故必须独立定时。
+    # 不再挂 workflow_run 链：实测 GitHub 在 cron 命中时若本工作流仍有
+    # in_progress run 就不会再起新 run（旧 run 安然跑完）；而 workflow_run
+    # 触发的新 run 会取消上一个 in_progress run（观测 3 次），导致
+    # probe 永远跑不完、china.json 冻结。纯 schedule 驱动即可。
+    #
+    # ⚠️ R351：**本注释上方「每 30 分钟一轮」是 cron 标称值，不是实测值。**
+    # 实测（不加 --event 过滤的完整 run 列表，China check 取到 83 个 schedule
+    # 样本、update-proxy 91 个）四个定时工作流的实际达成率只有标称的
+    # 23%–43%：本工作流 1 次 / 4.24 小时。最近 9 个间隔全部 ≥ 2.3 小时。
+    # 且缺口**不能**用「in_progress 时不起新 run」解释：近 8 次里 6 次只跑
+    # 0.0–0.6h 即退出，其后仍有空闲 2.0h 与 6.05h 的窗口（对应 2 个与 6 个
+    # :11 槽位被丢弃）。**⇒ 是平台侧丢弃/延迟 schedule，不是本仓库配置。**
+    # 复现方式：
+    #   gh run list --workflow='China check' --limit 100 \
+    #     --json createdAt,event,conclusion   # 注意不要用 --event schedule，
+    #   #   该过滤在本仓返回过陈旧列表（曾据此误判「某工作流停了 10 天」）。
+    #
+    # 由此，**任何依赖「每 30 分钟一轮」的推理都不成立**：streak 累积速率与
+    # 「连续多轮」的样本量都远低于标称（下列 1 次 / 4.24h 为**加密前**的实测；
+    # R486 加密后需重测达成率）。引用轮次数前必须先按实测节奏折算。
+    #
+    # ★R517 复测（R486 加密至 :11/:41 后）：窗口 2026-10-14T06:37Z→22:21Z
+    #   共 15.7h，``schedule`` 实测仅 12:20 / 17:34 / 20:56 三次，间隔
+    #   **5h14m / 3h22m** ⇒ 绝对节奏仍 ≈1 次 / 4–5h，**与加密前无显著差别**
+    #   （标称 2/h 的 ≈10%）。⇒ 平台对**绝对触发率**封顶：加密 cron 只增加
+    #   被丢弃的槽位。**故「一次结束后立刻下一轮」无法靠 cron 达成**——只能靠
+    #   带 PAT 的 ``workflow_dispatch`` 自派发（``GITHUB_TOKEN`` 触发的
+    #   workflow_run/dispatch 被平台静默忽略，防递归）。
+    #   ★R595：用户明确要求「一轮结束立刻下一轮」⇒ **已启用**自派发（job 末尾
+    #   ``Self-dispatch next round`` 步），并给 R351 的「烧源站配额」顾虑加三重
+    #   保险：①本轮**非取消**（成功/失败都派发，取消除外）且未被 gate 跳过；
+    #   ②与上一轮**开始**的间隔下限按上一轮结论取值：成功 ≥120min（防快速退出轮
+    #   连环派发）、失败/超时/取消 ≥5min（恢复链，R613）；③24h 内自派发 <24 次
+    #   （硬上限，≈1 次/2.4h，与实测单轮时长 2.2–2.5h 同量级）。派发失败**不判红**
+    #   （PAT 缺 workflow scope 时只记 warning，cron 仍兜底）。复现：
+    #     gh run list --workflow='China check' --limit 100 \
+    #       --json createdAt,event   # 勿用 --event schedule（本仓该过滤返回陈旧列表）
+    - cron: "11,41 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: china-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Mainland-China reachability
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      # R352：**本流水线不再需要任何人去签发任何 key 或 token**。原有的两个
+      # secret 注入已删除，依据是取证而非猜测：
+      #   · 必填 token 的那个源已整源下线——它是注册表里唯一凭证必填的源，
+      #     且 ``CI_OVERRIDES`` 从未收录它 ⇒ 产线从未派发，删除零数据损失。
+      #   · 剩下的可选 api key 喂给的是 ``auth: "optional Bearer"`` 的源，
+      #     **无 key 亦正常工作**（实测新鲜键 7/10 出数），从来不是必需品；
+      #     留着这行只会让人误以为「上线前得先去申请一个 key」。
+      # 两个 secret 在本仓从未存在过（旧值恒为空），故此改动零行为变化。
+      #
+      # CI 必须真实检出工具目录；缺失即失败，禁止静默写成空源证据。
+      PROXYIP_REQUIRE_BUNDLE: "1"
+      # 公开仓单 job 硬上限 6h；主探测最多占 4.5h，预留 1h 给回退与提交。
+      CN_PRIMARY_TIMEOUT_SECONDS: 16200
+      CN_FALLBACK_TIMEOUT_SECONDS: 3600
+      CN_FALLBACK_LIMIT: 300
+      # R1788：主探测内部软截止 4h。实测 run 40992331706 主探测 03:26 起、
+      # 07:56 撞 16,200s 被 SIGTERM，随后又跑 ~56min 回退才落盘（单轮 5h33m）。
+      # 到点后跳过剩余注册表槽位/批量阶段，让 merge/write 在硬超时前完成：
+      # 少测最后一段，但提前发布并让下一轮更早开始。0/缺省 = 关闭。
+      CN_SOFT_DEADLINE_SECONDS: 14400
+      # R329：主探测采样上限。此前是 ``--limit 0``（全量 17,242 键），而
+      # ``write_json(CHINA_FILE)`` 只在 ``main()`` 末尾（tools/scripts/china_check.py
+      # :2677）执行 ⇒ 撞 16200s 上限被 SIGTERM 杀死时，**整轮实测成果 100%
+      # 丢弃**，只有回退那 300 条落盘。run 36304900938 实录：L1 sweep 10,968.1s
+      # （3.05h，独占预算 67.7%）+ 10 个源 review 5,160s，止于第 10 个源，距
+      # 上限仅剩 68s，yml 里另 ~20 个源**从未被轮到**。
+      # 预算算术（R333 起用沙箱；**R443 起改用真实 CI run，R593 换用最新 run**；
+      # provenance：run 38681561758（``--limit 7000``、退出码 0、探测步 8,046s），
+      # 锁见 tests 里 R329/R333 两条锁与
+      # ``test_ci_budget_constants_match_real_run_r593``）：
+      #   实测逐项：
+      #     L1 sweep           3,843.6s （probe 7,000 键 ⇒ **0.5809 s/键**；
+      #                         实测为 0.5491，常数取更高者＝更严）
+      #     carrier probe      3,731 targets（candidates=4000；批量族本轮全灭）
+      #     batch-source       3,848.2s 累计（含 carrier ⇒ carrier 仅 4.6s）
+      #     逐源 review 合计   4,175.3s（30 个块全部拿到 targets；口径 = 末个
+      #                         review 累计 8,023.5s − batch 累计 3,848.2s）
+      #   ⇒ 与 R443 标定（L1 2,303.1s / 0.5809 s/键；逐源 1,485.5s）相比，逐源
+      #     一项**又被低估 2.81 倍**——低估方向朝危险侧（把开销算小 ⇒ 真超时前
+      #     守卫先变绿）。R593 前的模型口径占用率 34.3% 对实测 **49.5%**：
+      #     也就是说那段时间守卫是**假绿**的。第二次偏差出现在「守卫已校准过」
+      #     之后 ⇒ 一次性校准不成立，每次配置变更后的首轮都必须重标。
+      #   ⇒ R329 当初的算术（0.636×N + 26 源×516s ⇒ 15,960s / 98.5%）
+      #     **高估 7.3 倍**，两个错因：逐源成本 ∝ 该源拿到的 targets 而非
+      #     源个数（targets 由「前面的源还剩多少键没覆盖」决定，与该源自己的
+      #     --cn-limit 无关）；L1 单键成本随样本量下降（0.636@17242 vs
+      #     0.5809@4000）⇒ 均不可线性外推。
+      #   ★``… review: N.Ns`` 的 N.NN 是**累计已耗**（源码用单个
+      #     ``time.monotonic() - _t0``），不是本源耗时 ⇒ 逐源成本只能取
+      #     **相邻差**；且单源 s/target 实测跨度 0.065–4.347（67×），
+      #     **不可按源数或键数线性外推**。
+      # 取 6500（R593，由 R518 的 7000 收回）：逐源常数低估 2.81 倍后，
+      #   占用率锁（< 50%）对 7000 已不成立（(4,070.9+4,175.3)/16,200 = 50.9%）。
+      #   收回 500 键后：非逐源项 = 6500×0.5809+4.6 = 3,780.5s，余量 12,419.5s
+      #   ＝ 逐源实测 4,175.3s 的 **2.97 倍**（守卫要求 ≥2.9；该倍数的**绝对
+      #   要求 12,108s 比 R443 的 11,884s 更严**，数值下降只是重新表达），
+      #   总占用 (3,780.5+4,175.3)/16,200 = **49.1% < 50%** ⇒ 两条锁均绿。
+      #   ★覆盖面不降：6500×(1−25% hold)=4,875 键/轮，全池 ~20,680 ⇒ 约 4.2 轮
+      #   测完；按实测节奏 ~4.24–4.6 轮/天 ⇒ 约 21–24h，仍在 24h 窗口内。
+      # **覆盖面不降**：样本外的键由 ``compute_fallback_merge`` 按上一轮
+      # verdict 兜底沿用（池仍 21,877，MIN_CN_POOL=10000 硬约束不受影响），
+      # 而兜底键 ``streak`` 被强制归 0、不虚报连续可达。
+      # **最坏情况为零损失**：若仍撞线则回退照旧接管，行为与改动前完全一致。
+      CN_PRIMARY_LIMIT: 6500
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物（data/{quality,raw,download,diff}）只在 CI 工作区挂载，
+      # 公开仓只保留用户可直接消费的 data/{valid,output}。必须早于测试/脚本
+      # 读取 data：挂载会把工作区目录链成 data/ 下的软链。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or no data change
+        id: gate
+        run: |
+          # 1. 竞态检查
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+          # 注：本工作流纯 schedule 驱动（每小时 11 分自启，见上），无
+          # workflow_run 触发者，故不存在"触发者失败时跳过"的判定；从仓库
+          # checkout 的自洽数据运行（all.txt 与各 JSON 均为上次成功轮的
+          # 完整快照），单次失败不冻结 CN 连通性追踪(streak)与后缀应用，
+          # 否则 IP 未变更期间 stable 永远无法累积。
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        id: tests
+        if: steps.gate.outputs.skip != 'true'
+        # R246：同时跑 **tools/tests**。跨仓对账（``tools/tests/test_public_plan.py``：
+        # 公开工作流的 CI 配额 vs 工具目录 ``CI_OVERRIDES``）此前**在 CI 里从不
+        # 执行**——所有工作流的测试目标都是 ``discover -s tests``（纯公开测试），
+        # 它只在有人手动同时挂两棵树时才跑。R241 把工作流改成不透明 id 后，
+        # 那道对账立刻失配却**潜伏了整整一轮**无人发现。
+        # ``-t .`` 让顶层包解析到仓库根，tools/tests 内部按 ``tools/plugins`` 导入插件。
+        #
+        # R254：改用 ``tools/scripts/run_ci_tests.py`` 做**按严重度分级**的运行。
+        # 本步位于 ``China reachability check`` **之前**，它坏掉的代价不是
+        # 「构建变红」而是**整轮数据采集作废**（实测 run 36285211125 在 2m25s
+        # 处死于一条纯记账的基线漂移，4.5h 上限的 CN 探测一次都没跑）。而泄漏
+        # 门禁是方向感知的：**上行**（新增泄漏）＝缺陷＝硬失败；**下行**（基线
+        # 该下调）＝记账＝``::warning::`` 放行。
+        #
+        # 为什么**不能**简单把本步挪到探测之后（那才是更自然的顺序）：
+        # ``reorg_country.py`` 归 ``quality-check.yml`` 单一所有，本工作流
+        # **不跑**它，所以 annotate 之后的状态**必然处于未收敛态**（R243/R253
+        # 实测的 orphan 国别目录即源于此），全量测试挪过去会**必然**红。
+        # 分级是在不挪位置、不弱化任何断言的前提下解决代价不对称的唯一办法。
+        #
+        # 记账项在本工作流**不会**消失：其余全部工作流继续直接跑
+        # ``python -m unittest``，同一条 ``RatchetDowngrade``（继承
+        # ``AssertionError``）在那里照样判红。
+        #
+        # R596：**已发布状态门禁在此 defer**（与 R594 三条链同因、同机制）。
+        # 本步排在 ``Annotate and classify`` **之前**，预愈合快照上的漂移是
+        # 必然：实测 run 38731163299（dispatch 验证轮）硬失败 2 =
+        # ``TestExitCountryConvergence``（出口标注不忠实）+ 
+        # ``TestReorgCountryConsistency``（``39.98.224.123:443`` 在 all.txt
+        # 而不在任何 countries/*）。前者本链 annotate 自愈 ⇒ 由其后
+        # ``Published-state gates`` 步补跑；后者归 quality-check 的 reorg
+        # 单一收敛（R254），本链**无法**愈合 ⇒ 只由该链补跑。豁免与补跑成对，
+        # 由 tests_pipeline/test_commit_data.py 的结构门禁强制。
+        env:
+          PUBLISHED_GATES_DEFERRED: "1"
+        run: |
+          python tools/scripts/run_ci_tests.py --discover tools/tests_pipeline
+          python tools/scripts/run_ci_tests.py --discover tools/tests --top .
+
+      - name: China reachability check
+        id: china
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CN_BATCH_ALT: "1"
+          # R901：批量第二源确认上限。批量通道在补完缺家键后，把
+          # 「三网齐但某家仍单源」的已定论键追加投递，用第二个独立源压实
+          # 移动/联通读数（用户「不要听信一家之言」）。0=关闭；此处 2000
+          # 是留给批量通道的剩余预算，不挤占缺家键（它们仍排在列表前面）。
+          CN_EVIDENCE_BATCH_LIMIT: "2000"
+          # R904：第二源复核的**配额内预留**。缺家键会先占满 3,200 的上限，
+          # 三网齐但缺口只由主批量源覆盖的键会在排序中永远轮不到。这里从
+          # 同一份 3,200 中划出 800 给这些键，换另一个独立源复核；总请求量
+          # 不增加，缺家键的优先级也不变。
+          CN_EVIDENCE_HANDOFF_RESERVE: "800"
+        run: |
+          set +e
+          # R356：limit/concurrency 的**数值真相已单点存放于工具目录注册表**
+          # （``CI_OVERRIDES``）。此处不再逐条复写——复写等于两份真相，迟早
+          # 漂移；且在没有回落路径时删掉会让全通道 limit 归零、整轮空跑。
+          # 无 flag 时 ``china_check.seed_cn_defaults_from_registry`` 从工具目录
+          # 注册表取回同一组 26 条（实测与旧命令行逐字一致）。需要临时调参
+          # 时在下面命令里追加显式 flag 即可（显式覆盖优先）。
+          # ⚠️ 本段注释必须留在命令**之前**：续行里的 ``#`` 会让其后所有内容
+          # （含 ``--cn-cache-ttl``）一并被吞成注释，实测报
+          # ``--cn-cache-ttl: command not found``。
+          # R1852：探测侧缓存 6h → **24h**。明确可达（reachable）且三家运营商
+          # 证据齐全的键才复用；uncertain 视为「没有明确结论」，每轮必复测。
+          # 缓存拆分已提前到截断之前，缓存命中不再白占 6,500 个探测名额。
+          timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
+            python tools/scripts/china_check.py \
+            --source data/valid/all.txt --limit "${CN_PRIMARY_LIMIT}" \
+            --cn-cache-ttl 86400
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; then
+            echo "mode=fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning::主 CN 探测达到 ${CN_PRIMARY_TIMEOUT_SECONDS}s 上限；转入 ${CN_FALLBACK_LIMIT} 条有界回退"
+            find data -type f -name '*.tmp' -newer .jobstart -delete 2>/dev/null || true
+            timeout --signal=TERM --kill-after=60s "${CN_FALLBACK_TIMEOUT_SECONDS}s" \
+              python tools/scripts/china_check.py \
+              --source data/valid/all.txt \
+              --limit "${CN_FALLBACK_LIMIT}" \
+              --cn-cache-ttl 86400
+          else
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            exit "$rc"
+          fi
+
+      - name: Annotate and classify
+        id: annotate
+        # R313 自指死锁：本步是「已发布 →出口 标注」与「countries/sets/ports 视图」
+        # 的**唯一**修复动作（fill_and_classify 的 upsert_exit_region +
+        # reconcile_views 的 backfill/prune）。而 `Run tests` 排在它**之前**，
+        # 且未加 always() ⇒ 早测一红本步即被 **skipped** ⇒ 修复永不执行 ⇒
+        # 下一轮读到同样的陈旧数据、同样变红 ⇒ 永久自锁。
+        # 实测 run 36362738287：Run tests 3 红 → China reachability/Annotate/
+        # Verify/Commit 全 skipped。本地复现：生产 annotate_classify.py 把
+        # 红 #1 的 5/17215 处标注漂移收敛到 **0/17217**。
+        # 步序不动（R290 `test_run_tests_precedes_heavy_steps` 与 R312
+        # `test_quality_chain_script_order` 仍绿；R254 成文的「不挪测试」也不受影响），
+        # 只放开**失败传播**：always() 让 heal 在早测失败时仍执行。
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: python tools/scripts/annotate_classify.py
+
+      - name: Published-state gates
+        # R596：R594 成对约定的**补跑半边**（豁免 + 补跑必须成对，结构门禁在
+        # tests_pipeline/test_commit_data.py）。本链只补跑**它能愈合**的类：
+        # ``annotate_classify`` 收敛出口标注（``TestExitCountryConvergence``）；
+        # reorg 类（``TestReorgCountryConsistency``）归 quality-check 单一收敛，
+        # 在本链补跑必然红 ⇒ 不列入。判据不放水：本步若红，说明 annotate
+        # **没能**收敛漂移，是真缺陷。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: cd tools && python -m unittest tests_pipeline.test_annotate.TestExitCountryConvergence -v
+
+      # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
+
+      # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
+
+      # 提交前护栏：数据产出后再校验 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测速度），防止陈旧/空 cn_ms 重建把纯 -XMB/s 提交进仓库；
+      # 失败即中止，本 run 不提交（此前 tests 步先于数据改动执行，抓不到
+      # 改后状态）。
+      - name: Verify CN-view invariant
+        id: verify
+        if: always() && steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
+        run: >-
+          python -m unittest
+          tools.tests_pipeline.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      # R883：把 R881 的产物校验器接成提交前硬门禁。此前它只是手工脚本；
+      # 若写侧再引入孤儿/超龄 `isp_ms_at`，数据仍会被 commit。本步按发布
+      # 时钟检查 24h TTL、孤儿时间戳与三网键，失败则 Commit changes 不执行。
+      - name: Verify CN artifact freshness
+        id: verify_cn
+        if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome == 'success'
+        run: python tools/scripts/verify_china_artifact.py data/quality/china.json
+
+      - name: Show summary
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: |
+          echo "China check mode: ${{ steps.china.outputs.mode || 'full' }}"
+          echo "China-reachable proxies:"
+          wc -l data/valid/all_cn.txt 2>/dev/null || true
+          echo "Verdict distribution:"
+          jq -r '[.proxies[].verdict] | group_by(.) | map({(.[0]): length}) | add // empty' \
+            data/quality/china.json 2>/dev/null || true
+
+      - name: Commit changes
+        # R313：`china.outcome` 由 `== 'success'` 放宽为 `!= 'failure'`——
+        # `Run tests` 早红时 `China reachability check` 被 fail-fast **skipped**
+        # （R254 成文的成本决策，本就不该烧 4.5h 配额），此时 quality 未刷新、
+        # annotate 仍基于**已提交**的 china.json 收敛（本地已验证足以修红 #1）。
+        # **真实探测失败仍判 `failure` ⇒ 依然拦住提交**，门禁未被弱化；
+        # 且 job 整体仍因 `Run tests` 红而 failed ⇒ 红信号照常上报。
+        if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success' && steps.verify_cn.outcome != 'failure'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+
+      # R595：自派发下一轮（用户「一轮结束立刻下一轮」）。平台对 cron 绝对
+      # 触发率封顶（R517 实测 ≈标称的 10%，1 次/4–5h）⇒ 只有带 PAT 的
+      # dispatch 能达成（GITHUB_TOKEN 触发的 dispatch 被平台静默忽略）。
+      # 三重保险与上限取值理由见文件头 R595 注释。任何失败只记 warning、
+      # 不判红（PAT 缺 workflow scope 时 cron 兜底）。
+      #
+      # ★R604：生产实测自派发**从未成功**——38812094649（2026-10-16 00:12Z）
+      # 步骤日志：``HTTP 403: Resource not accessible by personal access
+      # token``。TOOLS_PAT 用于工具目录签出（repo 读即可），**不带
+      # workflow scope**，而 workflow_dispatch 必须该 scope。修法：新增
+      # ``DISPATCH_PAT``（本仓 admin 账号 OAuth token，实测 scope 含
+      # ``workflow``+``repo``），本步**优先**用它；未配置/失效时回退
+      # TOOLS_PAT（行为退化为今日现状=warning+cron 兜底，不会更差）。
+      # 工具目录签出仍用 TOOLS_PAT，不受本改动影响。
+      #
+      # ★R613：修「失败轮断链」——2026-10-16 09:41Z 轮在测试步硬失败后，本步因
+      # ``if: success()`` 整步跳过 ⇒ 链断；平台对 cron 丢弃率 ≈90%，china.json
+      # 随之冻结数小时（当日 04:27Z 后无成功轮）。修法：①``if`` 改
+      # ``!cancelled()``（探针成功/失败都派发；取消不派发，防与接管轮双链；
+      # tests 早红也派发，见 R1820）；②间隔下限按**上一轮结论**取值：上一轮成功 ⇒ 1min
+      #（R1750：用户要求一轮结束立刻下一轮；原 60min 会白等），上一轮失败/超时/取消 ⇒ 5min
+      #（恢复链：修复一旦推送，下一轮即自愈，不必等 cron 抽签）；③DAILY_CAP
+      # 不变——失败轮通常早退于测试步、不烧源站配额，热循环由日上限兜底。
+      #（★R750：因实测恢复链突发烧穿额度致正常轮断链——见下方 DAILY_CAP
+      # 注释——该值由 10 上调至 16。）
+      #
+      # ★R856 原为「tests 早红不派发」，理由是确定性缺陷会空烧轮次。但
+      # R1820 实测该策略 + 平台 cron 丢弃 ≈90% 造成更严重的后果：工具目录
+      # ``tests/test_ext_api.py`` 两处断言落后于 R1817 生产常量，China check
+      # 连续 4 轮在 ``Run tests`` 早红（每次仅 ~12min、探测步全跳过），
+      # china.json 自 11-06T07:01Z 冻结 20h+；24h 新鲜门逐条过期后
+      # good 列表从 45 国/CN=2 跌到 26 国/CN=0（用户观察到的「周期性震荡」
+      # 与「分运营商归零」正是该机制）。故恢复 R613 的失败也派发：tests
+      # 早红 ⇒ 探针 outcome=skipped ⇒ 走 RECOVERY_GAP_MIN 5min 恢复链；
+      # 确定性缺陷仍由 DAILY_CAP=24 封顶，且修复推送后下一轮即自愈。
+      - name: Self-dispatch next round
+        if: ${{ !cancelled() && steps.gate.outputs.skip != 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.TOOLS_PAT }}
+          # R809：本轮探针 outcome（success/skipped/failure）。tests 早红时
+          # `China reachability check` 被 fail-fast 跳过 ⇒ 本轮零产出，
+          # 必须在恢复链间隔内补派，而不是被上轮 success 的 120min 门卡住。
+          CHINA_OUTCOME: ${{ steps.china.outcome }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, subprocess, sys
+
+          MIN_GAP_MIN = 1        # R1750：用户「一轮结束立刻下一轮」⇒ 成功轮仅留 1min 防同分钟重复派发；单轮实际 ~1–2.5h，远大于此门
+          RECOVERY_GAP_MIN = 5   # 上一轮失败/超时/取消，或**本轮探针未成功** ⇒ 恢复链间隔下限（R613/R809）
+          # R750：10→16。实测 2026-10-19 07:59:59 轮日志：「24h 内自派发
+          # 11 次已达上限 10，跳过」——R718 恢复链（03:42–03:57 三连发）＋
+          # 风暴期重试把 24h 额度烧穿，正常轮的自派发被掐断；叠加平台 cron
+          # 丢弃 ≈90% ⇒ 空窗 3.5h+（05:15→09:27 无任何新轮，需人工补派）。
+          # R853：16→20。实测单轮已缩短到 ~70min（run 39360938188：
+          # 03:00→04:10），成功轮 1min 间隔 + 队列串行下稳态可达 ~20 轮/日；
+          # 16 会被人工 dispatch 和恢复链提前耗尽（本轮日志「24h 内自派发
+          # 16 次已达上限」），把正常轮也掐断。20 轮/日的源探针均值上限
+          # ≈20×150/24h=125 探针/h，仍低于匿名 250/h；平台绝对速率封顶、
+          # concurrency 串行与成功轮 1min 间隔仍是三重保险。
+          # ★R1829：20→24。实测连续 tests 早红（每次 ~10-12min）在 24h 内
+          # 耗尽 20 次额度，正常轮结束时自派发被「已达上限」掐断，只能等
+          # 平台 cron（丢弃率 ≈90%）。24 次/日 ≈1 次/h，仍低于单轮实际
+          # 时长（成功轮 1.5–2.5h）；失败轮早退不烧源站配额，只多花 CI 分钟，
+          # 用 4 次余量换恢复链不断档。
+          DAILY_CAP = 24         # 24h 内自派发硬上限（R351；R750 10→16；R853 16→20；R1829 20→24）
+          WF = "china-check.yml"
+          fmt = "%Y-%m-%dT%H:%M:%SZ"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          cur = os.environ["GITHUB_RUN_ID"]
+
+          def gh(*args):
+              return subprocess.run(["gh", *args], capture_output=True,
+                                    text=True)
+
+          p = gh("run", "list", "--workflow", WF, "--repo", repo,
+                 "--limit", "30",
+                 "--json", "databaseId,createdAt,event,conclusion")
+          if p.returncode != 0:
+              print("::warning::自派发前置查询失败，跳过: "
+                    + p.stderr.strip()[:200])
+              sys.exit(0)
+          runs = sorted(json.loads(p.stdout), key=lambda r: r["createdAt"])
+          me = next((r for r in runs
+                     if str(r["databaseId"]) == cur), None)
+          if me is None:
+              print("本轮不在 run 列表（分页/延迟），跳过自派发")
+              sys.exit(0)
+          prev = [r for r in runs if r["createdAt"] < me["createdAt"]]
+          # R809：本轮探针是否真的产数。`steps.china.outcome` 在 tests 早红
+          # 时为 skipped（fail-fast），探针自身失败时为 failure——两种都是
+          # **零产出轮**，必须走恢复链。
+          probe_ok = os.environ.get("CHINA_OUTCOME") == "success"
+          if prev:
+              prev_run = prev[-1]
+              # R613：上一轮成功走正常节奏；失败/超时/取消走恢复链（尽快自愈）。
+              # R809：只看上一轮 conclusion 不够——实测 run 39312810041（19:39
+              # 起，tests 红 ⇒ china skipped）在 19:50 自派发时，上一轮 success
+              # ⇒ 成功轮 1min 门（R1750；旧 60min 会把 1h 轮硬等），叠加平台
+              # 丢 cron，china.json 冻结 2.7h+。本轮零产出时改走 5min 恢复门
+              #（仍受 R655 的「当前时刻−上轮开始」防连环保护）。
+              if probe_ok:
+                  thr = (MIN_GAP_MIN if prev_run.get("conclusion") == "success"
+                         else RECOVERY_GAP_MIN)
+              else:
+                  thr = RECOVERY_GAP_MIN
+              # R655：间隔 = **当前时刻** − 上一轮开始。旧式被减数用
+              # me.createdAt（本轮创建）——排队班（cron 事件恰好落在上一轮
+              # 开始前后）会算出 4.5min<5min 的伪「快速退出轮」判据，恢复链
+              # 被误停（实测 run 38949831398：派发时实际距上轮开始已
+              # 18.8min，仍判 5min<5min 跳过 ⇒ 链停滞 23min 靠人工恢复）。
+              gap_min = (datetime.datetime.now(datetime.timezone.utc)
+                         - datetime.datetime.strptime(prev_run["createdAt"], fmt)
+                         .replace(tzinfo=datetime.timezone.utc)
+                         ).total_seconds() / 60
+              if gap_min < thr:
+                  print(f"距上一轮开始仅 {gap_min:.1f}min < {thr}min"
+                        f"（上一轮 {prev_run.get('conclusion') or 'in_progress'}），"
+                        "跳过自派发")
+                  sys.exit(0)
+          cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(hours=24))
+          n24 = sum(
+              1 for r in runs
+              if r["event"] == "workflow_dispatch"
+              and datetime.datetime.strptime(r["createdAt"], fmt).replace(
+                  tzinfo=datetime.timezone.utc) >= cutoff)
+          if n24 >= DAILY_CAP:
+              print(f"24h 内自派发 {n24} 次已达上限 {DAILY_CAP}，跳过")
+              sys.exit(0)
+          d = gh("workflow", "run", WF, "--repo", repo, "--ref", "main")
+          if d.returncode == 0:
+              print(f"已派发下一轮（24h 内第 {n24 + 1} 次自派发）")
+          else:
+              print("::warning::自派发失败（PAT 缺 workflow scope?），"
+                    "cron 兜底: " + d.stderr.strip()[:200])
+          PY
+
+      # ★R615：管线头保活。update-proxies（数据链头：update→quality→annotate→
+      # exit-family→build→stats）的 cron 丢弃率 ≈90%（2026-10-16 的 10:00/12:00
+      # 槽位实测全丢），其成功轮间隔一旦拉长，全链断粮、数据冻结（当日
+      # 09:52Z–13:22Z 实测 3.5h 零数据提交）。本步借用 china-check 自身**已保活**
+      # 的完成事件（R595/R613 自派发链 ≈2.5h/轮）做「staleness 看门」：距
+      # update-proxies 上一轮**开始** ≥120min（=其 cron 设计节拍 0 */2）、该轮
+      # 已结束（防 concurrency 取消在跑轮）、24h 内本看门派发 <10 次 ⇒ 补派一轮。
+      # 任何失败只记 warning、不判红（continue-on-error）；cron 仍兜底。
+      - name: Pipeline head watchdog
+        if: ${{ !cancelled() && steps.gate.outputs.skip != 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT || secrets.TOOLS_PAT }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, subprocess, sys
+
+          STALE_MIN = 120   # = update-proxies 设计节拍（cron 0 */2）；超过即补派
+          DAILY_CAP = 10    # 24h 内本看门派发硬上限（cron 正常时本步静默）
+          WF = "update-proxies.yml"
+          fmt = "%Y-%m-%dT%H:%M:%SZ"
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          def gh(*args):
+              return subprocess.run(["gh", *args], capture_output=True,
+                                    text=True)
+
+          p = gh("run", "list", "--workflow", WF, "--repo", repo,
+                 "--limit", "30",
+                 "--json", "databaseId,createdAt,event,status")
+          if p.returncode != 0:
+              print("::warning::管线头查询失败，跳过: " + p.stderr.strip()[:200])
+              sys.exit(0)
+          runs = sorted(json.loads(p.stdout), key=lambda r: r["createdAt"])
+          if runs:
+              last = runs[-1]
+              if last.get("status") != "completed":
+                  print("update-proxies 有未结束轮（防并发取消），跳过")
+                  sys.exit(0)
+              age_min = (datetime.datetime.now(datetime.timezone.utc)
+                         - datetime.datetime.strptime(
+                             last["createdAt"], fmt).replace(
+                             tzinfo=datetime.timezone.utc)
+                         ).total_seconds() / 60
+              if age_min < STALE_MIN:
+                  print(f"update-proxies 上轮 {age_min:.0f}min 前开始"
+                        f"（<{STALE_MIN}min）仍新鲜，跳过")
+                  sys.exit(0)
+          cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(hours=24))
+          n24 = sum(
+              1 for r in runs
+              if r["event"] == "workflow_dispatch"
+              and datetime.datetime.strptime(r["createdAt"], fmt).replace(
+                  tzinfo=datetime.timezone.utc) >= cutoff)
+          if n24 >= DAILY_CAP:
+              print(f"24h 内看门派发 {n24} 次已达上限 {DAILY_CAP}，跳过")
+              sys.exit(0)
+          d = gh("workflow", "run", WF, "--repo", repo, "--ref", "main")
+          if d.returncode == 0:
+              print(f"已补派 update-proxies（管线头 stale ≥{STALE_MIN}min）")
+          else:
+              print("::warning::管线头派发失败（PAT 缺 workflow scope?），"
+                    "cron 兜底: " + d.stderr.strip()[:200])
+          PY

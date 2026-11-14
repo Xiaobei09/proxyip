@@ -1,0 +1,110 @@
+name: Source report
+
+on:
+  workflow_dispatch:
+  # 每 2 小时刷新一次（与 Stats and charts 的 :40 心跳错开）。数据本身每轮
+  # update/quality/china 后重建，2 小时足以覆盖；表里带数据时间戳，滞后可见。
+  schedule:
+    - cron: "50 */2 * * *"
+
+# 只读公开仓：产物写专用分支，不回写公开 data/。
+permissions:
+  contents: read
+
+concurrency:
+  group: source-report
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Refresh per-repo source report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout public data
+        uses: actions/checkout@v7
+
+      # 生成器与注册表都在工具目录内；产物（含真实仓库名）只推 source-report
+      # 分支，故这里按其它 数据链的惯例签出 main（不跨分支引脚本）。
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物（data/{quality,raw,download,diff}）只在 CI 工作区挂载，
+      # 公开仓只保留用户可直接消费的 data/{valid,output}。必须早于测试/脚本
+      # 读取 data：挂载会把工作区目录链成 data/ 下的软链。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # 与 ip-cards.yml 同款前检：TOOLS_PAT 若只有读权限，本工作流会在
+      # 「跑完生成、push 被拒」处才失败，白跑一轮；提前失败更好读。
+      - name: Verify tools token can push
+        env:
+          GH_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: test "$(gh api "repos/${TOOLS_REPO}" --jq .permissions.push)" = "true"
+
+      # --out 落在 runner 临时目录：既避开公开仓工作树（生成器会拒绝落进
+      # 公开仓的真名产物），也让「发布」只搬运两个已知路径。
+      - name: Generate per-repo source report
+        run: |
+          python tools/scripts/source_report.py \
+            --data-dir data \
+            --out "$RUNNER_TEMP/source-report"
+
+      - name: Publish to source-report branch
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/source-report"
+          work="$RUNNER_TEMP/report-branch"
+          git init -q -b source-report "$work"
+          cd "$work"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:${TOOLS_TOKEN}@github.com/${TOOLS_REPO}.git"
+          git remote add origin "$remote"
+          old_tree=""
+          old_sha=""
+          if git fetch -q --depth=1 origin source-report 2>/dev/null; then
+            old_sha="$(git rev-parse FETCH_HEAD)"
+            old_tree="$(git rev-parse 'FETCH_HEAD^{tree}')"
+          fi
+          cp -a "$src/." .
+          git add -A
+          new_tree="$(git write-tree)"
+          if [ -n "$old_tree" ] && [ "$new_tree" = "$old_tree" ]; then
+            echo "source report unchanged; skip push"
+            exit 0
+          fi
+          git commit -q -m "chore(sources): 刷新按仓库源统计（$(date -u +%Y-%m-%dT%H:%M:%SZ)）"
+          # 该分支只存**生成产物**、历史无意义（每次都是全新孤儿提交），
+          # 故按 ip-cards 惯例强推；带 lease 防并发覆盖。
+          if [ -n "$old_sha" ]; then
+            git push --force-with-lease=source-report:"$old_sha" \
+              origin HEAD:source-report
+          else
+            git push origin HEAD:source-report
+          fi
+
+      # 只回显**不含真名**的部分：表头/口径在报告前 8 行，图只标短 id。
+      - name: Show summary
+        if: always()
+        run: |
+          echo "--- report head ---"
+          head -8 "$RUNNER_TEMP/source-report/docs/dl_sources_report.md" 2>/dev/null || true
+          ls -l "$RUNNER_TEMP/source-report/images/source-report" 2>/dev/null || true

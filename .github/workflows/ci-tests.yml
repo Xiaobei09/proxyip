@@ -1,0 +1,70 @@
+name: CI tests
+
+# R1853：本链由 ``bundle-push``（``repository_dispatch``）触发，只跑测试、
+# 不碰数据。
+#
+# 动机：改动若只靠下一轮数据链（update/china 等）覆盖，首次测试信号要等
+# 1–3h。本链独立于数据链的 concurrency 组，push 后 ~10–15min 内即可给出
+# 红绿；只在公开仓跑，不占用数据链时间。
+#
+# 只读：不写 data/、不提交、不需要 contents: write，故不参与 workflow_run
+# 链，也不影响既有数据链顺序。
+on:
+  repository_dispatch:
+    # 触发侧 ``gh api .../dispatches -f event_type=bundle-push`` 发来的事件。
+    types: [bundle-push]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-tests
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Bundle test suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # 固定跟随工具目录的 main：与其余数据链的 pin 一致性锁（R219）保持一致。
+      # 通知侧只负责触发，测试针对的是 main 的当前提交。
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物（data/{quality,raw,download,diff}）只在 CI 工作区挂载，
+      # 公开仓只保留用户可直接消费的 data/{valid,output}。必须早于测试/脚本
+      # 读取 data：挂载会把工作区目录链成 data/ 下的软链。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        # 与数据链一致的预愈合豁免：本链不负责 reorg/annotate，已发布状态
+        # 由真正拥有愈合动作的链补跑。这里只回答「代码本身能否过测试」。
+        #
+        # 刻意用裸 unittest，不用分级运行器：分级只属于 china-check 那一处
+        # 「测试失败会作废整轮数据采集」的代价不对称场景。本链是纯反馈通道，
+        # 记账漂移在这里必须照样判红，否则待办会静默失联（判据见
+        # tests_pipeline/test_ci_severity.py）。
+        env:
+          PUBLISHED_GATES_DEFERRED: "1"
+        run: |
+          python -m unittest discover -s tools/tests_pipeline -v
+          python -m unittest discover -s tools/tests -t . -v

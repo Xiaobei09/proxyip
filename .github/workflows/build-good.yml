@@ -1,0 +1,112 @@
+name: Build good lists
+
+on:
+  workflow_dispatch:
+  # 质量链或心跳链任一成功完成后即重建 good 变体与 tiers/ 目录：
+  # good_stable 依赖 china.json（每小时刷新），good_verified 依赖
+  # speed.json（质量链产出）——此前挂在两条链内部重复执行且互相覆盖，
+  # 独立后响应更快。
+  #
+  # 注：build_good.py 并非单一写入者——annotate-classify 与 exit-family
+  # 工作流（均由 quality-check 完成事件触发）也会调用它/annotate_classify，
+  # 跨 runner 并发写 data/valid/*.txt 与 good 清单，各自后 push 胜出；
+  # 属设计内（数据链下一轮自愈），勿在别处声称「单一写入者」。
+  workflow_run:
+    workflows: ["Quality check", "China check"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+# R1824：本链与 annotate-classify / exit-family 都会运行 build_good.py
+# 并提交同一批 good/good_meta 文件。此前各自独立 concurrency，实测
+# 957b629（05:08:02，CN 10）被 82ed870（05:08:18，长跑 annotate 仍用
+# R1823 前代码检出）整批回滚成 CN 4。共用同一组串行化后，后启动者必
+# 看到前者的提交与最新工具目录，最后一次写入即最新产物；保持 false，长任务
+# 不被抢占。
+concurrency:
+  group: data-good-writers
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Good variants & tier directories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物（data/{quality,raw,download,diff}）只在 CI 工作区挂载，
+      # 公开仓只保留用户可直接消费的 data/{valid,output}。必须早于测试/脚本
+      # 读取 data：挂载会把工作区目录链成 data/ 下的软链。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or trigger failed
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ] \
+             && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Trigger workflow failed, skipping"
+            exit 0
+          fi
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Build good lists and tiers
+        id: good
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          python tools/scripts/build_good.py
+          python tools/scripts/build_premium.py
+
+      # 提交前护栏：构建产物必须通过 CN 视图不变式（good/premium 家族不得
+      # 混入海外实测 -XMB/s）。此前陈旧 china.json/空 cn_ms 会令构建把纯速度
+      # 原样透传进清单，骑行在 tests 步之后才落盘、单价式提交上去——此步在
+      # 提交前校验被改动后的树，失败即中止不再提交。
+      - name: Verify CN-view invariant
+        id: verify
+        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success'
+        run: >-
+          python -m unittest
+          tools.tests_pipeline.test_build_good.TestCommittedCnViewInvariant.test_no_plain_overseas_speed_in_good_premium
+        env:
+          PYTHONPATH: "."
+
+      # 图表/渲染由专职 stats 工作流在 "Build good lists" 完成后统一重建（单一写入者）
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true' && steps.good.outcome == 'success' && steps.verify.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): good tiers & variants ($(date -u +%Y-%m-%dT%H:%M:%SZ))"

@@ -1,0 +1,126 @@
+name: Stats and charts
+
+on:
+  workflow_dispatch:
+  # 独立心跳：即使所有数据产出链（update/quality/china/exit/good）连续失败，
+  # stats 仍每 2 小时运行一次，health_alert 得以对"全线死亡"发出 stale/池塌方
+  # 告警（相同告警已被 6h 冷却抑制，不会刷屏）。错开到 update 的 :00/:02h。
+  schedule:
+    - cron: "40 */2 * * *"
+  # 任一数据产出链成功后统一重建图表与 stats.json——单一写入者，
+  # 此前 generate_stats 内嵌在 quality/china 两条链里重复执行。
+  workflow_run:
+    workflows: ["Quality check", "China check", "Exit family check", "Build good lists"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stats
+  cancel-in-progress: false
+
+jobs:
+  render:
+    name: Generate stats & SVG charts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物（data/{quality,raw,download,diff}）只在 CI 工作区挂载，
+      # 公开仓只保留用户可直接消费的 data/{valid,output}。必须早于测试/脚本
+      # 读取 data：挂载会把工作区目录链成 data/ 下的软链。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Mark job start
+        run: touch .jobstart
+
+      - name: Skip if superseded or trigger failed
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ] \
+             && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
+            --json=databaseId,status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
+                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
+          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superseded by run $LATEST, skipping"
+            exit 0
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # R700：``export`` 必须先于 ``generate_stats``——后者在
+      # ``collect_exit_coverage`` 里把 ``all.txt`` 的 ⇄/⇋ 标记与 ``all.json``
+      # 的 ``real_exit.multi_*`` 做「同宇宙对账」（R685）；若 stats 先跑，它读到的
+      # ``all.json`` 恒为**上一轮**产物、与本轮 ``all.txt`` 系统性错配（实测
+      # 13:55 ``exit_multi_ip_published=101`` vs ``exit_marked_multi_exit=136``，
+      # 14:56 二者互换）。``export_json`` 只读 ``all.txt``/``china.json``/exit 产物，
+      # 不依赖 ``generate_stats`` 的任何输出，故交换安全。
+      - name: Export structured JSON
+        id: export
+        if: steps.gate.outputs.skip != 'true'
+        run: python tools/scripts/export_json.py
+
+      # R828：先追写本轮 CN 快照再生成图表，否则 chart_cn_7d 永远少当前轮。
+      # continue-on-error：预写失败不得阻断 stats（退化为旧的一轮延迟）。
+      - name: Record CN history (pre-chart)
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: python tools/scripts/health_alert.py --record-cn-history
+
+      - name: Generate stats and charts
+        id: stats
+        if: steps.gate.outputs.skip != 'true'
+        run: python tools/scripts/generate_stats.py
+
+      - name: Source quality analysis
+        if: steps.gate.outputs.skip != 'true'
+        run: python tools/scripts/analyze_sources.py
+
+      - name: Health watchdog
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: python tools/scripts/health_alert.py --no-record-cn-history
+
+      - name: Commit changes
+        if: steps.gate.outputs.skip != 'true' && steps.stats.outcome == 'success' && steps.export.outcome == 'success'
+        run: |
+          bash .github/scripts/commit_data.sh "chore(data): stats & charts ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+
+      # jsDelivr 的 @main 缓存不随仓库更新失效——README 图片会长期停留在
+      # 旧版（曾出现空占位图被缓存数日）。提交后对本轮变更的产物逐个 purge。
+      - name: Purge jsDelivr cache
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          for f in $(git diff --name-only HEAD~1 -- data/output 2>/dev/null); do
+            curl -sf -o /dev/null --max-time 15 \
+              "https://purge.jsdelivr.net/gh/Xiaobei09/proxyip@main/$f" || true
+          done

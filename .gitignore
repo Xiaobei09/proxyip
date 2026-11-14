@@ -1,0 +1,27 @@
+data/
+__pycache__/
+*.pyc
+.venv/
+.local/
+AGENTS.md
+DEVELOPMENT.md
+
+# 密钥/凭据防御位：任何本地 .env 类文件一律不进版本库（CI 凭据走 secrets 注入，
+# 此处是额外保险层；当前仓库无凭据文件，纯防御）
+.env
+.env.*
+.envrc
+
+# opencode session files
+.opencode/
+
+# CI 工具目录 staging（检出到 tools/，不进公开 git）
+tools/
+
+# 本地缓存（R233）：无工具目录时信誉信号缓存改写此处——真名不得落进
+# data/quality/（该目录入库），而缓存只是优化，不参与发布。
+.cache/
+
+# 中间数据工作区挂载标记（workspace_data.sh checkout 写入；含 runner 临时
+# 路径，不是产物，任何时候都不进版本库）。
+.data-workspace

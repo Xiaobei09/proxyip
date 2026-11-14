@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# 只提交本 job 实际写入的 data 文件；push 冲突时对齐 origin，不回滚他人更新。
+#
+# 背景（lost-update 修复）：此前各工作流 `git add -Af data/` 全量快照提交，
+# 基于 checkout 时刻的工作树。当 job 运行期间其他工作流推送了新数据
+# （如 china.json），本 job 的重试路径 `reset --mixed origin/main +
+# add -Af` 会用陈旧副本覆盖他人更新——曾把 07:52 的 china.json 回退到
+# 05:40 版本，导致 streak 连续计数清零、all_cn_stable.txt 近乎清空。
+#
+# 用法：
+#   前置：checkout 后立即 `touch .jobstart`（早于任何脚本写盘）
+#   提交：bash .github/scripts/commit_data.sh "<commit message>"
+set -uo pipefail
+MSG="${1:?usage: commit_data.sh <message>}"
+MARKER=".jobstart"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_MARKER=".data-workspace"
+WORKSPACE="${WORKSPACE_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/data-workspace}"
+WORKSPACE_SCRIPT="$SCRIPT_DIR/workspace_data.sh"
+
+# 中间数据工作区存在时（workflow 已跑 workspace_data.sh checkout），
+# quality/raw/download/diff 归工作区 data 分支管理，公开仓只提交 valid/output。
+# 以 workspace_data.sh checkout 写下的标记为准：单测在临时仓里跑、没有标记，
+# 即使 RUNNER_TEMP 下存在真实工作区也保持旧 EXCL 行为。
+WORKSPACE_ACTIVE=0
+if [ -f "$WORKSPACE_MARKER" ]; then
+  marker_dir="$(head -n1 "$WORKSPACE_MARKER" 2>/dev/null || true)"
+  [ -n "$marker_dir" ] && WORKSPACE="$marker_dir"
+  if [ -d "$WORKSPACE/.git" ] && [ -f "$WORKSPACE_SCRIPT" ]; then
+    WORKSPACE_ACTIVE=1
+  fi
+fi
+
+EXCL='^(data/raw/|data/diff/)'
+if [ "$WORKSPACE_ACTIVE" = 1 ]; then
+  EXCL='^(data/(raw|diff|quality|download)/)'
+fi
+
+# 无 .jobstart 标记 = 前置 touch 步缺失（改 workflow 时的常见失误）→ 明明有
+# 产出也会被 find -newer 静默吞掉并 no-op，数据永远不会提交。显式 fail-fast。
+if [ ! -e "$MARKER" ]; then
+  echo "missing .jobstart marker (checkout 后需 touch .jobstart)" >&2
+  exit 1
+fi
+
+git config user.name "github-actions[bot]"
+git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+# 先把本 job 的中间产物推到工作区 data 分支；失败则不继续公开提交（公开侧
+# 的删除/更新必须建立在工作区快照已落地之上）。
+if [ "$WORKSPACE_ACTIVE" = 1 ]; then
+  WORKSPACE_DIR="$WORKSPACE" \
+    bash "$WORKSPACE_SCRIPT" commit "$MSG" || {
+    echo "workspace data commit failed" >&2
+    exit 1
+  }
+fi
+
+CHANGED=$(find data -type f -newer "$MARKER" 2>/dev/null | grep -Ev "$EXCL" | sort -u)
+
+# 删除产物：checkout 基线（job 起点 HEAD）里存在、现工作树已消失的 data 文件。
+# ``find -newer`` 只对现存文件按 mtime 判断，被 pipeline（validate/quality/
+# annotate 的 unlink/rmtree 清理）删掉的文件没有 mtime，若不单列，删除永远
+# 进不了提交——countries/sets/ports 越界视图与 rep/verified 残留会一直留在
+# 发布树（曾累计 609 行死代残留）。注意按路径排除 raw/diff 归档。
+WORKTREE_REF=$(git rev-parse HEAD)
+DELETED=$(
+  git ls-tree -r --name-only "$WORKTREE_REF" -- data/ 2>/dev/null \
+    | grep -Ev "$EXCL" \
+    | while IFS= read -r f; do [ ! -e "$f" ] && printf '%s\n' "$f"; done
+)
+PRODUCED=$(
+  { printf '%s\n' "$CHANGED"; printf '%s\n' "$DELETED"; } | sed '/^$/d' | sort -u
+)
+# 迁移期/历史遗留：公开 main 可能仍跟踪这些中间产物。工作区激活后
+# 首次提交要把它们从公开 index 移除（工作树里的软链保留），否则公开 raw
+# URL 会继续发布陈旧快照。
+STALE_INTERMEDIATE=0
+if [ "$WORKSPACE_ACTIVE" = 1 ] \
+    && [ -n "$(git ls-files -- data/raw data/diff data/quality data/download)" ]; then
+  STALE_INTERMEDIATE=1
+fi
+
+if [ -z "$CHANGED" ] && [ -z "$DELETED" ] && [ "$STALE_INTERMEDIATE" = 0 ]; then
+  echo "No job-produced changes under data/"
+  exit 0
+fi
+
+align_foreign() {
+  # 工作树中非本产出的漂移文件对齐 index(=origin/main)，防回滚他人提交。
+  # 本 job 的删除也属于产出，豁免恢复，否则删除会被 checkout -f 救回。
+  # （reset --mixed 后 index=origin，diff 列出的 = 本产出 ∪ 陈旧外来文件）
+  git diff --name-only -- data/ 2>/dev/null | grep -Ev "$EXCL" | sort \
+    | comm -23 - <(printf '%s\n' "$PRODUCED") \
+    | while IFS= read -r f; do
+        git checkout -f -- "$f" 2>/dev/null || rm -f "$f"
+      done
+}
+
+for attempt in 1 2 3 4 5; do
+  git fetch origin main || { sleep 5; continue; }
+  # R909：CN 产物是全体发布视图的证据基座，不能被“启动早于新数据提交”的
+  # 长任务用旧快照回滚。若本 job 产出了 china.json，而 origin/main 在本 job
+  # 起始快照之后已经改过它（例如上一轮 China run 刚提交了更强的证据），
+  # 直接放弃本次提交；旧任务消耗的探针可以下一轮重来，但已经发布的新证据
+  # 不能丢。只在本 job 确实产出该文件时启用，避免阻断只更新其它文件的 job。
+  if printf '%s\n' "$PRODUCED" | grep -qxF 'data/quality/china.json' \
+      && ! git diff --quiet "$WORKTREE_REF" origin/main -- data/quality/china.json; then
+    echo "::warning::refusing stale data/quality/china.json overwrite: origin/main advanced after this job's base snapshot" >&2
+    exit 0
+  fi
+  git reset -q --mixed origin/main || { echo "git reset failed" >&2; exit 1; }
+  if [ "$WORKSPACE_ACTIVE" = 1 ]; then
+    # 中间产物改由工作区 data 分支承载：只从公开 index 移除，工作树软链不动。
+    git rm -r -q --cached --ignore-unmatch -- \
+      data/quality data/raw data/download data/diff >/dev/null 2>&1 || true
+  fi
+  align_foreign
+  if [ -n "$CHANGED" ]; then
+    # shellcheck disable=SC2086
+    git add -Af -- $CHANGED || { echo "git add failed" >&2; exit 1; }
+  fi
+  # 暂存本 job 的删除：仅取 reset 后 index(=origin/main) 中仍存在的路径，
+  # 避免 pathspec 不匹配（他人已同步删除时自然 no-op）。
+  STAGE_DEL=$(
+    printf '%s\n' "$DELETED" | sed '/^$/d' \
+      | while IFS= read -r f; do git cat-file -e ":$f" 2>/dev/null && printf '%s\n' "$f"; done
+  )
+  if [ -n "$STAGE_DEL" ]; then
+    # shellcheck disable=SC2086
+    git add -Af -- $STAGE_DEL || { echo "git add deleted failed" >&2; exit 1; }
+  fi
+  if git diff --cached --quiet; then
+    echo "Nothing to commit"
+    exit 0
+  fi
+  git commit -q -m "$MSG" || { echo "git commit failed" >&2; exit 1; }
+  if git push; then
+    echo "Pushed on attempt $attempt"
+    exit 0
+  fi
+  echo "Push attempt $attempt failed; syncing origin and retrying..."
+  sleep 5
+done
+echo "Push failed after 5 attempts"
+exit 1

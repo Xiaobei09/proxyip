@@ -1,0 +1,100 @@
+name: IP cards
+
+# 派生快照：把 data/quality/* 汇成按「国家 → 分数 → 入口 IP」组织的名片，
+# 强制推送到独立的无历史 cards 分支快照。公开仓只保留数据，不落源名。
+on:
+  workflow_run:
+    workflows: ["Quality check"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 派生快照：每次质量检查后按最新 main 全量重建并原子强推。旧 run 的
+# 产物只会被新 run 覆盖，抢先取消没有数据成本；保留 false 反而会让
+# 过期快照排在最新数据之后，把更旧的 source_ts 推上 cards 分支。
+concurrency:
+  group: ip-cards
+  cancel-in-progress: true
+
+jobs:
+  cards:
+    name: Build and publish IP cards
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout data (main)
+        uses: actions/checkout@v7
+        with:
+          # workflow_run 的默认 ref 是触发那次 Quality check 的旧 SHA，不含
+          # 它随后提交的数据；必须显式取 main。
+          ref: main
+          path: public
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 中间产物只在 CI 工作区挂载；公开仓只保留 valid/output。
+      # 本工作流的公开检出在 ./public，故脚本在 public 根内执行。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: cd public && bash .github/scripts/workspace_data.sh checkout
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Verify tools token permissions
+        env:
+          GH_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: |
+          test "$(gh api "repos/${TOOLS_REPO}" --jq .permissions.push)" = "true"
+
+      - name: Build cards
+        run: |
+          python tools/scripts/build_cards.py \
+            --data-root public/data \
+            --out "$RUNNER_TEMP/cards"
+
+      - name: Publish snapshot to cards branch
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/cards"
+          work="$RUNNER_TEMP/cards-repo"
+          source_ts="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_ts"])' "$src/index.json")"
+          git init -q -b cards "$work"
+          cd "$work"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:${TOOLS_TOKEN}@github.com/${TOOLS_REPO}.git"
+          git remote add origin "$remote"
+          old_tree=""
+          if git fetch -q --depth=1 origin cards 2>/dev/null; then
+            old_tree="$(git rev-parse 'FETCH_HEAD^{tree}')"
+          fi
+          cp -a "$src/." .
+          git add -A
+          new_tree="$(git write-tree)"
+          if [ -n "$old_tree" ] && [ "$new_tree" = "$old_tree" ]; then
+            echo "cards unchanged for $source_ts; skip push"
+            exit 0
+          fi
+          git commit -q -m "cards: snapshot $source_ts"
+          git push --force origin HEAD:cards
