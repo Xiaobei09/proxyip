@@ -17,6 +17,11 @@ DEVELOPMENT.md
 
 # CI 工具目录 staging（检出到 tools/，不进公开 git）
 tools/
+# 同一份私有包的旧本地目录名。目录名改过（pcb/ → tools/），但仍在用的
+# 工作副本可能还叫 pcb/；两者都是「含 CN 真名清单、绝不入库」的面，
+# 漏掉任一个都等于给 `git add .` 留后门（tests_pipeline.test_checks_bundle
+# 的 FORBIDDEN_PREFIXES 同时列了这两个前缀）。
+pcb/
 
 # 本地缓存（R233）：无工具目录时信誉信号缓存改写此处——真名不得落进
 # data/quality/（该目录入库），而缓存只是优化，不参与发布。
