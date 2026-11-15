@@ -19,7 +19,7 @@
 ```
 data/
 ├── README.md            ← 本索引（人类导航，公开）
-├── raw/                 上游原始归档（zip/txt 快照，仅归档不消费）——工作区
+├── raw/                 按端口/国家重写的中游镜像（每轮由合并池重建）——工作区
 ├── download/            下载/切片产物（all.txt、countries/、ports/、sets/）——工作区
 ├── quality/             质量链路工件（探测、信誉、清单中间态）——工作区
 ├── diff/                每轮变更归档（latest.json + 时间戳快照）——工作区
@@ -33,7 +33,7 @@ data/
 
 | 层 | 物理目录 | 语义 | 典型消费者 |
 |----|----------|------|-----------|
-| 采集层（Ingest） | `raw/`, `download/` | 上游原始数据与切片 | 验证脚本、deep-speed |
+| 采集层（Ingest） | `raw/`, `download/` | 合并池的端口/国家切片 | 验证脚本、deep-speed |
 | 判定层（Probe） | `quality/` | 可达性/延迟/信誉/大陆判定等探测明细 | china-check、build_good、health |
 | 发布层（Release） | `valid/` | 整理后可直接使用的清单变体 | 各 `*.yml` 下游、仓库用户 |
 | 观测层（Observe） | `output/` | 统计/图表/徽章，README 直接引用 | README、外部报表 |
@@ -83,6 +83,7 @@ data/
 | `external_check.json` | `validate_proxies.py` | 出口国复核 |
 | `ipinfo.json` | 质量 CI | 入口 IP 地理 |
 | `upstream_meta.json` | 下载链 | 上游出口元数据 |
+| `upstream_parse.json` | 下载链 | 上游 `all.json` 解析漏斗（payload 条目 → 入池键的逐项丢弃计数；R1879） |
 | `deep_speed.json` | `deep_speed.py` | 真实吞吐 |
 | `reputation.json` / `reputation_cache.json` | `quality_check.py` | 信誉打分与缓存 |
 | `good_meta.json` / `premium_meta.json` | `build_good.py` / `build_premium.py` | 清单元数据 |
@@ -94,7 +95,7 @@ data/
 
 | 工件 | 生产者 | 说明 |
 |------|--------|------|
-| `raw/` | `download_proxies.py` | 上游原始归档（zip/txt），仅归档；文件数随上游快照增减 |
+| `raw/` | `download_proxies.py` | 合并池的 port/country 切片镜像（每轮重写，**不是**上游快照）；审计上游丢失请看 `quality/upstream_parse.json` |
 | `download/` | `download_proxies.py` | 下载切片（all.txt、countries/…），供验证链消费；文件数随国家/端口/集合拆分变化 |
 
 ---

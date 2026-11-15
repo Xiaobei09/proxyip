@@ -758,6 +758,37 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 `family`（由 `clientIp` 派生，ipv4/ipv6）、`asn`、`asOrganization`、`country`、`city`、
 `region`、`continent`、`colo_iata`。
 
+### `data/quality/upstream_parse.json`
+
+上游 `all.json` 解析漏斗（R1879）：逐轮记录「上游给了多少 → 解析丢在哪一步 →
+CF 边缘端口剩多少」。单行 JSON，只含计数，**不含上游原文**（原文里的
+`asOrganization`/`city` 等字符串受真名门禁约束，刻意不落盘）。
+
+| 字段 | 含义 |
+|---|---|
+| `ts` | 本文件写入时刻 |
+| `format` | `all.json`（主源走结构化解析）或 `zip`（回退路径；此时仅表示「本轮无结构化漏斗」，各计数为 0/缺省） |
+| `entries_total` | payload `data` 列表长度 |
+| `invalid_ip` | IP 非法而丢弃的条目数 |
+| `missing_country` | 缺 `meta.country` 而丢弃的条目数（主源口径） |
+| `bad_port_type` | `port` 不是列表而丢弃的条目数 |
+| `empty_port_list` | `port` 为空列表的条目数 |
+| `no_int_port_entries` | `port` 非空但没有任何整数端口、整条被丢弃的条目数 |
+| `non_int_port` | `port` 列表中被跳过的非整数元素数 |
+| `accepted_entries` | 至少贡献 1 个整数端口的条目数 |
+| `pairs_appended` | 追加到 `by_port` 的 `(ip, port, country)` 行数 |
+| `pair_duplicates` | 按 `(port, country, ip)` 去重时消失的重复行数 |
+| `pairs_parsed` | 去重后全部端口的行数 |
+| `pairs_cf_edge` | 其中端口属于 `CF_EDGE_PORTS` 的行数（真正可能入池） |
+| `pairs_non_cf_port` | 端口不在白名单、随后被过滤掉的行数 |
+| `ips_kept` | 解析后仍有端口的唯一 IP 数 |
+| `meta_missing` | 无 `meta` 的条目数（与上述丢弃原因正交，可重叠） |
+| `meta_overwritten` | 同一 IP 多条 `meta` 时被后写覆盖的次数（`meta_map` 按 IP 建键） |
+
+对账关系：`entries_total =` 各条目级丢弃原因之和 `+ accepted_entries`；
+`pairs_appended − pair_duplicates = pairs_parsed = pairs_cf_edge + pairs_non_cf_port`。
+本文件只覆盖主源；extra 源的净留量看 `source_stats.json`。
+
 ### `data/quality/ip_sources.json`
 
 逐 IP 下载源归属。键为 `ip:port#CC`，值为**来源标识**：
