@@ -1,0 +1,112 @@
+name: CN evidence
+
+# R1869：分运营商证据轮（独立高频小配额通道）。
+#
+# 为什么单独一条链
+# ----------------
+# 主链（``china-check.yml``）的职责是**判定可达性**，一轮 4–5h；撞
+# ``CN_SOFT_DEADLINE_SECONDS`` 后剩余 slot 相整段跳过。per-carrier 读数按
+# 24h TTL 清除，于是「证据生产」被「判定」饿死：实测 run 43613233793 在
+# 4h10m 撞软截止 → ``isp_ms`` 整轮未刷新 → 一次清退 4,271 个 CN 展示键，
+# ``all_cn.txt`` 13,634→9,361。
+#
+# 本链只做一件事：跑注册表里 ``predicate=carrier`` 的源，把最新运营商读数
+# 写进**独立 sidecar** ``data/quality/china.evidence.json``（私有工作区）。
+# 它**绝不**写 ``china.json`` / ``all_cn*``，主链在发布前做 overlay。故本链
+# 对公开数据/用户视图零写入，只需 ``contents: read``。
+#
+# 调度：30 分钟一次（:23/:53，与主链 :11/:41、stats 的 :40 错开）。平台对
+# cron 绝对触发率封顶（实测约标称的 10%），但单轮只 10–15min 且可抢占，
+# 即使只落到几次/天也远好于主链 4–5h 才刷新一次。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23,53 * * * *"
+
+permissions:
+  contents: read
+
+# 小任务可抢占：被下一轮取代零成本（与数据链长任务相反）。
+concurrency:
+  group: cn-evidence
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: Per-carrier evidence refresh
+    runs-on: ubuntu-latest
+    # 30min：脚本内部软截止 900s、外层 shell 硬超时 1500s，另留 >5min 给
+    # 增量 sidecar 提交——job 级超时必须晚于内层，否则提交步永远轮不到。
+    timeout-minutes: 30
+    env:
+      # 必须真实检出工具目录（插件/sidecar 都在私有包侧）；缺失即失败，
+      # 禁止静默跑成空证据。
+      PROXYIP_REQUIRE_BUNDLE: "1"
+      # 证据轮内部软截止：到点跳过剩余源，保证在 job 超时前落盘。
+      CN_EVIDENCE_DEADLINE_SECONDS: "900"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # data/quality 等中间产物挂在私有工作区 data 分支上；本链只读写
+      # quality/china.evidence.json，公开侧 data/valid 由上面 checkout 提供。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Refresh per-carrier evidence
+        id: evidence
+        run: |
+          # 1500s 是 job 级 30min 的内部上限：脚本自身还有 900s 软截止，
+          # 两者都留出 merge/write/commit 的余量。
+          timeout --signal=TERM --kill-after=60s 1500s \
+            python tools/scripts/china_check.py \
+            --source data/valid/all.txt \
+            --cn-evidence-only
+
+      - name: Show summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("data/quality/china.evidence.json")
+          if not path.exists():
+              print("evidence sidecar: absent")
+              raise SystemExit(0)
+          doc = json.loads(path.read_text(encoding="utf-8"))
+          keys = doc.get("keys") or {}
+          readings = sum(len((row or {}).get("isp_ms") or {})
+                         for row in keys.values())
+          print(f"evidence sidecar: ts={doc.get('ts', '?')} "
+                f"keys={len(keys)} carrier-readings={readings}")
+          PY
+
+      # 只推 sidecar（工作区快照分支）。workspace_data.sh commit 只重放本
+      # job 改过的路径，故不会覆盖其他链写入的 china.json。
+      # ``always()``：脚本按源增量落盘，即使最后被 shell 硬超时打断，已完成
+      # 源的读数也应提交（原子写保证文件要么是旧版要么是完整新版）。
+      - name: Commit evidence sidecar
+        if: always()
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: |
+          bash .github/scripts/workspace_data.sh commit \
+            "chore(data): refresh CN carrier evidence ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
