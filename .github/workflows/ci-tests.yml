@@ -66,5 +66,5 @@ jobs:
         env:
           PUBLISHED_GATES_DEFERRED: "1"
         run: |
-          python -m unittest discover -s tools/tests_pipeline -v
-          python -m unittest discover -s tools/tests -t . -v
+          python tools/scripts/run_tests_parallel.py --discover tools/tests_pipeline \
+            --discover tools/tests --top .

@@ -100,7 +100,8 @@ jobs:
         env:
           PUBLISHED_GATES_DEFERRED: "1"
         if: steps.gate.outputs.skip != 'true'
-        run: python -m unittest discover -s tools/tests_pipeline -v
+        # R1872：按测试文件分片并行（jobs=4）压墙钟；用例与断言一个不少。
+        run: python tools/scripts/run_tests_parallel.py --discover tools/tests_pipeline
 
       - name: Deep quality check
         id: quality

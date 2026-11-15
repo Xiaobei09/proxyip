@@ -56,7 +56,8 @@ jobs:
         # 由 tests_pipeline/test_commit_data.py 的结构门禁强制。
         env:
           PUBLISHED_GATES_DEFERRED: "1"
-        run: python -m unittest discover -s tools/tests_pipeline -v
+        # R1872：按测试文件分片并行（jobs=4）压墙钟；用例与断言一个不少。
+        run: python tools/scripts/run_tests_parallel.py --discover tools/tests_pipeline
 
       - name: Download and extract
         id: download

@@ -94,7 +94,8 @@ jobs:
       # 本步，与 Verify CN-view invariant 对 steps.build 的写法一致。
       - name: Run tests
         if: steps.gate.outputs.skip != 'true' && steps.annotate.outcome == 'success'
-        run: python -m unittest discover -s tools/tests_pipeline -v
+        # R1872：按测试文件分片并行（jobs=4）压墙钟；用例与断言一个不少。
+        run: python tools/scripts/run_tests_parallel.py --discover tools/tests_pipeline
 
       - name: Build good lists
         id: build
