@@ -200,9 +200,9 @@ jobs:
         # 实测的 orphan 国别目录即源于此），全量测试挪过去会**必然**红。
         # 分级是在不挪位置、不弱化任何断言的前提下解决代价不对称的唯一办法。
         #
-        # 记账项在本工作流**不会**消失：其余全部工作流继续直接跑
-        # ``python -m unittest``，同一条 ``RatchetDowngrade``（继承
-        # ``AssertionError``）在那里照样判红。
+        # 记账项在本工作流**不会**消失：其余全部工作流继续用**硬失败**的
+        # 测试入口（裸 unittest 或不分级的并行运行器），同一条
+        # ``RatchetDowngrade``（继承 ``AssertionError``）在那里照样判红。
         #
         # R596：**已发布状态门禁在此 defer**（与 R594 三条链同因、同机制）。
         # 本步排在 ``Annotate and classify`` **之前**，预愈合快照上的漂移是
@@ -213,11 +213,14 @@ jobs:
         # ``Published-state gates`` 步补跑；后者归 quality-check 的 reorg
         # 单一收敛（R254），本链**无法**愈合 ⇒ 只由该链补跑。豁免与补跑成对，
         # 由 tests_pipeline/test_commit_data.py 的结构门禁强制。
+        # R1872：仍由 ``run_ci_tests.py`` 分级，但改为按测试文件分片并行
+        # （``--graded``）：每个分片单独跑一次分级器，记账项照旧只放行、
+        # 硬失败照旧判红，而墙钟从 8m02s 压到约 1.5min。
         env:
           PUBLISHED_GATES_DEFERRED: "1"
         run: |
-          python tools/scripts/run_ci_tests.py --discover tools/tests_pipeline
-          python tools/scripts/run_ci_tests.py --discover tools/tests --top .
+          python tools/scripts/run_tests_parallel.py --graded \
+            --discover tools/tests_pipeline --discover tools/tests --top .
 
       - name: China reachability check
         id: china
