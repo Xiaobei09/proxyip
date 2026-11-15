@@ -256,7 +256,7 @@ CN 分运营商趋势，每行一快照 `{ts, cn_reachable, cn_by_isp}`（R441 �
 | `speed` | 测速统计（`avg_mbps`/`median_mbps`/`p90_mbps`/`max_mbps`） |
 | `speed_dist` | 速度分桶直方图（MB/s） |
 | `per_country` / `per_port` | 各国 / 各端口存活数 |
-| `prefiltered` | 进入完整检测的条目数 |
+| `prefiltered` | 被 `--quick-prefilter` 廉价 TCP 预筛**跳过**的条目数（未启用时为 0）；这些键不做完整检测、直接计入 `dead` |
 | `sets` | 各集合存活条数 |
 | `ext_check` | 外部 API 检测汇总（启用多源验证时出现）：`ext_check_total`/`ext_check_ok`/`ext_check_uncertain`/`ext_check_dead`/`ext_avg_response_ms` |
 
@@ -648,6 +648,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
   | `unsourced_reachable` | `reachable` 却零 `sources` 证据的条目数 `{total, reachable, unsourced_reachable, in_pool, outside_pool}`；后两项把该集合拆成「在可测候选池内（可被重测修复）」与「池外（不可测）」 |
   | `list_health` | CN 清单（`all_cn.txt`）落地自检报告 `{count, no_ms, junk_ms}`：`no_ms`＝无 ms token 的行数（大陆延迟重写失效的信令；实测基线 289/18220＝1.6%），`junk_ms`＝ms 低于该行出口国物理下限的行数（正常恒 0）。看门狗在 `no_ms/count > 10%` 或 `junk_ms > 100` 时告警 |
   | `probe_priority` | 本轮**派工样本**的四档构成 `{total, hold, no_data, uncertain, has_data}`：派工顺序＝续保桶 → 当前无数据 IP → uncertain → 已有数据，把「优先探测无数据 IP」的逐轮兑现度记成账（此前排序键零痕迹，只能事后反推 `prev`） |
+  | `node_evidence` | 逐键探测点账本的落盘账 `{keys, with_nodes}`（R1880）；明细在 `data/quality/china.nodes.json`（见该节）。sidecar 记账失败时缺失或保留上一轮值，不影响 `china.json` 本身 |
 
   只追加、不改动、不删除既有键；`per` 等子字段的键为三网（`中国电信`/`中国联通`/`中国移动`；R838 起删除多线）；
   R838 起公开报告与导出只列三网。
@@ -681,6 +682,46 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 > 也必须是源结果 dict，标量值在写入与读取两侧都拒绝（R773）。sidecar
 > 是旁路：单条坏数据或写盘异常只会让本次不落盘，不会中断主探测
 > （R774）。消费者只读 `china.json`，不要把 sidecar 当数据契约。
+
+### `data/quality/china.nodes.json`
+
+逐键探测点账本（R1880）：`china.json` 的 `sources` 只保留每源聚合计数
+（`nodes`/`ok_nodes`/`ratio`），而合并判据里的**跨源探测点多数**
+（`china_engine.probe_point_majority`）算完即弃。本 sidecar 把「这个键为什么
+判 `uncertain`」所需的输入落盘，供离线复核；不改 `china.json` 的条目级契约。
+
+单行 JSON：
+
+| 字段 | 含义 |
+|---|---|
+| `ts` | 发布轮次时钟，与同轮 `china.json` 的 `ts` **同源**（两份产物可按轮对齐） |
+| `keys` | 账本键数（= `proxies` 长度） |
+| `with_nodes` | 其中带逐节点明细的键数（插件当前只回聚合，常态为 0） |
+| `proxies` | `ip:port#国家` → 证据行 |
+
+证据行：
+
+| 字段 | 含义 |
+|---|---|
+| `verdict` / `level` | 与 `china.json` 同名字段一致（判据仍只活在 `merge_verdict`） |
+| `points` | `[有数据的源数, 探测点总数, 可达探测点数]`；**直接复用** `probe_point_majority`，不是平行实现 |
+| `checked_at` | 该条证据的探测时刻（epoch）；缺失/非数值时不写 |
+| `nodes` | **仅当**源结果带逐节点字段时出现：`{源不透明 id: [{operator, ms}, ...]}`；单源最多 64 个节点 |
+
+`points` 口径与判定层一致：多节点源按 `nodes`/`ok_nodes` 计点，单节点源各计
+1 点；只有 `status ∈ {ok, fail}` 的源计入分母（`error`/`skipped` 是无观测）。
+因此 `points[1] < 10` 的键本就不适用「点多数」规则——账本如实展示这一事实，
+而不是重新裁定。
+
+`nodes` 的键经 `cn_public_id` 封存为 `src_*`；解不出 id 时落统一占位
+`src_unknown`，**绝不**回写源代号。节点行只留运营商与毫秒（`ms: null`
+表示该节点明确回样但丢包），**不含节点 id/名称/地址**——节点标识属探测
+基础设施细节，审计只需要「哪家运营商、多少毫秒」。
+
+> **扩展点**：插件目前只回聚合计数，故 `nodes` 常态缺席。任一源结果开始携带
+> `per_node` / `nodes_detail` / `node_results`（见
+> `china_check.NODE_EVIDENCE_FIELDS`）时，本文件自动带上明细，无需再改宿主。
+> 写盘采用 fail-open：sidecar 记账失败只打印 stderr，不阻断 `china.json` 发布。
 
 ### `data/valid/all_cn.txt`
 
@@ -788,6 +829,43 @@ CF 边缘端口剩多少」。单行 JSON，只含计数，**不含上游原文*
 对账关系：`entries_total =` 各条目级丢弃原因之和 `+ accepted_entries`；
 `pairs_appended − pair_duplicates = pairs_parsed = pairs_cf_edge + pairs_non_cf_port`。
 本文件只覆盖主源；extra 源的净留量看 `source_stats.json`。
+
+### `data/quality/dead_reasons.json`
+
+逐键死因账（R1880）：`data/valid/meta.json` 只汇总 `alive`/`dead` 两个数，
+本文件回答「**每一个** dead 键死在哪一步」。单行 JSON；键空间与
+`valid/index.json` 同源（`ip:port#国家`），不含上游真名。
+
+| 字段 | 含义 |
+|---|---|
+| `ts` | 本文件写入时刻 |
+| `total` / `checked` / `alive` / `dead` / `prefiltered` | 与同轮 `valid/meta.json` 逐字相同（复制一份便于独立解读） |
+| `reasons` | 原因代码 → 键数（按键名字典序） |
+| `keys` | `ip:port#国家` → 原因代码（按键名字典序） |
+
+`sum(reasons.values())` 恒等于 `len(keys)`；`dead` 与 `len(keys)` 相等，
+**除非**同一 `ip:port#国家` 在输入清单里重复出现（`dead` 按条目计、`keys`
+按字符串去重，重复的死键只留一条）。
+
+原因词表是**固定代码，不含异常文本**——`str(exc)` 可能带目标地址（甚至
+凭据），公开产物一律只落类名：
+
+| 代码 | 含义 |
+|---|---|
+| `prefilter_tcp` | 上一轮未存活、本轮廉价 TCP 预筛连不通而跳过（`--quick-prefilter`） |
+| `tls_cert` | TLS 证书校验失败（确定性死亡，不重试） |
+| `tls_error` | 其他 TLS 握手错误（可重试；重试仍失败则保留此码） |
+| `timeout` | 连接/握手超时（先于 `connect` 判别：`TimeoutError` 是 `OSError` 子类） |
+| `connect` | 其余连接错误（拒绝/不可达/重置等） |
+| `bad_address` | 地址非法（`ValueError`） |
+| `ext_dead` | 外部 API 多源复核判死 |
+| `ext_uncertain` | 外部 API 复核未能确认（非明确死，但未复活） |
+| `ext_skipped` | 外部 API 无可用源/全 error（「没测到」≠「实测死」） |
+| `exception:<类名>` | 探测线程抛未预期异常；只记类名 |
+
+键从 `keys` 中**消失**即表示本轮最终判活（重试或外检翻活会即时移除），
+故本文件与 `valid/index.json` 互补、不会互相矛盾。`prefiltered` 与
+`meta.json` 同义：**被预筛跳过**的条目数（不是进入全检的条目数）。
 
 ### `data/quality/ip_sources.json`
 

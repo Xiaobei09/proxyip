@@ -84,6 +84,8 @@ data/
 | `ipinfo.json` | 质量 CI | 入口 IP 地理 |
 | `upstream_meta.json` | 下载链 | 上游出口元数据 |
 | `upstream_parse.json` | 下载链 | 上游 `all.json` 解析漏斗（payload 条目 → 入池键的逐项丢弃计数；R1879） |
+| `dead_reasons.json` | `validate_proxies.py` | 逐键死因账（`ip:port#CC` → 固定原因代码，含预筛/证书/超时/外检；R1880） |
+| `china.nodes.json` | `china_check.py` | 逐键探测点账本（跨源点多数输入 + 插件提供时的逐节点读数；R1880） |
 | `deep_speed.json` | `deep_speed.py` | 真实吞吐 |
 | `reputation.json` / `reputation_cache.json` | `quality_check.py` | 信誉打分与缓存 |
 | `good_meta.json` / `premium_meta.json` | `build_good.py` / `build_premium.py` | 清单元数据 |
