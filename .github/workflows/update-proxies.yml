@@ -68,7 +68,13 @@ jobs:
         env:
           # R1835：多源单键探测端点可由仓库变量覆盖；空值回退官方端点。
           EXTERNAL_CHECK_URL: ${{ vars.EXTERNAL_CHECK_URL }}
-        run: python tools/scripts/validate_proxies.py --time-budget 3600
+        # R1873：实测瓶颈是**测速尾**（run 43663271823：17,863 实探里
+        # 2,163 条测速失败各最多烧满 5s，测速段约 980s、TLS 判活仅约 85s）。
+        # ``--speed-workers 30 → 60`` 只提高在途测速数：同一探测集、同一 5s
+        # 超时、同一判定规则，alive/verified 必须逐字不变。唯一风险是 2× 并发
+        # 让速度读数受带宽竞争影响 ⇒ 下一轮对拍 ``meta.json`` 的
+        # alive/verified 与 per-source 计数，若漂移即回退 30。
+        run: python tools/scripts/validate_proxies.py --time-budget 3600 --speed-workers 60
 
       - name: Show stats
         run: |
