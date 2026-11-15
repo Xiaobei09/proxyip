@@ -101,7 +101,8 @@ jobs:
             git push origin HEAD:source-report
           fi
 
-      # 只回显**不含真名**的部分：表头/口径在报告前 8 行，图只标短 id。
+      # 只回显**不含真名**的部分：报告头 8 行与文件清单；表/图的真名只在
+      # 私有 source-report 分支（R1873 起图也用真名，故不得 cat 图或表格）。
       - name: Show summary
         if: always()
         run: |
