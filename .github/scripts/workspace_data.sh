@@ -14,12 +14,18 @@
 # force-with-lease）：树是完整快照，历史不累积。并发安全靠「fetch 远端 →
 # 重放本 job 改过的路径 → 再 push」实现，未改的文件保留远端最新版本。
 #
-# 历史不丢：每次快照 push 成功后，同一棵 tree 再以**普通提交**（parent=远端
-# 归档头）追加到独立分支 `data-archive`。归档分支只 fast-forward、永不 force、
-# 永不清理，因此每轮完整状态都留在 git 历史里；归档提交直接复用快照的 tree
-# 对象，两分支共享全部 blob/子树，**归档本身不复制文件**（重复内容只由 git
-# 版本间 delta 承担）。归档是旁路：push 失败只告警，下一轮快照树会再次包含
-# 本轮状态，不会丢数据。
+# 历史不丢：每次快照 push 成功后，快照 tree **去掉缓存/断点**再以**普通提交**
+# （parent=远端归档头）追加到独立分支 `data-archive`。归档分支只 fast-forward、
+# 永不 force、永不清理，因此每轮完整证据状态都留在 git 历史里；保留文件的
+# blob/子树与 live 快照完全共享，**归档本身不复制内容**（重复内容只由 git
+# 版本间 delta 承担）。
+#
+# 为什么不归档整棵树：缓存/断点既可本轮重新生成，又会随每轮刷新产生大体积
+# 版本（reputation_cache 约 52MB、exit_geo_cache 约 35MB、china.partial 约
+# 22MB），把它们写进永久历史等于重复保存“由其他数据推出”的中间态。
+# valid/ 与 output/ 是最终消费数据，且公开仓普通历史已完整保留，私有归档不再
+# 重复。data 分支仍保留完整快照（含缓存），供下一轮热启动。
+# 归档是旁路：push 失败只告警，下一轮证据树会再次包含本轮状态，不会丢数据。
 #
 # 用法：
 #   bash .github/scripts/workspace_data.sh checkout
@@ -45,6 +51,19 @@ WORKSPACE="${WORKSPACE_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/data-workspace}"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DATA_DIR="$ROOT/data"
 DIRS=(quality raw download diff)
+
+# 永久归档排除项：纯缓存或可在本轮/下一轮重新生成的断点。live 快照 data 仍
+# 保留它们（checkout 热启动需要），只有 data-archive 不保存其历史版本。
+#   reputation_cache / exit_geo_cache：外部查询缓存（单文件可达 52MB/35MB）
+#   cmli / entry_geo：可选查询缓存
+#   china.partial：单轮增量 checkpoint，最终由 china.json 取代
+ARCHIVE_EXCLUDES=(
+  quality/reputation_cache.json
+  quality/exit_geo_cache.json
+  quality/cmli.json
+  quality/entry_geo.json
+  quality/china.partial.json
+)
 
 log() { printf '%s\n' "$*"; }
 
@@ -248,13 +267,38 @@ checkout() {
   log "workspace data ready: $WORKSPACE"
 }
 
-# 归档：把刚推上 live 分支的**同一棵 tree** 追加到独立分支（普通提交链）。
+# 从快照 tree 构造归档 tree：只删除缓存/断点路径，其余原样保留。
+# 用独立临时 index 操作，绝不碰 live 工作树；保留路径仍指向快照的同一 blob/
+# 子树对象，因此归档与 live 快照之间没有内容复制。
+archive_tree() {
+  local commit_sha="$1" tmp index tree path
+  tmp="$(mktemp -d)"
+  index="$tmp/index"
+  if ! GIT_INDEX_FILE="$index" git_workspace read-tree "$commit_sha^{tree}"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  for path in "${ARCHIVE_EXCLUDES[@]}"; do
+    GIT_INDEX_FILE="$index" git_workspace update-index \
+      --force-remove -- "$path" 2>/dev/null || true
+  done
+  if ! tree="$(GIT_INDEX_FILE="$index" git_workspace write-tree)"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  rm -rf "$tmp"
+  printf '%s' "$tree"
+}
+
+# 归档：把刚推上 live 分支的快照 tree 去掉缓存/断点后追加到独立分支
+# （普通提交链）。
 #
-# 「全部保留」与「减少重复」同时成立靠 git 对象共享：归档提交直接复用快照
-# 提交的 tree，两分支共享全部 blob/子树，归档不复制任何文件；每轮只新增
-# 一个 commit 对象（以及本轮真正变过的 blob，由 git 打包时做版本间 delta）。
-# 归档分支只做 fast-forward、永不 force、永不清理，历史因此完整可追溯。
-# 归档是旁路：失败只告警，live 快照已落地，下一轮快照树会再次包含本轮状态。
+# 「全部保留」与「减少重复」同时成立靠两件事：① 语义上去掉缓存/断点等可由
+# 其他数据推出的中间态（见 ARCHIVE_EXCLUDES）；② git 对象共享——保留文件
+# 直接复用快照的 blob/子树，每轮归档只新增一个 commit 对象（以及本轮真正
+# 变过的 blob，由 git 打包时做版本间 delta）。归档分支只做 fast-forward、
+# 永不 force、永不清理，历史因此完整可追溯。
+# 归档是旁路：失败只告警，live 快照已落地，下一轮证据树会再次包含本轮状态。
 archive_snapshot() {
   local commit_sha="$1" msg="$2"
   if [ "$ARCHIVE_BRANCH" = "$BRANCH" ]; then
@@ -264,9 +308,9 @@ archive_snapshot() {
   local tree attempts state old_sha archive_sha archive_msg
   local max_attempts="${WORKSPACE_ARCHIVE_ATTEMPTS:-5}"
   local retry_sleep="${WORKSPACE_ARCHIVE_RETRY_SLEEP:-5}"
-  tree="$(git_workspace rev-parse "$commit_sha^{tree}" 2>/dev/null || true)"
+  tree="$(archive_tree "$commit_sha" 2>/dev/null || true)"
   if [ -z "$tree" ]; then
-    log "::warning::无法解析快照树 $commit_sha；跳过归档" >&2
+    log "::warning::无法解析/过滤快照树 $commit_sha；跳过归档" >&2
     return 0
   fi
   # commit message 里记录对应的 live 提交，便于把归档行与快照一一对上。
