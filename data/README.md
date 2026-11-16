@@ -8,6 +8,11 @@
 > `quality/`、`diff/` 是中间产物。CI 由 `.github/scripts/workspace_data.sh checkout`
 > 把它们软链到 `data/` 下，因此脚本里的路径写法不变；公开 checkout 里看不到
 > 这四个目录是预期行为。
+>
+> **历史归档**：中间产物在私有工具仓的 `data` 分支只保留最新快照（便于快速
+> checkout）；每次提交还会把同一棵 tree 以普通提交追加到 `data-archive` 分支，
+> 全部保留、无期限、不 force-push。归档提交复用快照的 tree 对象，两分支共享
+> blob/子树，不产生重复存储；`git log data-archive` 可回看每一轮完整状态。
 
 契约与格式的权威定义见 [`../docs/data-spec.md`](../docs/data-spec.md)。本文档是
 浏览入口（“立体化”导航），只做索引与层级说明，不重复契约细节。

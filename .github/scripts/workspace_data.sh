@@ -8,11 +8,18 @@
 # 完成：seal 只看真正的来自身份位置（避免把 US/proxy 这类撞名值误封），
 # unseal 无上下文；两侧都归一到紧凑 JSON，保证空跑不产生 diff。
 #
-# 为什么是「快照分支」而不是普通提交链：quality/ 里的缓存单文件可达
-# 60MB（reputation_cache.json），普通提交链每天会堆出 GB 级历史。本脚本
-# 每次用**单提交快照**（孤儿提交 + force-with-lease）替换分支内容：树是
-# 完整快照，历史不累积。并发安全靠「fetch 远端 → 重放本 job 改过的路径 →
-# 再 push」实现，未改的文件保留远端最新版本。
+# 为什么 live 分支用「快照」：quality/ 里的缓存单文件可达 60MB
+# （reputation_cache.json），checkout 只需要最新状态，普通提交链会让每次
+# fetch 都背着全部历史。故 `data` 分支仍是**单提交快照**（孤儿提交 +
+# force-with-lease）：树是完整快照，历史不累积。并发安全靠「fetch 远端 →
+# 重放本 job 改过的路径 → 再 push」实现，未改的文件保留远端最新版本。
+#
+# 历史不丢：每次快照 push 成功后，同一棵 tree 再以**普通提交**（parent=远端
+# 归档头）追加到独立分支 `data-archive`。归档分支只 fast-forward、永不 force、
+# 永不清理，因此每轮完整状态都留在 git 历史里；归档提交直接复用快照的 tree
+# 对象，两分支共享全部 blob/子树，**归档本身不复制文件**（重复内容只由 git
+# 版本间 delta 承担）。归档是旁路：push 失败只告警，下一轮快照树会再次包含
+# 本轮状态，不会丢数据。
 #
 # 用法：
 #   bash .github/scripts/workspace_data.sh checkout
@@ -24,6 +31,7 @@
 #   WORKSPACE_REMOTE                    显式远端 URL（测试/自托管用，优先于 TOOLS_REPO）
 #   WORKSPACE_DIR                      可选，默认 $RUNNER_TEMP/data-workspace
 #   DATA_BRANCH                        可选，默认 data
+#   DATA_ARCHIVE_BRANCH                可选，默认 data-archive（普通提交链，永久保留）
 #
 # checkout 会在公开仓 data/ 下建符号链接；脚本自身（tools/scripts/*）通过
 # common.DATA_DIR 读写这些路径，因此无需改任何脚本的路径常量。
@@ -31,6 +39,8 @@ set -uo pipefail
 
 REPO="${TOOLS_REPO:-}"
 BRANCH="${DATA_BRANCH:-data}"
+# 历史归档分支：普通提交链，全部保留、无期限；树对象与 live 快照共享。
+ARCHIVE_BRANCH="${DATA_ARCHIVE_BRANCH:-data-archive}"
 WORKSPACE="${WORKSPACE_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/data-workspace}"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DATA_DIR="$ROOT/data"
@@ -128,6 +138,7 @@ init_repo() {
 # 无法区分「分支尚未创建」与「令牌不可用」。改为看输出是否为空，并把
 # stderr 脱敏后回显，避免 URL 里的 token 泄漏。
 remote_state() {
+  local branch="${1:-$BRANCH}"
   local t err rc out url
   if ! url="$(remote_url)"; then
     return 1
@@ -138,7 +149,7 @@ remote_state() {
   # ``http.https://github.com/.extraheader``，在它里面直接 ls-remote 会让
   # 我们的 header 与它叠加成 "Duplicate header: Authorization"（400）。
   out="$(git_workspace ls-remote --heads "$url" \
-    "refs/heads/$BRANCH" 2>"$err")"
+    "refs/heads/$branch" 2>"$err")"
   rc=$?
   if [ -n "$t" ]; then
     local line
@@ -153,7 +164,7 @@ remote_state() {
     return 2
   fi
   # 不转发 git 的原始 stderr：远端 URL 带 token，错误行可能回显它。
-  log "::error::无法访问工作区 data 分支（rc=$rc，网络或令牌问题）" >&2
+  log "::error::无法访问工作区分支 $branch（rc=$rc，网络或令牌问题）" >&2
   if [ -s "$err" ]; then
     log "$(cat "$err")" >&2
   fi
@@ -235,6 +246,70 @@ checkout() {
   # 旧行为预期）。
   printf '%s\n' "$WORKSPACE" > "$ROOT/.data-workspace"
   log "workspace data ready: $WORKSPACE"
+}
+
+# 归档：把刚推上 live 分支的**同一棵 tree** 追加到独立分支（普通提交链）。
+#
+# 「全部保留」与「减少重复」同时成立靠 git 对象共享：归档提交直接复用快照
+# 提交的 tree，两分支共享全部 blob/子树，归档不复制任何文件；每轮只新增
+# 一个 commit 对象（以及本轮真正变过的 blob，由 git 打包时做版本间 delta）。
+# 归档分支只做 fast-forward、永不 force、永不清理，历史因此完整可追溯。
+# 归档是旁路：失败只告警，live 快照已落地，下一轮快照树会再次包含本轮状态。
+archive_snapshot() {
+  local commit_sha="$1" msg="$2"
+  if [ "$ARCHIVE_BRANCH" = "$BRANCH" ]; then
+    log "::warning::归档分支与 live 分支同名（$BRANCH）；跳过归档" >&2
+    return 0
+  fi
+  local tree attempts state old_sha archive_sha archive_msg
+  local max_attempts="${WORKSPACE_ARCHIVE_ATTEMPTS:-5}"
+  local retry_sleep="${WORKSPACE_ARCHIVE_RETRY_SLEEP:-5}"
+  tree="$(git_workspace rev-parse "$commit_sha^{tree}" 2>/dev/null || true)"
+  if [ -z "$tree" ]; then
+    log "::warning::无法解析快照树 $commit_sha；跳过归档" >&2
+    return 0
+  fi
+  # commit message 里记录对应的 live 提交，便于把归档行与快照一一对上。
+  archive_msg="${msg}
+
+snapshot: ${commit_sha}"
+  for ((attempts = 1; attempts <= max_attempts; attempts++)); do
+    remote_state "$ARCHIVE_BRANCH"
+    state=$?
+    if [ "$state" -eq 1 ]; then
+      log "::warning::无法访问归档分支 $ARCHIVE_BRANCH；本轮仅保留 live 快照" >&2
+      return 0
+    fi
+    old_sha=""
+    if [ "$state" -eq 0 ]; then
+      if ! git_workspace fetch -q --depth=1 origin "$ARCHIVE_BRANCH"; then
+        sleep "$retry_sleep"
+        continue
+      fi
+      old_sha="$(git_workspace rev-parse FETCH_HEAD)"
+      # 状态与归档头完全一致 ⇒ 不追加空提交（减少无意义历史）。
+      if [ "$(git_workspace rev-parse 'FETCH_HEAD^{tree}')" = "$tree" ]; then
+        log "Archive tree unchanged; skip"
+        return 0
+      fi
+    fi
+    if [ -n "$old_sha" ]; then
+      archive_sha="$(printf '%s\n' "$archive_msg" \
+        | git_workspace commit-tree "$tree" -p "$old_sha")"
+    else
+      archive_sha="$(printf '%s\n' "$archive_msg" \
+        | git_workspace commit-tree "$tree")"
+    fi
+    if git_workspace push -q origin "$archive_sha:refs/heads/$ARCHIVE_BRANCH"; then
+      git_workspace update-ref "refs/heads/$ARCHIVE_BRANCH" "$archive_sha"
+      log "Archived workspace snapshot on attempt $attempts"
+      return 0
+    fi
+    log "workspace archive push attempt $attempts failed; refetching and retrying..." >&2
+    sleep "$retry_sleep"
+  done
+  log "::warning::workspace archive push failed after $max_attempts attempts; live snapshot kept on $BRANCH" >&2
+  return 0
 }
 
 # 跳过官方 checkout 的 pathspec 风险：只把本 job **实际改过**的路径重放到
@@ -352,11 +427,13 @@ commit() {
       if git_workspace push -q --force-with-lease="$BRANCH:$old_sha" \
           origin "$commit_sha:refs/heads/$BRANCH"; then
         log "Pushed workspace data snapshot on attempt $attempts"
+        archive_snapshot "$commit_sha" "$msg"
         return 0
       fi
     else
       if git_workspace push -q origin "$commit_sha:refs/heads/$BRANCH"; then
         log "Created workspace data branch on attempt $attempts"
+        archive_snapshot "$commit_sha" "$msg"
         return 0
       fi
     fi
