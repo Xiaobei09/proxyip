@@ -720,11 +720,12 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 `network`、`ok` / `status`；只有源确实提供（或命中固定点目录）时才写，
 不给下游落一堆 `null`。
 
-`nodes` 的键经 `cn_public_id` 封存为 `src_*`；解不出 id 时落统一占位
-`src_unknown`，**绝不**回写源代号。节点元数据只写 PCB 私有 `data` 分支的
-`quality/` 工作区；公开仓/公开产物仍只见 `src_*`，不会出现节点名或供应商。
-固定点目录（`china_check.CN_PROBE_CATALOG`）只登记代码/文档已实证的地点，
-不猜测回包未暴露的位置；运行时源若回逐节点明细，其字段优先于目录。
+`nodes` 的键在运行时经 `cn_public_id` 封存为 `src_*`；解不出 id 时落统一
+占位 `src_unknown`，**绝不**回写源代号。提交到 PCB 私有 `data` 分支时，
+`workspace_alias` 再把 id 反解为真名（该分支不公开）；公开仓/公开产物仍只
+见 `src_*`，不会出现节点名或供应商。固定点目录
+（`china_check.CN_PROBE_CATALOG`）只登记代码/文档已实证的地点，不猜测回包
+未暴露的位置；运行时源若回逐节点明细，其字段优先于目录。
 
 > **扩展点**：插件只回聚合计数时，固定点目录把源级 `ms/ok/status` 挂到已知
 > 节点；任一源结果开始携带 `per_node` / `nodes_detail` / `node_results`（见
