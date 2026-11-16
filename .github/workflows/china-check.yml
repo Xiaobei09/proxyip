@@ -273,13 +273,18 @@ jobs:
           # ⚠️ 本段注释必须留在命令**之前**：续行里的 ``#`` 会让其后所有内容
           # （含 ``--cn-cache-ttl``）一并被吞成注释，实测报
           # ``--cn-cache-ttl: command not found``。
-          # R1852：探测侧缓存 6h → **24h**。明确可达（reachable）且三家运营商
+          # R1852：探测侧缓存 6h → 24h。明确可达（reachable）且三家运营商
           # 证据齐全的键才复用；uncertain 视为「没有明确结论」，每轮必复测。
           # 缓存拆分已提前到截断之前，缓存命中不再白占 6,500 个探测名额。
+          # ★R1924：24h → **18h（64,800s）**。24h == 发布侧读数 TTL，键要等到
+          # 读数已过期才进入复测队列；任一调度缺口即整批掉出 `sampled`
+          # （实测 2026-11-16 11:21 轮 ``expiring 3/3``，14:09→15:11
+          # sampled 11,227→9,434）。18h = 24h − 6h 临期余量：缓存键在到期前
+          # 至少还有一个 R1790 临期窗口，下一轮可被 expiring 桶优先复测。
           timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
             python tools/scripts/china_check.py \
             --source data/valid/all.txt --limit "${CN_PRIMARY_LIMIT}" \
-            --cn-cache-ttl 86400
+            --cn-cache-ttl 64800
           rc=$?
           set -e
           if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; then
@@ -290,7 +295,7 @@ jobs:
               python tools/scripts/china_check.py \
               --source data/valid/all.txt \
               --limit "${CN_FALLBACK_LIMIT}" \
-              --cn-cache-ttl 86400
+              --cn-cache-ttl 64800
           else
             echo "mode=full" >> "$GITHUB_OUTPUT"
             exit "$rc"

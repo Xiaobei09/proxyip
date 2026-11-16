@@ -69,10 +69,12 @@
 - 出口 IP：`http://httpbin.org/get`、`https://api.ipify.org?format=json`、Cloudflare `cf-ray`
 - 分运营商 RTT 异常下限：境内 1ms / 港澳 5ms / 台 8ms / 日韩 12ms / 东南亚 25ms / 其他 40ms。
 - 分运营商数据超过 1 天清除（携带侧 `china_check.ISP_MS_CARRY_TTL_SEC=86400`；
-  CN 侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。**读、写、调度三侧同一 24h 口径**：
+  消费侧缓存窗口同为 1 天，`common.CN_CACHE_WINDOW_SEC=86400`）。**读、写、调度判定同一 24h 口径**：
   读侧 `common.fresh_isp_ms` 剔除过期读数；写侧 `merge_isp_ms` 按 TTL 丢弃/携带；
   调度侧「证据齐全」判据（`_has_complete_carrier_data`/`_trinet_missing`）同按 24h 账龄——
   全过期的键视为缺口、重回补测候选，避免「raw 齐全但全过期」的键被永久排除在补测外（R686）。
+  探测侧缓存（`--cn-cache-ttl`）是独立的**复测节流**：R1924 起 CI 取 18h（64800），
+  小于 24h，保证读数到期前先进入复测队列；判龄取逐运营商 `isp_ms_at` 的最老戳。
 - **文件级新鲜度兜底（R1769）**：旧 `china.json` 可能整轮没有逐条 `checked_at`。
   此时以顶层 `ts` 作为整份快照的账龄；超过 24h 则 `-CN`/`-CNH`、运营商标记与
   good 延迟表一并按陈旧剔除，不再因「条目无时间戳」永久放行。`cn可达（平滑）`
