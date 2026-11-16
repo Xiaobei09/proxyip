@@ -696,8 +696,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 |---|---|
 | `ts` | 发布轮次时钟，与同轮 `china.json` 的 `ts` **同源**（两份产物可按轮对齐） |
 | `keys` | 账本键数（= `proxies` 长度） |
-| `with_nodes` | 其中带逐节点明细的键数（插件当前只回聚合，常态为 0） |
+| `with_nodes` | 其中带逐节点明细的键数（运行时明细或固定点目录兜底） |
 | `proxies` | `ip:port#国家` → 证据行 |
+| `catalog` | **仅当**固定点目录被用于兜底时出现：`{源不透明 id: [节点元数据]}`；卡片据此补齐地点/提供商/运营商 |
 
 证据行：
 
@@ -706,22 +707,30 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 | `verdict` / `level` | 与 `china.json` 同名字段一致（判据仍只活在 `merge_verdict`） |
 | `points` | `[有数据的源数, 探测点总数, 可达探测点数]`；**直接复用** `probe_point_majority`，不是平行实现 |
 | `checked_at` | 该条证据的探测时刻（epoch）；缺失/非数值时不写 |
-| `nodes` | **仅当**源结果带逐节点字段时出现：`{源不透明 id: [{operator, ms}, ...]}`；单源最多 64 个节点 |
+| `nodes` | **仅当**源结果带逐节点字段或命中固定点目录时出现：`{源不透明 id: [节点读数, ...]}`；单源最多 64 个节点 |
 
 `points` 口径与判定层一致：多节点源按 `nodes`/`ok_nodes` 计点，单节点源各计
 1 点；只有 `status ∈ {ok, fail}` 的源计入分母（`error`/`skipped` 是无观测）。
 因此 `points[1] < 10` 的键本就不适用「点多数」规则——账本如实展示这一事实，
 而不是重新裁定。
 
-`nodes` 的键经 `cn_public_id` 封存为 `src_*`；解不出 id 时落统一占位
-`src_unknown`，**绝不**回写源代号。节点行只留运营商与毫秒（`ms: null`
-表示该节点明确回样但丢包），**不含节点 id/名称/地址**——节点标识属探测
-基础设施细节，审计只需要「哪家运营商、多少毫秒」。
+节点读数的稳定字段是 `operator`（运营商）与 `ms`（`null` 表示该节点明确回样
+但丢包）。按用户要求，R1910 起还保留可得的 `node`（节点名）、`location`
+（地点）、`provider`（探针服务方）、`host`（云/机房托管方）、`asn`、
+`network`、`ok` / `status`；只有源确实提供（或命中固定点目录）时才写，
+不给下游落一堆 `null`。
 
-> **扩展点**：插件目前只回聚合计数，故 `nodes` 常态缺席。任一源结果开始携带
-> `per_node` / `nodes_detail` / `node_results`（见
-> `china_check.NODE_EVIDENCE_FIELDS`）时，本文件自动带上明细，无需再改宿主。
-> 写盘采用 fail-open：sidecar 记账失败只打印 stderr，不阻断 `china.json` 发布。
+`nodes` 的键经 `cn_public_id` 封存为 `src_*`；解不出 id 时落统一占位
+`src_unknown`，**绝不**回写源代号。节点元数据只写 PCB 私有 `data` 分支的
+`quality/` 工作区；公开仓/公开产物仍只见 `src_*`，不会出现节点名或供应商。
+固定点目录（`china_check.CN_PROBE_CATALOG`）只登记代码/文档已实证的地点，
+不猜测回包未暴露的位置；运行时源若回逐节点明细，其字段优先于目录。
+
+> **扩展点**：插件只回聚合计数时，固定点目录把源级 `ms/ok/status` 挂到已知
+> 节点；任一源结果开始携带 `per_node` / `nodes_detail` / `node_results`（见
+> `china_check.NODE_EVIDENCE_FIELDS`）时，本文件自动带上真实明细，无需再改
+> 宿主。写盘采用 fail-open：sidecar 记账失败只打印 stderr，不阻断
+> `china.json` 发布。
 
 ### `data/valid/all_cn.txt`
 
