@@ -11,9 +11,16 @@ permissions:
 
 # R1824：与 build-good / annotate-classify 共用 good 写入组，避免
 # 旧代码检出的长跑任务在末尾覆盖已生效的 good/good_meta。
+#
+# R1913：并发组默认 ``queue: single``——最多一个 pending，后到的 pending
+# 会取消先到的。Quality 完成瞬间本组同时收到 annotate/build-good/
+# exit-family 三路触发，实测 69%/54%/31% 的 run 在零 job 阶段被 cancelled。
+# ``queue: max`` 让三者都能排队；各链的 ``Skip if superseded`` 会让旧 run
+# 快速跳过，最新 run 仍执行实际写入。
 concurrency:
   group: data-good-writers
   cancel-in-progress: false
+  queue: max
 
 jobs:
   check:
