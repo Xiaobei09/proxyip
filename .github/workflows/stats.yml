@@ -82,6 +82,28 @@ jobs:
       # 13:55 ``exit_multi_ip_published=101`` vs ``exit_marked_multi_exit=136``，
       # 14:56 二者互换）。``export_json`` 只读 ``all.txt``/``china.json``/exit 产物，
       # 不依赖 ``generate_stats`` 的任何输出，故交换安全。
+      # R1940：导出**之前**量一次「已发布 all.json 相对本轮 all.txt 的滞后」。
+      # 测的是用户此刻能拿到的旧产物；导出后再测恒为 0，没有诊断价值。
+      # continue-on-error：滞后只作观测/告警，不能反过来阻断导出——否则一旦
+      # 跨过阈值导出永远不跑，滞后自我固化（R325 同类死锁）。
+      - name: Measure published JSON lag
+        id: lag
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          python tools/scripts/export_json.py --check | tee /tmp/all-json-lag.json
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          {
+            echo '### all.json published lag'
+            echo '```json'
+            cat /tmp/all-json-lag.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "lag check exit=$STATUS"
+          exit "$STATUS"
+
       - name: Export structured JSON
         id: export
         if: steps.gate.outputs.skip != 'true'

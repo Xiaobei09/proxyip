@@ -70,7 +70,9 @@ data/
 | `all.txt` | `validate_proxies.py` | 全量可达清单（本次判定；行数随池波动，权威值见 `output/stats.json` 的 `alive`） |
 | `all_<组>.txt` 系列 | `validate_proxies.py` | `_ltd/_verified/_stable/_rep` 变体 |
 | `all_cn*.txt` | `china_check.py` | 大陆可达清单（含 best-ISP 后缀） |
-| `all_diverse.txt` | `validate_proxies.py` | 覆盖多样化子集 |
+| `all_diverse.txt` | `build_good.py` | 出口去重视图（每出口一条） |
+| `all_balanced.txt` | `build_good.py` | 入口 ASN≤20、/24≤8 的均衡视图（edgetunnel proxyIP 视角；仍是 `all.txt` 子集） |
+| `all.json` | `export_json.py` | 结构化导出（IP + 行级字段） |
 | `meta.json` | `validate_proxies.py` | 行键元数据（国家/端口/延迟/速度） |
 | `ext_check.json` | `validate_proxies.py` | TLS 复核结果 |
 | `speed.json` | `deep_speed.py` | 大窗口真实测速 |
@@ -94,6 +96,7 @@ data/
 | `upstream_meta.json` | 下载链 | 上游出口元数据 |
 | `upstream_parse.json` | 下载链 | 上游 `all.json` 解析漏斗（payload 条目 → 入池键的逐项丢弃计数；R1879） |
 | `dead_reasons.json` | `validate_proxies.py` | 逐键死因账（`ip:port#CC` → 固定原因代码，含预筛/证书/超时/外检；R1880） |
+| `cmno_candidates.json` | `validate_proxies.py` | 本轮 CM 判否但自身探测存活的候选（条件池输入；不发布） |
 | `china.nodes.json` | `china_check.py` | 逐键探测点账本（跨源点多数输入 + 逐节点读数/固定点目录，含私有侧地点/提供商/运营商；R1880/R1910） |
 | `deep_speed.json` | `deep_speed.py` | 真实吞吐 |
 | `reputation.json` / `reputation_cache.json` | `quality_check.py` | 信誉打分与缓存 |

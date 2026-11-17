@@ -64,8 +64,15 @@
 | 大陆全量 | `data/valid/all_cn.txt` | 全可达集，按大陆实测延迟升序 |
 | 综合最优 | `data/valid/all_good.txt` | CN 可达 + 有信誉记录 + 非高风险 + 有国内速度（≈XMB/s） |
 | 高端优质 | `data/valid/all_premium.txt` | CN 可达 + 信誉≥95 + 真实住宅 IP |
+| 抗连坐（proxyIP 入口视角） | `data/valid/all_balanced.txt` | 入口 /24 与 ASN 限额，仍是 `all.txt` 子集（全部已存活） |
 | 按国家/集合取用 | `data/valid/countries/<CC>/cn4.txt` 等 | 各目录 `all/ltd/v4/46/cn/rep/good/premium` 多件套 |
 | 程序化消费 | `data/valid/all.json`、`speed.json`、`index.json` | 结构化导出 + 速度/延迟索引 |
+ 
+> **主池 = edgetunnel proxyIP 可用集。** `data/valid/` 根目录的全部 `.txt`
+> 清单都只含「入口 `ip:port` 能完成 CF 边缘握手且非 1034」的节点，可直接作为
+> `proxyIP` 使用。**公开面以 IP 清单为主要发布物**：导出侧车、条件池报告、
+> 完整性 manifest 等诊断元数据只留在内部工作区（`data/quality/`），不随公开仓
+> 发布。
 
 未验证的全量去重清单（`data/download/all.txt`）属于采集层中间产物，不随公开仓
 发布；需要「尽量全」的公开清单请用 `data/valid/all.txt`。

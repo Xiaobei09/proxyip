@@ -445,10 +445,47 @@ pct 为窗口内存现天数 ÷ **窗口内实际有质量轮的日期数**（�
 `latency_ms`/`speed_mbps` 只取 note 中首个 `Nms`/`N.MB/s` token——
 `≈XMB/s` 大陆估算 token 因 `≈` 前缀无法经 `float()` 解析，`speed_mbps` 记 `null`。
 
+### 导出侧车（内部，不发布）
+
+R1940 起 `export_json.py` 把 `all.json` 的自证元数据（`schema_version` /
+`generated_at` / `source` / `source_sha256` / `source_lines` / `source_keys` /
+`entries`）写到**内部工作区** `data/quality/all_export_meta.json`，不随公开仓
+发布（用户 2026-11-17：「不要发布中间数据，也就是只发布 ip」）。
+
+⚠ **跨工作流滞后是设计内的**：`all.txt` 由 update / quality / china / exit 各链写，
+`all.json` 只由 stats 写（单一写入者，R456 基线实测 505/315 键双向不对称）。
+判断「发布面是否异常」应看内部侧车的 `generated_at` 与 `export_json.py --check`
+的 `stale`/`missing` 比例，而不是要求两份文件逐键相等。
+
+维护侧命令行（阈值可覆盖）：
+
+- `export_json.py --check` —— 只读比对，超阈值退出码 1。阈值：`--max-stale-ratio`
+  （默认 `0.10`）、`--max-missing-ratio`（默认 `0.05`）、`--max-age-hours`
+  （默认 `6`，侧车年龄）。
+- `conditional_check.py` —— 条件能力诊断，输出内部 `quality/conditional_cmno.json`，
+  **不发布**。`--max-age-hours`（候选鲜度，默认 `24`）；`--insecure` 仅用于
+  调试（跳过证书校验），生产必须保持默认的校验开启。
+
 ### `data/valid/all_diverse.txt`
 
 出口多样性视图：按实测出口 IP（缺省回退入口 /24 网段）分组，每组仅保留综合分最高一条，
 全表按分数降序。
+
+> ⚠ 该视图按**出口**去重，适合「出口覆盖」类分析；edgetunnel 消费的是**入口**
+> `ip:port`，出口只是该入口的上游，故主池的抗连坐视图见
+> `all_balanced.txt`（入口 ASN//24 限额）。
+
+### `data/valid/all_balanced.txt`
+
+入口网络均衡视图（R1942，edgetunnel proxyIP 视角）：从 `all.txt` 按综合分降序
+贪心取行，每 **入口 ASN** 至多 20 条、每 **入口 /24** 至多 8 条（阈值定义在
+`BALANCED_CAP_ASN` / `BALANCED_CAP_NET24`）。目的不是「挑更好」，而是避免同一
+机房/同一上游的节点把清单占满——它们同时被封的概率高度相关。
+
+- 仍是 `all.txt` 的**子集**：不新增任何未验证节点，全部可直接作为 `proxyIP`。
+- 入口 ASN 证据优先取 `quality/entry_geo.json`，缺失时回退
+  `quality/upstream_meta.json`；两者都没有的 IP **不按 ASN 分组**（只受 /24 约束）。
+- 与 `all_diverse.txt` 的轴不同：后者按出口去重，不与本文件互相替代。
 
 ### `data/quality/quality_meta.json`
 
