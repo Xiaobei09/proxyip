@@ -41,15 +41,13 @@
 
 </details>
 <details>
-<summary>🔍 出口与质量（点击展开 8 图）</summary>
+<summary>🔍 出口与质量（点击展开 6 图）</summary>
 
 ![Exit IP family](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_family.svg)
 ![Exit shapes](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_shapes.svg)
 ![Exit country top 15](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_exit.svg)
 ![Entry CC label audit](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_entry_audit.svg)
 ![IP type distribution](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_ip_type.svg)
-![IP source availability](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_source_avail.svg)
-![IP source stats](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_source_stats.svg)
 ![Reputation score](https://raw.githubusercontent.com/Xiaobei09/proxyip/main/data/output/chart_rep.svg)
 
 </details>
