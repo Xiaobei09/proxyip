@@ -10,13 +10,17 @@
 > 这四个目录是预期行为。
 >
 > **历史归档**：中间产物在私有工具仓的 `data` 分支只保留最新快照（便于快速
-> checkout）；每次提交还会把快照 tree **去掉缓存/断点**后以普通提交追加到
-> `data-archive` 分支，全部保留、无期限、不 force-push。保留文件的 blob/子树
-> 与 live 快照共享，不产生重复存储；`git log data-archive` 可回看每一轮证据
-> 状态。`valid/`、`output/` 是最终消费数据，公开仓普通历史已完整保留，私有
-> 归档不重复保存；`reputation_cache.json`、`exit_geo_cache.json`、`cmli.json`、
-> `entry_geo.json`、`china.partial.json` 属于缓存/单轮断点，只在 `data` 快照
-> 保留供热启动，不进入永久归档。
+> checkout）；每次提交还会把快照 tree **去掉缓存、滚动状态与派生件**后以普通
+> 提交追加到 `data-archive` 分支，全部保留、无期限、不 force-push。归档只收
+> 原始证据（`china.json`/`china.nodes.json`/`china.evidence.json`、
+> `exit_family.json`、`external_check.json`、`raw/` 等），保留文件的 blob/子树
+> 与 live 快照共享，不产生重复存储；`git log data-archive` 可回看每一轮证据。
+> `valid/`、`output/` 是最终消费数据，公开仓普通历史已完整保留，私有归档不
+> 重复保存；外部查询缓存（`reputation_cache`/`exit_geo_cache`/`exit_geo_multi`/
+> `ipinfo`/`entry_geo`/`cmli`）、滚动状态（`node_seen`/`uptime`/
+> `china.partial`/`cmno_candidates`）、派生判定与侧车（`reputation`/
+> `entry_audit`/`*_meta` 等），以及可由 `raw/` 快照重建的 `download/`、
+> `diff/` 只在 `data` 快照保留，不进入永久归档。
 
 契约与格式的权威定义见 [`../docs/data-spec.md`](../docs/data-spec.md)。本文档是
 浏览入口（“立体化”导航），只做索引与层级说明，不重复契约细节。

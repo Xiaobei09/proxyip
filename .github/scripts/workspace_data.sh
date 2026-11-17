@@ -52,17 +52,41 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DATA_DIR="$ROOT/data"
 DIRS=(quality raw download diff)
 
-# 永久归档排除项：纯缓存或可在本轮/下一轮重新生成的断点。live 快照 data 仍
-# 保留它们（checkout 热启动需要），只有 data-archive 不保存其历史版本。
-#   reputation_cache / exit_geo_cache：外部查询缓存（单文件可达 52MB/35MB）
-#   cmli / entry_geo：可选查询缓存
-#   china.partial：单轮增量 checkpoint，最终由 china.json 取代
+# 永久归档排除项：缓存、单轮断点、滚动状态，以及由其他数据/公开清单推出的
+# 派生件。live 快照 data 仍保留它们（checkout 热启动/当轮运行需要），只有
+# data-archive 不保存其逐轮历史。原则（用户 R1911/R1912）：
+#   保留 = 不可从其他归档数据或公开仓历史重建的原始证据；
+#   排除 = 可重查的缓存、可重建的状态、最终消费数据的派生物。
+# 目录前缀（download/diff）会展开为其中全部条目。
 ARCHIVE_EXCLUDES=(
+  # 外部查询缓存：可重查（reputation_cache 单文件曾达 52MB、exit_geo_cache 35MB）
   quality/reputation_cache.json
   quality/exit_geo_cache.json
-  quality/cmli.json
+  quality/exit_geo_multi.json
+  quality/ipinfo.json
   quality/entry_geo.json
+  quality/cmli.json
+  # 单轮断点 / 滚动状态：由归档快照或公开仓 valid 历史可重建
   quality/china.partial.json
+  quality/node_seen.json
+  quality/uptime.json
+  quality/cmno_candidates.json
+  # 由缓存/其他产物推出的派生判定、统计与发布侧车
+  quality/reputation.json
+  quality/entry_audit.json
+  quality/source_quality.json
+  quality/quality_meta.json
+  quality/good_meta.json
+  quality/all_export_meta.json
+  quality/premium_meta.json
+  quality/alert_state.json
+  quality/upstream_parse.json
+  # 已删除的遗留产物（R1918，快照不再写入但旧文件仍在）
+  quality/oc.json
+  # 下载切片（countries/ports/sets/all*）由 raw/ 完全推出；
+  # diff/ 由相邻 raw/ 快照求差即可重建（公开 valid/ 历史亦保留发布面）。
+  download
+  diff
 )
 
 log() { printf '%s\n' "$*"; }
@@ -267,21 +291,26 @@ checkout() {
   log "workspace data ready: $WORKSPACE"
 }
 
-# 从快照 tree 构造归档 tree：只删除缓存/断点路径，其余原样保留。
-# 用独立临时 index 操作，绝不碰 live 工作树；保留路径仍指向快照的同一 blob/
-# 子树对象，因此归档与 live 快照之间没有内容复制。
+# 从快照 tree 构造归档 tree：删除 ARCHIVE_EXCLUDES 命中的文件/目录前缀，
+# 其余原样保留。用独立临时 index 操作，绝不碰 live 工作树；保留路径仍指向
+# 快照的同一 blob/子树对象，因此归档与 live 快照之间没有内容复制。
 archive_tree() {
-  local commit_sha="$1" tmp index tree path
+  local commit_sha="$1" tmp index tree
   tmp="$(mktemp -d)"
   index="$tmp/index"
   if ! GIT_INDEX_FILE="$index" git_workspace read-tree "$commit_sha^{tree}"; then
     rm -rf "$tmp"
     return 1
   fi
-  for path in "${ARCHIVE_EXCLUDES[@]}"; do
-    GIT_INDEX_FILE="$index" git_workspace update-index \
-      --force-remove -- "$path" 2>/dev/null || true
-  done
+  # 先按 pathspec 枚举索引条目再批量删除：update-index 对目录参数静默无效，
+  # 不能直接把 download/diff 这类前缀传给它。
+  if ! GIT_INDEX_FILE="$index" git_workspace ls-files -z -- \
+      "${ARCHIVE_EXCLUDES[@]}" \
+      | GIT_INDEX_FILE="$index" git_workspace update-index \
+          --force-remove -z --stdin; then
+    rm -rf "$tmp"
+    return 1
+  fi
   if ! tree="$(GIT_INDEX_FILE="$index" git_workspace write-tree)"; then
     rm -rf "$tmp"
     return 1
@@ -290,14 +319,15 @@ archive_tree() {
   printf '%s' "$tree"
 }
 
-# 归档：把刚推上 live 分支的快照 tree 去掉缓存/断点后追加到独立分支
+# 归档：把刚推上 live 分支的快照 tree 去掉缓存/断点/派生件后追加到独立分支
 # （普通提交链）。
 #
-# 「全部保留」与「减少重复」同时成立靠两件事：① 语义上去掉缓存/断点等可由
-# 其他数据推出的中间态（见 ARCHIVE_EXCLUDES）；② git 对象共享——保留文件
-# 直接复用快照的 blob/子树，每轮归档只新增一个 commit 对象（以及本轮真正
-# 变过的 blob，由 git 打包时做版本间 delta）。归档分支只做 fast-forward、
-# 永不 force、永不清理，历史因此完整可追溯。
+# 「全部保留」与「减少重复」同时成立靠两件事：① 语义上去掉缓存、滚动状态与
+# 可由其他数据推出的中间态（见 ARCHIVE_EXCLUDES；valid/output 本就不在
+# 工作区树里，由公开仓普通历史承载）；② git 对象共享——保留文件直接复用
+# 快照的 blob/子树，每轮归档只新增一个 commit 对象（以及本轮真正变过的
+# blob，由 git 打包时做版本间 delta）。归档分支只做 fast-forward、永不
+# force、永不清理，历史因此完整可追溯。
 # 归档是旁路：失败只告警，live 快照已落地，下一轮证据树会再次包含本轮状态。
 archive_snapshot() {
   local commit_sha="$1" msg="$2"
