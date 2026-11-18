@@ -56,76 +56,160 @@ concurrency:
   group: china-check
   cancel-in-progress: false
 
+env:
+  # R352：**本流水线不再需要任何人去签发任何 key 或 token**。原有的两个
+  # secret 注入已删除，依据是取证而非猜测：
+  #   · 必填 token 的那个源已整源下线——它是注册表里唯一凭证必填的源，
+  #     且 ``CI_OVERRIDES`` 从未收录它 ⇒ 产线从未派发，删除零数据损失。
+  #   · 剩下的可选 api key 喂给的是 ``auth: "optional Bearer"`` 的源，
+  #     **无 key 亦正常工作**（实测新鲜键 7/10 出数），从来不是必需品；
+  #     留着这行只会让人误以为「上线前得先去申请一个 key」。
+  # 两个 secret 在本仓从未存在过（旧值恒为空），故此改动零行为变化。
+  #
+  # CI 必须真实检出工具目录；缺失即失败，禁止静默写成空源证据。
+  PROXYIP_REQUIRE_BUNDLE: "1"
+  # 公开仓单 job 硬上限 6h；主探测最多占 4.5h，预留 1h 给回退与提交。
+  CN_PRIMARY_TIMEOUT_SECONDS: 16200
+  CN_FALLBACK_TIMEOUT_SECONDS: 3600
+  CN_FALLBACK_LIMIT: 300
+  # R1788：主探测内部软截止 4h。实测 run 40992331706 主探测 03:26 起、
+  # 07:56 撞 16,200s 被 SIGTERM，随后又跑 ~56min 回退才落盘（单轮 5h33m）。
+  # 到点后跳过剩余注册表槽位/批量阶段，让 merge/write 在硬超时前完成：
+  # 少测最后一段，但提前发布并让下一轮更早开始。0/缺省 = 关闭。
+  CN_SOFT_DEADLINE_SECONDS: 14400
+  # R329：主探测采样上限。此前是 ``--limit 0``（全量 17,242 键），而
+  # ``write_json(CHINA_FILE)`` 只在 ``main()`` 末尾（tools/scripts/china_check.py
+  # :2677）执行 ⇒ 撞 16200s 上限被 SIGTERM 杀死时，**整轮实测成果 100%
+  # 丢弃**，只有回退那 300 条落盘。run 36304900938 实录：L1 sweep 10,968.1s
+  # （3.05h，独占预算 67.7%）+ 10 个源 review 5,160s，止于第 10 个源，距
+  # 上限仅剩 68s，yml 里另 ~20 个源**从未被轮到**。
+  # 预算算术（R333 起用沙箱；**R443 起改用真实 CI run，R593 换用最新 run**；
+  # provenance：run 38681561758（``--limit 7000``、退出码 0、探测步 8,046s），
+  # 锁见 tests 里 R329/R333 两条锁与
+  # ``test_ci_budget_constants_match_real_run_r593``）：
+  #   实测逐项：
+  #     L1 sweep           3,843.6s （probe 7,000 键 ⇒ **0.5809 s/键**；
+  #                         实测为 0.5491，常数取更高者＝更严）
+  #     carrier probe      3,731 targets（candidates=4000；批量族本轮全灭）
+  #     batch-source       3,848.2s 累计（含 carrier ⇒ carrier 仅 4.6s）
+  #     逐源 review 合计   4,175.3s（30 个块全部拿到 targets；口径 = 末个
+  #                         review 累计 8,023.5s − batch 累计 3,848.2s）
+  #   ⇒ 与 R443 标定（L1 2,303.1s / 0.5809 s/键；逐源 1,485.5s）相比，逐源
+  #     一项**又被低估 2.81 倍**——低估方向朝危险侧（把开销算小 ⇒ 真超时前
+  #     守卫先变绿）。R593 前的模型口径占用率 34.3% 对实测 **49.5%**：
+  #     也就是说那段时间守卫是**假绿**的。第二次偏差出现在「守卫已校准过」
+  #     之后 ⇒ 一次性校准不成立，每次配置变更后的首轮都必须重标。
+  #   ⇒ R329 当初的算术（0.636×N + 26 源×516s ⇒ 15,960s / 98.5%）
+  #     **高估 7.3 倍**，两个错因：逐源成本 ∝ 该源拿到的 targets 而非
+  #     源个数（targets 由「前面的源还剩多少键没覆盖」决定，与该源自己的
+  #     --cn-limit 无关）；L1 单键成本随样本量下降（0.636@17242 vs
+  #     0.5809@4000）⇒ 均不可线性外推。
+  #   ★``… review: N.Ns`` 的 N.NN 是**累计已耗**（源码用单个
+  #     ``time.monotonic() - _t0``），不是本源耗时 ⇒ 逐源成本只能取
+  #     **相邻差**；且单源 s/target 实测跨度 0.065–4.347（67×），
+  #     **不可按源数或键数线性外推**。
+  # 取 6500（R593，由 R518 的 7000 收回）：逐源常数低估 2.81 倍后，
+  #   占用率锁（< 50%）对 7000 已不成立（(4,070.9+4,175.3)/16,200 = 50.9%）。
+  #   收回 500 键后：非逐源项 = 6500×0.5809+4.6 = 3,780.5s，余量 12,419.5s
+  #   ＝ 逐源实测 4,175.3s 的 **2.97 倍**（守卫要求 ≥2.9；该倍数的**绝对
+  #   要求 12,108s 比 R443 的 11,884s 更严**，数值下降只是重新表达），
+  #   总占用 (3,780.5+4,175.3)/16,200 = **49.1% < 50%** ⇒ 两条锁均绿。
+  #   ★覆盖面不降：6500×(1−25% hold)=4,875 键/轮，全池 ~20,680 ⇒ 约 4.2 轮
+  #   测完；按实测节奏 ~4.24–4.6 轮/天 ⇒ 约 21–24h，仍在 24h 窗口内。
+  # **覆盖面不降**：样本外的键由 ``compute_fallback_merge`` 按上一轮
+  # verdict 兜底沿用（池仍 21,877，MIN_CN_POOL=10000 硬约束不受影响），
+  # 而兜底键 ``streak`` 被强制归 0、不虚报连续可达。
+  # **最坏情况为零损失**：若仍撞线则回退照旧接管，行为与改动前完全一致。
+  CN_PRIMARY_LIMIT: 6500
+  # R1975：发布步的补测上限。分片 sidecar 已覆盖全池时只补测
+  # 少量高优先级键；无 sidecar 时回退到 CN_PRIMARY_LIMIT 全量。
+  CN_PUBLISH_LIMIT: "300"
+
 jobs:
+  # R1975：3 个 runner 并行探测同一池的互补切片。分片只看不写：
+  # 每片输出一个 sidecar artifact（[runner.temp]/cn-shards/），绝不提交
+  # china.json / all_cn*，也不污染仓库工作树。
+  # 发布（含 CN 清单单一写者身份）仍由下面的 check job 独占。
+  probe:
+    name: CN shard ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      # 单片失败不能让另外两片的成果一起丢；check 仍会合并可用 sidecar。
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # 测试只在 check 发布 job 跑一次：分片 job 只负责探测，避免同一套
+      # 测试在 3 个 runner 上重复执行；代码/参数错误会让探测步自身快速失败。
+      - name: Probe CN shard ${{ matrix.shard }}
+        id: shard
+        run: |
+          set +e
+          timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
+            python tools/scripts/china_check.py \
+            --source data/valid/all.txt --limit "${CN_PRIMARY_LIMIT}" \
+            --cn-shard "${{ matrix.shard }}/3" \
+            --cn-shard-out "${RUNNER_TEMP}/cn-shards/china.shard.${{ matrix.shard }}.json" \
+            --cn-cache-ttl 64800
+          rc=$?
+          set -e
+          # shard 模式下的周期 checkpoint 只含本片实测条目（run_measurements
+          # 不再合并 prev）。撞硬超时时把它转成正式的 shard sidecar，避免
+          # 「跑了 4h 却一条没上传」——上一轮 R946 的教训在分片上的同型应用。
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; then
+            echo "::warning::CN shard ${{ matrix.shard }} 撞 ${CN_PRIMARY_TIMEOUT_SECONDS}s 上限；保留已完成的部分"
+            mkdir -p "${RUNNER_TEMP}/cn-shards"
+            if [ -f data/quality/china.partial.json ]; then
+              cp data/quality/china.partial.json \
+                "${RUNNER_TEMP}/cn-shards/china.shard.${{ matrix.shard }}.json"
+            fi
+            if [ -s "${RUNNER_TEMP}/cn-shards/china.shard.${{ matrix.shard }}.json" ]; then
+              exit 0
+            fi
+          fi
+          exit "$rc"
+
+      - name: Upload CN shard sidecar
+        # 成功/超时/普通失败都尝试上传：check 侧按「有几片用几片」合并，
+        # 缺失的分片由发布轮补测或 fallback 兜底。
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cn-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/cn-shards/china.shard.${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 1
+
   check:
     name: Mainland-China reachability
+    needs: probe
+    # 某片失败仍要发布可用成果；只有整个 run 被取消才跳过。
+    if: always() && needs.probe.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    env:
-      # R352：**本流水线不再需要任何人去签发任何 key 或 token**。原有的两个
-      # secret 注入已删除，依据是取证而非猜测：
-      #   · 必填 token 的那个源已整源下线——它是注册表里唯一凭证必填的源，
-      #     且 ``CI_OVERRIDES`` 从未收录它 ⇒ 产线从未派发，删除零数据损失。
-      #   · 剩下的可选 api key 喂给的是 ``auth: "optional Bearer"`` 的源，
-      #     **无 key 亦正常工作**（实测新鲜键 7/10 出数），从来不是必需品；
-      #     留着这行只会让人误以为「上线前得先去申请一个 key」。
-      # 两个 secret 在本仓从未存在过（旧值恒为空），故此改动零行为变化。
-      #
-      # CI 必须真实检出工具目录；缺失即失败，禁止静默写成空源证据。
-      PROXYIP_REQUIRE_BUNDLE: "1"
-      # 公开仓单 job 硬上限 6h；主探测最多占 4.5h，预留 1h 给回退与提交。
-      CN_PRIMARY_TIMEOUT_SECONDS: 16200
-      CN_FALLBACK_TIMEOUT_SECONDS: 3600
-      CN_FALLBACK_LIMIT: 300
-      # R1788：主探测内部软截止 4h。实测 run 40992331706 主探测 03:26 起、
-      # 07:56 撞 16,200s 被 SIGTERM，随后又跑 ~56min 回退才落盘（单轮 5h33m）。
-      # 到点后跳过剩余注册表槽位/批量阶段，让 merge/write 在硬超时前完成：
-      # 少测最后一段，但提前发布并让下一轮更早开始。0/缺省 = 关闭。
-      CN_SOFT_DEADLINE_SECONDS: 14400
-      # R329：主探测采样上限。此前是 ``--limit 0``（全量 17,242 键），而
-      # ``write_json(CHINA_FILE)`` 只在 ``main()`` 末尾（tools/scripts/china_check.py
-      # :2677）执行 ⇒ 撞 16200s 上限被 SIGTERM 杀死时，**整轮实测成果 100%
-      # 丢弃**，只有回退那 300 条落盘。run 36304900938 实录：L1 sweep 10,968.1s
-      # （3.05h，独占预算 67.7%）+ 10 个源 review 5,160s，止于第 10 个源，距
-      # 上限仅剩 68s，yml 里另 ~20 个源**从未被轮到**。
-      # 预算算术（R333 起用沙箱；**R443 起改用真实 CI run，R593 换用最新 run**；
-      # provenance：run 38681561758（``--limit 7000``、退出码 0、探测步 8,046s），
-      # 锁见 tests 里 R329/R333 两条锁与
-      # ``test_ci_budget_constants_match_real_run_r593``）：
-      #   实测逐项：
-      #     L1 sweep           3,843.6s （probe 7,000 键 ⇒ **0.5809 s/键**；
-      #                         实测为 0.5491，常数取更高者＝更严）
-      #     carrier probe      3,731 targets（candidates=4000；批量族本轮全灭）
-      #     batch-source       3,848.2s 累计（含 carrier ⇒ carrier 仅 4.6s）
-      #     逐源 review 合计   4,175.3s（30 个块全部拿到 targets；口径 = 末个
-      #                         review 累计 8,023.5s − batch 累计 3,848.2s）
-      #   ⇒ 与 R443 标定（L1 2,303.1s / 0.5809 s/键；逐源 1,485.5s）相比，逐源
-      #     一项**又被低估 2.81 倍**——低估方向朝危险侧（把开销算小 ⇒ 真超时前
-      #     守卫先变绿）。R593 前的模型口径占用率 34.3% 对实测 **49.5%**：
-      #     也就是说那段时间守卫是**假绿**的。第二次偏差出现在「守卫已校准过」
-      #     之后 ⇒ 一次性校准不成立，每次配置变更后的首轮都必须重标。
-      #   ⇒ R329 当初的算术（0.636×N + 26 源×516s ⇒ 15,960s / 98.5%）
-      #     **高估 7.3 倍**，两个错因：逐源成本 ∝ 该源拿到的 targets 而非
-      #     源个数（targets 由「前面的源还剩多少键没覆盖」决定，与该源自己的
-      #     --cn-limit 无关）；L1 单键成本随样本量下降（0.636@17242 vs
-      #     0.5809@4000）⇒ 均不可线性外推。
-      #   ★``… review: N.Ns`` 的 N.NN 是**累计已耗**（源码用单个
-      #     ``time.monotonic() - _t0``），不是本源耗时 ⇒ 逐源成本只能取
-      #     **相邻差**；且单源 s/target 实测跨度 0.065–4.347（67×），
-      #     **不可按源数或键数线性外推**。
-      # 取 6500（R593，由 R518 的 7000 收回）：逐源常数低估 2.81 倍后，
-      #   占用率锁（< 50%）对 7000 已不成立（(4,070.9+4,175.3)/16,200 = 50.9%）。
-      #   收回 500 键后：非逐源项 = 6500×0.5809+4.6 = 3,780.5s，余量 12,419.5s
-      #   ＝ 逐源实测 4,175.3s 的 **2.97 倍**（守卫要求 ≥2.9；该倍数的**绝对
-      #   要求 12,108s 比 R443 的 11,884s 更严**，数值下降只是重新表达），
-      #   总占用 (3,780.5+4,175.3)/16,200 = **49.1% < 50%** ⇒ 两条锁均绿。
-      #   ★覆盖面不降：6500×(1−25% hold)=4,875 键/轮，全池 ~20,680 ⇒ 约 4.2 轮
-      #   测完；按实测节奏 ~4.24–4.6 轮/天 ⇒ 约 21–24h，仍在 24h 窗口内。
-      # **覆盖面不降**：样本外的键由 ``compute_fallback_merge`` 按上一轮
-      # verdict 兜底沿用（池仍 21,877，MIN_CN_POOL=10000 硬约束不受影响），
-      # 而兜底键 ``streak`` 被强制归 0、不虚报连续可达。
-      # **最坏情况为零损失**：若仍撞线则回退照旧接管，行为与改动前完全一致。
-      CN_PRIMARY_LIMIT: 6500
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -222,6 +306,18 @@ jobs:
           python tools/scripts/run_tests_parallel.py --graded \
             --discover tools/tests_pipeline --discover tools/tests --top .
 
+      - name: Download CN shard sidecars
+        # R1975：probe matrix job 只上传 artifact，不提交任何文件；本 job 是
+        # 唯一发布者。没有 artifact（首轮/全失败）时本步失败但继续，下面的
+        # shell 会按无 sidecar 回退到全量探测。
+        if: steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cn-shard-*
+          path: ${{ runner.temp }}/cn-shards
+          merge-multiple: true
+
       - name: China reachability check
         id: china
         if: steps.gate.outputs.skip != 'true'
@@ -281,20 +377,39 @@ jobs:
           # （实测 2026-11-16 11:21 轮 ``expiring 3/3``，14:09→15:11
           # sampled 11,227→9,434）。18h = 24h − 6h 临期余量：缓存键在到期前
           # 至少还有一个 R1790 临期窗口，下一轮可被 expiring 桶优先复测。
+          # R1975：全池 13.5k 键已超过单进程 4.5h 预算能测的 6.5k。探测工作
+          # 由同工作流的 ``probe`` matrix job（3 个 runner）按稳定哈希分片完成，
+          # 每片只写自己的 sidecar（``cn-shards/*.json``），不写 china.json/
+          # all_cn*。本 job 是**唯一发布者**：下载全部 sidecar，把它们当作
+          # 本轮已实测条目并入 entries；只对 sidecar 未覆盖的键补测
+          # ``CN_PUBLISH_LIMIT`` 条（上限 300），然后一次性生成 CN 清单。
+          #
+          # 无 sidecar（首轮/分片全失败）时必须退回单进程全量探测，否则
+          # 只测 300 条会让发布视图大面积掉回 fallback。判断放在 shell 里，
+          # 让 ``test_ci_timeout_branch_runs_fallback`` 仍能在无 sidecar 的
+          # 测试环境看到 ``--limit ${CN_PRIMARY_LIMIT}``。
+          SHARD_DIR="${RUNNER_TEMP}/cn-shards"
+          LIMIT="${CN_PUBLISH_LIMIT:-${CN_PRIMARY_LIMIT}}"
+          if ! compgen -G "$SHARD_DIR/*.json" >/dev/null 2>&1; then
+            LIMIT="${CN_PRIMARY_LIMIT}"
+            echo "::warning::无 CN 分片 sidecar；本轮退回 ${LIMIT} 键单进程全量探测"
+          fi
           timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
             python tools/scripts/china_check.py \
-            --source data/valid/all.txt --limit "${CN_PRIMARY_LIMIT}" \
+            --source data/valid/all.txt --limit "$LIMIT" \
+            --cn-shard-in "$SHARD_DIR" \
             --cn-cache-ttl 64800
           rc=$?
           set -e
           if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$rc" -eq 143 ]; then
             echo "mode=fallback" >> "$GITHUB_OUTPUT"
-            echo "::warning::主 CN 探测达到 ${CN_PRIMARY_TIMEOUT_SECONDS}s 上限；转入 ${CN_FALLBACK_LIMIT} 条有界回退"
+            echo "::warning::主 CN 发布轮达到 ${CN_PRIMARY_TIMEOUT_SECONDS}s 上限；转入 ${CN_FALLBACK_LIMIT} 条有界回退"
             find data -type f -name '*.tmp' -newer .jobstart -delete 2>/dev/null || true
             timeout --signal=TERM --kill-after=60s "${CN_FALLBACK_TIMEOUT_SECONDS}s" \
               python tools/scripts/china_check.py \
               --source data/valid/all.txt \
               --limit "${CN_FALLBACK_LIMIT}" \
+              --cn-shard-in "$SHARD_DIR" \
               --cn-cache-ttl 64800
           else
             echo "mode=full" >> "$GITHUB_OUTPUT"
