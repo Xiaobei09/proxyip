@@ -661,6 +661,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 | `lines_by_carrier` | 与 `lines` 成对的逐运营商线路证据 `{运营商: {线路: 票数}}`，运营商只含三网；某运营商无路由证据时不写该键 |
 | `lines_at` | `lines`/`lines_by_carrier` 的证据账龄戳（epoch）；跨轮携带线路证据时保留原始观测时刻，读侧据此执行 24h TTL，超期不携带。无线路证据则不写 |
 | `lines_tried_at` | 最近一次向该键派发**线路追踪源**（MTR/traceroute）的时刻（epoch）；仅用于补缺口候选的公平轮转（全 timeout 的键试过一次即排到队尾），**不表示**线路证据新鲜度，也不参与 `lines` 的 TTL。旧产物缺省；未派发过线路源的键不写 |
+| `sources_carried` | 本轮有效点 <11 且无新鲜 `fail` 时，从上一轮 24h TTL 内携带的源行数（int）；携带行在 `sources` 内带 `carried=true` / `carried_at`，逐源轮次统计会跳过它们。无携带不写 |
+| `sources_carried_at` | 上述携带行对应的上一轮 `checked_at`（epoch）；仅在有携带行且时间戳有效时写，用于核对携带账龄 |
+| `fresh_fails` | 本轮新鲜失败源数快照（int）；仅携带键写 `0`，避免携带行里的旧 `fail` 阻断「本轮只有 error、上一轮可达」的 fallback 判定 |
 
 **条目级字段只增不改**：上表为该产物**已发布条目字段的全集**——新增字段必须同时更新本表与产出代码；未列出的键消费方应按未知键自动降级、不参与判据。
 
