@@ -166,6 +166,13 @@ jobs:
       # 测试在 3 个 runner 上重复执行；代码/参数错误会让探测步自身快速失败。
       - name: Probe CN shard ${{ matrix.shard }}
         id: shard
+        env:
+          # R1976：轮末补点必须跑在**分片** runner 里，才会进 sidecar。
+          # 各片 entries 只含本片键；发布轮把 sidecar 键排除在补测候选外，
+          # 只对未覆盖的 300 条补测，补不到这 1,773 个低点键。这里用本片
+          # 本轮的健康度把这批键补到 11 点以上，补点行随 sidecar 上传。
+          CN_CARRIER_REPAIR_LIMIT: "2000"
+          CN_CARRIER_REPAIR_ROUNDS: "2"
         run: |
           set +e
           timeout --signal=TERM --kill-after=120s "${CN_PRIMARY_TIMEOUT_SECONDS}s" \
@@ -359,8 +366,8 @@ jobs:
           # uncertain 相对上一轮上升，删除本行即回退到代码默认 2。
           CN_REGISTRY_LANES: "3"
           # R1976：轮末补点。第一遍 carrier 分派每键只投一家、按上一轮
-          # 健康度选源；本轮死源（kkce/ce8/celuo/jkapi/itdog batch 等）
-          # 分到的键只拿到 0 点 error 行。三分片合并实测仍有 1,773 键 <11
+          # 健康度选源；本轮若干批量源整轮 0 ok，分到的键只拿到 0 点
+          # error 行。三分片合并实测仍有 1,773 键 <11
           # 有效点（13.0%），其中 590 可达。补点只用**本轮** tier-2 源，
           # 每源花剩余配额（不突破 limit），最多 2 轮、总 2,000 靶。
           # 既有单测/本地默认 0=关闭；置 0 即回退。
