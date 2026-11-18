@@ -36,6 +36,32 @@ if [ "$WORKSPACE_ACTIVE" = 1 ]; then
   EXCL='^(data/(raw|diff|quality|download)/)'
 fi
 
+# R1974：CN 清单（``all_cn``/``all_cn_http``/``all_cn_stable``）是
+# **china-check 单一写入者**的产物。exit-family/annotate 等长任务会在启动
+# 快照上重写它们并刷新 mtime，``find -newer`` 于是把它当成「本 job 产出」
+# 提交——实测 2026-11-18 13:12 的 exit-family 提交（96eb63e）用 11:30 的旧
+# 快照覆盖了 12:41 China check 刚发布的 7,812/5,308/3,323 行（其中 2,378 个
+# 键已不在存活池）。默认拒绝：只有显式声明
+# ``COMMIT_DATA_CN_WRITER=china-check`` 的提交步才可暂存这三份文件；其余
+# 作业把它们从产出集中剔除，随后 align_foreign 会从 origin 恢复最新版本。
+CN_OWNER="china-check"
+CN_WRITER="${COMMIT_DATA_CN_WRITER:-}"
+
+cn_owned() {
+  case "$1" in
+    data/valid/all_cn.txt|data/valid/all_cn_http.txt|data/valid/all_cn_stable.txt)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+drop_cn_owned() {
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    cn_owned "$f" || printf '%s\n' "$f"
+  done
+}
+
 # 无 .jobstart 标记 = 前置 touch 步缺失（改 workflow 时的常见失误）→ 明明有
 # 产出也会被 find -newer 静默吞掉并 no-op，数据永远不会提交。显式 fail-fast。
 if [ ! -e "$MARKER" ]; then
@@ -69,6 +95,18 @@ DELETED=$(
     | grep -Ev "$EXCL" \
     | while IFS= read -r f; do [ ! -e "$f" ] && printf '%s\n' "$f"; done
 )
+if [ "$CN_WRITER" != "$CN_OWNER" ]; then
+  CN_DROPPED=$(
+    { printf '%s\n' "$CHANGED"; printf '%s\n' "$DELETED"; } | sed '/^$/d' \
+      | while IFS= read -r f; do cn_owned "$f" && printf '%s\n' "$f"; done
+  )
+  if [ -n "$CN_DROPPED" ]; then
+    echo "CN lists are single-writer ($CN_OWNER); preserving origin:" \
+      "$(printf '%s' "$CN_DROPPED" | tr '\n' ' ')"
+  fi
+  CHANGED=$(printf '%s\n' "$CHANGED" | drop_cn_owned)
+  DELETED=$(printf '%s\n' "$DELETED" | drop_cn_owned)
+fi
 PRODUCED=$(
   { printf '%s\n' "$CHANGED"; printf '%s\n' "$DELETED"; } | sed '/^$/d' | sort -u
 )

@@ -370,6 +370,12 @@ jobs:
         # **真实探测失败仍判 `failure` ⇒ 依然拦住提交**，门禁未被弱化；
         # 且 job 整体仍因 `Run tests` 红而 failed ⇒ 红信号照常上报。
         if: always() && steps.gate.outputs.skip != 'true' && steps.china.outcome != 'failure' && steps.annotate.outcome == 'success' && steps.verify.outcome == 'success' && steps.verify_cn.outcome != 'failure'
+        # R1974：本链是 ``all_cn``/``all_cn_http``/``all_cn_stable`` 的单一
+        # 写入者。别的长任务（exit-family 等）跑 annotate_classify 时也会重写
+        # 这三份文件，但内容基于其启动快照；commit_data.sh 默认拒绝暂存，
+        # 只有这里显式声明身份才放行。
+        env:
+          COMMIT_DATA_CN_WRITER: china-check
         run: |
           bash .github/scripts/commit_data.sh "chore(data): reachability check ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
 
