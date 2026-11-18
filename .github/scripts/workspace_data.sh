@@ -2,11 +2,13 @@
 # 中间数据工作区同步：把 data/{quality,raw,download,diff} 放到只读工作区的
 # data 分支，公开仓只保留用户可直接消费的 data/{valid,output}。
 #
-# 工作区分支内容用**真名**：工作区不对外，真名才是人能读的形态。运行脚本仍以
-# 不透明 id 做跨轮 join，故 checkout 时把真名**密封**回 id（seal），commit 时
-# 把 id **反解**成真名（unseal）。翻译由 tools/scripts/workspace_alias.py
-# 完成：seal 只看真正的来自身份位置（避免把 US/proxy 这类撞名值误封），
-# unseal 无上下文；两侧都归一到紧凑 JSON，保证空跑不产生 diff。
+# 工作区分支内容用**真名**：工作区不对外，真名才是人能读的形态。下载源/
+# 信誉源脚本仍以不透明 id（dsrc_/rsrc_）做跨轮 join，故 checkout 时把真名
+# **密封**回 id（seal），commit 时把 id **反解**成真名（unseal）。翻译由
+# tools/scripts/workspace_alias.py 完成：seal 只看真正的来自身份位置（避免
+# 把 US/proxy 这类撞名值误封），unseal 无上下文；两侧都归一到紧凑 JSON，
+# 保证空跑不产生 diff。CN 源 id（src_*）已于 R1973 整层删除，china.json/
+# china.nodes.json/alert_state.json 两个方向都保持真名。
 #
 # 为什么 live 分支用「快照」：quality/ 里的缓存单文件可达 60MB
 # （reputation_cache.json），checkout 只需要最新状态，普通提交链会让每次
@@ -275,8 +277,8 @@ checkout() {
     ln -sfn "$WORKSPACE/$d" "$link"
   done
 
-  # 分支存真名，运行脚本要 id：checkout 后立刻 seal。若翻译器存在却失败，
-  # 说明插件不可用——继续跑会让脚本拿到真名、破坏跨文件 join，
+  # 分支存真名，dsrc_/rsrc_ 运行脚本要 id：checkout 后立刻 seal。若翻译器
+  # 存在却失败，说明插件不可用——继续跑会让脚本拿到真名、破坏跨文件 join，
   # 故这一步是硬失败（而不是像旧 names/ 视图那样只告警）。
   if ! run_alias seal; then
     log "::error::workspace data seal 失败；拒绝以真名运行脚本" >&2
@@ -398,9 +400,9 @@ commit() {
   # 直接 commit」的用法（step 自己带了 TOOLS_TOKEN 时）。
   configure_auth
 
-  # 运行期写的是 id；推上前先反解成真名（分支的唯一表示）。unseal 失败只
-  # 告警、继续提交：宁可先落一份 id 形态的数据，也不能丢掉本轮产出；下一轮
-  # checkout/commit 会把它重新归一。
+  # 运行期写的是 dsrc_/rsrc_ id；推上前先反解成真名（分支的唯一表示）。
+  # unseal 失败只告警、继续提交：宁可先落一份 id 形态的数据，也不能丢掉
+  # 本轮产出；下一轮 checkout/commit 会把它重新归一。
   if ! run_alias unseal; then
     log "::warning::workspace data unseal 失败；本轮将以不透明 id 提交" >&2
   fi

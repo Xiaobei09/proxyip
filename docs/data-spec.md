@@ -677,7 +677,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 
 顶层另含两个 **additive** 键（读侧对未知键自动降级，不参与判据）：
 
-- `isp_ms_sources` — 逐源 per-ISP 归属记账（键为不透明 `src_*` id）：`ran`＝该源出现过的键数（**下界**，含跨轮携带，只用于阈值/排序），`made`＝其中产出**可信带内** `isp_ms`（R699：非 bool、有限、>2.0ms 噪声带且 ≤1000ms；此前为宽松的 `v > 0`）的键数。R701 起，CN 链 stderr 的「G01 批量产出自证」核算与「`isp_ms` 零产出源」告警（`isp_ms_zero_yield_sources`）**共用同一谓词**——此前两者仍留宽松 `v > 0`，会把 >1000ms（实测最长 6477ms 的 SYN 重传）/≤噪声带的伪读数记成「有产出」，使零产出告警**漏报**真零产出源。R701 起每条另带 `capable` 能力位（通道 ∈ {tcping,http} 且未被注册表标为结构性不产）：把「结构上不产 `isp_ms`」（ping/trace/ssl/scan/status/dns，单源实测 `ran` 达 4788）与「该产却全灭」在**产物内**分开，看门狗据此另算**能力源子集**的真浪费（实测基线 capable `ran` 13014 / `made` 6216＝47.8% 产出率、零产出派工 52.2%，远低于全源视角），只在能力源几乎全灭（≥80%）时告警；能力位**缺席**的旧产物自动跳过（fail-open）。看门狗据此监控 per-ISP 读数**供给**：实测基线 ran 15918 / made 4080（25.6%），38 个 `ran>0` 却零产出的源吃掉 68.6% 派工——产出率 <10% 或零产出派工占比 ≥90% 时告警。R703 起该证据**回流到下发侧**：CN 链下一轮把「capable 且上一轮 `ran ≥ 200` 却零读数」的源配额钳到哨兵 60（不归零，恢复可自证），在 stderr 印 `dispatch capped to 60 (R703: …)`；语义不变、纯省时——单轮墙钟缩短即每日轮次增加（CN 链一轮跑完自派发下一轮）。
+- `isp_ms_sources` — 逐源 per-ISP 归属记账（键为注册表源名；R1973 起源 id 层已删除，且该文件只在私有 `quality/` 数据分支可见，公开产物不含源标识）：`ran`＝该源出现过的键数（**下界**，含跨轮携带，只用于阈值/排序），`made`＝其中产出**可信带内** `isp_ms`（R699：非 bool、有限、>2.0ms 噪声带且 ≤1000ms；此前为宽松的 `v > 0`）的键数。R701 起，CN 链 stderr 的「G01 批量产出自证」核算与「`isp_ms` 零产出源」告警（`isp_ms_zero_yield_sources`）**共用同一谓词**——此前两者仍留宽松 `v > 0`，会把 >1000ms（实测最长 6477ms 的 SYN 重传）/≤噪声带的伪读数记成「有产出」，使零产出告警**漏报**真零产出源。R701 起每条另带 `capable` 能力位（通道 ∈ {tcping,http} 且未被注册表标为结构性不产）：把「结构上不产 `isp_ms`」（ping/trace/ssl/scan/status/dns，单源实测 `ran` 达 4788）与「该产却全灭」在**产物内**分开，看门狗据此另算**能力源子集**的真浪费（实测基线 capable `ran` 13014 / `made` 6216＝47.8% 产出率、零产出派工 52.2%，远低于全源视角），只在能力源几乎全灭（≥80%）时告警；能力位**缺席**的旧产物自动跳过（fail-open）。看门狗据此监控 per-ISP 读数**供给**：实测基线 ran 15918 / made 4080（25.6%），38 个 `ran>0` 却零产出的源吃掉 68.6% 派工——产出率 <10% 或零产出派工占比 ≥90% 时告警。R703 起该证据**回流到下发侧**：CN 链下一轮把「capable 且上一轮 `ran ≥ 200` 却零读数」的源配额钳到哨兵 60（不归零，恢复可自证），在 stderr 印 `dispatch capped to 60 (R703: …)`；语义不变、纯省时——单轮墙钟缩短即每日轮次增加（CN 链一轮跑完自派发下一轮）。
 - `meta` — **数据新鲜度/覆盖可见性**快照（`schema: "freshness-coverage/v1"`）：
 
   | 子键 | 含义 |
@@ -715,8 +715,10 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 > **运行时 sidecar（非发布契约）**：China 主探测的
 > `data/quality/china.partial.json` 是 R946 增量 checkpoint，不是稳定产物；
 > 取消/中断轮可能经 `commit_data.sh` 强制提交以支持跨轮恢复。其条目必须已
-> 归一化、带 `checked_at`，且 `sources`/`basis`/顶层源键均已封存为不透明
-> `src_*`（R766/R767/R770）；写入侧只保留带 `sources` 的完整记录，缺
+> 归一化、带 `checked_at`，且 `sources`/`basis` 的键直接使用注册表源名。
+> R1973 起 CN 源 id 层（`src_*`）整层删除——调查确认公开数据从未包含该
+> 族 id；sidecar 与 `china.json` 一样只落私有工作区 `data` 分支，公开仓
+> 不提交 `quality/`。写入侧只保留带 `sources` 的完整记录，缺
 > `sources` 的半记录/旧最终记录不会进入 sidecar，只有全 dict 的裸源表
 > 才归一（R771）；从 `prev` 合并的条目还必须有 `checked_at`，只有
 > `sources` 而无 `checked_at` 同样不写入（R772）；`sources` 的每个值
@@ -739,7 +741,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 | `keys` | 账本键数（= `proxies` 长度） |
 | `with_nodes` | 其中带逐节点明细的键数（运行时明细或固定点目录兜底） |
 | `proxies` | `ip:port#国家` → 证据行 |
-| `catalog` | **仅当**固定点目录被用于兜底时出现：`{源不透明 id: [节点元数据]}`；卡片据此补齐地点/提供商/运营商 |
+| `catalog` | **仅当**固定点目录被用于兜底时出现：`{源名: [节点元数据]}`；卡片据此补齐地点/提供商/运营商 |
 
 证据行：
 
@@ -748,7 +750,7 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 | `verdict` / `level` | 与 `china.json` 同名字段一致（判据仍只活在 `merge_verdict`） |
 | `points` | `[有数据的源数, 探测点总数, 可达探测点数]`；**直接复用** `probe_point_majority`，不是平行实现 |
 | `checked_at` | 该条证据的探测时刻（epoch）；缺失/非数值时不写 |
-| `nodes` | **仅当**源结果带逐节点字段或命中固定点目录时出现：`{源不透明 id: [节点读数, ...]}`；单源最多 64 个节点 |
+| `nodes` | **仅当**源结果带逐节点字段或命中固定点目录时出现：`{源名: [节点读数, ...]}`；单源最多 64 个节点 |
 
 `points` 口径与判定层一致：多节点源按 `nodes`/`ok_nodes` 计点，单节点源各计
 1 点；只有 `status ∈ {ok, fail}` 的源计入分母（`error`/`skipped` 是无观测）。
@@ -761,10 +763,9 @@ good 门与供给而非配额逻辑。缺 `pool_lines` 的调用或旧产物下�
 `network`、`ok` / `status`；只有源确实提供（或命中固定点目录）时才写，
 不给下游落一堆 `null`。
 
-`nodes` 的键在运行时经 `cn_public_id` 封存为 `src_*`；解不出 id 时落统一
-占位 `src_unknown`，**绝不**回写源代号。提交到 PCB 私有 `data` 分支时，
-`workspace_alias` 再把 id 反解为真名（该分支不公开）；公开仓/公开产物仍只
-见 `src_*`，不会出现节点名或供应商。固定点目录
+`nodes` 的键直接使用注册表源名（R1973；源 id 层已删除，不再有
+`cn_public_id`/`src_unknown` 封存或占位）。本 sidecar 只落 PCB 私有
+`data` 分支，公开仓/公开产物不发布 CN 源标识；固定点目录
 （`china_check.CN_PROBE_CATALOG`）只登记代码/文档已实证的地点，不猜测回包
 未暴露的位置；运行时源若回逐节点明细，其字段优先于目录。
 
@@ -934,8 +935,9 @@ CF 边缘端口剩多少」。单行 JSON，只含计数，**不含上游原文*
 
 不透明 id 按 artifact 分族，前缀互不重叠、同一 salt 下不撞 id：下载源 `dsrc_`（本文件及
 `source_stats.json`/`source_history.json`/`source_quality.json`）、信誉源 `rsrc_`
-（`reputation.json`/`ipinfo.json`/`reputation_cache.json`）、CN 点位源 `src_`（`china.json`）。
-三族同构（加盐、可逆、确定性 join key），安全边界是**注册表不公开**而非 salt 保密。
+（`reputation.json`/`ipinfo.json`/`reputation_cache.json`）。CN 点位源（`quality/china.json`）
+从未公开发布不透明 id；R1973 证实公开数据零 `src_*` 后已把该族整层删除，私有 `data`
+分支直接存真名。
 
 来源 id 全集**不在本文档逐条列举**（会与注册表二次漂移）。
 
