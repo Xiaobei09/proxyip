@@ -358,6 +358,14 @@ jobs:
           # 会独占一条 lane）且并发更高，故取 3。先做一轮实测；若错误率或
           # uncertain 相对上一轮上升，删除本行即回退到代码默认 2。
           CN_REGISTRY_LANES: "3"
+          # R1976：轮末补点。第一遍 carrier 分派每键只投一家、按上一轮
+          # 健康度选源；本轮死源（kkce/ce8/celuo/jkapi/itdog batch 等）
+          # 分到的键只拿到 0 点 error 行。三分片合并实测仍有 1,773 键 <11
+          # 有效点（13.0%），其中 590 可达。补点只用**本轮** tier-2 源，
+          # 每源花剩余配额（不突破 limit），最多 2 轮、总 2,000 靶。
+          # 既有单测/本地默认 0=关闭；置 0 即回退。
+          CN_CARRIER_REPAIR_LIMIT: "2000"
+          CN_CARRIER_REPAIR_ROUNDS: "2"
         run: |
           set +e
           # R356：limit/concurrency 的**数值真相已单点存放于工具目录注册表**
