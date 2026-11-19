@@ -9,8 +9,19 @@ on:
     - cron: "40 */2 * * *"
   # 任一数据产出链成功后统一重建图表与 stats.json——单一写入者，
   # 此前 generate_stats 内嵌在 quality/china 两条链里重复执行。
+  # R1992：直接挂 Update proxy list / Annotate / Reputation backfill /
+  # Deep speed probe。此前只挂 Quality check 等下游链，Update 成功后若
+  # Quality 排队/取消，图表会一直停留在旧数据（用户实测「数据更新了但图没变」）。
   workflow_run:
-    workflows: ["Quality check", "China check", "Exit family check", "Build good lists"]
+    workflows:
+      - "Update proxy list"
+      - "Quality check"
+      - "Annotate and classify"
+      - "China check"
+      - "Exit family check"
+      - "Build good lists"
+      - "Reputation backfill"
+      - "Deep speed probe"
     types: [completed]
 
 permissions:
@@ -28,6 +39,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # workflow_run 的默认 ref 是触发者的旧 SHA，不含 Update 随后
+          # 提交的 data/valid；必须显式取 main，否则图表会读旧池。
+          ref: main
 
       - name: Checkout build helpers (tracking main)
         uses: actions/checkout@v7
@@ -49,25 +64,21 @@ jobs:
       - name: Mark job start
         run: touch .jobstart
 
-      - name: Skip if superseded or trigger failed
+      # R1992：不再按「有更新的 run 排队」跳过。此前多个数据链在同一轮
+      # 完成时，先到的 run 会因后到的 run 排队而自跳；若后者恰由失败链
+      # 触发也会跳，最终整轮没有 stats 提交。现在每个成功触发都跑一遍，
+      # commit_data.sh 在无变化时不产生提交，concurrency 只负责排队。
+      - name: Skip on failed trigger
         id: gate
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ] \
-             && [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            if [ "${{ github.event.workflow_run.conclusion }}" != "success" ] \
+               || [ "${{ github.event.workflow_run.head_branch }}" != "main" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Trigger ${{ github.event.workflow_run.conclusion }}/${{ github.event.workflow_run.head_branch }}; skipping"
+              exit 0
+            fi
           fi
-          LATEST=$(gh run list --workflow="${{ github.workflow }}" \
-            --json=databaseId,status \
-            --jq '[.[] | select(.status == "in_progress" or .status == "queued")]
-                   | sort_by(.databaseId) | last | .databaseId // empty' 2>/dev/null || echo "")
-          if [ -n "$LATEST" ] && [ "$LATEST" != "${{ github.run_id }}" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Superseded by run $LATEST, skipping"
-            exit 0
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Set up Python
         if: steps.gate.outputs.skip != 'true'

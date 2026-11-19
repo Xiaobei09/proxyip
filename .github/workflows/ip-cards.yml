@@ -4,7 +4,18 @@ name: IP cards
 # 强制推送到独立的无历史 cards 分支快照。公开仓只保留数据，不落源名。
 on:
   workflow_run:
-    workflows: ["Quality check"]
+    # R1992：不再只等 Quality check。Update 完成即按最新 main 重建快照；
+    # 后续 Quality/Annotate/China/Exit/Reputation/Deep speed 完成后再刷一次，
+    # 补上最新评分。旧 run 被新 run 覆盖（cancel-in-progress=true），只有
+    # 最新数据会推到 cards 分支。
+    workflows:
+      - "Update proxy list"
+      - "Quality check"
+      - "Annotate and classify"
+      - "China check"
+      - "Exit family check"
+      - "Reputation backfill"
+      - "Deep speed probe"
     types: [completed]
   workflow_dispatch:
 

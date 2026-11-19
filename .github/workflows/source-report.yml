@@ -2,10 +2,25 @@ name: Source report
 
 on:
   workflow_dispatch:
-  # 每 2 小时刷新一次（与 Stats and charts 的 :40 心跳错开）。数据本身每轮
-  # update/quality/china 后重建，2 小时足以覆盖；表里带数据时间戳，滞后可见。
+  # 独立心跳：即使所有数据链都失败，仍每 2 小时留一份可观测快照。
   schedule:
     - cron: "50 */2 * * *"
+  # R1992：数据一更新就重建，不再只靠 2 小时 cron。此前 R1991 在 14:19
+  # 完成后报告仍停在 13:57 的旧池（30,533 条），用户看到「数据更新了报告
+  # 没变」。Update 写 source_stats；Quality/Annotate/China/Exit 补存活与
+  # 标注口径；Stats 会重算 source_quality。
+  workflow_run:
+    workflows:
+      - "Update proxy list"
+      - "Quality check"
+      - "Annotate and classify"
+      - "China check"
+      - "Exit family check"
+      - "Build good lists"
+      - "Reputation backfill"
+      - "Deep speed probe"
+      - "Stats and charts"
+    types: [completed]
 
 # 只读公开仓：产物写专用分支，不回写公开 data/。
 permissions:
@@ -18,11 +33,19 @@ concurrency:
 jobs:
   report:
     name: Refresh per-repo source report
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout public data
         uses: actions/checkout@v7
+        with:
+          # workflow_run 默认检出触发者的旧 SHA；报告的数据时间戳必须
+          # 对齐刚提交的 main。
+          ref: main
 
       # 生成器与注册表都在工具目录内；产物（含真实仓库名）只推 source-report
       # 分支，故这里按其它 数据链的惯例签出 main（不跨分支引脚本）。
