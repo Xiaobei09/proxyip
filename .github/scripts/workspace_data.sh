@@ -68,6 +68,9 @@ ARCHIVE_EXCLUDES=(
   quality/ipinfo.json
   quality/entry_geo.json
   quality/cmli.json
+  # R1983：多 runner 回填片段是「传输中」的缓存行，合并后已进
+  # reputation_cache.json；不归档，避免每小时分片永久累积涨大历史。
+  quality/rep_backfill
   # 单轮断点 / 滚动状态：由归档快照或公开仓 valid 历史可重建
   quality/china.partial.json
   quality/node_seen.json

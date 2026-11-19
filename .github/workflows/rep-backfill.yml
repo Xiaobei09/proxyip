@@ -1,0 +1,156 @@
+name: Reputation backfill
+
+# R1983：多 runner 分摊「按客户端地址限速」的信誉源。
+#
+# 为什么单独一条链
+# ----------------
+# 部分免费信誉源按**客户端地址**限速（实测约 20 次/分，连续超限即整段
+# 拒绝），主质量链一轮只能补 ~1,200 行；75% 覆盖（约 7,750 个出口）靠
+# 单条质量链要等数天。GitHub 托管 runner 的出口地址彼此独立，故用 matrix
+# 让每个分片花自己的额度，查**互不相交**的 IP 切片，写自己的片段文件：
+#
+#   data/quality/rep_backfill/<source>-<run-id>-<shard>.json
+#
+# 质量链是 reputation_cache.json 的唯一写入者，在下一轮启动时调用
+# quality_reputation.merge_rep_backfill() 合并片段。分片写不同路径，
+# workspace_data.sh 的 replay/retry 不会让并发提交互相覆盖。
+#
+# 手动触发，先小规模测收益再扩分片。片段保留两天，合并时自动清理。
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Private-registry source name (entered at dispatch time)"
+        required: true
+      shards:
+        description: "Parallel runners (each has its own egress quota)"
+        default: "4"
+        required: true
+      limit:
+        description: "Max queries per shard"
+        default: "1200"
+        required: true
+      ttl:
+        description: "Skip IPs with a cache row younger than this (seconds)"
+        default: "604800"
+        required: true
+      dry_run:
+        description: "Only print selection counts"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+
+permissions:
+  contents: read
+
+# 手动链，同组只保留一轮；新 dispatch 有意取代旧轮（避免两轮抢同一批
+# IP 与额度）。matrix 分片同属一个 run，彼此不会互相取消。
+concurrency:
+  group: rep-backfill
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Plan shards
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: plan
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n = max(1, min(12, int(os.environ.get("SHARDS") or 1)))
+          print("shards=" + json.dumps(list(range(n))))
+          PY
+
+  backfill:
+    name: ${{ inputs.source }} shard ${{ matrix.shard }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout build helpers (tracking main)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.TOOLS_REPO }}
+          ref: main
+          token: ${{ secrets.TOOLS_PAT }}
+          path: tools
+
+      # 需要 data/quality/reputation_cache.json 来跳过仍新鲜的 IP；
+      # 片段也写在同一个工作区快照分支上。
+      - name: Mount working data
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: bash .github/scripts/workspace_data.sh checkout
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Backfill slice
+        id: backfill
+        env:
+          SOURCE: ${{ inputs.source }}
+          SHARDS: ${{ inputs.shards }}
+          LIMIT: ${{ inputs.limit }}
+          TTL: ${{ inputs.ttl }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          extra=()
+          if [ "$DRY_RUN" = "yes" ]; then extra+=(--dry-run); fi
+          timeout --signal=TERM --kill-after=60s 6300s \
+            python tools/scripts/rep_backfill.py \
+              --source "$SOURCE" \
+              --targets data/valid/all.json \
+              --shard-index "$SHARD" \
+              --shard-count "$SHARDS" \
+              --limit "$LIMIT" \
+              --ttl "$TTL" \
+              "${extra[@]}"
+
+      - name: Show fragment summary
+        if: always()
+        env:
+          SOURCE: ${{ inputs.source }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python - <<'PY'
+          import glob, json, os
+          pattern = ("data/quality/rep_backfill/%s-%s-%s.json"
+                     % (os.environ["SOURCE"], os.environ.get("GITHUB_RUN_ID", "*"),
+                        os.environ["SHARD"]))
+          paths = glob.glob(pattern)
+          if not paths:
+              print("fragment: absent")
+              raise SystemExit(0)
+          doc = json.loads(open(paths[0], encoding="utf-8").read())
+          meta = doc.get("meta") or {}
+          print(f"fragment: {paths[0]} ts={meta.get('ts')} "
+                f"rows={len(doc.get('proxies') or {})}")
+          PY
+
+      # 只推本分片的片段；workspace_data.sh 只重放本 job 改过的路径。
+      - name: Commit fragment
+        if: always()
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+          SOURCE: ${{ inputs.source }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          bash .github/scripts/workspace_data.sh commit \
+            "chore(data): rep backfill $SOURCE shard $SHARD ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
