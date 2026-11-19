@@ -26,10 +26,15 @@ on:
 permissions:
   contents: read
 
-# 小任务可抢占：被下一轮取代零成本（与数据链长任务相反）。
+# R2000：**不抢占**，与 docs/logic.md §8.2「其他下游 workflow 一律
+# ``cancel-in-progress: false``（保护已完成的检测结果）」对齐。此前为
+# true，实测 run 44594068662 于 19:12:53 被定时 run 44595828317 取消：
+# 探测已跑 ~10min，但 sidecar 只在末尾 commit，取消即全部丢失（data 分支
+# 仍停在 18:15:50Z）。证据轮单轮 10–15min、调度间隔 30min，排队等待的
+# 代价远小于丢失一轮 1,500 键刷新的代价。
 concurrency:
   group: cn-evidence
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   evidence:
