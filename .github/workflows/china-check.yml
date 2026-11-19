@@ -142,6 +142,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # R1984：排队中的 run 可能指向历史重写前的 head SHA（实测
+          # 44451198939 检出 76b323f，缺 rep-backfill.yml，测试误红后
+          # fail-fast 跳过整轮探测）。公开检出固定 main；中间产物仍由
+          # workspace_data.sh 从 data 分支挂载。
+          ref: main
 
       - name: Checkout build helpers (tracking main)
         uses: actions/checkout@v7
@@ -220,6 +226,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # R1984：同 probe job，固定公开检出为 main，避免排队 run 的旧
+          # head SHA 让测试读到缺失的工作流文件。
+          ref: main
 
       - name: Checkout build helpers (tracking main)
         uses: actions/checkout@v7
