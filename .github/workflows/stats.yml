@@ -13,15 +13,9 @@ on:
   # Deep speed probe。此前只挂 Quality check 等下游链，Update 成功后若
   # Quality 排队/取消，图表会一直停留在旧数据（用户实测「数据更新了但图没变」）。
   workflow_run:
-    workflows:
-      - "Update proxy list"
-      - "Quality check"
-      - "Annotate and classify"
-      - "China check"
-      - "Exit family check"
-      - "Build good lists"
-      - "Reputation backfill"
-      - "Deep speed probe"
+    # 行内列表是 ``test_china_check.TestWorkflowTriggerEdges`` 的解析口径；
+    # 改成分行会让拓扑锁读到空边（R1992 实测 CI 因此一红到底）。
+    workflows: ["Update proxy list", "Quality check", "Annotate and classify", "China check", "Exit family check", "Build good lists", "Reputation backfill", "Deep speed probe"]
     types: [completed]
 
 permissions:
