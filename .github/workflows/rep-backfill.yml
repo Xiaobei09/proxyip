@@ -19,8 +19,8 @@ name: Reputation backfill
 on:
   workflow_dispatch:
     inputs:
-      source:
-        description: "Private-registry source name (entered at dispatch time)"
+      source_id:
+        description: "Opaque source id (rsrc_...); never a real source name"
         required: true
       shards:
         description: "Parallel runners (each has its own egress quota)"
@@ -67,7 +67,7 @@ jobs:
           PY
 
   backfill:
-    name: ${{ inputs.source }} shard ${{ matrix.shard }}
+    name: ${{ inputs.source_id }} shard ${{ matrix.shard }}
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -103,7 +103,7 @@ jobs:
       - name: Backfill slice
         id: backfill
         env:
-          SOURCE: ${{ inputs.source }}
+          SOURCE_ID: ${{ inputs.source_id }}
           SHARDS: ${{ inputs.shards }}
           LIMIT: ${{ inputs.limit }}
           TTL: ${{ inputs.ttl }}
@@ -114,7 +114,7 @@ jobs:
           if [ "$DRY_RUN" = "yes" ]; then extra+=(--dry-run); fi
           timeout --signal=TERM --kill-after=60s 6300s \
             python tools/scripts/rep_backfill.py \
-              --source "$SOURCE" \
+              --source-id "$SOURCE_ID" \
               --targets data/valid/all.json \
               --shard-index "$SHARD" \
               --shard-count "$SHARDS" \
@@ -125,13 +125,13 @@ jobs:
       - name: Show fragment summary
         if: always()
         env:
-          SOURCE: ${{ inputs.source }}
+          SOURCE_ID: ${{ inputs.source_id }}
           SHARD: ${{ matrix.shard }}
         run: |
           python - <<'PY'
           import glob, json, os
           pattern = ("data/quality/rep_backfill/%s-%s-%s.json"
-                     % (os.environ["SOURCE"], os.environ.get("GITHUB_RUN_ID", "*"),
+                     % (os.environ["SOURCE_ID"], os.environ.get("GITHUB_RUN_ID", "*"),
                         os.environ["SHARD"]))
           paths = glob.glob(pattern)
           if not paths:
@@ -149,8 +149,8 @@ jobs:
         env:
           TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
           TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
-          SOURCE: ${{ inputs.source }}
+          SOURCE_ID: ${{ inputs.source_id }}
           SHARD: ${{ matrix.shard }}
         run: |
           bash .github/scripts/workspace_data.sh commit \
-            "chore(data): rep backfill $SOURCE shard $SHARD ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            "chore(data): rep backfill $SOURCE_ID shard $SHARD ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
