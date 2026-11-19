@@ -34,6 +34,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # R1984：固定检出 main，而不是 workflow_run 触发者的 head SHA。
+          # 排队中的 run 可能指向重写前的旧提交（实测 44451215568 检出
+          # 76b323f，缺少 rep-backfill.yml，测试误红、深层检查被跳过）；
+          # 中间产物仍由 workspace_data.sh 从 data 分支挂载，不受影响。
+          ref: main
 
       - name: Checkout build helpers (tracking main)
         uses: actions/checkout@v7
