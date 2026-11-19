@@ -19,7 +19,10 @@ jobs:
   update:
     name: Download and extract proxies
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # R1992：候选池从 5.2 万增到约 8 万（清洗 + auief Global 四文件），
+    # 校验预算提到 6000s 后整轮约 100–110 分钟；120 分钟上限太贴边，
+    # 提到 150 以免校验成功却在提交前被 job 超时截断。
+    timeout-minutes: 150
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -74,7 +77,9 @@ jobs:
         # 超时、同一判定规则，alive/verified 必须逐字不变。唯一风险是 2× 并发
         # 让速度读数受带宽竞争影响 ⇒ 下一轮对拍 ``meta.json`` 的
         # alive/verified 与 per-source 计数，若漂移即回退 30。
-        run: python tools/scripts/validate_proxies.py --time-budget 3600 --speed-workers 60
+        # R1992：池规模约 8 万，旧 3600s/60 workers 只能覆盖 ~3.7 万实探；
+        # 提到 6000s/90 workers，覆盖清洗后旧池 + 约 2.8 万新增候选键。
+        run: python tools/scripts/validate_proxies.py --time-budget 6000 --speed-workers 90
 
       - name: Show stats
         run: |
