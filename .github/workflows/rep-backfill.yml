@@ -52,6 +52,15 @@ on:
         description: "R2029: override registry delay seconds (empty = source default)"
         default: ""
         required: false
+      forced:
+        description: "R2030: use proxy-egress transport when supported; no = direct runner quota"
+        type: choice
+        options: ["yes", "no"]
+        default: "yes"
+      max_429:
+        description: "R2030: abort a shard after this many HTTP 429s (0 = never)"
+        default: "60"
+        required: false
 
 permissions:
   contents: read
@@ -125,6 +134,8 @@ jobs:
           CN_ONLY: ${{ inputs.cn_only }}
           WORKERS: ${{ inputs.workers }}
           DELAY: ${{ inputs.delay }}
+          FORCED: ${{ inputs.forced }}
+          MAX_429: ${{ inputs.max_429 }}
           SHARD: ${{ matrix.shard }}
         run: |
           extra=()
@@ -132,6 +143,10 @@ jobs:
           # R2029：按源覆盖并发；某源在 160 并发下大量 502，需按波次降速。
           if [ -n "$WORKERS" ]; then extra+=(--workers "$WORKERS"); fi
           if [ -n "$DELAY" ]; then extra+=(--delay "$DELAY"); fi
+          # R2030：代理出口配额被 Cloudflare 429 打满时，允许改用 runner
+          # 自己的新鲜出口额度（每 runner 1,000/日）；并可按源放宽 429 熔断。
+          if [ "$FORCED" = "no" ]; then extra+=(--no-forced); fi
+          if [ -n "$MAX_429" ]; then extra+=(--max-429 "$MAX_429"); fi
           targets=data/valid/all.json
           if [ "$CN_ONLY" = "yes" ]; then
             # R2023：只回填 CN 可达键对应的出口行（保留 real_exit）。
