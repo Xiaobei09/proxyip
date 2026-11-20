@@ -48,10 +48,11 @@ on:
 permissions:
   contents: read
 
-# 手动链，同组只保留一轮；新 dispatch 有意取代旧轮（避免两轮抢同一批
-# IP 与额度）。matrix 分片同属一个 run，彼此不会互相取消。
+# 手动链，同组只保留一轮；R2023 起按源分组，不同源可并行回填
+# （同一源的新 dispatch 仍有意取代旧轮，避免两轮抢同一批 IP 与额度）。
+# matrix 分片同属一个 run，彼此不会互相取消。
 concurrency:
-  group: rep-backfill
+  group: rep-backfill-${{ inputs.source_id }}
   cancel-in-progress: true
 
 jobs:
