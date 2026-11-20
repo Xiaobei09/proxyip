@@ -39,6 +39,11 @@ on:
         type: choice
         options: ["no", "yes"]
         default: "no"
+      cn_only:
+        description: "R2023: only exits whose entry key is CN-reachable"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
 
 permissions:
   contents: read
@@ -108,14 +113,36 @@ jobs:
           LIMIT: ${{ inputs.limit }}
           TTL: ${{ inputs.ttl }}
           DRY_RUN: ${{ inputs.dry_run }}
+          CN_ONLY: ${{ inputs.cn_only }}
           SHARD: ${{ matrix.shard }}
         run: |
           extra=()
           if [ "$DRY_RUN" = "yes" ]; then extra+=(--dry-run); fi
+          targets=data/valid/all.json
+          if [ "$CN_ONLY" = "yes" ]; then
+            # R2023：只回填 CN 可达键对应的出口行（保留 real_exit）。
+            # china.json 的键与 all.json 的 key 同源（入口 ip:port#CC）。
+            python - <<'PY'
+          import json
+          cn = json.load(open("data/quality/china.json", encoding="utf-8"))
+          reach = {
+              k for k, e in (cn.get("proxies") or {}).items()
+              if isinstance(e, dict) and e.get("verdict") == "reachable"
+          }
+          rows = json.load(open("data/valid/all.json", encoding="utf-8"))
+          picked = [r for r in rows if isinstance(r, dict)
+                    and r.get("key") in reach]
+          with open("/tmp/cn_targets.json", "w", encoding="utf-8") as fh:
+              json.dump(picked, fh)
+          print(f"cn targets: {len(picked)}/{len(rows)} rows "
+                f"({len(reach)} reachable keys)")
+          PY
+            targets=/tmp/cn_targets.json
+          fi
           timeout --signal=TERM --kill-after=60s 6300s \
             python tools/scripts/rep_backfill.py \
               --source-id "$SOURCE_ID" \
-              --targets data/valid/all.json \
+              --targets "$targets" \
               --shard-index "$SHARD" \
               --shard-count "$SHARDS" \
               --limit "$LIMIT" \
