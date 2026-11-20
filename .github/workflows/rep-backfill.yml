@@ -44,6 +44,14 @@ on:
         type: choice
         options: ["no", "yes"]
         default: "no"
+      workers:
+        description: "R2029: override registry workers (empty = source default)"
+        default: ""
+        required: false
+      delay:
+        description: "R2029: override registry delay seconds (empty = source default)"
+        default: ""
+        required: false
 
 permissions:
   contents: read
@@ -115,10 +123,15 @@ jobs:
           TTL: ${{ inputs.ttl }}
           DRY_RUN: ${{ inputs.dry_run }}
           CN_ONLY: ${{ inputs.cn_only }}
+          WORKERS: ${{ inputs.workers }}
+          DELAY: ${{ inputs.delay }}
           SHARD: ${{ matrix.shard }}
         run: |
           extra=()
           if [ "$DRY_RUN" = "yes" ]; then extra+=(--dry-run); fi
+          # R2029：按源覆盖并发；10ips 在 160 并发下大量 502，需按波次降速。
+          if [ -n "$WORKERS" ]; then extra+=(--workers "$WORKERS"); fi
+          if [ -n "$DELAY" ]; then extra+=(--delay "$DELAY"); fi
           targets=data/valid/all.json
           if [ "$CN_ONLY" = "yes" ]; then
             # R2023：只回填 CN 可达键对应的出口行（保留 real_exit）。
