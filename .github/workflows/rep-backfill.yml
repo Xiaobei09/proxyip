@@ -129,7 +129,7 @@ jobs:
         run: |
           extra=()
           if [ "$DRY_RUN" = "yes" ]; then extra+=(--dry-run); fi
-          # R2029：按源覆盖并发；10ips 在 160 并发下大量 502，需按波次降速。
+          # R2029：按源覆盖并发；某源在 160 并发下大量 502，需按波次降速。
           if [ -n "$WORKERS" ]; then extra+=(--workers "$WORKERS"); fi
           if [ -n "$DELAY" ]; then extra+=(--delay "$DELAY"); fi
           targets=data/valid/all.json
