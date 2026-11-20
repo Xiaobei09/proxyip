@@ -63,6 +63,36 @@ jobs:
           TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
         run: cd public && bash .github/scripts/workspace_data.sh checkout
 
+      # 历史信誉跨强推保留：cards 分支是无历史孤儿提交，构建前把上一轮
+      # history/score_history.jsonl 取回。--filter=blob:none 只拉提交/树与
+      # 这一行文件，避免为历史再下载整棵产物树。
+      - name: Restore rolling score history
+        env:
+          TOOLS_TOKEN: ${{ secrets.TOOLS_PAT }}
+          TOOLS_REPO: ${{ secrets.TOOLS_REPO }}
+        run: |
+          set -euo pipefail
+          hist="$RUNNER_TEMP/score_history.jsonl"
+          : > "$hist"
+          work="$RUNNER_TEMP/history-repo"
+          git init -q "$work"
+          cd "$work"
+          remote="https://x-access-token:${TOOLS_TOKEN}@github.com/${TOOLS_REPO}.git"
+          git remote add origin "$remote"
+          if ! git fetch -q --depth=1 --filter=blob:none origin cards 2>/dev/null; then
+            git fetch -q --depth=1 origin cards 2>/dev/null || true
+          fi
+          if git rev-parse -q --verify FETCH_HEAD >/dev/null; then
+            if git show 'FETCH_HEAD:history/score_history.jsonl' > "$hist" 2>/dev/null; then
+              echo "restored history: $(wc -l < "$hist") daily snapshots"
+            else
+              : > "$hist"
+              echo "no history file in previous cards snapshot"
+            fi
+          else
+            echo "no cards branch yet; history starts with this build"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -79,7 +109,8 @@ jobs:
         run: |
           python tools/scripts/build_cards.py \
             --data-root public/data \
-            --out "$RUNNER_TEMP/cards"
+            --out "$RUNNER_TEMP/cards" \
+            --history "$RUNNER_TEMP/score_history.jsonl"
 
       - name: Publish snapshot to cards branch
         env:
