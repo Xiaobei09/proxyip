@@ -151,11 +151,27 @@ jobs:
 
       # good 清单改由专职 build-good 工作流在本链成功后重建（单一写入者）
 
+      - name: Download local geo DB (DB-IP Lite)
+        # R2085（用户「入口 ip 也要主动判断地区（10 源交叉）」）：远端 9 族 +
+        # DB-IP 本地族才凑满 10 个独立族。放 $RUNNER_TEMP，绝不进 data/
+        # （commit_data.sh 会把 data/ 下新文件当产物提交）。fail-open：下载
+        # 失败只少一票，不阻断审计。
+        if: always() && steps.gate.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/geoip"
+          for m in "$(date -u +%Y-%m)" "$(date -u -d 'last month' +%Y-%m)"; do
+            curl -fsSL --retry 2 -o "$RUNNER_TEMP/geoip/dbip-country-lite-$m.csv.gz" \
+              "https://download.db-ip.com/free/dbip-country-lite-$m.csv.gz" && break
+          done
+
       - name: Audit entry CC labels
         # R325：审计步。早测红时跳过就看不到本轮 CC 标注的审计结论。
         if: always() && steps.gate.outputs.skip != 'true'
         continue-on-error: true
-        run: python tools/scripts/audit_entry_cc.py --timeout 20
+        env:
+          EXIT_GEO_LOCAL_DB_DIR: ${{ runner.temp }}/geoip
+        run: python tools/scripts/audit_entry_cc.py --timeout 20 --multi-budget 240 --multi-workers 12
 
       # 图表/统计改由专职 stats 工作流在本链成功后统一重建（单一写入者）
 

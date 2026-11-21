@@ -67,6 +67,10 @@ ARCHIVE_EXCLUDES=(
   quality/exit_geo_multi.json
   quality/ipinfo.json
   quality/entry_geo.json
+  # R2085：入口多源交叉的完整缓存与派生产物（可由 entry_geo.json 与出口
+  # 多源产物重建）；只进 live 快照，不逐轮永久归档。
+  quality/entry_geo_multi_cache.json
+  quality/entry_geo_multi.json
   quality/cmli.json
   # R1983：多 runner 回填片段是「传输中」的缓存行，合并后已进
   # reputation_cache.json；不归档，避免每小时分片永久累积涨大历史。
