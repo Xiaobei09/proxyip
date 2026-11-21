@@ -78,6 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
     steps:
       - id: plan
         env:
@@ -85,8 +86,12 @@ jobs:
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
+          # R2032：矩阵上限 12，但下游 --shard-count 必须用夹紧后的 n。
+          # 此前传原始 inputs.shards（如 20），12 个 job 只覆盖 0–11，
+          # 12–19 的键永远没人查，波次越多缺口越隐蔽。
           n = max(1, min(12, int(os.environ.get("SHARDS") or 1)))
           print("shards=" + json.dumps(list(range(n))))
+          print("count=" + str(n))
           PY
 
   backfill:
@@ -127,7 +132,9 @@ jobs:
         id: backfill
         env:
           SOURCE_ID: ${{ inputs.source_id }}
-          SHARDS: ${{ inputs.shards }}
+          # Must match the matrix size; use the clamped plan output, not the
+          # raw dispatch input (otherwise shards >= count are never queried).
+          SHARDS: ${{ needs.plan.outputs.count }}
           LIMIT: ${{ inputs.limit }}
           TTL: ${{ inputs.ttl }}
           DRY_RUN: ${{ inputs.dry_run }}
